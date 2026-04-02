@@ -1,0 +1,7 @@
+interface:
+  display_name: "Hydrotest Development"
+  short_description: "Maintain the hydrostatic test app safely"
+  default_prompt: "Use $hydrotest-development to extend or refactor this hydrostatic test repository safely."
+
+policy:
+  allow_implicit_invocation: false

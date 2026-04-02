@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "table_key": "water_property_grid_0_40c_1_150bar_v1",
+  "interpolation_method": "bilinear",
+  "temperature_axis": {
+    "key": "temp_c",
+    "unit": "degC",
+    "minimum": 0.0,
+    "maximum": 40.0,
+    "step": 1.0,
+    "count": 41
+  },
+  "pressure_axis": {
+    "key": "pressure_bar",
+    "unit": "bar",
+    "minimum": 1.0,
+    "maximum": 150.0,
+    "step": 1.0,
+    "count": 150
+  },
+  "csv_columns": [
+    "temp_c",
+    "pressure_bar",
+    "a_micro_per_bar",
+    "water_beta_micro_per_c"
+  ],
+  "a_unit": "10^-6 / bar",
+  "beta_unit": "10^-6 / degC",
+  "source_backend_key": "coolprop",
+  "source_backend_label": "CoolProp EOS",
+  "generated_at_utc": "2026-04-02T19:21:24+00:00",
+  "row_count": 6150,
+  "notes": [
+    "Runtime table backend sadece CSV ve metadata dosyalarini okur.",
+    "Bu baslangic grid 0-40 degC ve 1-150 bar araliginda 1x1 adimlarla uretilmistir.",
+    "B runtime'da beta_water - celik alpha olarak hesaplanmaya devam eder.",
+    "0 degC sirasinda erime sinirina yakin noktalar gerekirse kucuk pozitif sicaklik kaydirma ile uretilir."
+  ]
+}

@@ -1,0 +1,7 @@
+interface:
+  display_name: "Hydrotest UI Review"
+  short_description: "Improve operator workflow and field ergonomics"
+  default_prompt: "Use $hydrotest-ui-review to improve the operator workflow of this hydrostatic test UI."
+
+policy:
+  allow_implicit_invocation: false

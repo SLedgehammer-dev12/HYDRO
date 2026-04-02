@@ -1,0 +1,420 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+import webbrowser
+import zipfile
+
+from ..app_metadata import (
+    APP_VERSION,
+    BINARY_NAME,
+    GITHUB_OWNER,
+    GITHUB_REPO,
+    LEGACY_GITHUB_REPOS,
+    RELEASES_API_URL,
+    RELEASES_PAGE_URL,
+    RELEASE_ASSET_TEMPLATE,
+    RELEASE_TAG_PREFIX,
+)
+
+DEFAULT_TIMEOUT_SECONDS = 10
+POWERSHELL_JSON_DEPTH = 32
+
+
+class UpdateError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class ReleaseAsset:
+    name: str
+    download_url: str
+    size: int
+
+
+@dataclass(frozen=True)
+class UpdateInfo:
+    current_version: str
+    latest_version: str
+    tag_name: str
+    html_url: str
+    body: str
+    published_at: str
+    asset: ReleaseAsset | None
+    update_available: bool
+    source_repository: str
+
+
+@dataclass(frozen=True)
+class RuntimeContext:
+    frozen: bool
+    can_self_update: bool
+    executable_path: Path
+    install_dir: Path
+
+
+def _version_key(version: str) -> tuple[int, ...]:
+    parts = version.strip().split(".")
+    numeric_parts: list[int] = []
+    for part in parts:
+        digits = "".join(ch for ch in part if ch.isdigit())
+        numeric_parts.append(int(digits) if digits else 0)
+    while len(numeric_parts) < 3:
+        numeric_parts.append(0)
+    return tuple(numeric_parts)
+
+
+def _version_from_tag(tag_name: str) -> str:
+    normalized = tag_name.strip()
+    if normalized.startswith(RELEASE_TAG_PREFIX):
+        return normalized[len(RELEASE_TAG_PREFIX) :]
+    if normalized.startswith("v"):
+        return normalized[1:]
+    return normalized
+
+
+def _matches_project_release(release: dict[str, Any]) -> bool:
+    tag_name = str(release.get("tag_name", ""))
+    if tag_name.startswith(RELEASE_TAG_PREFIX):
+        return True
+    asset_template_prefix = RELEASE_ASSET_TEMPLATE.split("{version}", 1)[0]
+    for asset in release.get("assets", []):
+        asset_name = str(asset.get("name", ""))
+        if asset_name.startswith(asset_template_prefix) and asset_name.endswith(".zip"):
+            return True
+    return False
+
+
+def _extract_asset(release: dict[str, Any], version: str) -> ReleaseAsset | None:
+    expected_name = RELEASE_ASSET_TEMPLATE.format(version=version)
+    fallback_asset: ReleaseAsset | None = None
+    for asset in release.get("assets", []):
+        asset_name = str(asset.get("name", ""))
+        if not asset_name.lower().endswith(".zip"):
+            continue
+        release_asset = ReleaseAsset(
+            name=asset_name,
+            download_url=str(asset.get("browser_download_url", "")),
+            size=int(asset.get("size", 0) or 0),
+        )
+        if asset_name == expected_name:
+            return release_asset
+        if fallback_asset is None:
+            fallback_asset = release_asset
+    return fallback_asset
+
+
+def _select_latest_release(releases: list[dict[str, Any]], repo_name: str) -> dict[str, Any]:
+    matching_releases = [
+        release
+        for release in releases
+        if not release.get("draft")
+        and not release.get("prerelease")
+        and _matches_project_release(release)
+    ]
+    if not matching_releases:
+        raise UpdateError(
+            f"{GITHUB_OWNER}/{repo_name} icinde bu uygulamaya ait yayin bulunamadi."
+        )
+    matching_releases.sort(
+        key=lambda release: _version_key(_version_from_tag(str(release.get("tag_name", "")))),
+        reverse=True,
+    )
+    return matching_releases[0]
+
+
+def _build_headers(accept: str) -> dict[str, str]:
+    return {
+        "Accept": accept,
+        "User-Agent": f"{BINARY_NAME}-updater/{APP_VERSION}",
+    }
+
+
+def _release_source_repositories() -> tuple[str, ...]:
+    repositories = [GITHUB_REPO]
+    repositories.extend(repo for repo in LEGACY_GITHUB_REPOS if repo != GITHUB_REPO)
+    return tuple(repositories)
+
+
+def _releases_api_url(repo_name: str) -> str:
+    return f"https://api.github.com/repos/{GITHUB_OWNER}/{repo_name}/releases"
+
+
+def _releases_page_url(repo_name: str) -> str:
+    return f"https://github.com/{GITHUB_OWNER}/{repo_name}/releases"
+
+
+def _powershell_literal(value: str) -> str:
+    return value.replace("'", "''")
+
+
+def _powershell_headers_block(headers: dict[str, str]) -> str:
+    lines = ["$headers = @{}"]
+    for key, value in headers.items():
+        lines.append(
+            f"$headers['{_powershell_literal(key)}'] = '{_powershell_literal(value)}'"
+        )
+    return "\n".join(lines)
+
+
+def _run_powershell(script: str, timeout_seconds: int) -> str:
+    wrapped_script = "\n".join(
+        [
+            "$ErrorActionPreference = 'Stop'",
+            "$ProgressPreference = 'SilentlyContinue'",
+            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+            "$OutputEncoding = [System.Text.Encoding]::UTF8",
+            script,
+        ]
+    )
+    try:
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", wrapped_script],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=timeout_seconds,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise UpdateError("PowerShell ag cagrisi zaman asimina ugradi.") from exc
+
+    if completed.returncode != 0:
+        message = completed.stderr.strip() or completed.stdout.strip() or "PowerShell komutu basarisiz oldu."
+        raise UpdateError(message)
+    return completed.stdout
+
+
+def _load_json_via_powershell(url: str, headers: dict[str, str], timeout_seconds: int) -> Any:
+    script = "\n".join(
+        [
+            _powershell_headers_block(headers),
+            (
+                f"$response = Invoke-RestMethod -Uri '{_powershell_literal(url)}' "
+                f"-Headers $headers -TimeoutSec {timeout_seconds}"
+            ),
+            f"$response | ConvertTo-Json -Depth {POWERSHELL_JSON_DEPTH} -Compress",
+        ]
+    )
+    raw_output = _run_powershell(script, timeout_seconds).strip()
+    if not raw_output:
+        raise UpdateError("PowerShell bos bir release cevabi dondurdu.")
+    try:
+        return json.loads(raw_output)
+    except json.JSONDecodeError as exc:
+        raise UpdateError("PowerShell release cevabi JSON olarak okunamadi.") from exc
+
+
+def _download_via_powershell(
+    url: str,
+    headers: dict[str, str],
+    target_path: Path,
+    timeout_seconds: int,
+) -> None:
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    script = "\n".join(
+        [
+            _powershell_headers_block(headers),
+            (
+                f"Invoke-WebRequest -Uri '{_powershell_literal(url)}' "
+                f"-Headers $headers -OutFile '{_powershell_literal(str(target_path))}' "
+                f"-TimeoutSec {timeout_seconds}"
+            ),
+        ]
+    )
+    _run_powershell(script, timeout_seconds)
+    if not target_path.exists() or target_path.stat().st_size <= 0:
+        raise UpdateError("PowerShell indirmesi bos bir dosya olusturdu.")
+
+
+def _fetch_release_payload(source_url: str, timeout_seconds: int) -> list[dict[str, Any]]:
+    headers = _build_headers("application/vnd.github+json")
+    request = Request(source_url, headers=headers)
+
+    try:
+        with urlopen(request, timeout=timeout_seconds) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        raise UpdateError(f"GitHub release bilgisi okunamadi: HTTP {exc.code}") from exc
+    except URLError:
+        try:
+            payload = _load_json_via_powershell(source_url, headers, timeout_seconds)
+        except UpdateError as fallback_exc:
+            raise UpdateError(
+                "GitHub release servisine ulasilamadi. Python TLS dogrulamasi ve Windows fallback denemesi basarisiz oldu."
+            ) from fallback_exc
+    except json.JSONDecodeError as exc:
+        raise UpdateError("GitHub release cevabi okunamadi.") from exc
+
+    if not isinstance(payload, list):
+        raise UpdateError("GitHub release cevabi beklenen list formatinda degil.")
+    return payload
+
+
+def fetch_latest_update_info(timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS) -> UpdateInfo:
+    candidates: list[tuple[tuple[int, ...], int, UpdateInfo]] = []
+    source_errors: list[str] = []
+    for priority, repo_name in enumerate(_release_source_repositories()):
+        try:
+            payload = _fetch_release_payload(_releases_api_url(repo_name), timeout_seconds)
+            release = _select_latest_release(payload, repo_name)
+        except UpdateError as exc:
+            source_errors.append(f"{repo_name}: {exc}")
+            continue
+
+        latest_version = _version_from_tag(str(release.get("tag_name", "")))
+        latest_asset = _extract_asset(release, latest_version)
+        candidates.append(
+            (
+                _version_key(latest_version),
+                priority,
+                UpdateInfo(
+                    current_version=APP_VERSION,
+                    latest_version=latest_version,
+                    tag_name=str(release.get("tag_name", "")),
+                    html_url=str(release.get("html_url", _releases_page_url(repo_name))),
+                    body=str(release.get("body", "")),
+                    published_at=str(release.get("published_at", "")),
+                    asset=latest_asset,
+                    update_available=_version_key(latest_version) > _version_key(APP_VERSION),
+                    source_repository=f"{GITHUB_OWNER}/{repo_name}",
+                ),
+            )
+        )
+
+    if not candidates:
+        joined_errors = " | ".join(source_errors) if source_errors else "kaynak repo bulunamadi"
+        raise UpdateError(f"Release kaynaklari okunamadi: {joined_errors}")
+
+    candidates.sort(key=lambda item: (item[0], -item[1]), reverse=True)
+    return candidates[0][2]
+
+
+def get_runtime_context() -> RuntimeContext:
+    frozen = bool(getattr(sys, "frozen", False))
+    executable_path = Path(sys.executable if frozen else __file__).resolve()
+    install_dir = executable_path.parent if frozen else Path(__file__).resolve().parent
+    can_self_update = frozen and sys.platform.startswith("win") and executable_path.suffix.lower() == ".exe"
+    return RuntimeContext(
+        frozen=frozen,
+        can_self_update=can_self_update,
+        executable_path=executable_path,
+        install_dir=install_dir,
+    )
+
+
+def open_release_page(url: str | None = None) -> None:
+    webbrowser.open(url or RELEASES_PAGE_URL)
+
+
+def _download_asset(asset: ReleaseAsset, target_path: Path, timeout_seconds: int) -> None:
+    headers = _build_headers("application/octet-stream")
+    request = Request(asset.download_url, headers=headers)
+    try:
+        with urlopen(request, timeout=timeout_seconds) as response, target_path.open("wb") as output:
+            while True:
+                chunk = response.read(1024 * 256)
+                if not chunk:
+                    break
+                output.write(chunk)
+    except HTTPError as exc:
+        raise UpdateError(f"Release paketi indirilemedi: HTTP {exc.code}") from exc
+    except URLError:
+        try:
+            if target_path.exists():
+                target_path.unlink()
+            _download_via_powershell(asset.download_url, headers, target_path, timeout_seconds)
+        except UpdateError as fallback_exc:
+            raise UpdateError(
+                "Release paketi indirilemedi. Python TLS dogrulamasi ve Windows fallback denemesi basarisiz oldu."
+            ) from fallback_exc
+
+
+def _find_extracted_app_dir(extract_root: Path) -> Path:
+    expected_dir = extract_root / BINARY_NAME
+    if expected_dir.exists():
+        return expected_dir
+    directories = [path for path in extract_root.iterdir() if path.is_dir()]
+    if len(directories) == 1:
+        return directories[0]
+    raise UpdateError("Indirilen paket beklenen uygulama klasorunu icermiyor.")
+
+
+def _write_update_script(
+    working_root: Path,
+    stage_dir: Path,
+    install_dir: Path,
+    executable_path: Path,
+    current_pid: int,
+) -> Path:
+    script_path = working_root / "apply_update.cmd"
+    script = f"""@echo off
+setlocal
+set "APP_PID={current_pid}"
+set "STAGE_DIR={stage_dir}"
+set "TARGET_DIR={install_dir}"
+set "EXE_PATH={executable_path}"
+
+for /L %%I in (1,1,120) do (
+    tasklist /FI "PID eq %APP_PID%" | find "%APP_PID%" >nul
+    if errorlevel 1 goto apply_update
+    timeout /t 1 /nobreak >nul
+)
+
+:apply_update
+robocopy "%STAGE_DIR%\\{BINARY_NAME}" "%TARGET_DIR%" /E /R:2 /W:1 /NFL /NDL /NP >nul
+start "" "%EXE_PATH%"
+rmdir /S /Q "%STAGE_DIR%"
+del "%~f0"
+"""
+    script_path.write_text(script, encoding="utf-8", newline="\r\n")
+    return script_path
+
+
+def install_update(update_info: UpdateInfo, timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS) -> str:
+    if not update_info.update_available:
+        return "up_to_date"
+
+    if update_info.asset is None:
+        open_release_page(update_info.html_url)
+        return "browser"
+
+    runtime = get_runtime_context()
+    if not runtime.can_self_update:
+        open_release_page(update_info.html_url)
+        return "browser"
+
+    working_root = Path(tempfile.mkdtemp(prefix="hidrostatik-update-"))
+    zip_path = working_root / update_info.asset.name
+    extract_root = working_root / "extract"
+    extract_root.mkdir(parents=True, exist_ok=True)
+
+    _download_asset(update_info.asset, zip_path, timeout_seconds)
+    with zipfile.ZipFile(zip_path, "r") as archive:
+        archive.extractall(extract_root)
+
+    extracted_app_dir = _find_extracted_app_dir(extract_root)
+    stage_root = working_root / "stage"
+    stage_root.mkdir(parents=True, exist_ok=True)
+    staged_app_dir = stage_root / BINARY_NAME
+    if staged_app_dir.exists():
+        raise UpdateError("Gecici update klasoru beklenmedik sekilde dolu.")
+    extracted_app_dir.rename(staged_app_dir)
+
+    script_path = _write_update_script(
+        working_root=working_root,
+        stage_dir=stage_root,
+        install_dir=runtime.install_dir,
+        executable_path=runtime.executable_path,
+        current_pid=os.getpid(),
+    )
+    subprocess.Popen(["cmd", "/c", "start", "", "/min", str(script_path)], close_fds=True)
+    return "self_update"

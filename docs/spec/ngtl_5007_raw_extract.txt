@@ -1,0 +1,577 @@
+===== PAGE 1 =====
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+4 19.06.2014  
+MEKANİK VE 
+BORULAMA 
+GRUBU 
+ŞARTNAME 
+HAZIRLAMA 
+KOMİSYONU 
+3 10.05.2013  
+MEKANİK VE 
+BORULAMA 
+GRUBU 
+ŞARTNAME 
+HAZIRLAMA 
+KOMİSYONU 
+2 26.04.2012  
+MEKANİK VE 
+BORULAMA 
+GRUBU 
+ŞARTNAME 
+HAZIRLAMA 
+KOMİSYONU 
+Rev. 
+No. 
+Tarih Açıklama HAZIR. KONTROL 
+ 
+HİDROSTATİK TEST VE İÇTEN DENETLEME ŞARTNAMESİ 
+ 
+ 
+4-NGTL 0 – GN – P – 002 – 5007 
+Rev. 
+4 
+Sayfa 
+24 
+ 
+ 
+ 
+BORU HATLARI İLE PETROL TAŞIMA A.Ş. 
+ 
+
+===== PAGE 2 =====
+HİDROSTATİK TEST VE İÇTEN DENETLEME ŞARTNAMESİ 
+   4-NGTL 0-GN-P-002-5007 R4  
+1 / 12 
+ 
+ 
+ 
+ 
+İÇİNDEKİLER: 
+1.0 KAPSAM 
+2.0 TANIMLAR 
+3.0 GENEL 
+4.0 TEST BÖLÜMLERİ 
+5.0 TEST PROSEDÜRÜ 
+6.0 TEST BAŞLIKLARI 
+7.0 TEST İŞLEMİNDE KULLANILACAK SU 
+8.0 ENSTRÜMANTASYON VE TEST LABORATUARI 
+8.1 Dead Weight Tester 
+8.2 Kayıt Cihazı (Chart Recorder) 
+8.3 Sayaçlar (Flow Meters) 
+8.4 Termometreler 
+8.5 Manometreler 
+8.6 Test Laboratuarı 
+9.0 BORU İÇİ TEMİZLİĞİ 
+10.0 HİDROSTATİK TEST ŞARTLARI VE TEST İÇİN HAZIRLIK 
+11.0 SU DOLDURMA 
+12.0 TERMAL DENGELEME 
+13.0 HAVA İÇERİK TESTİ 
+14.0 BASINÇLANDIRMA 
+15.0 BASINÇ TESTİ 
+16.0 BASINCIN DÜŞÜRÜLMESİ 
+17.0 BOŞALTMA 
+18.0 ÖN KURUTMA 
+19.0 İÇTEN DENETLEME 
+19.1 Ölçüm Pigleri 
+19.2 Ölçüm Piginin Çalıştırılması 
+19.3 Sonuçların Yorumlanması 
+19.4 Kabul Edilme Kriteri 
+19.5 Onarımlar 
+20.0 NİHAİ KURUTMA 
+21.0 DOKÜMANTASYON 
+ 
+ 
+
+===== PAGE 3 =====
+HİDROSTATİK TEST VE İÇTEN DENETLEME ŞARTNAMESİ 
+   4-NGTL 0-GN-P-002-5007 R4  
+2 / 12 
+ 
+ 
+1. KAPSAM  
+Bu şartname karada döşenen boru hattı sistemlerinin  çalıştırılmasından önce sistemin 
+temizlenmesi, hidrostatik testinin yapılması, boşaltılması, boru profilinin içten muayene edilmesi,  
+kurutulması ve bu operasyonlarla ilgili diğer çalışmaların yerine getirilmesiyle ilişkili istenilenleri 
+ve Yüklenici sorumluluklarını kapsamaktadır. 
+ 
+2. TANIMLAR VE STANDARTLAR 
+Bu şartnamenin uygulanmasında gerekmesi halinde aşağıdaki tanımlar ve standartlardaki 
+gereklilikler göz önüne alınacaktır:  
+2.1. SMYS : (Specified Minimum Yield Strength) borunun belirtilen minimum akma ( %0.5 
+uzama esnasında belirlenen mukavemet) değeridir. 
+2.2. Minimum basınç: En yüksek kot noktasındaki test basıncıdır. (Bar) 
+2.3. Maksimum basınç: Minimum basınca, kot farkından kaynaklanan hidrolik yükün neden 
+olacağı basınç farkının eklenmesi ile bulunan basınç değeridir. (Bar) 
+2.4. İzlenen basınç: Test pompasının bağlı olduğu test başlığının bulunduğu kot ta izlenerek 
+kayıt altına alınan basınç değeridir. (Bar)  
+ 
+ASME B31.8 “Gaz İletim ve Dağıtım Borulama Sistemleri”  
+API 5L “Hat Borusu Şartnamesi” 
+ISO 13623 “Petrol ve Doğal Gaz Endüstrileri-Boru Hattı Taşıma Sistemleri” 
+ 
+3. GENEL 
+YÜKLENİCİ bu şartname gereklerinin yerine getirilmesi için gereken bütün ekipman ve işgücünü 
+temin edecektir. 
+ 
+4. TEST BÖLÜMLERİ 
+YÜKLENİCİ her bir test bölümünün, başlama ve son noktalarının yerlerini aş ağıdaki ilkelere 
+göre belirleyecektir. 
+4.1. Uzunluk ve hacim:  Aksi İDARE tarafından onaylanmadıkça her bir test bölümünün 
+uzunluğu 20 km yi, her bir test bölümünün hacmi ise 12.500 m³ ü aşmayacaktır. 
+4.2. Basınçlar: Minimum basınç, ASME B31.8 belirtilen 1. ve 2. sın ıf inşaat bölgelerindeki 
+boru hattı için dizayn basıncının 1.25 katından, 3. ve 4. sınıf inşaat bölgelerindeki boru hattı için 
+dizayn basıncının 1.50 katından daha az olmayacaktır. Maksimum basınç ise borunun SMYS 
+değerinin %100 ‘ünü aşmayacaktır. 
+4.3. Yüklenici, test bölümlerinin seçiminde, test için  elverişli su kaynaklarının bulunabilirliğini 
+ve testin tamamlanması ndan sonra  suyun boşaltılması için uygun boşaltma yerlerin 
+
+===== PAGE 4 =====
+HİDROSTATİK TEST VE İÇTEN DENETLEME ŞARTNAMESİ 
+   4-NGTL 0-GN-P-002-5007 R4  
+3 / 12 
+ 
+ 
+bulunabilirliğini de göz önüne alacaktır. Suyun temini ve boşaltılması sırasında üçüncü taraflara 
+verilen zararların tazmini yükleniciye aittir. 
+5. TEST PROSEDÜRÜ 
+Yüklenici t estin başlamasından en az dört hafta önce detaylı bir test prosedürü hazırlayarak 
+İdare’nin onayına sunacaktır. İşin yürütümü esnasında prosedürün revize edilmesi gerektiğinde, 
+yapılan değişiklikler yeniden İdare’nin onayına sunulacaktır. Test işlemleri, her safhada onaylı 
+prosedüre bağlı kalarak yapılacaktır.  
+Test prosedürü aşağıda belirtilen bilgilerle sınırlı kalmamak üzere test için gerekli tüm bilgileri 
+ihtiva edecektir. 
+5.1. Her bir test bölümünün başlangıç ve bitiş noktaları için seçilen yerlerin konum (lokasyon) 
+ve yükseklik bilgileri. 
+5.2. Her bir test bölümü için maksimum ve minimum yükseklik bilgileri. 
+5.3. Madde 5.1. ve 5.2. de belirtilen bilgileri de içeren test bölümü profili. 
+5.4. Her bir test bölümü için maksimum basınç, minimum basınç ve test basıncı değerleri. 
+5.5. Basınç testi ve hava içerik testi formüllerinde kullanılan A ve B değerlerinin birer barlık 
+basınç artışları ve 1’er oC’lik sıcaklık artışlarına göre hazırlanmış tablosu, (Bu tablonun basınç 
+ve sıcaklık değeri sınırları hava içerik testi ve basınç testi hesaplamalarında kullanılabilecek 
+maksimum ve minimum değerleri kapsayacak şekilde olacaktır.) 
+5.6. Hidrolik yük için aşağıda verilen formül kullanılacaktır. 
+ΔP = ρ x Δh x g / 100.000 
+ΔP : Hidrolik yükten kaynaklanan fark basınç (bar) 
+ρ : Kullanılan suyun 15 oC deki yoğunluğu (kg/m3) 
+Δh : Kot farkı (m) 
+g : Yerçekimi ivmesi (m/sn2) 
+5.7. Su doldurma ve boşaltma için seçilen yerlerin lokasyon bilgileri, 
+5.8. Kullanılan suya her hangi bir kimya sal maddenin atılması gerektiğinde, bu işlemin 
+nerede ve hangi yöntemle yapılacağı, 
+5.9. Test işleminde kullanılacak test başlıkları,  doldurma ve boşaltma boru donanımları, 
+vanalar, akış ölçerler, hidrolik hortumlar, fittingler, basınç pompaları, su ısıtıcılar ı ve kurutma 
+işleminde kullanılacak kompresörler dahil tüm malzeme ve ekipmanların listesi ve bunların 
+teknik özelliklerine ait doküman ile kalibrasyon gerektiren ekipmanların kalibrasyon belgeleri. 
+ 
+6. TEST BAŞLIKLARI 
+Yüklenici bütün test başlıklarının temin  ve montajından sorumlu olacaktır. Test başlığı 
+malzemesinin kimyasal ve mekanik test raporları ile detaylı proje çizimleri, vanaların yerleri ve 
+boyutları, montajın başlamasından önce İdare’nin onayına sunulacaktır.  
+
+===== PAGE 5 =====
+HİDROSTATİK TEST VE İÇTEN DENETLEME ŞARTNAMESİ 
+   4-NGTL 0-GN-P-002-5007 R4  
+4 / 12 
+ 
+ 
+Test başlıkları test bölümündeki en ka lın cidarlı borunun test edilmesine dayanacak şekilde 
+projelendirilecek ve imal edilecektir. Test başlıklarının basınç dayanımı, test sırasında maruz 
+kalacağı en büyük basınç değerinin en az 1,33 katını karşılayabilecektir. 
+Tüm test başlıklarının üretimi ve bu başlıkların test bölümüne bağlantısında yapılan kaynaklar 4-
+NGTL 0-GN-P-002-5005 Kaynak şartnamesine göre ve bunların tahribatsız muayenesi 4 -NGTL 
+0-GN-P-002-5006 Kaynakların tahribatsız muayenesi şartnamesine göre yapılacaktır. 
+Tamamlanan test başlıkları, malzemesinin SMYS değerinin % 100’üne denk bir basınçla 4 saat 
+süreyle hidrostatik olarak test edileceklerdir. Test başlıklarının kendine ait seri numaraları olacak 
+ve kullanıldığı test yerlerinin kayıtları proje boyunca tutulacaktır.  
+ 
+7. TEST İŞLEMİNDE KULLANILACAK SU 
+Hidrostatik testin yapılmasında kullanılacak suyun Ph değeri 6,5 – 10,5 arasında, olacak ve H2S 
+bulunmayacaktır. Suyun içine 50 mikrondan büyük parçacıkların girmesine engel olacak şekilde 
+filtre düzeneği kurulacaktır. Uygun nitelikte olm ayan su,  kimyasal olarak işlem görmedikçe 
+kullanılmayacaktır. Su numunesi analiz sonuçları, İdarenin onaylayacağı  kuruluştan alınmış 
+olacak ve su dolum raporlarında belirtilecektir. 
+ 
+8. ENSTRÜMANTASYON VE TEST LABORATUVARI 
+8.1. DEAD WEIGHT TEST CİHAZI 
+Dead Weight test cihazı aralığı  0 ila 200 bar arasında ; 0.05 barlık artışları, doğruluğu ise tüm 
+aralık boyunca % 0. 05 olacaktır. Dead Weight test cihazı, son  12 ay içerisinde alınmış bir 
+kalibrasyon sertifikasına sahip olacaktır. 
+8.2. CHART RECORDER 
+Yirmi dört saatlik bas ınç testi nin başlangıcından sonuna kadar basınç ve sıcaklık değerleri , 
+chart recorder  ile kayıt altına alınacaktır.   Chart recorder analog veya dijital olabilir.  Chart 
+recorder grafik skalası, basınç kayıtların da maksimum basıncın  1,5 katı basıncın 
+kaydedilmesine,  sıcaklık kayıtlarında ise –30 ile + 45 oC sıcaklığın kaydedilmesine imkan 
+sağlayacak nitelikte ve 24 saat kayıt için uygun olacaktır.  Kayıt hassasiyeti basınç kayıtlarında 
+% 0.15 bar, sıcaklık kayıtlarında ise 0.5 oC hassasiyetinde olacak, boru içindeki basınç kayıtları 
+mavi, boru sıcaklığı  kayıtları ise kırmızı renkte olacaktır.   Yukarıda bahsedilen kayıtlar dijital 
+ortamda da tutulabilir. Ancak yukarıda belirtilen şartları n sağlanmasının yanı sıra bu işlem için 
+kullanılan program ve tutulan kayıtlar ıslak imzalı çıktısı ile birlikte idareye teslim edilecektir. 
+8.3. SAYAÇLAR (FLOW METERS) 
+Hidrostatik test yapılacak bölüme doldurulan su  hacmi, bölüm hacmi ile mukayese edilmek ve 
+doldurma hızını gözlemlemek maksadı ile ölçülecektir. Bu ölçüm sırasında ku llanılan sayacın 
+ölçüm hassasiyeti %3’ten daha iyi olacaktır. 
+
+===== PAGE 6 =====
+HİDROSTATİK TEST VE İÇTEN DENETLEME ŞARTNAMESİ 
+   4-NGTL 0-GN-P-002-5007 R4  
+5 / 12 
+ 
+ 
+Su ile doldurulan bölüme ait hava içerik testi esnasında ilave edilen suyun hacmini ölçmek için 
+kullanılan sayaç ise %0,1 den daha iyi hassasiyette olacaktır. 
+8.4. TERMOMETRELER 
+Termometreler aşağıda belirtilen niteliklerde olacaktır. 
+8.4.1. Termometre pro bları, veri kayıt cihazı (D ata logger )’na bağlı olacak  ve dijital olarak 
+yaptığı ölçüm değerlerini bekleme süresi içinde kayıt altına alabilecek nitelikte ve yeterli hafıza  
+kapasitesine sahip olacaktır. 
+8.4.2. Toprak sıcaklığı ve gömülü  boru cidarının sıcaklıklarının ölçümü için kullanılacak 
+termometrelerin ölçüm aralığı 0 ile +30 derece arasında ve hassasiyeti ±0.1 oC olacaktır. 
+8.4.3. Çevre hava sıcaklıklarının ölçümü için kullanılacak termometrelerin ölçüm aralığı -40 ile 
++50 oC arasında ve hassasiyeti ±0.5 oC olacaktır. 
+8.4.4. Açıktaki boruların cidar sıcaklığının ölçülmesi için kullanılacak termometrelerin ölçüm 
+aralığı –10 ile +50 oC arasında ve hassasiyeti ±0.2 oC olacaktır. 
+8.4.5. Doldurma suyu sıcaklığının ölçülmesi için kullanılacak termometrelerin ölçüm aralığı 0 ile 
++50 oC arasında ve hassasiyeti ±0.5 oC olacaktır. 
+8.5. MANOMETRELER 
+Test sırasında; doldurma, basınç testi, basınç arttırma, kurutma gibi farklı işlemler için ayrı ayrı 
+manometreler kullanılacaktır . Manometrenin basınç  değeri, yapılacak işlem deki (d oldurma, 
+basınçlandırma, boşaltma, v.b.) maksimum basıncın en çok 1,5 katı olacaktır. Ayrıca 
+manometrenin kadran çapı rahat okumaya imkan verecektir.  
+8.6. TEST LABORATUVARI 
+Test işlemleri sırasında test bölgesinde, en az aşağıda belirtilen özellikleri karşılayan mobil bir 
+test laboratuvarı bulundurulacaktır. Bu laboratuvar; 
+8.6.1. Test işlemleri sırasında ihtiyaç duyulacak alet, makine ve ekipmanları içerecektir. 
+8.6.2. Aydınlatma, ısıtma ve havalandırma sistemine sahip olacaktır. 
+8.6.3. İhtiyaç halinde test personelinin barınmasına imkan sağlayacaktır. 
+8.6.4. Test işlemi sırasında meydana gelmesi muhtemel yaralanmalara karşı ilk yardım 
+malzemeleri bulundurulacak ve iş kazalarına karşı her türlü önlem alınmış olacaktır. 
+8.6.5. Basınçlandırma işleminde kullanılan hor tumların patlama ihtimalinin olası iş kazalarına 
+neden olmaması için muhafaza altına alınması başta olmak üzere gerekli tedbirler alınacaktır. 
+ 
+9. BORU İÇ TEMİZLİĞİ 
+Test bölümleri su ile doldurulmadan önce boru içinin temizlenmesi için test bölümüne basınçlı 
+hava kullanılarak iç yüzeyi kaplı borularda inşaat pigi, iç yüzeyi kaplı olmayan borularda tel 
+fırçalı temizlik pigi atılacaktır. Pig hızı 2,5 m/sn ‘yi aşmayacaktır. 
+
+===== PAGE 7 =====
+HİDROSTATİK TEST VE İÇTEN DENETLEME ŞARTNAMESİ 
+   4-NGTL 0-GN-P-002-5007 R4  
+6 / 12 
+ 
+ 
+PİG atma işlemi, atılış ve alınış tarih ve saatleri  ile pigin ilerleme hızı bilgilerini de ihtiva edecek 
+şekilde raporlanacaktır.  
+ 
+10. HİDROSTATİK TEST ŞARTLARI VE TEST İÇİN HAZIRLIK 
+10.1. Hava sıcaklığının +2 OCnin altında olması halinde su dolumu yapılmayacaktır. Hava 
+sıcaklığı +2 OCnin altında iken dolum yapmak istenirse doldurma suyuna İdarenin kabul 
+edebileceği nitelik ve miktarda antifriz ilave edilecektir. 
+10.2. Test laboratuvarı, test bölgesinde hazır halde bulundurulacaktır. 
+10.3. Test bölümünün, gömülü kısmının dışında açıkta kalan uçları ve test başlıkları hava 
+şartlarına karşı korunması amacıyla  İdarenin kabul edeceği bir yalıtım malzemesi ile izole 
+edilecektir. 
+10.4. Test bölümüne, boru ve toprak sıcaklığının takibi için sıcaklık probları yerleştiril ecektir. 
+Bu problar yerleştirilirken aşağıda belirtilen hususlara riayet edilecektir. 
+10.4.1. Boru sıcaklığının takibi içi n yerleştirilen problar boru kaplaması dış yüzeyine 
+temas edecek şekilde yerleştirilecektir. Toprak sıcaklığının takibi için yerleştirilen problar 
+ise boru yüzeyi ile arasında 30 cm olacak şekilde yerleştirilecektir. 
+10.4.2. Probların üzeri, yer yüzeyi  seviyesine kadar toprak ile doldurulup bağlantı uçları 
+yer yüzeyi üzerine çıkartılacaktır. 
+10.4.3. Test bölümünün başlangıç ve bitişine yerleştirilen problar, test bölümünün 
+toprağa gömülü olan kısmının başlangıç ve bitiş noktalarından 1 ’er metre içeride 
+olacaktır. Bu probların arasında kalan kısımda, aralarında en fazla 2,5 km mesafe olacak 
+şekilde yeteri sayıda prob yerleştirilecektir. 
+10.5. Test bölümü  boyunca boru hattı ile yol kesişim yerlerine ve açıkta bulunan borular ile 
+bunların müştemilatının bulunduğu bütün noktalara uyarı işaretleri yerleştirilecektir. 
+ 
+11. SU DOLDURMA 
+Test bölümünün su ile doldurulmasına başlanmadan önce yüklenici, test bölümündeki tüm conta 
+kaynaklarının NDT (Tahribatsız muayene) raporlarının başarılı olduğuna ve test bölümünün 
+kanala indirilip şartnamelere uygun olarak üzerinin kapatıldığına dair İdareden dolum müsaadesi 
+alacaktır. 
+Dolum işlemi, bu şartnamede özellikleri belirlenen  su kaynağından veya bir önceki test 
+bölümünden yapılabilir. 
+11.1. Doldurma işlemi esnasında e n az 2 adet doldurma pigi atılacaktır . Doldurma pigleri, 
+dolan suyun önünde gidecek ve bölümün kotuna göre pozitif geri basınçla ilerleyecektir. 
+11.2. Su dolumu yapılırken, içeri dolan suyla birlikte havanın da girmesine engel olunacaktır  
+
+===== PAGE 8 =====
+HİDROSTATİK TEST VE İÇTEN DENETLEME ŞARTNAMESİ 
+   4-NGTL 0-GN-P-002-5007 R4  
+7 / 12 
+ 
+ 
+11.3. Doldurulan su yun hacmi, bölüm hacmi ile karşılaştırılmak ve d oldurma hızını görmek 
+amacıyla ölçülecektir. Yapılan ölçümler birer saat aralıklarla kay dedilecek ve kaydedilen bu 
+bilgiler doldurma raporunda yer alacaktır. 
+11.4. Doldurulan suyun sıcaklığı, birer saat aralıklarla kaydedilecek ve kaydedilen bu bilgiler 
+doldurma raporunda yer alacaktır. 
+ 
+12. TERMAL DENGELEME 
+Test bölümünün basıncı, test pompasının bağlı olduğu yerde olması gereken basınç (İzlenen 
+basınç) değerinin yüzde seksenine kadar arttırılacaktır. Basınç artış hızı dakikada 5 bar’ı 
+aşmayacaktır. Basınç, chart re corder (veya veri kayıt cihazı)  ile kayıt edilecek ve dead weight 
+test cihazı kullanılarak izlenecektir. 
+Belirtilen basınca erişilmesinden sonra, minimum 24 saatlik termal dengeleme süresi 
+başlayacak ve boru sıcaklığında dörder saat aralıklarla yapılan son iki okumanın ortalama 
+değerleri arasında maksimum sıcaklık farkı 0.5 OC oluncaya kadar devam edilecektir. 
+Bu işlem süresince basınç ve sıcaklık arasındaki ilişkinin kontrolü için, her dört saatte bir izlenen 
+basınç değeri ile boru ve toprak sıcaklıklarının ölçülmesi için yerleştirilen probl arın her birinden 
+alınan ölçüm değerleri ve bunların ortalamaları raporlanacaktır. 
+ 
+13. HAVA İÇERİK TESTİ 
+Hava içerik testi, termal dengelemenin sağlandığı basınçtan  başlamak üzere  basıncın 1 bar 
+arttırılması için test bölümüne basılan su hacminin ölçülmesi  (Vpa) ve bu hacmin teorik olarak 
+hesaplanan hacim (Vp) ile karşılaştırılması yöntemi kullanılarak yapılacaktır. Test bölümüne 
+ilave edilen su hacminin, teorik olarak hesaplanan su hacmi nden  % 6 veya daha fazla olması 
+durumunda, hava içerik  testi başarısız kabul edilecek, bu oran %6 dan küçük çıkıncaya kadar 
+test bölümü boşaltılacak ve yeniden doldurulacaktır.  Teorik su hacmi aşağıdaki formülle 
+hesaplanacaktır. Bu hesap ve sonucu da hava içerik testi raporunda belirtilecektir. 
+Vp = (( 0,884 x ri / s ) + A) x 10-6 x Vt x K   
+Vp   : Test bölümü basıncını 1 bar arttırmak için gerekli olan suyun teorik hacmi (m3) 
+Vpa : Test bölümü basıncını 1 bar arttırmak için ilave edilen suyun gerçek hacmi (m3)         
+Vt    : Test bölümünün geometrik hacmi (m3)         
+ri     : Test edilen borunun iç yarıçapı (mm)        
+s     : Test edilen borunun nominal et kalınlığı (mm)  
+A    : Ölçülen basınç ve sıcaklık şartlarında suyun izotermal sıkıştırılabilirliği (1/K) 
+K   : Kaynaklı boru için 1.02, dikişsiz boru için 1.0’dir  
+ 
+ 
+
+===== PAGE 9 =====
+HİDROSTATİK TEST VE İÇTEN DENETLEME ŞARTNAMESİ 
+   4-NGTL 0-GN-P-002-5007 R4  
+8 / 12 
+ 
+ 
+14. BASINÇLANDIRMA 
+14.1. Test pompasının bağlı olduğu yerde olması gereken basıncın (izlenen basıncın) borunun 
+SMYS’nin %80’den %100’e çıkartılması İDARE veya temsilcisinin gözetiminde yapılacaktır. Bu 
+işlem sırasında basınç artış hızı, borunun SMYS’nin %80 den %95’ine  maksimum dakikada 1 
+bar’ı aşmayacaktır.  
+14.2. Test pompasının bağlı olduğu yerde olması gereken basıncın test bölümünün en düşük 
+kota sahip bölgesindeki maksimum test  basıncı borunun SMYS’nin % 9 5’ine karşılık gelen test 
+basıncına ulaştıktan sonra borunun SMYS’nin %100 üne kadar basınçlandırmaya devam etmek 
+için, basınç-hacim ilişkisi izlenecek ve 0.2 barlık artışlarla, söz konusu test basıncına ulaşmak 
+için doldurulan  toplam su hacminin %0.2 inden daha fazla su basılmasını engellemek için 
+önlemler alınacaktır. Belirtilen test basıncına erişilmeden önce basılan su miktarı, toplam 
+doldurulan su hacminin %0.2 inden daha fazla su basıldığı durumda,  basınçlandırma 
+durdurulacak ve İdarenin talimatı beklenecektir  
+14.3. Belirtilen test basıncına erişildiğinde, pompalar bağlı kalmaya devam edecek, ancak 
+pompa bağlantı hattındaki vana kapatılacaktır . İki saatlik bekleme  süresi başlayacak ve basınç 
+ile sıcaklık okumaları her 15 dakikad a bir alınacaktır.  İki saatlik bekleme süresinin 
+tamamlanması üzerine, basınçta düşme var ise  basınç, yeniden izlenen basıncın %100’üne 
+çıkartılacak, pompa bağlantı hattındaki vana kapatılacak , pompa bağlantısı çözülecek ve vana 
+ucu körlenerek 24 saatlik b asınç testi başlatılacaktır.  Basınçlandırma işlemi her bölüm için 
+raporlanacaktır. 
+ 
+15. BASINÇ TESTİ 
+15.1. 24 saatlik test başlatılacak ve test süresince çevre sıcaklığı ve izlenen basınç her saat, 
+boru ve toprak sıcaklıklarının ölçülmesi için yerleştirilen probları n her birinden alınan ölçüm 
+değerleri ve bunların ortalamaları her dört saatte bir kayıt altına alınacak ve aşağıda belirtilen 
+hesaplama ile birlikte raporlanacaktır. 
+15.2. Su (boru) sıcaklığında meydana gelen değişim için yapılan ölçüm değerleri kullanılarak 
+hesaplanan teorik basınç değişimi (ΔP)  aşağıdaki formülle hesaplanacaktır. 
+ΔP = ( B x ΔT ) / (( 0,884 x ri / S) + A ) 
+Bu formülde   
+Pa : (Pilk-Pson) Fiili basınç değişikliği (bar) 
+ΔP : Sıcaklık değişmesinden kaynaklanan teorik basınç değişimi (bar) 
+ΔT : (Tilk-Tson) Su (boru) sıcaklığında meydana gelen değişim (oC) 
+B : Ölçülen basınçta ve sıcaklıkta suyun term al genleşmesinin çeliğin termal 
+genleşmesiyle farkı (1/K) 
+
+===== PAGE 10 =====
+HİDROSTATİK TEST VE İÇTEN DENETLEME ŞARTNAMESİ 
+   4-NGTL 0-GN-P-002-5007 R4  
+9 / 12 
+ 
+ 
+A : Ölçülen basınç ve sıcaklıkta suyun tahmin edilen izotermal sıkıştırılabilirliği  
+(1/bar) 
+ri : Borunun nominal iç yarı çapı (mm) 
+S : Borunun nominal et kalınlığı (mm) 
+ 
+ Gerçek basınç değişimi ile hesaplanan basınç değişimi arasındaki fark ( Pa- ΔP) ≤ 0.3  bar ise 
+test başarılı kabul edilecek aksi takdirde başarısız olarak nitelendirilecek ve basın ç düşümünün 
+sebebi tespit edilecektir.   
+ 
+16. BASINCIN DÜŞÜRÜLMESİ 
+Hidrostatik test işlemi başarıyla tamamlandıktan sonra, basıncın düşürülmesi sırasında boru, 
+ekipman ve çevresel etki açısından dikkatli olunacaktır . Bu işlem için kullanılan vanalar 2” veya 
+daha düşük çapta olacaktır. 
+ 
+17. BOŞALTMA 
+Test bölümünün suyunun boşaltılması mutlaka boşaltma pigi kullanılarak ve aşağıda belirtilen 
+hususlara riayet edilerek yapılacaktır 
+17.1. Suyun oluşturacağı hidrolik yüklerin boruda hareket oluşturmasına engel olmak için 
+gerekli tüm tedbirler alınacaktır.  
+17.2. Boşaltılacak su, bir başka test bölümüne aktarılabilir.  
+17.3. Suyun akar veya durağan bir su mecrasına, devlete veya özel mülkiyette bir araziye 
+boşaltılmasına, sadece, YÜKLENİCİ tarafından gerekli onayların alınması durumunda müsaade 
+edilecektir. 
+17.4. Çevre mevzuatı gereklilikleri açısından Yükleniciden yağları, organik bileşik maddeleri ve 
+parçacıkları uzaklaştırmak için bu kirleticileri kabul edilebilir bir düzeye düşürmek üzere suyu 
+işlemden geçirtmesi istenilebilir. İDARE tarafında n gere görülmesi durumda suda toksik 
+kimyasal maddelerin mevcut olmadığının tespiti amacı ile su numunesi analizleri istenebilir. 
+17.5. Su mecrası içerisine suyun boşaltılması, kıyıda erozyon, toprak yıkamaları ve aşırı 
+derecede silitasyon meydana gelmeyecek şekilde yapılacaktır.  
+17.6. Suyun boşaltılması işlemi, tarih, saat, kullanılan pig, su boşaltma yeri ve işlem süresini 
+ihtiva edecek şekilde raporlanacaktır. 
+ 
+18. ÖN KURUTMA 
+Suyu boşaltılan test bölümlerinde, suyun tamamen boşaltıldığından emin olmak maksadı ile 
+yüksek yoğunluklu sızdırmaz pigler (High density sealing pig) kullanılarak ön kurutma yapılacak  
+ve raporlanacaktır. 
+
+===== PAGE 11 =====
+HİDROSTATİK TEST VE İÇTEN DENETLEME ŞARTNAMESİ 
+   4-NGTL 0-GN-P-002-5007 R4  
+10 / 12 
+ 
+ 
+18.1. Bu işlem yapılırken test bölümleri birleştirilebilir. Ancak birleştirilmiş test bölümlerinin 
+toplam uzunluğu 20 km yi geçmeyecektir. 
+18.2. Ön kurutma i şlemi, pigin süpürdüğü gözle görülür miktarda su kalmayıncaya   kadar 
+devam edecektir. 
+18.3. Pigler sıkıştırılmış havayla sürüklenecek ve pigin yanından geçen (kaçan) suyun en aza 
+inmiş olmasını sağlamak için saatte 8 km veya bundan daha az bir hızla ilerleyecektir. 
+18.4. Aksine İDARE tarafından izin verilmediği hallerde,  kurutma çalışmaları gündüz 
+saatlerinde tamamlanacak ve İDARE veya temsilcisi bu çalışmalar sırasında hazır bulunacaktır. 
+18.5. İçten denetleme işleminin, ön  kurutmanın hemen ardından yapılamadığı  ve bölüm 
+uçlarının açık kalmasının söz konusu olduğu durumlarda test bölümü içine yabancı madde ve 
+hayvanların girmesini önlemek maksadıyla test bölümü uçları kapatılacaktır. Test bölümü 
+uçlarının su içerisinde kalma durumunda hattın içerisine su girme sini önleyecek metal başlıklar 
+kaynatılacaktır. 
+ 
+19. İÇTEN DENETLEME 
+Ön kurutma işlemi tamamlandıktan sonra boru profili (geometrik yapısı) ovalite, dent, çentik, v.b. 
+bakımından boru içinden kontrol edilecektir. Bu işlem yapılmadan önce ön kurutma yapılan 
+bölümler birleştirilebilir. Ancak birleştirilen bölümlerin toplam uzunluğu “Nihai kurutma” işleminde 
+belirtilen sınırları aşamaz . İçten denetleme  için kullanılacak pigler aşağıda belirtildiği gibi 
+olacaktır. İçten denetleme için yapılan işlemler,  elde edilen sonuçlar, yapıl an değerlendirmeler 
+ve varsa onarımlar içten denetleme raporunda detaylı şekilde belirtilecektir. 
+19.1. ÖLÇÜM PİGLERİ 
+19.1.1. 8” ve daha büyük boru hatları için, kullanılan pigler (Caliper pig), olumsuzlukları ve 
+bunların yerlerini saptayan elektronik donanıma sahip ola caktır. Bu işlem için , kalibre edilmiş 
+pigler kullanılacak ve ölçüm doğruluğu %0,1 olacaktır. 
+19.1.2. 8” ten daha küçük boru hatları için, hat borusunun iç çapından 12.7 mm daha az çapı 
+olan 6.4 mm.lik yumuşak metal (Alüminyum v.b.)  levhadan yapılma ölçüm plakası ve lastik 
+fincanlarla ile donatılmış karma bir pig (gauge plate) çalıştırılacaktır.  
+19.2. ÖLÇÜM PİGİNİN ÇALIŞTIRILMASI 
+Ölçüm pigi sıkıştırılmış kuru hava ile ve pig üreticisinin önerilerine göre çalıştırılacaktır. Ölçüm 
+çalışmasından elde edilen veri yeterli nitelikte olmadığı takdirde, çalıştırma tekrarlanacaktır. 
+19.3. SONUÇLARIN YORUMLANMASI 
+Ölçüm piginden kayıt edilen veriler her bir çalıştırmadan sonra derhal yorumlanacaktır. Analizin 
+tamamlanmasından sonra, yazılı rapor ile orijinal tablo İdareye teslim edilecektir.   
+Boyutlandırma plakasıyla pig’in çalıştırılmasından sonra, plaka üzerinde çentikler veya çizikler 
+bulunmayacaktır. Herhangi bir şekilde ölçüm plakası şekil değiştirmiş olduğu takdirde, bunun 
+nedeni belirlenecek ve 19,4 ve 19.5 maddelerinde belirtilmiş olunduğu gibi düzeltilecektir. 
+
+===== PAGE 12 =====
+HİDROSTATİK TEST VE İÇTEN DENETLEME ŞARTNAMESİ 
+   4-NGTL 0-GN-P-002-5007 R4  
+11 / 12 
+ 
+ 
+19.4. KABUL KRİTERİ 
+19.4.1. Kaliper Pig İçin Kabul Kriterleri 
+19.4.1.1. 12” (323.9 mm) veya daha küçük çaplı borularda dent ( çukurlaşma) derinliği 
+(kaynakların üzerinde bulunanlar hariç) 6.3 mm yi,  12” ten daha büyük çaplı 
+borularda ise boru çapının %2 sinden daha büyük olmayacaktır. Eğer dent, boru 
+kaynağı veya conta kaynağı üzerinde meydana gelmiş ise büyüklüğüne 
+bakılmaksızın kabul edilmeyecektir. 
+19.4.1.2. Dairesellikten sapmanın (ovalite) olduğu duru mlarda, boru çapı azalması %5’i 
+aşmayacaktır.  
+19.4.1.3. Aynı yerde hem dairesellikten sapma hem de dent var ise, bunların her ikisinin 
+de birlikte meydana getirdiği boru çapı azalması , madde: 19.4.1.1 de  belirtilen 
+sınırları aşmayacaktır. 
+19.4.1.4. Boru imalatına uygulanan boyut toleransları,  bu şartnamede belirtilen sınırlar a 
+ilave edilmeyecektir. 
+19.4.1.5. Ölçüm piglerinden elde edilen bilgilerin değerlendirilmesi sırasında gerek 
+görülmesi halinde , İDARE hata bölgesin in açığa çıkartılıp muayene edilmesini 
+isteyebilir. 
+19.4.1.6. Boru profili (geometrik yapısı) ile ilgili b u hatalar dışında kalan  hataların 
+değerlendirilmesi API 5L standardının son versiyonuna göre yapılacaktır. 
+19.4.2. Gauge Plate İçin Kabul Kriterleri 
+19.4.2.1. Gauge plate kullanılması durumunda işlem sonunda hattan çıkan metal plaka 
+hiçbir şekilde deforme olmayacaktır. 
+19.5. ONARIMLAR 
+Ölçüm incelemesi  sonunda, yukarıda belirtilen kabul edilebilirlik kriterini aşan kusurlar ın 
+bulunması halinde , ayrıntılı muayenenin ve ölçümlerin yapılabilmesi için bu kusurların 
+bulunduğu yerlerde boru hattı açığa çıkartılacaktır. Bu bölümlerdeki kusurlar açığa çıkmış bor u 
+üzerinde yeniden değerlendirilecek ve kabul edilmesi mümkün bulunmayan kusur veya hasar lı 
+bölgeler kesilip önceden test edilmiş borularla değiştirilecektir. Bütün kaynak, muayene, 
+kaplama, v.b. işlemler onaylanmış işlem prosedürlerine uygun olarak yapılacaktır. 
+ 
+ 
+20. NİHAİ KURUTMA 
+İçten denetlemesi yapılan bölümlerin sudan ve nemden tamamen arındırılması için -40 oC 
+çiğlenme noktasına kadar kurutulmuş hava ile n ihai kurutma işlemi yapılacaktır.  Bu işlem için 
+kuru hava temin edecek kompresör ün sağladığı hava , yağdan arınmış olacaktır. Ayrıca bölüm 
+uzunluğu ve çap için gerekli debiyi sağlayabilme gücünde olacaktır.  
+
+===== PAGE 13 =====
+HİDROSTATİK TEST VE İÇTEN DENETLEME ŞARTNAMESİ 
+   4-NGTL 0-GN-P-002-5007 R4  
+12 / 12 
+ 
+ 
+Nihai kurutma işleminde aşağıda belirtilen hususlara riayet edilecek ve yapılan işlemler 
+raporlanacaktır. 
+20.1. Bu işlem yapılırken test bölümleri birleşt irilebilir. Ancak birleştirilmiş test bölümlerinin 
+uzunluğu içten kaplanmış borularda 150 km ve içten kaplı olmayan borularda 100 km yi 
+geçmeyecektir. 
+20.2. Havayla nihai kurutma işlemine başlamadan önce hatta sünger pig atılacaktır. 
+20.3. Bu işlem için kullanılacak pigdeki süngerin yoğunluğu 30–50 kg/m3 arasında olacaktır. 
+20.4. Sünger piglerin in artarda atılması durumunda iki pig arasında ki mesafe en az 300 m 
+olacaktır. 
+20.5. Sünger piglerin ilerleme hızı 1,2 m/sn yi geçmeyecektir. 
+20.6. Sünger pig atma işlemi, çıkan pig’in ağırlığının atılan pig’in ağırlığa oranı en fazla  1,5 
+oluncaya kadar devam edecektir. 
+20.7. Havayla nihai kurutma işlemi, hattan çıkan havanın çiğlenme noktası -20 oC oluncaya 
+kadar devam edecektir. 
+20.8. Kurutma işlemi tamamlanan bölümler, boru hattı tek parça olarak devreye a lmaya hazır 
+hale getirilinceye kadar atmosferik basınçta uçları kapatılarak bekletilecektir. 
+20.9. Hat içerisindeki havanın çiğlenme noktası okumaları, boru hattı tek parça olarak devreye 
+almaya hazır hale getirilinceye kadar İdare tarafından her hangi bir zamanda tekrar istenebilir. 
+ 
+21. DOKÜMANTASYON 
+21.1. Hidrostatik testin her safhasın da şartname ekinde yer alan formlar kullanılacaktır. İdare 
+işin yürütümü esnasında ihtiyaç duyması halinde bu formları revize etme hakkına sahiptir.  
+21.2. Bir testin başarıyla tamamlanması ve kabul edilmesi üzerine, Yüklenici bütün 
+dokümanların, grafiklerin, şemaların ve diğer test kayıtlarının Yüklenici ve İdare tarafından 
+onaylanmış dört kopyasını geçici kabul öncesinde İdareye teslim edilecektir.  
+ 
+Ek: Formlar  
+ Hidrostatik Test Verileri (BOT-FRM-CDB-001-015) 
+ Temizlik Kabul Raporu (BOT-FRM-CDB-001-016) 
+ Su Dolum Raporu (BOT-FRM-CDB-001-017) 
+ Dengeleme İçin Kaçak Test Raporu (BOT-FRM-CDB-001-018) 
+ Mukavemet Test Raporu (BOT-FRM-CDB-001-019) 
+ Hava İçerik Testi Kabul Raporu (BOT-FRM-CDB-001-020) 
+ Basınç Testi Raporu (BOT-FRM-CDB-001-021) 
+ Basınç Testi Kabul Raporu (BOT-FRM-CDB-001-022) 
+ Boşaltma Kabul Raporu (BOT-FRM-CDB-001-024) 
+ Ön Kurutma Kabul Raporu (BOT-FRM-CDB-001-025) 
+ Hava Kurutma Raporu (BOT-FRM-CDB-001-026) 
+ Çiğlenme Noktası Raporu (BOT-FRM-CDB-001-027) 
