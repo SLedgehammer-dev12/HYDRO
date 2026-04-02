@@ -28,6 +28,8 @@
 - `Uygulama / Guncelleme` paneli ana ekrandan kaldirildi; ayni islevler menude birakildi.
 - Sag yardimci alan tek uzun kolon yerine `Rehber / Durum / Kayit` sekmeleriyle parcali hale getirildi; dikey yigilma azaltildi.
 - Hava, basinc ve saha sekmeleri yatay alani daha etkin kullanacak sekilde iki kolonlu duzene yaklastirildi.
+- `Yan Paneli Gizle/Goster` kontrolu eklendi; hesap girisine odaklanmak isteyen operator calisma alanini tek kolon moduna alabilir.
+- `Bilgi Notlarini Goster/Gizle` kontrolu eklendi; varsayilan ekranda statik aciklama metinleri gizlenerek gereksiz dikey yuk azaltildi.
 - Sag panelde `Canli Sema` eklendi:
   - aktif sekmeye gore hesap akisini cizer,
   - sekmeler arasi tiklanabilir gezinme sunar,

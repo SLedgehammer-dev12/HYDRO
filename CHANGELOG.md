@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.5 - 2026-04-03
+
+- `Yan Paneli Gizle/Goster` kontrolu eklendi; operator isterse sag yardimci alan kapatilarak calisma alani genisletilebiliyor.
+- `Bilgi Notlarini Goster/Gizle` kontrolu eklendi; varsayilan ekranda statik aciklama bloklari gizlenerek daha kompakt bir akisa gecildi.
+- Sag panel yerlesimi ve sash konumu daha tutarli hale getirildi; kapanista gorulen gereksiz Tk callback gurultusu temizlendi.
+- UI regresyon testleri yan panel ve bilgi notu gorunurluk kontrolleriyle genisletildi; otomatik test paketi 75 teste cikarildi.
+
 ## 1.5.4 - 2026-04-03
 
 - Manuel guncelleme kontrolunde yeni surum bulundugunda kurulum akisi artik dogrudan teklif ediliyor; sadece acilista degil, kullanici talebinde de `indir/uygula` akisi basliyor.

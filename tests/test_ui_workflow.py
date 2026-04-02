@@ -266,6 +266,29 @@ class UiWorkflowTests(unittest.TestCase):
 
         self.assertEqual(labels, ["Rehber", "Durum", "Kayit"])
 
+    def test_side_panel_can_be_hidden_and_restored(self) -> None:
+        self.root.update_idletasks()
+        self.assertIn(str(self.app.side_panel), self.app.content_pane.panes())
+
+        self.app._toggle_side_panel_visibility()
+        self.root.update_idletasks()
+        self.assertNotIn(str(self.app.side_panel), self.app.content_pane.panes())
+
+        self.app._toggle_side_panel_visibility()
+        self.root.update_idletasks()
+        self.assertIn(str(self.app.side_panel), self.app.content_pane.panes())
+
+    def test_help_notes_are_hidden_by_default_and_can_be_shown(self) -> None:
+        self.root.update_idletasks()
+        self.assertFalse(self.app.help_notes_visible_var.get())
+        self.assertFalse(self.app.intro_label.winfo_ismapped())
+
+        self.app._toggle_help_notes_visibility()
+        self.root.update_idletasks()
+
+        self.assertTrue(self.app.help_notes_visible_var.get())
+        self.assertTrue(self.app.intro_label.winfo_ismapped())
+
     def test_clear_active_form_resets_pressure_inputs(self) -> None:
         self.app.notebook.select(1)
         self.app.pressure_vars["temperature_c"].set("20")
