@@ -6,8 +6,13 @@
 - Kokte sadece launcher, build dosyalari ve ust seviye dokumanlar kaldi
 - Build artefact'i `dist/windows/` altina ayrildi
 - Eski prototip ve onceki calisma notlari `docs/legacy/` altina arsivlendi
-- Otomatik test paketi 66 test ile geciyor
-- Updater birincil olarak `SLedgehammer-dev12/HYDRO`, gecis icin ikinci kaynak olarak `SLedgehammer-dev12/Programlar` release'lerini tarayacak sekilde hazirlandi
+- Otomatik test paketi 71 test ile geciyor
+- Updater birincil olarak `SLedgehammer-dev12/HYDRO`, gecis icin ikinci kaynak olarak `SLedgehammer-dev12/Programlar` release'lerini tarayacak sekilde calisiyor
+- UI artik kok seviyede ve sekme seviyesinde kaydirilabilir
+- `Boru Kesiti` alani sikistirildi; segment tablosu varsayilan olarak gizli ve ihtiyac halinde aciliyor
+- Sabit `Uygulama / Guncelleme` paneli kaldirildi; guncelleme sadece menu ve durum mesajlari ile yonetiliyor
+- `Canli Sema` paneli aktif sekmeye, segment geometriye, checklist ilerlemesine ve pig hizina gore dinamik guncelleniyor
+- Guncelleme paketi icin kullanici secimli indirme klasoru akisi eklendi
 
 ## Teknik Gercekler
 
@@ -17,6 +22,9 @@
 - Updater `hidrostatik_test/services/updater.py`
 - Girdi akisini kolaylastirmak icin aktif teste ozel akis kontrol listesi eklendi
 - Repo ayrisma gecisi icin updater kaynak secimi `hidrostatik_test/services/updater.py` icinde merkezilestirildi
+- Table/interpolation backend secimi UI tarafinda kullaniciya acik
+- Scroll ve canli sema davranislarinin regresyonu `tests/test_ui_workflow.py` ile korunuyor
+- Guncelleme indirme klasoru akisi `tests/test_updater.py` ile korunuyor
 
 ## Acik Riskler
 
@@ -24,7 +32,8 @@
 - 24 saatlik zaman serisi ve saha form akisi henuz yok
 - Segmentli geometri yaklasimi icin kurum ici metod onayi alinmadi
 - A birimi dokumanda tutarsiz gorunuyor; saha oncesi tablo ile teyit edilmeli
-- `HYDRO` reposu bu oturumda olusturulamadi; GitHub CLI auth veya bos repo gerekecek
+- EXE dagitimi icin kod imzalama halen yok; SmartScreen / kurumsal AV false positive riski suruyor
+- Update paketi gecici klasor mantigiyla iniyor; audit / retention kurali gerekiyorsa ek saklama politikasi tanimlanmali
 
 ## Sonraki Oturumda Ilk Okunacaklar
 

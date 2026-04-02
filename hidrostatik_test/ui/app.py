@@ -68,8 +68,7 @@ class HydrostaticTestApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title(f"{APP_TITLE} v{APP_VERSION}")
-        self.root.geometry("1240x820")
-        self.root.minsize(1080, 760)
+        self._configure_window_geometry()
 
         self.geometry_vars = {
             "outside_diameter_mm": tk.StringVar(),
@@ -128,6 +127,7 @@ class HydrostaticTestApp:
             "pressure": tk.StringVar(),
             "field": tk.StringVar(),
         }
+        self.geometry_details_visible_var = tk.BooleanVar(value=False)
         self.control_check_vars = {
             key: tk.BooleanVar(value=False) for key, _label, _reference in FIELD_CHECK_DEFINITIONS
         }
@@ -158,12 +158,17 @@ class HydrostaticTestApp:
         self.active_backend_comparison_var = tk.StringVar(
             value="Aktif sekme icin backend karsilastirmasi henuz yapilmadi."
         )
+        self.visual_schema_var = tk.StringVar(
+            value="Canli sema aktif sekmeye gore guncellenir. Ustteki kutulara tiklayarak sekme degistirebilirsiniz."
+        )
+        self.update_download_summary_var = tk.StringVar()
         self.pig_limit_var = tk.StringVar()
         self.pig_status_var = tk.StringVar(value="Pig hiz hesabi henuz yapilmadi.")
         self.pig_summary_var = tk.StringVar(
             value="Mesafe ve sure girildiginde pig hizi m/sn ve km/sa olarak burada gosterilir."
         )
         self.check_summary_var = tk.StringVar()
+        self.check_progress_var = tk.DoubleVar(value=0.0)
         self.decision_title_var = tk.StringVar(value=DEFAULT_DECISION_TITLE)
         self.decision_status_var = tk.StringVar(value=DEFAULT_DECISION_STATUS)
         self.decision_summary_var = tk.StringVar(value=DEFAULT_DECISION_SUMMARY)
@@ -171,6 +176,7 @@ class HydrostaticTestApp:
         self.update_detail_var = tk.StringVar(
             value="Acilista otomatik kontrol yapilir. Isterseniz elle de guncelleme kontrolu baslatabilirsiniz."
         )
+        self.update_download_dir_var = tk.StringVar(value=str(self._default_update_download_dir()))
         self.coefficient_states = {
             "air_a": "empty",
             "pressure_a": "empty",
@@ -191,6 +197,7 @@ class HydrostaticTestApp:
         self.latest_update_info: UpdateInfo | None = None
         self.update_check_in_progress = False
         self.update_install_in_progress = False
+        self._active_scroll_canvas: tk.Canvas | None = None
 
         self._build_menu()
         self._build_ui()
@@ -205,8 +212,11 @@ class HydrostaticTestApp:
         self._on_air_a_mode_changed()
         self._on_pressure_a_mode_changed()
         self._apply_b_helper_mode()
+        self._refresh_update_download_summary()
+        self._apply_geometry_details_visibility()
         self._update_check_summary()
         self._update_pig_limit_hint()
+        self._refresh_visual_schema()
         self.root.after(1200, self._check_for_updates_on_startup)
 
     def _build_menu(self) -> None:
@@ -226,6 +236,7 @@ class HydrostaticTestApp:
         update_menu = tk.Menu(menu_bar, tearoff=False)
         update_menu.add_command(label="Guncelleme Kontrol Et", command=self._check_for_updates_manually)
         update_menu.add_command(label="Guncellemeyi Uygula", command=self._apply_available_update)
+        update_menu.add_command(label="Indirme Klasoru Sec", command=self._choose_update_download_dir)
         update_menu.add_separator()
         update_menu.add_command(label="Release Sayfasini Ac", command=self._open_release_page)
         menu_bar.add_cascade(label="Guncelleme", menu=update_menu)
@@ -236,9 +247,259 @@ class HydrostaticTestApp:
 
         self.root.configure(menu=menu_bar)
 
+    def _configure_window_geometry(self) -> None:
+        screen_width = max(self.root.winfo_screenwidth(), 1280)
+        screen_height = max(self.root.winfo_screenheight(), 900)
+        width = min(screen_width - 120, max(1440, int(screen_width * 0.84)))
+        height = min(screen_height - 100, max(920, int(screen_height * 0.86)))
+        x_offset = max((screen_width - width) // 2, 0)
+        y_offset = max((screen_height - height) // 2, 0)
+        self.root.geometry(f"{width}x{height}+{x_offset}+{y_offset}")
+        self.root.minsize(1280, 840)
+
+    def _default_update_download_dir(self) -> Path:
+        downloads_dir = Path.home() / "Downloads" / "HidrostatikTestUpdates"
+        return downloads_dir
+
+    def _resolve_update_download_dir(self, create: bool = False) -> Path:
+        target_dir = Path(self.update_download_dir_var.get()).expanduser()
+        if create:
+            target_dir.mkdir(parents=True, exist_ok=True)
+        return target_dir
+
+    def _choose_update_download_dir(self) -> bool:
+        selected_dir = filedialog.askdirectory(
+            title="Guncelleme Paketinin Indirilecegi Klasor",
+            initialdir=str(self._resolve_update_download_dir(create=True)),
+            mustexist=False,
+        )
+        if not selected_dir:
+            return False
+        self.update_download_dir_var.set(selected_dir)
+        self._refresh_update_download_summary()
+        self._set_banner(f"Guncelleme indirme klasoru secildi: {selected_dir}", "info")
+        return True
+
+    def _refresh_update_download_summary(self) -> None:
+        target_dir = self._resolve_update_download_dir(create=False)
+        self.update_download_summary_var.set(
+            f"Guncelleme indirilecek klasor: {target_dir}"
+        )
+
+    def _bind_mousewheel(self, canvas: tk.Canvas) -> None:
+        self._active_scroll_canvas = canvas
+        self.root.bind_all("<MouseWheel>", self._on_mousewheel)
+
+    def _unbind_mousewheel(self, canvas: tk.Canvas) -> None:
+        if self._active_scroll_canvas is canvas:
+            self._active_scroll_canvas = None
+        self.root.unbind_all("<MouseWheel>")
+
+    def _on_mousewheel(self, event: tk.Event) -> None:
+        if self._active_scroll_canvas is None:
+            return
+        if event.delta == 0:
+            return
+        self._active_scroll_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def _create_scrollable_region(
+        self,
+        parent: tk.Misc,
+        *,
+        padding: int | tuple[int, ...] = 0,
+    ) -> tuple[ttk.Frame, ttk.Frame, tk.Canvas]:
+        wrapper = ttk.Frame(parent)
+        wrapper.columnconfigure(0, weight=1)
+        wrapper.rowconfigure(0, weight=1)
+        canvas = tk.Canvas(wrapper, highlightthickness=0, borderwidth=0)
+        scrollbar = ttk.Scrollbar(wrapper, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        content = ttk.Frame(canvas, padding=padding)
+        window_id = canvas.create_window((0, 0), window=content, anchor="nw")
+        content.bind(
+            "<Configure>",
+            lambda _event, target_canvas=canvas: target_canvas.configure(scrollregion=target_canvas.bbox("all")),
+        )
+        canvas.bind(
+            "<Configure>",
+            lambda event, target_canvas=canvas, item_id=window_id: target_canvas.itemconfigure(item_id, width=event.width),
+        )
+        canvas.bind("<Enter>", lambda _event, target_canvas=canvas: self._bind_mousewheel(target_canvas))
+        canvas.bind("<Leave>", lambda _event, target_canvas=canvas: self._unbind_mousewheel(target_canvas))
+        return wrapper, content, canvas
+
+    def _create_scrollable_tab(self, title: str) -> ttk.Frame:
+        wrapper, content, _canvas = self._create_scrollable_region(self.notebook, padding=16)
+        content.columnconfigure(0, weight=1)
+        self.notebook.add(wrapper, text=title)
+        return content
+
+    def _toggle_geometry_details(self) -> None:
+        self.geometry_details_visible_var.set(not self.geometry_details_visible_var.get())
+        self._apply_geometry_details_visibility()
+
+    def _apply_geometry_details_visibility(self) -> None:
+        if not hasattr(self, "geometry_segment_frame") or not hasattr(self, "geometry_toggle_button"):
+            return
+        visible = self.geometry_details_visible_var.get()
+        self.geometry_toggle_button.configure(text="Detaylari Gizle" if visible else "Detaylari Goster")
+        if visible:
+            self.geometry_segment_frame.grid(row=5, column=0, columnspan=6, sticky="ew", pady=(8, 0))
+            self.geometry_segment_summary_label.grid(row=6, column=0, columnspan=6, sticky="w", pady=(6, 0))
+        else:
+            self.geometry_segment_frame.grid_remove()
+            self.geometry_segment_summary_label.grid_remove()
+        self._refresh_visual_schema()
+
+    def _select_tab_by_key(self, tab_key: str) -> None:
+        tab_index = {"air": 0, "pressure": 1, "field": 2}.get(tab_key)
+        if tab_index is None or not hasattr(self, "notebook"):
+            return
+        self.notebook.select(tab_index)
+        self._on_tab_changed()
+
+    def _visual_segment_payload(self) -> list[dict[str, float]]:
+        segments: list[dict[str, float]] = []
+        if self.geometry_segments:
+            for segment_info in self.geometry_segments:
+                pipe = segment_info["pipe"]
+                assert isinstance(pipe, PipeSection)
+                segments.append(
+                    {
+                        "length_m": pipe.length_m,
+                        "outside_diameter_mm": pipe.outside_diameter_mm,
+                        "wall_thickness_mm": pipe.wall_thickness_mm,
+                    }
+                )
+            return segments
+
+        outside = self._safe_float(self.geometry_vars["outside_diameter_mm"].get())
+        wall = self._safe_float(self.geometry_vars["wall_thickness_mm"].get())
+        length = self._safe_float(self.geometry_vars["length_m"].get())
+        if outside is None or wall is None or length is None:
+            return []
+        if outside <= 0 or wall <= 0 or length <= 0 or (wall * 2) >= outside:
+            return []
+        return [
+            {
+                "length_m": length,
+                "outside_diameter_mm": outside,
+                "wall_thickness_mm": wall,
+            }
+        ]
+
+    def _refresh_visual_schema(self) -> None:
+        if not hasattr(self, "visual_canvas"):
+            return
+        canvas = self.visual_canvas
+        canvas.delete("all")
+        width = max(canvas.winfo_width(), 340)
+        active_tab = self._active_tab_key()
+        selector_specs = (
+            ("air", "Hava", 24, 100),
+            ("pressure", "Basinc", 124, 224),
+            ("field", "Saha", 248, 336),
+        )
+        for tab_key, label, left, right in selector_specs:
+            fill = "#DDEBFF" if tab_key == active_tab else "#FFFFFF"
+            outline = "#4A74A8" if tab_key == active_tab else "#C6D0E0"
+            tag = f"schema_nav_{tab_key}"
+            canvas.create_rectangle(left, 16, right, 46, fill=fill, outline=outline, width=1.5, tags=(tag,))
+            canvas.create_text((left + right) / 2, 31, text=label, fill="#16365D", font=("Segoe UI", 9, "bold"), tags=(tag,))
+            canvas.tag_bind(tag, "<Button-1>", lambda _event, key=tab_key: self._select_tab_by_key(key))
+
+        pipe_y = 116
+        canvas.create_line(28, pipe_y, width - 28, pipe_y, fill="#B9C4D6", width=4)
+        segments = self._visual_segment_payload()
+        if segments:
+            total_length = sum(segment["length_m"] for segment in segments) or 1.0
+            available_width = width - 80
+            current_x = 40.0
+            palette = ("#6FA8DC", "#93C47D", "#F6B26B", "#C27BA0")
+            for index, segment in enumerate(segments, start=1):
+                segment_width = max(36.0, available_width * (segment["length_m"] / total_length))
+                visual_height = max(16.0, min(30.0, 14.0 + (segment["outside_diameter_mm"] / 40.0)))
+                top = pipe_y - (visual_height / 2)
+                bottom = pipe_y + (visual_height / 2)
+                fill = palette[(index - 1) % len(palette)]
+                canvas.create_rectangle(current_x, top, current_x + segment_width, bottom, fill=fill, outline="#35506B")
+                canvas.create_text(
+                    current_x + (segment_width / 2),
+                    bottom + 16,
+                    text=f"S{index} | {segment['length_m']:.0f} m",
+                    fill="#35506B",
+                    font=("Segoe UI", 8),
+                )
+                current_x += segment_width
+        else:
+            canvas.create_rectangle(40, pipe_y - 12, width - 40, pipe_y + 12, outline="#C6D0E0", dash=(4, 2))
+            canvas.create_text(
+                width / 2,
+                pipe_y,
+                text="Geometri girdileri tamamlandiginda hat semasi burada canlanir.",
+                fill="#6B7280",
+                font=("Segoe UI", 9),
+            )
+
+        backend_label = self._selected_water_backend_info().label
+        if active_tab == "air":
+            air_state = self.coefficient_status_vars["air_a"].get()
+            canvas.create_oval(52, 150, 88, 186, fill="#D8EEF9", outline="#4A74A8")
+            canvas.create_text(70, 168, text="A", fill="#16365D", font=("Segoe UI", 10, "bold"))
+            canvas.create_text(150, 160, text="P = 1.0 bar", fill="#16365D", font=("Segoe UI", 9, "bold"))
+            canvas.create_text(242, 160, text="K", fill="#16365D", font=("Segoe UI", 9, "bold"))
+            canvas.create_text(320, 160, text="Vpa", fill="#16365D", font=("Segoe UI", 9, "bold"))
+            self.visual_schema_var.set(
+                "Hava testi akisi gosteriliyor. "
+                f"Geometriye gore A, P=1.0 bar, K ve Vpa adimlari okunur. A durumu: {air_state}. "
+                f"Secili backend: {backend_label}."
+            )
+        elif active_tab == "pressure":
+            pressure_a_state = self.coefficient_status_vars["pressure_a"].get()
+            pressure_b_state = self.coefficient_status_vars["pressure_b"].get()
+            canvas.create_text(68, 166, text="A", fill="#16365D", font=("Segoe UI", 10, "bold"))
+            canvas.create_text(130, 166, text="B", fill="#16365D", font=("Segoe UI", 10, "bold"))
+            canvas.create_text(210, 154, text="dT = Tilk - Tson", fill="#16365D", font=("Segoe UI", 9, "bold"))
+            canvas.create_text(316, 178, text="Pa = Pilk - Pson", fill="#16365D", font=("Segoe UI", 9, "bold"))
+            self.visual_schema_var.set(
+                "Basinc degisim testi akisi gosteriliyor. "
+                f"A ve B hazirlandiktan sonra dT ve Pa okunur. A durumu: {pressure_a_state}; "
+                f"B durumu: {pressure_b_state}. Secili backend: {backend_label}."
+            )
+        else:
+            checked_count = sum(1 for variable in self.control_check_vars.values() if variable.get())
+            pig_speed = self.field_vars["pig_speed_m_per_s"].get().strip() or "-"
+            canvas.create_oval(52, 150, 88, 186, fill="#FCE5CD", outline="#B45F06")
+            canvas.create_text(70, 168, text="PIG", fill="#7F3F00", font=("Segoe UI", 8, "bold"))
+            canvas.create_line(88, 168, 160, 168, fill="#B45F06", width=3, arrow="last")
+            canvas.create_text(
+                250,
+                156,
+                text=f"Checklist: {checked_count}/{len(FIELD_CHECK_DEFINITIONS)} | Mesafe + sure -> hiz",
+                fill="#16365D",
+                font=("Segoe UI", 9, "bold"),
+            )
+            canvas.create_text(250, 178, text=f"Anlik hiz: {pig_speed} m/sn", fill="#35506B", font=("Segoe UI", 9))
+            self.visual_schema_var.set(
+                "Saha kontrol akisi gosteriliyor. "
+                f"Isaretlenen kontrol noktasi: {checked_count}/{len(FIELD_CHECK_DEFINITIONS)}. "
+                "Checklist tamamlandiktan sonra pig mesafesi ve suresi girilerek hiz limiti dogrulanir."
+            )
+
+        canvas.create_text(
+            width - 12,
+            204,
+            text=f"Backend: {backend_label}",
+            fill="#35506B",
+            font=("Segoe UI", 8),
+            anchor="e",
+        )
+
     def _build_ui(self) -> None:
-        container = ttk.Frame(self.root, padding=16)
-        container.pack(fill="both", expand=True)
+        scroll_root, container, _canvas = self._create_scrollable_region(self.root, padding=16)
+        scroll_root.pack(fill="both", expand=True)
         container.columnconfigure(0, weight=1)
         container.rowconfigure(3, weight=1)
 
@@ -267,7 +528,7 @@ class HydrostaticTestApp:
         )
         self.banner_label.grid(row=1, column=0, sticky="ew", pady=(0, 12))
 
-        geometry_frame = ttk.LabelFrame(container, text="Boru Kesiti", padding=12)
+        geometry_frame = ttk.LabelFrame(container, text="Boru Kesiti", padding=8)
         geometry_frame.grid(row=2, column=0, sticky="ew")
         geometry_frame.columnconfigure(1, weight=1)
         geometry_frame.columnconfigure(3, weight=1)
@@ -294,6 +555,12 @@ class HydrostaticTestApp:
         ttk.Button(geometry_frame, text="Listeden Doldur", command=self._apply_catalog_selection).grid(
             row=0, column=4, sticky="w", pady=6
         )
+        self.geometry_toggle_button = ttk.Button(
+            geometry_frame,
+            text="Detaylari Goster",
+            command=self._toggle_geometry_details,
+        )
+        self.geometry_toggle_button.grid(row=0, column=5, sticky="e", pady=6)
 
         self._add_entry(
             geometry_frame,
@@ -312,13 +579,14 @@ class HydrostaticTestApp:
         )
         self._add_entry(
             geometry_frame,
-            row=2,
+            row=1,
             label="Hat uzunlugu (m)",
             variable=self.geometry_vars["length_m"],
             field_key="geometry.length_m",
+            column=4,
         )
         segment_actions = ttk.Frame(geometry_frame)
-        segment_actions.grid(row=2, column=2, columnspan=3, sticky="w", pady=6)
+        segment_actions.grid(row=2, column=0, columnspan=6, sticky="w", pady=(2, 6))
         ttk.Button(segment_actions, text="Segment Ekle", command=self._add_geometry_segment).pack(side="left")
         ttk.Button(segment_actions, text="Secili Segmenti Sil", command=self._remove_selected_segment).pack(
             side="left", padx=(8, 0)
@@ -327,14 +595,13 @@ class HydrostaticTestApp:
             side="left", padx=(8, 0)
         )
 
-        segment_frame = ttk.Frame(geometry_frame)
-        segment_frame.grid(row=3, column=0, columnspan=6, sticky="ew", pady=(8, 0))
-        segment_frame.columnconfigure(0, weight=1)
+        self.geometry_segment_frame = ttk.Frame(geometry_frame)
+        self.geometry_segment_frame.columnconfigure(0, weight=1)
         self.segment_tree = ttk.Treeview(
-            segment_frame,
+            self.geometry_segment_frame,
             columns=("segment", "nps", "schedule", "od", "wt", "length"),
             show="headings",
-            height=5,
+            height=3,
         )
         self.segment_tree.heading("segment", text="Segment")
         self.segment_tree.heading("nps", text="NPS / DN")
@@ -349,30 +616,30 @@ class HydrostaticTestApp:
         self.segment_tree.column("wt", width=90, anchor="e")
         self.segment_tree.column("length", width=100, anchor="e")
         self.segment_tree.grid(row=0, column=0, sticky="ew")
-        segment_scroll = ttk.Scrollbar(segment_frame, orient="vertical", command=self.segment_tree.yview)
+        segment_scroll = ttk.Scrollbar(self.geometry_segment_frame, orient="vertical", command=self.segment_tree.yview)
         segment_scroll.grid(row=0, column=1, sticky="ns")
         self.segment_tree.configure(yscrollcommand=segment_scroll.set)
-        ttk.Label(
-            geometry_frame,
-            textvariable=self.section_feedback_vars["geometry"],
-            foreground="#A4262C",
-            wraplength=1140,
-            justify="left",
-        ).grid(row=4, column=0, columnspan=6, sticky="w", pady=(8, 0))
         ttk.Label(
             geometry_frame,
             textvariable=self.geometry_summary_var,
             wraplength=1140,
             justify="left",
             foreground="#35506B",
-        ).grid(row=5, column=0, columnspan=6, sticky="w", pady=(8, 0))
+        ).grid(row=3, column=0, columnspan=6, sticky="w", pady=(4, 0))
         ttk.Label(
+            geometry_frame,
+            textvariable=self.section_feedback_vars["geometry"],
+            foreground="#A4262C",
+            wraplength=1140,
+            justify="left",
+        ).grid(row=4, column=0, columnspan=6, sticky="w", pady=(6, 0))
+        self.geometry_segment_summary_label = ttk.Label(
             geometry_frame,
             textvariable=self.segment_summary_var,
             wraplength=1140,
             justify="left",
             foreground="#35506B",
-        ).grid(row=6, column=0, columnspan=6, sticky="w", pady=(6, 0))
+        )
 
         content_pane = ttk.Panedwindow(container, orient="horizontal")
         content_pane.grid(row=3, column=0, sticky="nsew", pady=12)
@@ -391,58 +658,46 @@ class HydrostaticTestApp:
         self.notebook.grid(row=0, column=0, sticky="nsew")
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
-        air_frame = ttk.Frame(self.notebook, padding=16)
-        pressure_frame = ttk.Frame(self.notebook, padding=16)
-        field_frame = ttk.Frame(self.notebook, padding=16)
-        self.notebook.add(air_frame, text="Hava Icerik Testi")
-        self.notebook.add(pressure_frame, text="Basinc Degisim Testi")
-        self.notebook.add(field_frame, text="Saha Kontrol")
-
-        for frame in (air_frame, pressure_frame, field_frame):
-            frame.columnconfigure(0, weight=1)
+        air_frame = self._create_scrollable_tab("Hava Icerik Testi")
+        pressure_frame = self._create_scrollable_tab("Basinc Degisim Testi")
+        field_frame = self._create_scrollable_tab("Saha Kontrol")
 
         self._build_air_tab(air_frame)
         self._build_pressure_tab(pressure_frame)
         self._build_field_tab(field_frame)
 
-        update_frame = ttk.LabelFrame(side_panel, text="Uygulama ve Guncelleme", padding=12)
-        update_frame.grid(row=0, column=0, sticky="ew")
-        update_frame.columnconfigure(0, weight=1)
+        visual_frame = ttk.LabelFrame(side_panel, text="Canli Sema", padding=12)
+        visual_frame.grid(row=0, column=0, sticky="ew")
+        visual_frame.columnconfigure(0, weight=1)
+        self.visual_canvas = tk.Canvas(
+            visual_frame,
+            height=220,
+            bg="#F8FAFD",
+            highlightthickness=1,
+            highlightbackground="#D6DCE8",
+        )
+        self.visual_canvas.grid(row=0, column=0, sticky="ew")
         ttk.Label(
-            update_frame,
-            text=f"Surum: {APP_VERSION}",
-            font=("Segoe UI", 10, "bold"),
-        ).grid(row=0, column=0, sticky="w")
-        ttk.Label(
-            update_frame,
-            textvariable=self.update_status_var,
+            visual_frame,
+            textvariable=self.visual_schema_var,
             wraplength=340,
             justify="left",
-        ).grid(row=1, column=0, sticky="ew", pady=(8, 0))
+            foreground="#35506B",
+        ).grid(row=1, column=0, sticky="ew", pady=(10, 0))
         ttk.Label(
-            update_frame,
-            textvariable=self.update_detail_var,
+            visual_frame,
+            text="Guncelleme islemleri menuden yonetilir. Indirme klasoru da Guncelleme menusu altindan secilir.",
             wraplength=340,
             justify="left",
             foreground="#35506B",
         ).grid(row=2, column=0, sticky="ew", pady=(8, 0))
-        update_actions = ttk.Frame(update_frame)
-        update_actions.grid(row=3, column=0, sticky="ew", pady=(12, 0))
-        ttk.Button(
-            update_actions,
-            text="Guncelleme Kontrol Et",
-            command=self._check_for_updates_manually,
-        ).pack(side="left")
-        ttk.Button(
-            update_actions,
-            text="Guncellemeyi Uygula",
-            command=self._apply_available_update,
-        ).pack(side="left", padx=(8, 0))
-        ttk.Button(
-            update_actions,
-            text="Release Sayfasi",
-            command=self._open_release_page,
-        ).pack(side="left", padx=(8, 0))
+        ttk.Label(
+            visual_frame,
+            textvariable=self.update_download_summary_var,
+            wraplength=340,
+            justify="left",
+            foreground="#35506B",
+        ).grid(row=3, column=0, sticky="ew", pady=(8, 0))
 
         workflow_frame = ttk.LabelFrame(side_panel, text="Hizli Akis", padding=12)
         workflow_frame.grid(row=1, column=0, sticky="ew", pady=(12, 0))
@@ -936,6 +1191,19 @@ class HydrostaticTestApp:
             wraplength=860,
             justify="left",
         ).grid(row=len(FIELD_CHECK_DEFINITIONS) + 1, column=0, columnspan=3, sticky="w", pady=(10, 0))
+        self.check_progress = ttk.Progressbar(
+            checklist_frame,
+            mode="determinate",
+            maximum=len(FIELD_CHECK_DEFINITIONS),
+            variable=self.check_progress_var,
+        )
+        self.check_progress.grid(
+            row=len(FIELD_CHECK_DEFINITIONS) + 2,
+            column=0,
+            columnspan=3,
+            sticky="ew",
+            pady=(8, 0),
+        )
 
         pig_frame = ttk.LabelFrame(frame, text="2. Pig Hiz Hesabi", padding=12)
         pig_frame.grid(row=1, column=0, sticky="ew", pady=(14, 0))
@@ -1120,6 +1388,7 @@ class HydrostaticTestApp:
         for variable in self.control_check_vars.values():
             variable.trace_add("write", lambda *_: self._update_check_summary())
         self.pig_mode_var.trace_add("write", lambda *_: self._update_pig_limit_hint())
+        self.update_download_dir_var.trace_add("write", lambda *_: self._refresh_update_download_summary())
         self.air_vars["a_micro_per_bar"].trace_add(
             "write", lambda *_: self._on_coefficient_field_changed("air_a", self.air_vars["a_micro_per_bar"])
         )
@@ -1215,18 +1484,41 @@ class HydrostaticTestApp:
         if not self.latest_update_info.update_available:
             messagebox.showinfo("Bilgi", "Kurulacak yeni bir surum bulunmuyor.")
             return
+        try:
+            download_root = self._resolve_update_download_dir(create=True)
+        except OSError as exc:
+            messagebox.showerror("Guncelleme", f"Indirme klasoru hazirlanamadi: {exc}")
+            return
+        if not messagebox.askyesno(
+            "Guncelleme Indirme Klasoru",
+            (
+                "Guncelleme paketi su klasore indirilecek:\n"
+                f"{download_root}\n\n"
+                "Bu klasorle devam etmek istiyor musunuz?"
+            ),
+        ):
+            if not self._choose_update_download_dir():
+                self._set_banner("Guncelleme indirme klasoru secilmedigi icin islem baslatilmadi.", "warning")
+                return
+            try:
+                download_root = self._resolve_update_download_dir(create=True)
+            except OSError as exc:
+                messagebox.showerror("Guncelleme", f"Indirme klasoru hazirlanamadi: {exc}")
+                return
         self.update_install_in_progress = True
         self.update_status_var.set(f"Guncelleme indiriliyor: {self.latest_update_info.latest_version}")
-        self.update_detail_var.set("Release paketi indiriliyor ve kurulum hazirlaniyor.")
-        worker = threading.Thread(target=self._perform_update_install, daemon=True)
+        self.update_detail_var.set(
+            f"Release paketi indiriliyor ve kurulum hazirlaniyor. Indirme klasoru: {download_root}"
+        )
+        worker = threading.Thread(target=self._perform_update_install, args=(download_root,), daemon=True)
         worker.start()
 
-    def _perform_update_install(self) -> None:
+    def _perform_update_install(self, download_root: Path) -> None:
         if self.latest_update_info is None:
             self.root.after(0, lambda: self._handle_update_install_error("Guncel release bilgisi bulunamadi."))
             return
         try:
-            install_mode = install_update(self.latest_update_info)
+            install_mode = install_update(self.latest_update_info, download_root=download_root)
         except UpdateError as exc:
             self.root.after(0, lambda: self._handle_update_install_error(str(exc)))
             return
@@ -1406,17 +1698,21 @@ class HydrostaticTestApp:
             else:
                 self._clear_field_message(field_key)
             self._update_live_notice()
+            self._refresh_visual_schema()
             return
         if self._safe_float(variable.get()) is None:
             self._set_field_message(field_key, "Gecerli bir sayi girin.", "error")
             self._update_live_notice()
+            self._refresh_visual_schema()
             return
         if field_key == "pressure.b_micro_per_c" and self.use_b_helper_var.get():
             self._set_field_message(field_key, "Helper modu bu degeri yonetiyor.", "info")
             self._update_live_notice()
+            self._refresh_visual_schema()
             return
         self._clear_field_message(field_key)
         self._update_live_notice()
+        self._refresh_visual_schema()
 
     def _refresh_geometry_summary(self) -> None:
         if self.geometry_segments:
@@ -1426,12 +1722,14 @@ class HydrostaticTestApp:
                 )
             except ValidationError as exc:
                 self.geometry_summary_var.set(f"Segment ozeti hazir degil: {exc}")
+                self._refresh_visual_schema()
                 return
             self.geometry_summary_var.set(
                 "Segmentli geometri aktif. Esdeger ic yaricap = "
                 f"{geometry.internal_radius_mm:.3f} mm, toplam ic hacim Vt = {geometry.internal_volume_m3:.6f} m3, "
                 f"toplam uzunluk = {geometry.total_length_m:.3f} m"
             )
+            self._refresh_visual_schema()
             return
         outside = self._safe_float(self.geometry_vars["outside_diameter_mm"].get())
         wall = self._safe_float(self.geometry_vars["wall_thickness_mm"].get())
@@ -1440,6 +1738,7 @@ class HydrostaticTestApp:
             self.geometry_summary_var.set(
                 "Geometri girildiginde ic cap, ic yaricap ve hacim ozeti burada gosterilir."
             )
+            self._refresh_visual_schema()
             return
         try:
             pipe = PipeSection(
@@ -1449,6 +1748,7 @@ class HydrostaticTestApp:
             )
         except ValidationError as exc:
             self.geometry_summary_var.set(f"Geometri ozeti hazir degil: {exc}")
+            self._refresh_visual_schema()
             return
         internal_diameter_mm = pipe.internal_radius_mm * 2
         self.geometry_summary_var.set(
@@ -1456,6 +1756,7 @@ class HydrostaticTestApp:
             f"{internal_diameter_mm:.3f} mm, ic yaricap = {pipe.internal_radius_mm:.3f} mm, "
             f"ic hacim Vt = {pipe.internal_volume_m3:.6f} m3"
         )
+        self._refresh_visual_schema()
 
     def _on_coefficient_field_changed(self, key: str, variable: tk.StringVar) -> None:
         if key in self._programmatic_coefficient_updates:
@@ -1470,6 +1771,7 @@ class HydrostaticTestApp:
         self.coefficient_status_vars["pressure_b"].set(self._coefficient_status_text("pressure_b"))
         self._sync_coefficient_field_messages()
         self._update_workflow_hint()
+        self._refresh_visual_schema()
 
     def _coefficient_status_text(self, key: str) -> str:
         state = self.coefficient_states[key]
@@ -1721,6 +2023,9 @@ class HydrostaticTestApp:
                 "schedule_label": schedule_text,
             }
         )
+        if not self.geometry_details_visible_var.get():
+            self.geometry_details_visible_var.set(True)
+            self._apply_geometry_details_visibility()
         self._refresh_segment_tree()
         self._refresh_geometry_summary()
         self._set_banner("Geometri segmenti listeye eklendi.", "success")
@@ -1782,6 +2087,7 @@ class HydrostaticTestApp:
         self._update_contextual_actions()
         self._sync_backend_comparison_summary()
         self._update_live_notice()
+        self._refresh_visual_schema()
 
     def _update_workflow_hint(self) -> None:
         active_tab = self._active_tab_key()
@@ -1861,10 +2167,13 @@ class HydrostaticTestApp:
     def _update_check_summary(self) -> None:
         checked_count = sum(1 for variable in self.control_check_vars.values() if variable.get())
         total_count = len(self.control_check_vars)
+        self.check_progress_var.set(float(checked_count))
         self.check_summary_var.set(
             f"Isaretlenen kontrol noktasi: {checked_count} / {total_count}. "
             "Bu tablo karar algoritmasi degil, saha uygulama dogrulama yardimcisidir."
         )
+        self._update_live_notice()
+        self._refresh_visual_schema()
 
     def _checked_control_lines(self) -> list[str]:
         lines: list[str] = []
@@ -1878,14 +2187,17 @@ class HydrostaticTestApp:
             limit = get_pig_speed_limit(self.pig_mode_var.get())
         except ValidationError:
             self.pig_limit_var.set("Pig modu secilmedigi icin limit bilgisi gosterilemiyor.")
+            self._refresh_visual_schema()
             return
         if limit.max_speed_m_per_s is None:
             self.pig_limit_var.set(f"Secili mod: {limit.label}. Bu secenekte limit karsilastirmasi yapilmaz.")
+            self._refresh_visual_schema()
             return
         self.pig_limit_var.set(
             f"Secili mod: {limit.label}. Maksimum hiz = {limit.max_speed_m_per_s:.3f} m/sn "
             f"({limit.max_speed_km_per_h:.3f} km/sa). Referans: {limit.spec_reference}."
         )
+        self._refresh_visual_schema()
 
     def _on_pig_mode_changed(self, _: tk.Event | None = None) -> None:
         self._update_pig_limit_hint()
@@ -1905,6 +2217,7 @@ class HydrostaticTestApp:
             "info",
         )
         self._update_live_notice()
+        self._refresh_visual_schema()
 
     def _compare_active_backend(self) -> None:
         active_tab = self._active_tab_key()
@@ -2779,6 +3092,7 @@ class HydrostaticTestApp:
         self._sync_backend_comparison_summary()
         self._reset_decision_card()
         self._set_banner("Hava icerik testi formu temizlendi.", "info")
+        self._refresh_visual_schema()
 
     def _clear_pressure_form(self) -> None:
         for variable in self.pressure_vars.values():
@@ -2794,6 +3108,7 @@ class HydrostaticTestApp:
         self._sync_backend_comparison_summary()
         self._reset_decision_card()
         self._set_banner("Basinc degisim testi formu temizlendi.", "info")
+        self._refresh_visual_schema()
 
     def _clear_field_form(self) -> None:
         for variable in self.field_vars.values():
@@ -2811,6 +3126,7 @@ class HydrostaticTestApp:
         self._update_pig_limit_hint()
         self._sync_backend_comparison_summary()
         self._set_banner("Saha kontrol formu temizlendi.", "info")
+        self._refresh_visual_schema()
 
     def _clear_results(self) -> None:
         self.report_entries.clear()

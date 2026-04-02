@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+import tempfile
 import tkinter as tk
 import unittest
+from unittest.mock import patch
 
 from hidrostatik_test.ui.app import (
     AUTO_A_MODE,
@@ -183,6 +186,7 @@ class UiWorkflowTests(unittest.TestCase):
         self.app.control_check_vars["thermal_balance"].set(True)
 
         self.assertIn("2 / 10", self.app.check_summary_var.get())
+        self.assertEqual(self.app.check_progress_var.get(), 2.0)
 
     def test_pig_speed_calculation_updates_status_and_outputs(self) -> None:
         self.app.notebook.select(2)
@@ -234,6 +238,17 @@ class UiWorkflowTests(unittest.TestCase):
         self.assertIn("Segmentli geometri aktif", self.app.geometry_summary_var.get())
         self.assertEqual(len(self.app.segment_tree.get_children()), 2)
         self.assertGreater(geometry.internal_volume_m3, 0.0)
+
+    def test_segment_addition_expands_geometry_details(self) -> None:
+        self.assertFalse(self.app.geometry_details_visible_var.get())
+        self.app.geometry_vars["outside_diameter_mm"].set("406.4")
+        self.app.geometry_vars["wall_thickness_mm"].set("8.74")
+        self.app.geometry_vars["length_m"].set("500")
+
+        self.app._add_geometry_segment()
+
+        self.assertTrue(self.app.geometry_details_visible_var.get())
+        self.assertEqual(self.app.geometry_toggle_button.cget("text"), "Detaylari Gizle")
 
     def test_menu_bar_contains_expected_sections(self) -> None:
         menu = self.root.nametowidget(self.root["menu"])
@@ -354,6 +369,59 @@ class UiWorkflowTests(unittest.TestCase):
 
         self.assertTrue(self.app.compare_backend_button.instate(["disabled"]))
         self.assertIn("kullanilmaz", self.app.active_backend_comparison_var.get())
+
+    def test_visual_schema_updates_with_active_tab(self) -> None:
+        self.assertIn("Hava testi akisi", self.app.visual_schema_var.get())
+
+        self.app.notebook.select(1)
+        self.app._on_tab_changed()
+        self.assertIn("Basinc degisim testi akisi", self.app.visual_schema_var.get())
+
+        self.app.notebook.select(2)
+        self.app._on_tab_changed()
+        self.assertIn("Saha kontrol akisi", self.app.visual_schema_var.get())
+
+    def test_update_download_summary_tracks_selected_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_dir = Path(temp_dir) / "hydro-updates"
+            self.app.update_download_dir_var.set(str(target_dir))
+
+            self.assertIn(str(target_dir), self.app.update_download_summary_var.get())
+
+    def test_apply_available_update_uses_selected_download_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_dir = Path(temp_dir) / "updates"
+            self.app.update_download_dir_var.set(str(target_dir))
+            self.app.latest_update_info = type(
+                "UpdateInfoLike",
+                (),
+                {
+                    "update_available": True,
+                    "latest_version": "9.9.9",
+                },
+            )()
+            captured: dict[str, object] = {}
+
+            class _FakeThread:
+                def start(self) -> None:
+                    return None
+
+            def fake_thread(*, target, args=(), daemon=None):
+                captured["target"] = target
+                captured["args"] = args
+                captured["daemon"] = daemon
+                return _FakeThread()
+
+            with patch("hidrostatik_test.ui.app.messagebox.askyesno", return_value=True), patch(
+                "hidrostatik_test.ui.app.threading.Thread",
+                side_effect=fake_thread,
+            ):
+                self.app._apply_available_update()
+
+            self.assertTrue(self.app.update_install_in_progress)
+            self.assertEqual(captured["target"], self.app._perform_update_install)
+            self.assertEqual(captured["args"], (target_dir,))
+            self.assertIn(str(target_dir), self.app.update_detail_var.get())
 
     def test_report_text_contains_version_spec_and_input_snapshot(self) -> None:
         self._fill_geometry()

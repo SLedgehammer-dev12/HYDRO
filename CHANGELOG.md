@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.5.3 - 2026-04-02
+
+- Arayuz kok seviyede ve sekme seviyesinde kaydirilabilir hale getirildi; buyuk ama dikey olarak uzun ekranlarda tasma davranisi azaltildi.
+- `Boru Kesiti` bolumu sikistirildi; `Hat uzunlugu` ust satira alindi ve segment tablosu varsayilan olarak gizlendi.
+- Ayrik `Uygulama / Guncelleme` paneli kaldirildi; guncelleme akisi menu uzerinden korunarak ana ekran sadeletirildi.
+- `Canli Sema` paneli aktif sekme, segment geometri, checklist ilerlemesi, katsayi durumu ve pig hizina gore dinamik guncellenir hale getirildi.
+- Guncelleme paketi icin kullanici secimli indirme klasoru ve kurulum onayi eklendi; updater bu klasoru dogrudan kullanir hale getirildi.
+- UI ve updater regresyon testleri genisletildi; otomatik test paketi 71 teste cikarildi.
+
 ## 1.5.1 - 2026-03-31
 
 - `pipe_catalog.py` icindeki ASME B36.10 katalogu, Wermac uzerindeki `part-a`...`part-k` tablolarina gore NPS `1/8`-`80` araliginda yeniden uretildi.

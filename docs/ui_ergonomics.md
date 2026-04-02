@@ -23,6 +23,16 @@
   - sartnameden turetilmis operasyonel kontrol noktalarinin isaretlenebildigi bir kontrol tablosu,
   - pig hizi hesaplayicisi,
   - A/B tespit yontemlerinin kisa ozeti bulunur.
+- Kok ekran ve tum sekmeler artik kaydirilabilir; buyuk ama dikey olarak uzun ekranlarda tasma sorunu azaltilir.
+- `Boru Kesiti` bolumu sikistirildi; `Hat uzunlugu` ust satira alindi ve segment tablosu varsayilan olarak gizlendi.
+- `Uygulama / Guncelleme` paneli ana ekrandan kaldirildi; ayni islevler menude birakildi.
+- Sag panelde `Canli Sema` eklendi:
+  - aktif sekmeye gore hesap akisini cizer,
+  - sekmeler arasi tiklanabilir gezinme sunar,
+  - geometri hazirsa segmentleri gosterir,
+  - saha sekmesinde checklist ilerlemesi ve pig hizini yansitir.
+- Guncelleme paketinin indirilecegi klasor secilebilir hale getirildi ve secili yol UI'de ozetlenir.
+- Saha checklisti icin ilerleme cubugu eklendi; operator tum maddeleri ne kadar tamamladigini tek bakista gorur.
 
 Bu iyilestirmeler operatora her test icin hangi sirayla ilerlemesi gerektigini
 tek bakista gosterir ve testin uygulanma safhasindaki kritik adimlarin
@@ -41,6 +51,8 @@ Bu degisiklikler hesap mantigina dokunmadan kullanim belirsizligini azaltir.
 - `Pa` ve `dT` alanlarinin hemen altina isaret formullerini sabit metin olarak koy.
 - Katsayi alanlarinda son hesaplanan kaynak bilgisini goster.
 - `Raporu Kaydet` icin hava/basinc testine ozel hazir basliklar kullan.
+- `Canli Sema` icinde hesap oncesi / hesaplandi / stale durumunu renkli durum rozetleriyle goster.
+- `Guncelleme` menusu acildiginda secili indirme klasorunu ilk satirda pasif bilgi olarak goster.
 
 ### Yuksek deger / orta risk
 
@@ -49,6 +61,8 @@ Bu degisiklikler hesap mantigina dokunmadan kullanim belirsizligini azaltir.
 - 24 saatlik test verisini satir satir girilen bir tabloya tasima
 - PDF'deki form numaralarina gore rapor sablonu uretme
 - Segment ekleme ekranina toplu paste veya CSV iceri alma
+- Sekme bazli kayit setleri olusturup ayni oturumda birden fazla test kaydini acik tutma
+- `Canli Sema` panelini mini trend grafikleri ile destekleme: `P`, `T`, `Vpa`, `Pa`
 
 ### Guvenlik ve operator hatasi acisindan kritik
 
@@ -56,6 +70,7 @@ Bu degisiklikler hesap mantigina dokunmadan kullanim belirsizligini azaltir.
 - `13` icin `P=1.0 bar` zorunlulugunu alan seviyesinde kilitleme
 - `15` icin `Pa` ve `dT` isaret hatasini anomali kontrolu ile yakalama
 - Sonuc kartinda kabul kriterinin matematiksel ifadesini her zaman gostermek
+- Update uygulamasi oncesi hedef klasor ve kaynak repo bilgisini ikinci bir onay penceresinde netlestirmek
 
 ## Tasarim Ilkesi
 

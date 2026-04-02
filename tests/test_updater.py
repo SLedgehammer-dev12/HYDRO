@@ -9,8 +9,15 @@ import unittest
 from urllib.error import URLError
 from unittest.mock import patch
 
-from hidrostatik_test.app_metadata import APP_VERSION
-from hidrostatik_test.services.updater import ReleaseAsset, UpdateInfo, _download_asset, fetch_latest_update_info
+from hidrostatik_test.app_metadata import APP_VERSION, BINARY_NAME
+from hidrostatik_test.services.updater import (
+    ReleaseAsset,
+    RuntimeContext,
+    UpdateInfo,
+    _download_asset,
+    fetch_latest_update_info,
+    install_update,
+)
 from hidrostatik_test.ui.app import HydrostaticTestApp
 
 NEXT_TEST_VERSION = f"{int(APP_VERSION.split('.', 1)[0]) + 1}.0.0"
@@ -169,6 +176,69 @@ class UpdaterTests(unittest.TestCase):
 
             self.assertTrue(target_path.exists())
             self.assertEqual(target_path.read_bytes(), b"zip-data")
+
+    def test_install_update_uses_selected_download_root(self) -> None:
+        info = UpdateInfo(
+            current_version=APP_VERSION,
+            latest_version=NEXT_TEST_VERSION,
+            tag_name=f"hidrostatik-test-v{NEXT_TEST_VERSION}",
+            html_url="https://example.com/update",
+            body="notes",
+            published_at="2026-03-30T12:00:00Z",
+            asset=ReleaseAsset(
+                name=f"HidrostatikTest-v{NEXT_TEST_VERSION}-windows-x64.zip",
+                download_url="https://example.com/update.zip",
+                size=1024,
+            ),
+            update_available=True,
+            source_repository="SLedgehammer-dev12/HYDRO",
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+            chosen_dir = base_dir / "chosen-downloads"
+            working_root = base_dir / "hidrostatik-update-test"
+            working_root.mkdir()
+            install_dir = base_dir / "install"
+            install_dir.mkdir()
+            executable_path = install_dir / "HidrostatikTest.exe"
+            executable_path.write_text("stub", encoding="utf-8")
+            captured: dict[str, str | None] = {}
+
+            def fake_mkdtemp(prefix: str, dir: str | None = None) -> str:
+                captured["prefix"] = prefix
+                captured["dir"] = dir
+                return str(working_root)
+
+            def write_test_zip(asset: ReleaseAsset, target_path: Path, timeout: int) -> None:
+                del asset, timeout
+                import zipfile
+
+                with zipfile.ZipFile(target_path, "w") as archive:
+                    archive.writestr(f"{BINARY_NAME}/marker.txt", "ok")
+
+            runtime = RuntimeContext(
+                frozen=True,
+                can_self_update=True,
+                executable_path=executable_path,
+                install_dir=install_dir,
+            )
+
+            with patch("hidrostatik_test.services.updater.tempfile.mkdtemp", side_effect=fake_mkdtemp), patch(
+                "hidrostatik_test.services.updater.get_runtime_context",
+                return_value=runtime,
+            ), patch(
+                "hidrostatik_test.services.updater._download_asset",
+                side_effect=write_test_zip,
+            ), patch(
+                "hidrostatik_test.services.updater.subprocess.Popen"
+            ) as mocked_popen:
+                result = install_update(info, download_root=chosen_dir)
+
+        self.assertEqual(result, "self_update")
+        self.assertEqual(captured["prefix"], "hidrostatik-update-")
+        self.assertEqual(captured["dir"], str(chosen_dir))
+        mocked_popen.assert_called_once()
 
 
 class UpdateUiTests(unittest.TestCase):

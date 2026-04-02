@@ -2,7 +2,7 @@ from __future__ import annotations
 
 APP_NAME = "Hidrostatik Test Degerlendirme"
 APP_TITLE = "Hidrostatik Test Degerlendirme"
-APP_VERSION = "1.5.2"
+APP_VERSION = "1.5.3"
 BINARY_NAME = "HidrostatikTest"
 PUBLISHER_NAME = "Hidrostatik Test Project"
 COPYRIGHT_NOTICE = "Copyright (c) 2026"

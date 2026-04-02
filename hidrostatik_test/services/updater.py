@@ -379,7 +379,11 @@ del "%~f0"
     return script_path
 
 
-def install_update(update_info: UpdateInfo, timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS) -> str:
+def install_update(
+    update_info: UpdateInfo,
+    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+    download_root: Path | None = None,
+) -> str:
     if not update_info.update_available:
         return "up_to_date"
 
@@ -392,7 +396,11 @@ def install_update(update_info: UpdateInfo, timeout_seconds: int = DEFAULT_TIMEO
         open_release_page(update_info.html_url)
         return "browser"
 
-    working_root = Path(tempfile.mkdtemp(prefix="hidrostatik-update-"))
+    if download_root is not None:
+        download_root.mkdir(parents=True, exist_ok=True)
+        working_root = Path(tempfile.mkdtemp(prefix="hidrostatik-update-", dir=str(download_root)))
+    else:
+        working_root = Path(tempfile.mkdtemp(prefix="hidrostatik-update-"))
     zip_path = working_root / update_info.asset.name
     extract_root = working_root / "extract"
     extract_root.mkdir(parents=True, exist_ok=True)
