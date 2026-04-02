@@ -290,11 +290,37 @@ class UpdateUiTests(unittest.TestCase):
             source_repository="SLedgehammer-dev12/Programlar",
         )
 
-        self.app._handle_update_check_result(info, user_requested=True)
+        with patch("hidrostatik_test.ui.app.messagebox.askyesno", return_value=False):
+            self.app._handle_update_check_result(info, user_requested=True)
 
         self.assertIn("Yeni surum bulundu", self.app.update_status_var.get())
         self.assertIn(f"HidrostatikTest-v{NEXT_TEST_VERSION}-windows-x64.zip", self.app.update_detail_var.get())
         self.assertIn("SLedgehammer-dev12/Programlar", self.app.update_detail_var.get())
+
+    def test_manual_update_check_offers_install_flow(self) -> None:
+        info = UpdateInfo(
+            current_version=APP_VERSION,
+            latest_version=NEXT_TEST_VERSION,
+            tag_name=f"hidrostatik-test-v{NEXT_TEST_VERSION}",
+            html_url="https://example.com/update",
+            body="notes",
+            published_at="2026-03-30T12:00:00Z",
+            asset=ReleaseAsset(
+                name=f"HidrostatikTest-v{NEXT_TEST_VERSION}-windows-x64.zip",
+                download_url="https://example.com/update.zip",
+                size=1024,
+            ),
+            update_available=True,
+            source_repository="SLedgehammer-dev12/HYDRO",
+        )
+
+        with patch("hidrostatik_test.ui.app.messagebox.askyesno", return_value=True), patch.object(
+            self.app,
+            "_apply_available_update",
+        ) as mocked_apply:
+            self.app._handle_update_check_result(info, user_requested=True)
+
+        mocked_apply.assert_called_once()
 
 
 if __name__ == "__main__":

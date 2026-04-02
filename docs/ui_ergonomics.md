@@ -26,12 +26,15 @@
 - Kok ekran ve tum sekmeler artik kaydirilabilir; buyuk ama dikey olarak uzun ekranlarda tasma sorunu azaltilir.
 - `Boru Kesiti` bolumu sikistirildi; `Hat uzunlugu` ust satira alindi ve segment tablosu varsayilan olarak gizlendi.
 - `Uygulama / Guncelleme` paneli ana ekrandan kaldirildi; ayni islevler menude birakildi.
+- Sag yardimci alan tek uzun kolon yerine `Rehber / Durum / Kayit` sekmeleriyle parcali hale getirildi; dikey yigilma azaltildi.
+- Hava, basinc ve saha sekmeleri yatay alani daha etkin kullanacak sekilde iki kolonlu duzene yaklastirildi.
 - Sag panelde `Canli Sema` eklendi:
   - aktif sekmeye gore hesap akisini cizer,
   - sekmeler arasi tiklanabilir gezinme sunar,
   - geometri hazirsa segmentleri gosterir,
   - saha sekmesinde checklist ilerlemesi ve pig hizini yansitir.
 - Guncelleme paketinin indirilecegi klasor secilebilir hale getirildi ve secili yol UI'de ozetlenir.
+- Manuel update kontrolunde `yeni surum bulundu` akisi artik tek seferde `indir/uygula` teklifine gider; ayrica kullaniciya hedef indirme klasorunu secme veya mevcut klasorle devam etme secenegi sunulur.
 - Saha checklisti icin ilerleme cubugu eklendi; operator tum maddeleri ne kadar tamamladigini tek bakista gorur.
 
 Bu iyilestirmeler operatora her test icin hangi sirayla ilerlemesi gerektigini

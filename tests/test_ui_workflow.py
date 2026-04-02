@@ -261,6 +261,11 @@ class UiWorkflowTests(unittest.TestCase):
 
         self.assertEqual(labels, ["Dosya", "Rapor", "Guncelleme", "Hakkinda"])
 
+    def test_side_panel_uses_tabbed_workspace(self) -> None:
+        labels = [self.app.side_notebook.tab(index, "text") for index in range(self.app.side_notebook.index("end"))]
+
+        self.assertEqual(labels, ["Rehber", "Durum", "Kayit"])
+
     def test_clear_active_form_resets_pressure_inputs(self) -> None:
         self.app.notebook.select(1)
         self.app.pressure_vars["temperature_c"].set("20")
@@ -412,7 +417,7 @@ class UiWorkflowTests(unittest.TestCase):
                 captured["daemon"] = daemon
                 return _FakeThread()
 
-            with patch("hidrostatik_test.ui.app.messagebox.askyesno", return_value=True), patch(
+            with patch("hidrostatik_test.ui.app.messagebox.askyesnocancel", return_value=False), patch(
                 "hidrostatik_test.ui.app.threading.Thread",
                 side_effect=fake_thread,
             ):

@@ -506,9 +506,8 @@ class HydrostaticTestApp:
         intro = ttk.Label(
             container,
             text=(
-                "Bu arayuz, hidrostatik test degerlendirmesini sahada daha hizli ve daha kontrollu "
-                "yapmak icin tasarlandi. Solda veri girisi, sagda ise karar, katsayi durumu ve "
-                "oturum kaydi birlikte gorulur. Mevcut akista hesap ve isaret tanimlari "
+                "Calisma alani hesap ve saha dogrulama girdileri icindir. Yardimci paneller sagdaki "
+                "sekmelerde tutulur. Referans akisi "
                 f"{SPEC_DOCUMENT_CODE} {SPEC_DOCUMENT_TITLE} ile hizalanmistir."
             ),
             wraplength=1180,
@@ -643,15 +642,16 @@ class HydrostaticTestApp:
 
         content_pane = ttk.Panedwindow(container, orient="horizontal")
         content_pane.grid(row=3, column=0, sticky="nsew", pady=12)
+        self.content_pane = content_pane
 
         left_panel = ttk.Frame(content_pane, padding=(0, 0, 12, 0))
         left_panel.columnconfigure(0, weight=1)
         left_panel.rowconfigure(0, weight=1)
-        content_pane.add(left_panel, weight=3)
+        content_pane.add(left_panel, weight=5)
 
         side_panel = ttk.Frame(content_pane)
         side_panel.columnconfigure(0, weight=1)
-        side_panel.rowconfigure(4, weight=1)
+        side_panel.rowconfigure(0, weight=1)
         content_pane.add(side_panel, weight=2)
 
         self.notebook = ttk.Notebook(left_panel)
@@ -666,7 +666,25 @@ class HydrostaticTestApp:
         self._build_pressure_tab(pressure_frame)
         self._build_field_tab(field_frame)
 
-        visual_frame = ttk.LabelFrame(side_panel, text="Canli Sema", padding=12)
+        self.side_notebook = ttk.Notebook(side_panel)
+        self.side_notebook.grid(row=0, column=0, sticky="nsew")
+
+        guide_tab = ttk.Frame(self.side_notebook, padding=8)
+        guide_tab.columnconfigure(0, weight=1)
+        self.side_notebook.add(guide_tab, text="Rehber")
+
+        status_tab = ttk.Frame(self.side_notebook, padding=8)
+        status_tab.columnconfigure(0, weight=1)
+        self.side_notebook.add(status_tab, text="Durum")
+
+        session_tab = ttk.Frame(self.side_notebook, padding=8)
+        session_tab.columnconfigure(0, weight=1)
+        session_tab.rowconfigure(0, weight=1)
+        self.side_notebook.add(session_tab, text="Kayit")
+
+        side_wrap = 300
+
+        visual_frame = ttk.LabelFrame(guide_tab, text="Canli Sema", padding=12)
         visual_frame.grid(row=0, column=0, sticky="ew")
         visual_frame.columnconfigure(0, weight=1)
         self.visual_canvas = tk.Canvas(
@@ -680,38 +698,38 @@ class HydrostaticTestApp:
         ttk.Label(
             visual_frame,
             textvariable=self.visual_schema_var,
-            wraplength=340,
+            wraplength=side_wrap,
             justify="left",
             foreground="#35506B",
         ).grid(row=1, column=0, sticky="ew", pady=(10, 0))
         ttk.Label(
             visual_frame,
             text="Guncelleme islemleri menuden yonetilir. Indirme klasoru da Guncelleme menusu altindan secilir.",
-            wraplength=340,
+            wraplength=side_wrap,
             justify="left",
             foreground="#35506B",
         ).grid(row=2, column=0, sticky="ew", pady=(8, 0))
         ttk.Label(
             visual_frame,
             textvariable=self.update_download_summary_var,
-            wraplength=340,
+            wraplength=side_wrap,
             justify="left",
             foreground="#35506B",
         ).grid(row=3, column=0, sticky="ew", pady=(8, 0))
 
-        workflow_frame = ttk.LabelFrame(side_panel, text="Hizli Akis", padding=12)
+        workflow_frame = ttk.LabelFrame(guide_tab, text="Hizli Akis", padding=12)
         workflow_frame.grid(row=1, column=0, sticky="ew", pady=(12, 0))
         workflow_frame.columnconfigure(0, weight=1)
         ttk.Label(
             workflow_frame,
             textvariable=self.workflow_hint_var,
-            wraplength=340,
+            wraplength=side_wrap,
             justify="left",
         ).grid(row=0, column=0, sticky="ew")
         ttk.Label(
             workflow_frame,
             textvariable=self.live_notice_var,
-            wraplength=340,
+            wraplength=side_wrap,
             justify="left",
             foreground="#35506B",
         ).grid(row=1, column=0, sticky="ew", pady=(10, 0))
@@ -746,8 +764,8 @@ class HydrostaticTestApp:
         )
         self.clear_form_button.pack(side="left", padx=(8, 0))
 
-        coefficient_frame = ttk.LabelFrame(side_panel, text="Katsayi Durumu", padding=12)
-        coefficient_frame.grid(row=2, column=0, sticky="ew", pady=(12, 0))
+        coefficient_frame = ttk.LabelFrame(status_tab, text="Katsayi Durumu", padding=12)
+        coefficient_frame.grid(row=0, column=0, sticky="ew")
         coefficient_frame.columnconfigure(1, weight=1)
         ttk.Label(coefficient_frame, text="Hava testi A").grid(row=0, column=0, sticky="w")
         ttk.Label(
@@ -770,7 +788,7 @@ class HydrostaticTestApp:
         ttk.Label(
             coefficient_frame,
             textvariable=self.helper_mode_summary_var,
-            wraplength=340,
+            wraplength=side_wrap,
             justify="left",
             foreground="#35506B",
         ).grid(row=3, column=0, columnspan=2, sticky="ew", pady=(10, 0))
@@ -786,7 +804,7 @@ class HydrostaticTestApp:
         ttk.Label(
             coefficient_frame,
             textvariable=self.water_backend_summary_var,
-            wraplength=340,
+            wraplength=side_wrap,
             justify="left",
             foreground="#35506B",
         ).grid(row=5, column=0, columnspan=2, sticky="ew", pady=(8, 0))
@@ -801,13 +819,13 @@ class HydrostaticTestApp:
         ttk.Label(
             coefficient_frame,
             textvariable=self.active_backend_comparison_var,
-            wraplength=340,
+            wraplength=side_wrap,
             justify="left",
             foreground="#35506B",
         ).grid(row=7, column=0, columnspan=2, sticky="ew", pady=(8, 0))
 
-        decision_frame = ttk.LabelFrame(side_panel, text="Nihai Karar", padding=12)
-        decision_frame.grid(row=3, column=0, sticky="ew", pady=(12, 0))
+        decision_frame = ttk.LabelFrame(status_tab, text="Nihai Karar", padding=12)
+        decision_frame.grid(row=1, column=0, sticky="ew", pady=(12, 0))
         decision_frame.columnconfigure(1, weight=1)
 
         ttk.Label(
@@ -830,15 +848,15 @@ class HydrostaticTestApp:
             textvariable=self.decision_summary_var,
             justify="left",
             anchor="w",
-            wraplength=340,
+            wraplength=side_wrap,
         ).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
 
-        results_frame = ttk.LabelFrame(side_panel, text="Oturum Kaydi", padding=12)
-        results_frame.grid(row=4, column=0, sticky="nsew", pady=(12, 0))
+        results_frame = ttk.LabelFrame(session_tab, text="Oturum Kaydi", padding=12)
+        results_frame.grid(row=0, column=0, sticky="nsew")
         results_frame.columnconfigure(0, weight=1)
         results_frame.rowconfigure(0, weight=1)
 
-        self.results_text = ScrolledText(results_frame, height=18, wrap="word")
+        self.results_text = ScrolledText(results_frame, height=22, wrap="word")
         self.results_text.grid(row=0, column=0, sticky="nsew")
         self.results_text.insert(
             "end",
@@ -853,12 +871,19 @@ class HydrostaticTestApp:
         ttk.Button(results_actions, text="Sonuclari Temizle", command=self._clear_results).pack(
             side="left", padx=(8, 0)
         )
+        self.root.after_idle(lambda: self.content_pane.sashpos(0, max(960, int(self.root.winfo_width() * 0.74))))
 
     def _build_air_tab(self, frame: ttk.Frame) -> None:
-        frame.rowconfigure(3, weight=1)
+        frame.columnconfigure(0, weight=1)
+        frame.columnconfigure(1, weight=1)
 
-        conditions_frame = ttk.LabelFrame(frame, text="1. Test Kosullari", padding=12)
-        conditions_frame.grid(row=0, column=0, sticky="ew")
+        top_row = ttk.Frame(frame)
+        top_row.grid(row=0, column=0, columnspan=2, sticky="ew")
+        top_row.columnconfigure(0, weight=1)
+        top_row.columnconfigure(1, weight=1)
+
+        conditions_frame = ttk.LabelFrame(top_row, text="1. Test Kosullari", padding=12)
+        conditions_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
         conditions_frame.columnconfigure(1, weight=1)
         conditions_frame.columnconfigure(3, weight=1)
         self._add_entry(
@@ -910,13 +935,13 @@ class HydrostaticTestApp:
         ttk.Label(
             conditions_frame,
             text="Sicaklik veya basinc degisirse A yeniden hesaplanmalidir.",
-            wraplength=860,
+            wraplength=520,
             justify="left",
             foreground="#35506B",
         ).grid(row=3, column=0, columnspan=4, sticky="w", pady=(8, 0))
 
-        measurements_frame = ttk.LabelFrame(frame, text="2. Olculen Degerler", padding=12)
-        measurements_frame.grid(row=1, column=0, sticky="ew", pady=(14, 0))
+        measurements_frame = ttk.LabelFrame(top_row, text="2. Olculen Degerler", padding=12)
+        measurements_frame.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
         measurements_frame.columnconfigure(1, weight=1)
         measurements_frame.columnconfigure(3, weight=1)
         self._add_entry(
@@ -953,7 +978,7 @@ class HydrostaticTestApp:
         )
 
         actions_frame = ttk.Frame(frame)
-        actions_frame.grid(row=2, column=0, sticky="ew", pady=(14, 0))
+        actions_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(14, 0))
         self.air_a_calculate_button = ttk.Button(actions_frame, text="A Hesapla", command=self._calculate_air_a)
         self.air_a_calculate_button.pack(side="left")
         ttk.Button(actions_frame, text="Hava Testini Degerlendir", command=self._run_air_test).pack(
@@ -966,22 +991,28 @@ class HydrostaticTestApp:
                 "Operasyon sirasi: 1) sicaklik ve basinci girin, 2) A'yi dogrulayin, "
                 "3) sartname geregi 1.0 bar P, K ve Vpa degerleriyle testi degerlendirin."
             ),
-            wraplength=860,
+            wraplength=1120,
             justify="left",
-        ).grid(row=3, column=0, sticky="nw", pady=(12, 0))
+        ).grid(row=2, column=0, columnspan=2, sticky="nw", pady=(12, 0))
         ttk.Label(
             frame,
             textvariable=self.section_feedback_vars["air"],
             foreground="#A4262C",
-            wraplength=860,
+            wraplength=1120,
             justify="left",
-        ).grid(row=4, column=0, sticky="w", pady=(10, 0))
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(10, 0))
 
     def _build_pressure_tab(self, frame: ttk.Frame) -> None:
-        frame.rowconfigure(4, weight=1)
+        frame.columnconfigure(0, weight=1)
+        frame.columnconfigure(1, weight=1)
 
-        conditions_frame = ttk.LabelFrame(frame, text="1. Test Kosullari", padding=12)
-        conditions_frame.grid(row=0, column=0, sticky="ew")
+        top_row = ttk.Frame(frame)
+        top_row.grid(row=0, column=0, columnspan=2, sticky="ew")
+        top_row.columnconfigure(0, weight=1)
+        top_row.columnconfigure(1, weight=1)
+
+        conditions_frame = ttk.LabelFrame(top_row, text="1. Test Kosullari", padding=12)
+        conditions_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
         conditions_frame.columnconfigure(1, weight=1)
         conditions_frame.columnconfigure(3, weight=1)
         self._add_entry(
@@ -1061,8 +1092,8 @@ class HydrostaticTestApp:
         self.pressure_b_reference_combo.grid(row=4, column=3, sticky="ew", padx=(0, 12), pady=6)
         self.pressure_b_reference_combo.bind("<<ComboboxSelected>>", self._on_pressure_b_reference_changed)
 
-        measurements_frame = ttk.LabelFrame(frame, text="2. Olculen Degerler", padding=12)
-        measurements_frame.grid(row=1, column=0, sticky="ew", pady=(14, 0))
+        measurements_frame = ttk.LabelFrame(top_row, text="2. Olculen Degerler", padding=12)
+        measurements_frame.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
         measurements_frame.columnconfigure(1, weight=1)
         measurements_frame.columnconfigure(3, weight=1)
         self._add_entry(
@@ -1082,7 +1113,7 @@ class HydrostaticTestApp:
         )
 
         helper_frame = ttk.LabelFrame(frame, text="3. B Yardimcisi", padding=12)
-        helper_frame.grid(row=2, column=0, sticky="ew", pady=(14, 0))
+        helper_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(14, 0))
         helper_frame.columnconfigure(1, weight=1)
         helper_frame.columnconfigure(3, weight=1)
         ttk.Label(
@@ -1091,7 +1122,7 @@ class HydrostaticTestApp:
                 "B secenegi ustte belirlenir. Otomatik modda su beta ve celik alpha ile hesaplanir; "
                 "manuel modda ise B degeri dogrudan girilir."
             ),
-            wraplength=860,
+            wraplength=1120,
             justify="left",
         ).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 10))
 
@@ -1145,7 +1176,7 @@ class HydrostaticTestApp:
                 "B degeri manuel girilebilir veya helper ile hesaplanabilir. Helper kullanilirsa "
                 "sicaklik ya da basinc degisince B guncellenmeli durumuna duser."
             ),
-            wraplength=860,
+            wraplength=1120,
             justify="left",
         ).grid(row=3, column=0, columnspan=4, sticky="w", pady=(10, 0))
         ttk.Label(
@@ -1154,20 +1185,23 @@ class HydrostaticTestApp:
                 "Operasyon sirasi: 1) sicaklik ve basinci girin, 2) A ve gerekiyorsa B'yi hazirlayin, "
                 "3) dT = Tilk - Tson ve Pa = Pilk - Pson degerleriyle testi degerlendirin."
             ),
-            wraplength=860,
+            wraplength=1120,
             justify="left",
-        ).grid(row=3, column=0, sticky="nw", pady=(12, 0))
+        ).grid(row=2, column=0, columnspan=2, sticky="nw", pady=(12, 0))
         ttk.Label(
             frame,
             textvariable=self.section_feedback_vars["pressure"],
             foreground="#A4262C",
-            wraplength=860,
+            wraplength=1120,
             justify="left",
-        ).grid(row=4, column=0, sticky="w", pady=(10, 0))
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(10, 0))
 
     def _build_field_tab(self, frame: ttk.Frame) -> None:
+        frame.columnconfigure(0, weight=3)
+        frame.columnconfigure(1, weight=2)
+
         checklist_frame = ttk.LabelFrame(frame, text="1. Kontrol Noktalari", padding=12)
-        checklist_frame.grid(row=0, column=0, sticky="ew")
+        checklist_frame.grid(row=0, column=0, sticky="nsew")
         checklist_frame.columnconfigure(1, weight=1)
         ttk.Label(checklist_frame, text="Durum", font=("Segoe UI", 9, "bold")).grid(row=0, column=0, sticky="w")
         ttk.Label(checklist_frame, text="Kontrol noktasi", font=("Segoe UI", 9, "bold")).grid(
@@ -1178,7 +1212,7 @@ class HydrostaticTestApp:
             ttk.Checkbutton(checklist_frame, variable=self.control_check_vars[key]).grid(
                 row=row_index, column=0, sticky="w", padx=(0, 8), pady=4
             )
-            ttk.Label(checklist_frame, text=label, wraplength=600, justify="left").grid(
+            ttk.Label(checklist_frame, text=label, wraplength=500, justify="left").grid(
                 row=row_index, column=1, sticky="w", pady=4
             )
             ttk.Label(checklist_frame, text=reference, foreground="#35506B").grid(
@@ -1205,8 +1239,12 @@ class HydrostaticTestApp:
             pady=(8, 0),
         )
 
-        pig_frame = ttk.LabelFrame(frame, text="2. Pig Hiz Hesabi", padding=12)
-        pig_frame.grid(row=1, column=0, sticky="ew", pady=(14, 0))
+        right_column = ttk.Frame(frame)
+        right_column.grid(row=0, column=1, sticky="nsew", padx=(14, 0))
+        right_column.columnconfigure(0, weight=1)
+
+        pig_frame = ttk.LabelFrame(right_column, text="2. Pig Hiz Hesabi", padding=12)
+        pig_frame.grid(row=0, column=0, sticky="ew")
         pig_frame.columnconfigure(1, weight=1)
         pig_frame.columnconfigure(3, weight=1)
         ttk.Label(
@@ -1215,7 +1253,7 @@ class HydrostaticTestApp:
                 "Kullanici mesafeyi ve pigin varis suresini girdiginde hiz hesaplanir. "
                 "Secili moda gore maksimum pig hizi asildiysa alan bunu acikca gosterir."
             ),
-            wraplength=860,
+            wraplength=500,
             justify="left",
         ).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 10))
         ttk.Label(pig_frame, text="Pig modu").grid(row=1, column=0, sticky="w", pady=6)
@@ -1230,7 +1268,7 @@ class HydrostaticTestApp:
         ttk.Label(
             pig_frame,
             textvariable=self.pig_limit_var,
-            wraplength=860,
+            wraplength=500,
             justify="left",
             foreground="#35506B",
         ).grid(row=2, column=0, columnspan=4, sticky="w", pady=(0, 8))
@@ -1277,12 +1315,12 @@ class HydrostaticTestApp:
         ttk.Label(
             pig_frame,
             textvariable=self.pig_summary_var,
-            wraplength=860,
+            wraplength=500,
             justify="left",
         ).grid(row=6, column=0, columnspan=4, sticky="w", pady=(8, 0))
 
-        methods_frame = ttk.LabelFrame(frame, text="3. A ve B Tespit Yontemleri", padding=12)
-        methods_frame.grid(row=2, column=0, sticky="ew", pady=(14, 0))
+        methods_frame = ttk.LabelFrame(right_column, text="3. A ve B Tespit Yontemleri", padding=12)
+        methods_frame.grid(row=1, column=0, sticky="ew", pady=(14, 0))
         ttk.Label(
             methods_frame,
             text=(
@@ -1295,7 +1333,7 @@ class HydrostaticTestApp:
                 "araliginda 1x1 grid ile calisir. Secili backend sag panelden degistirilebilir ve burada "
                 "karsilastirma ozeti alinabilir."
             ),
-            wraplength=860,
+            wraplength=500,
             justify="left",
         ).grid(row=0, column=0, sticky="w")
 
@@ -1303,9 +1341,9 @@ class HydrostaticTestApp:
             frame,
             textvariable=self.section_feedback_vars["field"],
             foreground="#A4262C",
-            wraplength=860,
+            wraplength=1120,
             justify="left",
-        ).grid(row=3, column=0, sticky="w", pady=(12, 0))
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(12, 0))
 
     def _add_entry(
         self,
@@ -1455,15 +1493,19 @@ class HydrostaticTestApp:
                 f"Yeni surum bulundu: {update_info.latest_version}. Isterseniz uygulama icinden guncellemeyi baslatabilirsiniz.",
                 "warning",
             )
-            if not user_requested:
-                if messagebox.askyesno(
-                    "Guncelleme Bulundu",
-                    (
-                        f"Yeni surum bulundu: {update_info.latest_version}\n\n"
-                        "Simdi indirip uygulamak ister misiniz?"
-                    ),
-                ):
-                    self._apply_available_update()
+            if messagebox.askyesno(
+                "Guncelleme Bulundu",
+                (
+                    f"Yeni surum bulundu: {update_info.latest_version}\n\n"
+                    "Simdi indirip uygulamak ister misiniz?"
+                ),
+            ):
+                self._apply_available_update()
+            elif user_requested:
+                self._set_banner(
+                    "Yeni surum bulundu ancak kurulum kullanici onayi olmadan baslatilmadi.",
+                    "info",
+                )
             return
 
         self.update_status_var.set(f"Guncel surum kullaniyorsunuz: {APP_VERSION}")
@@ -1489,14 +1531,20 @@ class HydrostaticTestApp:
         except OSError as exc:
             messagebox.showerror("Guncelleme", f"Indirme klasoru hazirlanamadi: {exc}")
             return
-        if not messagebox.askyesno(
+        folder_choice = messagebox.askyesnocancel(
             "Guncelleme Indirme Klasoru",
             (
-                "Guncelleme paketi su klasore indirilecek:\n"
-                f"{download_root}\n\n"
-                "Bu klasorle devam etmek istiyor musunuz?"
+                "Guncelleme paketinin nereye indirilecegini secin.\n\n"
+                f"Mevcut klasor:\n{download_root}\n\n"
+                "Evet: farkli klasor sec\n"
+                "Hayir: mevcut klasorle devam et\n"
+                "Iptal: islemi durdur"
             ),
-        ):
+        )
+        if folder_choice is None:
+            self._set_banner("Guncelleme kurulumu kullanici tarafindan iptal edildi.", "info")
+            return
+        if folder_choice:
             if not self._choose_update_download_dir():
                 self._set_banner("Guncelleme indirme klasoru secilmedigi icin islem baslatilmadi.", "warning")
                 return

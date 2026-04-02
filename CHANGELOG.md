@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.4 - 2026-04-03
+
+- Manuel guncelleme kontrolunde yeni surum bulundugunda kurulum akisi artik dogrudan teklif ediliyor; sadece acilista degil, kullanici talebinde de `indir/uygula` akisi basliyor.
+- Guncelleme paketi hedef klasoru icin `farkli klasor sec / mevcut klasorle devam / iptal` secenekleri netlestirildi; onceki sessiz varsayilan davranis kaldirildi.
+- Sag yardimci alan `Rehber / Durum / Kayit` sekmelerine ayrildi; uzun tek kolon nedeniyle olusan dikey yigilma azaltildi.
+- Hava, basinc ve saha sekmeleri genis ekranlarda yatay alani daha iyi kullanacak sekilde iki kolonlu duzene yaklastirildi.
+- UI ve updater testleri genisletildi; otomatik test paketi 73 teste cikarildi.
+
 ## 1.5.3 - 2026-04-02
 
 - Arayuz kok seviyede ve sekme seviyesinde kaydirilabilir hale getirildi; buyuk ama dikey olarak uzun ekranlarda tasma davranisi azaltildi.
