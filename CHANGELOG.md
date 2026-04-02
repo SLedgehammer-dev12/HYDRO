@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.6 - 2026-04-03
+
+- Updater uygulama adimi `cmd + .cmd` yerine Unicode yol adlarina daha dayanikli `PowerShell + .ps1` akisina tasindi.
+- Guncelleme script'i `utf-8-sig` ile yazilarak Turkce karakter iceren klasor adlarinda gorulen bozulma riski azaltildi.
+- Dosya kopyalama `Copy-Item -LiteralPath` ile yapilacak sekilde degistirildi; `robocopy/cmd` tabanli karakter sorunu ortadan kaldirildi.
+- Updater testleri Turkce karakterli yol senaryosu ile genisletildi; otomatik test paketi 76 teste cikarildi.
+
 ## 1.5.5 - 2026-04-03
 
 - `Yan Paneli Gizle/Goster` kontrolu eklendi; operator isterse sag yardimci alan kapatilarak calisma alani genisletilebiliyor.

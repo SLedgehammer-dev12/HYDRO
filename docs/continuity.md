@@ -6,7 +6,7 @@
 - Kokte sadece launcher, build dosyalari ve ust seviye dokumanlar kaldi
 - Build artefact'i `dist/windows/` altina ayrildi
 - Eski prototip ve onceki calisma notlari `docs/legacy/` altina arsivlendi
-- Otomatik test paketi 75 test ile geciyor
+- Otomatik test paketi 76 test ile geciyor
 - Updater birincil olarak `SLedgehammer-dev12/HYDRO`, gecis icin ikinci kaynak olarak `SLedgehammer-dev12/Programlar` release'lerini tarayacak sekilde calisiyor
 - UI artik kok seviyede ve sekme seviyesinde kaydirilabilir
 - `Boru Kesiti` alani sikistirildi; segment tablosu varsayilan olarak gizli ve ihtiyac halinde aciliyor
@@ -18,6 +18,7 @@
 - Hava, basinc ve saha sekmeleri genis ekranlarda yatay alan kullanacak sekilde iki kolonlu duzene yaklastirildi
 - Kullanici isterse `Yan Paneli Gizle` ile sadece calisma alanina gecebilir
 - Statik aciklama metinleri `Bilgi Notlarini Goster/Gizle` ile kontrol edilir; varsayilan ekran daha kompakt tutulur
+- Updater yeniden baslatma akisi `cmd` yerine `PowerShell` ile calisir; Turkce karakterli klasor yollarinda daha guvenli hale getirildi
 
 ## Teknik Gercekler
 

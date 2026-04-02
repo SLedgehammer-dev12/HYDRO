@@ -355,27 +355,32 @@ def _write_update_script(
     executable_path: Path,
     current_pid: int,
 ) -> Path:
-    script_path = working_root / "apply_update.cmd"
-    script = f"""@echo off
-setlocal
-set "APP_PID={current_pid}"
-set "STAGE_DIR={stage_dir}"
-set "TARGET_DIR={install_dir}"
-set "EXE_PATH={executable_path}"
-
-for /L %%I in (1,1,120) do (
-    tasklist /FI "PID eq %APP_PID%" | find "%APP_PID%" >nul
-    if errorlevel 1 goto apply_update
-    timeout /t 1 /nobreak >nul
-)
-
-:apply_update
-robocopy "%STAGE_DIR%\\{BINARY_NAME}" "%TARGET_DIR%" /E /R:2 /W:1 /NFL /NDL /NP >nul
-start "" "%EXE_PATH%"
-rmdir /S /Q "%STAGE_DIR%"
-del "%~f0"
-"""
-    script_path.write_text(script, encoding="utf-8", newline="\r\n")
+    script_path = working_root / "apply_update.ps1"
+    script = "\n".join(
+        [
+            "$ErrorActionPreference = 'Stop'",
+            f"$AppPid = {current_pid}",
+            f"$StageDir = '{_powershell_literal(str(stage_dir))}'",
+            f"$TargetDir = '{_powershell_literal(str(install_dir))}'",
+            f"$ExePath = '{_powershell_literal(str(executable_path))}'",
+            f"$SourceDir = Join-Path $StageDir '{BINARY_NAME}'",
+            "$deadline = (Get-Date).AddSeconds(120)",
+            "while ((Get-Process -Id $AppPid -ErrorAction SilentlyContinue) -and ((Get-Date) -lt $deadline)) {",
+            "    Start-Sleep -Seconds 1",
+            "}",
+            "if (-not (Test-Path -LiteralPath $SourceDir)) {",
+            "    throw 'Guncelleme klasoru bulunamadi.'",
+            "}",
+            "New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null",
+            "Get-ChildItem -LiteralPath $SourceDir -Force | ForEach-Object {",
+            "    Copy-Item -LiteralPath $_.FullName -Destination $TargetDir -Recurse -Force",
+            "}",
+            "Start-Process -FilePath $ExePath",
+            "Remove-Item -LiteralPath $StageDir -Recurse -Force -ErrorAction SilentlyContinue",
+        ]
+    )
+    # Windows PowerShell, UTF-8 BOM ile kaydedilen script dosyalarini Unicode yol adlariyla daha guvenli okur.
+    script_path.write_text(script, encoding="utf-8-sig", newline="\r\n")
     return script_path
 
 
@@ -424,5 +429,18 @@ def install_update(
         executable_path=runtime.executable_path,
         current_pid=os.getpid(),
     )
-    subprocess.Popen(["cmd", "/c", "start", "", "/min", str(script_path)], close_fds=True)
+    subprocess.Popen(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-WindowStyle",
+            "Hidden",
+            "-File",
+            str(script_path),
+        ],
+        close_fds=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
     return "self_update"

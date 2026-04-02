@@ -15,6 +15,7 @@ from hidrostatik_test.services.updater import (
     RuntimeContext,
     UpdateInfo,
     _download_asset,
+    _write_update_script,
     fetch_latest_update_info,
     install_update,
 )
@@ -239,6 +240,35 @@ class UpdaterTests(unittest.TestCase):
         self.assertEqual(captured["prefix"], "hidrostatik-update-")
         self.assertEqual(captured["dir"], str(chosen_dir))
         mocked_popen.assert_called_once()
+        launch_command = mocked_popen.call_args.args[0]
+        self.assertEqual(launch_command[0], "powershell")
+        self.assertIn("-File", launch_command)
+        self.assertTrue(str(launch_command[-1]).endswith(".ps1"))
+
+    def test_write_update_script_preserves_turkish_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir) / "İş_Çalışan"
+            working_root = base_dir / "güncelleme"
+            stage_dir = working_root / "sahne"
+            install_dir = base_dir / "Çalışan programlar" / "Hidrostatik_Test"
+            executable_path = install_dir / "HidrostatikTest.exe"
+            working_root.mkdir(parents=True)
+
+            script_path = _write_update_script(
+                working_root=working_root,
+                stage_dir=stage_dir,
+                install_dir=install_dir,
+                executable_path=executable_path,
+                current_pid=1234,
+            )
+
+            script_text = script_path.read_text(encoding="utf-8-sig")
+
+        self.assertEqual(script_path.suffix, ".ps1")
+        self.assertIn("İş_Çalışan", script_text)
+        self.assertIn("Çalışan programlar", script_text)
+        self.assertIn("Copy-Item -LiteralPath", script_text)
+        self.assertIn("Start-Process -FilePath $ExePath", script_text)
 
 
 class UpdateUiTests(unittest.TestCase):
