@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.7 - 2026-04-03
+
+- `A ve B Katsayisi.xlsx` kaynagindan uretilen kurum ici `A/B` kontrol tablosu uygulamaya eklendi.
+- Hava ve basinc testlerinde mevcut hesaplanan katsayilar ile kontrol tablosu degerleri ayni ekranda karsilastirilabilir hale getirildi.
+- Kontrol tablosu ozeti rapor ve oturum kaydina da eklendi; resmi tablo kapsami `T=1-25 degC`, `P=30-120 bar` olarak korunuyor.
+
 ## 1.5.6 - 2026-04-03
 
 - Updater uygulama adimi `cmd + .cmd` yerine Unicode yol adlarina daha dayanikli `PowerShell + .ps1` akisina tasindi.

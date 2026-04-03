@@ -15,6 +15,11 @@ from ..app_metadata import (
     SPEC_DOCUMENT_CODE,
     SPEC_DOCUMENT_TITLE,
 )
+from ..data.ab_control_table import (
+    ABControlTableError,
+    describe_ab_control_table_range,
+    lookup_ab_control_point,
+)
 from ..data.coefficient_reference import find_reference_point, get_reference_option_labels
 from ..domain import (
     get_available_water_property_backends,
@@ -160,6 +165,10 @@ class HydrostaticTestApp:
         self.active_backend_comparison_var = tk.StringVar(
             value="Aktif sekme icin backend karsilastirmasi henuz yapilmadi."
         )
+        self.control_table_range_text = describe_ab_control_table_range()
+        self.air_control_table_var = tk.StringVar()
+        self.pressure_control_table_var = tk.StringVar()
+        self.active_control_table_var = tk.StringVar()
         self.visual_schema_var = tk.StringVar(
             value="Canli sema aktif sekmeye gore guncellenir. Ustteki kutulara tiklayarak sekme degistirebilirsiniz."
         )
@@ -211,6 +220,7 @@ class HydrostaticTestApp:
         self._update_workflow_hint()
         self._update_water_backend_summary()
         self._sync_backend_comparison_summary()
+        self._refresh_control_table_summaries()
         self._update_contextual_actions()
         self._on_air_a_mode_changed()
         self._on_pressure_a_mode_changed()
@@ -895,6 +905,16 @@ class HydrostaticTestApp:
             justify="left",
             foreground="#35506B",
         ).grid(row=7, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        ttk.Label(coefficient_frame, text="Kurum ici A/B kontrol tablosu").grid(
+            row=8, column=0, sticky="w", pady=(10, 0)
+        )
+        ttk.Label(
+            coefficient_frame,
+            textvariable=self.active_control_table_var,
+            wraplength=side_wrap,
+            justify="left",
+            foreground="#35506B",
+        ).grid(row=9, column=0, columnspan=2, sticky="ew", pady=(8, 0))
 
         decision_frame = ttk.LabelFrame(status_tab, text="Nihai Karar", padding=12)
         decision_frame.grid(row=1, column=0, sticky="ew", pady=(12, 0))
@@ -1817,20 +1837,24 @@ class HydrostaticTestApp:
                 self._set_field_message(field_key, "Bu alan gerekli.", "warning")
             else:
                 self._clear_field_message(field_key)
+            self._refresh_control_table_summaries()
             self._update_live_notice()
             self._refresh_visual_schema()
             return
         if self._safe_float(variable.get()) is None:
             self._set_field_message(field_key, "Gecerli bir sayi girin.", "error")
+            self._refresh_control_table_summaries()
             self._update_live_notice()
             self._refresh_visual_schema()
             return
         if field_key == "pressure.b_micro_per_c" and self.use_b_helper_var.get():
             self._set_field_message(field_key, "Helper modu bu degeri yonetiyor.", "info")
+            self._refresh_control_table_summaries()
             self._update_live_notice()
             self._refresh_visual_schema()
             return
         self._clear_field_message(field_key)
+        self._refresh_control_table_summaries()
         self._update_live_notice()
         self._refresh_visual_schema()
 
@@ -2051,6 +2075,19 @@ class HydrostaticTestApp:
             return "Basinc testi icin backend karsilastirmasi henuz yapilmadi."
         return "Bu sekmede backend karsilastirmasi kullanilmaz."
 
+    def _default_control_table_text(self, section: str) -> str:
+        if section == "air":
+            return (
+                "Kurum ici A/B kontrol tablosu henuz kullanilmadi. "
+                f"Aralik: {self.control_table_range_text}."
+            )
+        if section == "pressure":
+            return (
+                "Basinc testi icin kurum ici A/B kontrol tablosu henuz kullanilmadi. "
+                f"Aralik: {self.control_table_range_text}."
+            )
+        return "Bu sekmede kurum ici A/B kontrol tablosu kullanilmaz."
+
     def _update_water_backend_summary(self) -> None:
         info = self._selected_water_backend_info()
         self.water_backend_summary_var.set(
@@ -2066,6 +2103,74 @@ class HydrostaticTestApp:
             self.active_backend_comparison_var.set(self.pressure_backend_comparison_var.get())
             return
         self.active_backend_comparison_var.set(self._default_backend_comparison_text("field"))
+
+    def _sync_control_table_summary(self) -> None:
+        active_tab = self._active_tab_key()
+        if active_tab == "air":
+            self.active_control_table_var.set(self.air_control_table_var.get())
+            return
+        if active_tab == "pressure":
+            self.active_control_table_var.set(self.pressure_control_table_var.get())
+            return
+        self.active_control_table_var.set(self._default_control_table_text("field"))
+
+    def _refresh_control_table_summaries(self) -> None:
+        self.air_control_table_var.set(self._build_air_control_table_summary())
+        self.pressure_control_table_var.set(self._build_pressure_control_table_summary())
+        self._sync_control_table_summary()
+
+    def _build_air_control_table_summary(self) -> str:
+        temp_c = self._safe_float(self.air_vars["temperature_c"].get())
+        pressure_bar = self._safe_float(self.air_vars["pressure_bar"].get())
+        if temp_c is None or pressure_bar is None:
+            return self._default_control_table_text("air")
+        try:
+            point = lookup_ab_control_point(temp_c=temp_c, pressure_bar=pressure_bar)
+        except (ABControlTableError, FileNotFoundError, ValueError) as exc:
+            return f"Kurum ici A/B kontrol tablosu bu nokta icin kullanilamaz ({exc})."
+
+        current_a = self._safe_float(self.air_vars["a_micro_per_bar"].get())
+        if current_a is None:
+            return (
+                f"Kurum ici tablo A = {point.a_micro_per_bar:.6f}. "
+                f"Kaynak: {point.source_note}."
+            )
+        delta_text = self._format_control_table_delta(current_a, point.a_micro_per_bar)
+        return (
+            f"Kurum ici tablo A = {point.a_micro_per_bar:.6f}. "
+            f"A farki = {delta_text}. Kaynak: {point.source_note}."
+        )
+
+    def _build_pressure_control_table_summary(self) -> str:
+        temp_c = self._safe_float(self.pressure_vars["temperature_c"].get())
+        pressure_bar = self._safe_float(self.pressure_vars["pressure_bar"].get())
+        if temp_c is None or pressure_bar is None:
+            return self._default_control_table_text("pressure")
+        try:
+            point = lookup_ab_control_point(temp_c=temp_c, pressure_bar=pressure_bar)
+        except (ABControlTableError, FileNotFoundError, ValueError) as exc:
+            return f"Kurum ici A/B kontrol tablosu bu nokta icin kullanilamaz ({exc})."
+
+        parts = [
+            f"Kurum ici tablo A = {point.a_micro_per_bar:.6f}, B = {point.b_micro_per_c:.6f}."
+        ]
+        current_a = self._safe_float(self.pressure_vars["a_micro_per_bar"].get())
+        if current_a is not None:
+            parts.append(
+                f"A farki = {self._format_control_table_delta(current_a, point.a_micro_per_bar)}."
+            )
+        current_b = self._safe_float(self.pressure_vars["b_micro_per_c"].get())
+        if current_b is not None:
+            parts.append(
+                f"B farki = {self._format_control_table_delta(current_b, point.b_micro_per_c)}."
+            )
+        parts.append(f"Kaynak: {point.source_note}.")
+        return " ".join(parts)
+
+    def _format_control_table_delta(self, value: float, reference: float) -> str:
+        delta = value - reference
+        delta_pct = (delta / reference * 100.0) if abs(reference) > 1e-12 else 0.0
+        return f"{delta:+.6f} | %{delta_pct:+.6f}"
 
     def _mark_water_backend_change(self) -> None:
         if self._air_a_is_auto() and self.air_vars["a_micro_per_bar"].get().strip():
@@ -2206,6 +2311,7 @@ class HydrostaticTestApp:
         self._update_workflow_hint()
         self._update_contextual_actions()
         self._sync_backend_comparison_summary()
+        self._sync_control_table_summary()
         self._update_live_notice()
         self._refresh_visual_schema()
 
@@ -2891,10 +2997,14 @@ class HydrostaticTestApp:
             return False
 
         self._set_coefficient_value("air_a", self.air_vars["a_micro_per_bar"], a_value)
+        self._refresh_control_table_summaries()
         if log_result:
             self._append_result(
                 "Hava Icerik Testi - A hesabi",
-                f"A = {a_value:.6f} (10^-6 / bar) olarak {backend_info.label} backend'i ile hesaplandi.",
+                (
+                    f"A = {a_value:.6f} (10^-6 / bar) olarak {backend_info.label} backend'i ile hesaplandi.\n"
+                    f"Kontrol tablosu: {self.air_control_table_var.get()}"
+                ),
             )
         self._set_banner("Hava icerik testi icin A katsayisi guncellendi.", "success")
         return True
@@ -2918,10 +3028,14 @@ class HydrostaticTestApp:
             return False
 
         self._set_coefficient_value("pressure_a", self.pressure_vars["a_micro_per_bar"], a_value)
+        self._refresh_control_table_summaries()
         if log_result:
             self._append_result(
                 "Basinc Degisim Testi - A hesabi",
-                f"A = {a_value:.6f} (10^-6 / bar) olarak {backend_info.label} backend'i ile hesaplandi.",
+                (
+                    f"A = {a_value:.6f} (10^-6 / bar) olarak {backend_info.label} backend'i ile hesaplandi.\n"
+                    f"Kontrol tablosu: {self.pressure_control_table_var.get()}"
+                ),
             )
         self._set_banner("Basinc degisim testi icin A katsayisi guncellendi.", "success")
         return True
@@ -2950,6 +3064,7 @@ class HydrostaticTestApp:
 
         self.b_helper_vars["water_beta_micro_per_c"].set(f"{water_beta:.6f}")
         self._set_coefficient_value("pressure_b", self.pressure_vars["b_micro_per_c"], b_value)
+        self._refresh_control_table_summaries()
         if log_result:
             self._append_result(
                 "B Yardimcisi",
@@ -2957,7 +3072,8 @@ class HydrostaticTestApp:
                     f"Backend: {backend_info.label}\n"
                     f"Su beta: {water_beta:.6f} (10^-6 / degC)\n"
                     f"Celik alpha: {steel_alpha:.6f} (10^-6 / degC)\n"
-                    f"Hesaplanan B: {b_value:.6f} (10^-6 / degC)"
+                    f"Hesaplanan B: {b_value:.6f} (10^-6 / degC)\n"
+                    f"Kontrol tablosu: {self.pressure_control_table_var.get()}"
                 ),
             )
         self._set_banner("Basinc degisim testi icin B katsayisi helper ile guncellendi.", "success")
@@ -3029,6 +3145,7 @@ class HydrostaticTestApp:
             return
 
         status = "BASARILI" if result.passed else "BASARISIZ"
+        self._refresh_control_table_summaries()
         self._update_decision_card(
             "Hava Icerik Testi",
             status,
@@ -3051,7 +3168,8 @@ class HydrostaticTestApp:
                 f"Teorik ilave su Vp: {result.theoretical_added_water_m3:.6f} m3\n"
                 f"Kabul limiti (1.06 x Vp): {result.acceptance_limit_m3:.6f} m3\n"
                 f"Fiili ilave su Vpa: {result.actual_added_water_m3:.6f} m3\n"
-                f"Vpa / Vp: {result.ratio:.6f}"
+                f"Vpa / Vp: {result.ratio:.6f}\n"
+                f"Kontrol tablosu: {self.air_control_table_var.get()}"
             ),
         )
         self._set_banner("Hava icerik testi degerlendirmesi tamamlandi.", "success")
@@ -3089,6 +3207,7 @@ class HydrostaticTestApp:
             return
 
         status = "BASARILI" if result.passed else "BASARISIZ"
+        self._refresh_control_table_summaries()
         self._update_decision_card(
             "Basinc Degisim Testi",
             status,
@@ -3115,7 +3234,8 @@ class HydrostaticTestApp:
                 f"Teorik basinc degisimi Pt: {result.theoretical_pressure_change_bar:.6f} bar\n"
                 f"Ust kabul siniri (Pt + 0.3): {result.allowable_upper_pressure_change_bar:.6f} bar\n"
                 f"Fiili basinc degisimi Pa: {result.actual_pressure_change_bar:.6f} bar\n"
-                f"Fark (Pa - Pt): {result.margin_bar:.6f} bar"
+                f"Fark (Pa - Pt): {result.margin_bar:.6f} bar\n"
+                f"Kontrol tablosu: {self.pressure_control_table_var.get()}"
             ),
         )
         self._set_banner("Basinc degisim testi degerlendirmesi tamamlandi.", "success")
@@ -3206,10 +3326,12 @@ class HydrostaticTestApp:
         self.air_vars["k_factor"].set(self._default_k_factor())
         self.coefficient_states["air_a"] = "empty"
         self.air_backend_comparison_var.set(self._default_backend_comparison_text("air"))
+        self.air_control_table_var.set(self._default_control_table_text("air"))
         self._remove_touched_fields("air")
         self._clear_feedback("air")
         self._refresh_coefficient_statuses()
         self._sync_backend_comparison_summary()
+        self._sync_control_table_summary()
         self._reset_decision_card()
         self._set_banner("Hava icerik testi formu temizlendi.", "info")
         self._refresh_visual_schema()
@@ -3222,10 +3344,12 @@ class HydrostaticTestApp:
         self.coefficient_states["pressure_a"] = "empty"
         self.coefficient_states["pressure_b"] = "empty"
         self.pressure_backend_comparison_var.set(self._default_backend_comparison_text("pressure"))
+        self.pressure_control_table_var.set(self._default_control_table_text("pressure"))
         self._remove_touched_fields("pressure")
         self._clear_feedback("pressure")
         self._refresh_coefficient_statuses()
         self._sync_backend_comparison_summary()
+        self._sync_control_table_summary()
         self._reset_decision_card()
         self._set_banner("Basinc degisim testi formu temizlendi.", "info")
         self._refresh_visual_schema()
@@ -3299,6 +3423,7 @@ class HydrostaticTestApp:
                 f"A referans noktasi: {self.air_a_reference_var.get().strip() or '-'}",
                 f"A (10^-6 / bar): {self._format_var_value(self.air_vars['a_micro_per_bar'])}",
                 f"Hava backend karsilastirmasi: {self.air_backend_comparison_var.get()}",
+                f"Hava kontrol tablosu: {self.air_control_table_var.get()}",
                 f"Basinc artisi P (bar, sartname 1.0): {self._format_var_value(self.air_vars['pressure_rise_bar'])}",
                 f"K faktor: {self._format_var_value(self.air_vars['k_factor'])}",
                 f"Fiili ilave su Vpa (m3): {self._format_var_value(self.air_vars['actual_added_water_m3'])}",
@@ -3313,6 +3438,7 @@ class HydrostaticTestApp:
                 f"B referans noktasi: {self.pressure_b_reference_var.get().strip() or '-'}",
                 f"B (10^-6 / degC): {self._format_var_value(self.pressure_vars['b_micro_per_c'])}",
                 f"Basinc backend karsilastirmasi: {self.pressure_backend_comparison_var.get()}",
+                f"Basinc kontrol tablosu: {self.pressure_control_table_var.get()}",
                 f"Su sicaklik degisimi dT = Tilk - Tson (degC): {self._format_var_value(self.pressure_vars['delta_t_c'])}",
                 f"Fiili basinc degisimi Pa = Pilk - Pson (bar): {self._format_var_value(self.pressure_vars['actual_pressure_change_bar'])}",
                 f"B helper modu: {'Acik' if self.use_b_helper_var.get() else 'Kapali'}",

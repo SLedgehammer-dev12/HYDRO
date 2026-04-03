@@ -147,6 +147,25 @@ class UiWorkflowTests(unittest.TestCase):
         self.assertEqual(self.app.coefficient_states["pressure_a"], "reference")
         self.assertEqual(self.app.pressure_vars["a_micro_per_bar"].get(), "47.193089")
 
+    def test_air_control_table_summary_updates_after_a_calculation(self) -> None:
+        self.app.air_vars["temperature_c"].set("10")
+        self.app.air_vars["pressure_bar"].set("30")
+
+        self.assertTrue(self.app._calculate_air_a(log_result=False))
+        self.assertIn("Kurum ici tablo A = 46.990000", self.app.air_control_table_var.get())
+        self.assertIn("A farki =", self.app.air_control_table_var.get())
+
+    def test_pressure_control_table_summary_updates_after_a_and_b_calculation(self) -> None:
+        self.app.pressure_vars["temperature_c"].set("15")
+        self.app.pressure_vars["pressure_bar"].set("80")
+        self.app.b_helper_vars["steel_alpha_micro_per_c"].set("12.0")
+        self.app.use_b_helper_var.set(True)
+
+        self.assertTrue(self.app._calculate_pressure_a(log_result=False))
+        self.assertTrue(self.app._calculate_b_helper(log_result=False))
+        self.assertIn("Kurum ici tablo A = 45.434000, B = 134.050000.", self.app.pressure_control_table_var.get())
+        self.assertIn("B farki =", self.app.pressure_control_table_var.get())
+
     def test_empty_required_field_sets_feedback(self) -> None:
         self.app._run_air_test()
 

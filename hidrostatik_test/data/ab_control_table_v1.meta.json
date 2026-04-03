@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "table_key": "ab_control_table_1_25c_30_120bar_v1",
+  "interpolation_method": "bilinear",
+  "temperature_axis": {
+    "key": "temp_c",
+    "unit": "degC",
+    "minimum": 1.0,
+    "maximum": 25.0,
+    "step": 1.0,
+    "count": 25
+  },
+  "pressure_axis": {
+    "key": "pressure_bar",
+    "unit": "bar",
+    "minimum": 30.0,
+    "maximum": 120.0,
+    "step": 1.0,
+    "count": 91
+  },
+  "csv_columns": [
+    "temp_c",
+    "pressure_bar",
+    "a_micro_per_bar",
+    "b_micro_per_c"
+  ],
+  "a_unit": "10^-6 / bar",
+  "b_unit": "10^-6 / degC",
+  "source_name": "A ve B Katsay\u0131s\u0131.xlsx",
+  "generated_at_utc": "2026-04-03T08:34:23+00:00",
+  "row_count": 2275,
+  "notes": [
+    "Imported from the official A ve B Katsayisi workbook.",
+    "Workbook orientation is row=pressure_bar and column=temp_c; runtime CSV is normalized to temp-first rows.",
+    "A and B are stored as direct table values from the workbook; B is not reconstructed from beta minus steel alpha."
+  ]
+}

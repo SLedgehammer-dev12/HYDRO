@@ -69,6 +69,7 @@ Mevcut kod:
 - A ve B katsayilari icin otomatik, manuel ve referans modlari sunar
 - A ve B icin backend soyutlamasi ile gelecekte dagitima uygun ikinci dogrulama motoru eklenmesine hazirdir
 - `table_v1` backend ile offline uretilen CSV grid uzerinden interpolasyon yapabilir
+- Kurum ici `A/B` kontrol tablosu ile hesaplanan katsayilari ayni noktada karsilastirabilir
 - Segmentli geometri modelini destekler
 - Windows self-update akisina sahiptir
 - `HYDRO` repo ayrisma gecisi icin legacy `Programlar` release kaynagina fallback destekler

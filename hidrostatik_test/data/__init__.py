@@ -1,3 +1,17 @@
+from .ab_control_table import (
+    ABControlPoint,
+    ABControlTableAxis,
+    ABControlTableError,
+    ABControlTableGrid,
+    ABControlTableSpec,
+    DEFAULT_CONTROL_TABLE_CSV_PATH,
+    DEFAULT_CONTROL_TABLE_METADATA_PATH,
+    clear_ab_control_table_cache,
+    default_ab_control_table_spec,
+    describe_ab_control_table_range,
+    load_ab_control_table,
+    lookup_ab_control_point,
+)
 from .coefficient_reference import find_reference_point, get_reference_option_labels
 from .pipe_catalog import find_pipe_size, find_schedule, get_pipe_size_options, get_schedule_options
 from .water_property_table import (
@@ -12,14 +26,26 @@ from .water_property_table import (
 )
 
 __all__ = [
+    "ABControlPoint",
+    "ABControlTableAxis",
+    "ABControlTableError",
+    "ABControlTableGrid",
+    "ABControlTableSpec",
+    "DEFAULT_CONTROL_TABLE_CSV_PATH",
+    "DEFAULT_CONTROL_TABLE_METADATA_PATH",
     "DEFAULT_TABLE_CSV_PATH",
     "DEFAULT_TABLE_METADATA_PATH",
+    "clear_ab_control_table_cache",
     "find_pipe_size",
     "find_reference_point",
     "find_schedule",
+    "default_ab_control_table_spec",
+    "describe_ab_control_table_range",
     "get_pipe_size_options",
     "get_reference_option_labels",
     "get_schedule_options",
+    "load_ab_control_table",
+    "lookup_ab_control_point",
     "WaterPropertyTableAxis",
     "WaterPropertyTableGrid",
     "WaterPropertyTableSpec",
