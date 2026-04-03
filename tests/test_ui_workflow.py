@@ -78,6 +78,33 @@ class UiWorkflowTests(unittest.TestCase):
         self.assertEqual(self.app.coefficient_states["air_a"], "manual")
         self.assertIn("Manuel", self.app.air_a_mode_var.get())
 
+    def test_air_manual_detail_report_marks_manual_a_source(self) -> None:
+        self.app.air_a_mode_var.set(MANUAL_A_MODE)
+        self.app._on_air_a_mode_changed()
+        self.app.air_vars["temperature_c"].set("20")
+        self.app.air_vars["pressure_bar"].set("80")
+        self.app.air_vars["a_micro_per_bar"].set("45.0")
+
+        detail = self.app.active_detail_report_var.get()
+
+        self.assertIn("Hava Icerik Testi - Detay Raporu", detail)
+        self.assertIn("A durum: Hazir: manuel giris", detail)
+        self.assertIn("A kaynagi: Kullanici girdisi / manuel tablo-prosedur.", detail)
+        self.assertIn("A degeri: 45.0 (10^-6 / bar)", detail)
+
+    def test_coefficient_source_badges_reflect_manual_and_computed_states(self) -> None:
+        self.app.air_a_mode_var.set(MANUAL_A_MODE)
+        self.app._on_air_a_mode_changed()
+        self.app.air_vars["a_micro_per_bar"].set("45.0")
+        self.assertEqual(self.app.coefficient_source_vars["air_a"].get(), "MANUEL")
+        self.assertIn("air_a", self.app.inline_coefficient_source_badges)
+
+        self.app.pressure_vars["temperature_c"].set("20")
+        self.app.pressure_vars["pressure_bar"].set("80")
+        self.assertTrue(self.app._calculate_pressure_a(log_result=False))
+        self.assertEqual(self.app.coefficient_source_vars["pressure_a"].get(), "HESAP")
+        self.assertIn("pressure_a", self.app.inline_coefficient_source_badges)
+
     def test_air_evaluation_accepts_reference_a_mode(self) -> None:
         self._fill_geometry()
         self.app.air_a_mode_var.set(REFERENCE_A_MODE)
@@ -146,6 +173,29 @@ class UiWorkflowTests(unittest.TestCase):
         self.assertEqual(self.app.decision_status_var.get(), "BASARILI")
         self.assertEqual(self.app.coefficient_states["pressure_a"], "reference")
         self.assertEqual(self.app.pressure_vars["a_micro_per_bar"].get(), "47.193089")
+
+    def test_pressure_manual_detail_report_shows_sources_and_decision_basis(self) -> None:
+        self._fill_geometry()
+        self.app.notebook.select(1)
+        self.app._on_tab_changed()
+        self.app.pressure_a_mode_var.set(MANUAL_A_MODE)
+        self.app._on_pressure_a_mode_changed()
+        self.app.pressure_b_mode_var.set(MANUAL_B_MODE)
+        self.app._on_pressure_b_mode_changed()
+        self.app.pressure_vars["temperature_c"].set("20")
+        self.app.pressure_vars["pressure_bar"].set("80")
+        self.app.pressure_vars["a_micro_per_bar"].set("45")
+        self.app.pressure_vars["b_micro_per_c"].set("200")
+        self.app.pressure_vars["delta_t_c"].set("0.6")
+        self.app.pressure_vars["actual_pressure_change_bar"].set("2.1")
+
+        detail = self.app.active_detail_report_var.get()
+
+        self.assertIn("Basinc Degisim Testi - Detay Raporu", detail)
+        self.assertIn("A kaynagi: Kullanici girdisi / manuel tablo-prosedur.", detail)
+        self.assertIn("B kaynagi: Kullanici girdisi / manuel tablo-prosedur.", detail)
+        self.assertIn("Karar kurali: (Pa - Pt) <= 0.3 bar", detail)
+        self.assertIn("Anlik sonuc: BASARILI", detail)
 
     def test_air_control_table_summary_updates_after_a_calculation(self) -> None:
         self.app.air_vars["temperature_c"].set("10")
@@ -469,6 +519,35 @@ class UiWorkflowTests(unittest.TestCase):
             self.assertEqual(captured["target"], self.app._perform_update_install)
             self.assertEqual(captured["args"], (target_dir,))
             self.assertIn(str(target_dir), self.app.update_detail_var.get())
+
+    def test_apply_available_update_prompts_for_folder_selection_options(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_dir = Path(temp_dir) / "updates"
+            self.app.update_download_dir_var.set(str(target_dir))
+            self.app.latest_update_info = type(
+                "UpdateInfoLike",
+                (),
+                {
+                    "update_available": True,
+                    "latest_version": "9.9.9",
+                },
+            )()
+            captured: dict[str, str] = {}
+
+            def fake_prompt(title: str, message: str):
+                captured["title"] = title
+                captured["message"] = message
+                return None
+
+            with patch("hidrostatik_test.ui.app.messagebox.askyesnocancel", side_effect=fake_prompt):
+                self.app._apply_available_update()
+
+            self.assertEqual(captured["title"], "Guncelleme Indirme Klasoru")
+            self.assertIn(str(target_dir), captured["message"])
+            self.assertIn("Evet: farkli klasor sec", captured["message"])
+            self.assertIn("Hayir: mevcut klasorle devam et", captured["message"])
+            self.assertIn("Iptal: islemi durdur", captured["message"])
+            self.assertFalse(self.app.update_install_in_progress)
 
     def test_report_text_contains_version_spec_and_input_snapshot(self) -> None:
         self._fill_geometry()

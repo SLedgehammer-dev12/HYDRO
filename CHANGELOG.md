@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.5.8 - 2026-04-03
+
+- Aktif sekme icin canli `Detay Raporu` paneli eklendi; katsayi kaynagi, kullanici girdileri ve karar hesabinda kullanilan ara terimler arayuzde gorunur hale getirildi.
+- Manuel A/B modlarinda katsayinin kullanici tarafindan girildigi ve degerlendirmede hangi degerin kullanildigi artik acikca ayirt ediliyor.
+- `Katsayi Durumu` paneline kisa kaynak rozetleri eklendi; `HESAP / REFERANS / MANUEL / YENILE` durumu tek bakista gorulebiliyor.
+- A ve B alanlarinin yanina da ayni kaynak rozetleri tasindi; kullanici formdan ayrilmadan aktif katsayi kaynagini gorebiliyor.
+- Hesap ve degerlendirme butonlari renkli ilerleme geri bildirimi aldi; hesap sirasinda sari, tamamlandiginda yesil, uyari/hata durumunda turuncu-kirmizi durum kisa sureyle gosteriliyor.
+- Guncelleme paketi hedef klasoru secim ekranindaki `farkli klasor sec / mevcut klasorle devam et / iptal` akisi testle koruma altina alindi.
+
 ## 1.5.7 - 2026-04-03
 
 - `A ve B Katsayisi.xlsx` kaynagindan uretilen kurum ici `A/B` kontrol tablosu uygulamaya eklendi.

@@ -169,6 +169,10 @@ class HydrostaticTestApp:
         self.air_control_table_var = tk.StringVar()
         self.pressure_control_table_var = tk.StringVar()
         self.active_control_table_var = tk.StringVar()
+        self.air_detail_report_var = tk.StringVar()
+        self.pressure_detail_report_var = tk.StringVar()
+        self.field_detail_report_var = tk.StringVar()
+        self.active_detail_report_var = tk.StringVar()
         self.visual_schema_var = tk.StringVar(
             value="Canli sema aktif sekmeye gore guncellenir. Ustteki kutulara tiklayarak sekme degistirebilirsiniz."
         )
@@ -198,6 +202,17 @@ class HydrostaticTestApp:
             "pressure_a": tk.StringVar(value="Bekleniyor"),
             "pressure_b": tk.StringVar(value="Bekleniyor"),
         }
+        self.coefficient_source_vars = {
+            "air_a": tk.StringVar(value="BEKLIYOR"),
+            "pressure_a": tk.StringVar(value="BEKLIYOR"),
+            "pressure_b": tk.StringVar(value="BEKLIYOR"),
+        }
+        self.coefficient_source_badges: dict[str, tk.Label] = {}
+        self.inline_coefficient_source_badges: dict[str, tk.Label] = {}
+        self.progress_buttons: dict[str, tk.Button] = {}
+        self.progress_button_idle_texts: dict[str, str] = {}
+        self.progress_button_reset_jobs: dict[str, str] = {}
+        self.progress_button_busy: set[str] = set()
         self._programmatic_coefficient_updates: set[str] = set()
         self.entry_widgets: dict[str, ttk.Entry] = {}
         self.field_meta: dict[str, dict[str, str | bool]] = {}
@@ -757,6 +772,7 @@ class HydrostaticTestApp:
 
         status_tab = ttk.Frame(self.side_notebook, padding=8)
         status_tab.columnconfigure(0, weight=1)
+        status_tab.rowconfigure(2, weight=1)
         self.side_notebook.add(status_tab, text="Durum")
 
         session_tab = ttk.Frame(self.side_notebook, padding=8)
@@ -827,14 +843,16 @@ class HydrostaticTestApp:
         )).grid(row=2, column=0, sticky="ew", pady=(10, 0))
         workflow_actions = ttk.Frame(workflow_frame)
         workflow_actions.grid(row=3, column=0, sticky="ew", pady=(12, 0))
-        self.run_selected_button = ttk.Button(
+        self.run_selected_button = self._create_progress_button(
             workflow_actions,
+            key="run_selected",
             text="Aktif Testi Degerlendir",
             command=self._run_selected_test,
         )
         self.run_selected_button.pack(side="left")
-        self.recalculate_button = ttk.Button(
+        self.recalculate_button = self._create_progress_button(
             workflow_actions,
+            key="recalculate",
             text="Katsayilari Yenile",
             command=self._recalculate_active_coefficients,
         )
@@ -849,24 +867,43 @@ class HydrostaticTestApp:
         coefficient_frame = ttk.LabelFrame(status_tab, text="Katsayi Durumu", padding=12)
         coefficient_frame.grid(row=0, column=0, sticky="ew")
         coefficient_frame.columnconfigure(1, weight=1)
+        coefficient_frame.columnconfigure(2, weight=0)
         ttk.Label(coefficient_frame, text="Hava testi A").grid(row=0, column=0, sticky="w")
         ttk.Label(
             coefficient_frame,
             textvariable=self.coefficient_status_vars["air_a"],
             foreground="#8A6D3B",
         ).grid(row=0, column=1, sticky="w")
+        self.coefficient_source_badges["air_a"] = self._create_source_badge(
+            coefficient_frame,
+            key="air_a",
+            registry=self.coefficient_source_badges,
+        )
+        self.coefficient_source_badges["air_a"].grid(row=0, column=2, sticky="e", padx=(8, 0))
         ttk.Label(coefficient_frame, text="Basinc testi A").grid(row=1, column=0, sticky="w", pady=(6, 0))
         ttk.Label(
             coefficient_frame,
             textvariable=self.coefficient_status_vars["pressure_a"],
             foreground="#8A6D3B",
         ).grid(row=1, column=1, sticky="w", pady=(6, 0))
+        self.coefficient_source_badges["pressure_a"] = self._create_source_badge(
+            coefficient_frame,
+            key="pressure_a",
+            registry=self.coefficient_source_badges,
+        )
+        self.coefficient_source_badges["pressure_a"].grid(row=1, column=2, sticky="e", padx=(8, 0), pady=(6, 0))
         ttk.Label(coefficient_frame, text="Basinc testi B").grid(row=2, column=0, sticky="w", pady=(6, 0))
         ttk.Label(
             coefficient_frame,
             textvariable=self.coefficient_status_vars["pressure_b"],
             foreground="#8A6D3B",
         ).grid(row=2, column=1, sticky="w", pady=(6, 0))
+        self.coefficient_source_badges["pressure_b"] = self._create_source_badge(
+            coefficient_frame,
+            key="pressure_b",
+            registry=self.coefficient_source_badges,
+        )
+        self.coefficient_source_badges["pressure_b"].grid(row=2, column=2, sticky="e", padx=(8, 0), pady=(6, 0))
         ttk.Label(
             coefficient_frame,
             textvariable=self.helper_mode_summary_var,
@@ -943,6 +980,18 @@ class HydrostaticTestApp:
             wraplength=side_wrap,
         ).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
 
+        detail_frame = ttk.LabelFrame(status_tab, text="Detay Raporu", padding=12)
+        detail_frame.grid(row=2, column=0, sticky="nsew", pady=(12, 0))
+        detail_frame.columnconfigure(0, weight=1)
+        detail_frame.rowconfigure(0, weight=1)
+        self.detail_report_text = ScrolledText(detail_frame, height=18, wrap="word")
+        self.detail_report_text.grid(row=0, column=0, sticky="nsew")
+        self.detail_report_text.insert(
+            "end",
+            "Aktif sekmedeki girdi, katsayi ve karar detayi burada canli olarak gosterilecek.\n",
+        )
+        self.detail_report_text.configure(state="disabled")
+
         results_frame = ttk.LabelFrame(session_tab, text="Oturum Kaydi", padding=12)
         results_frame.grid(row=0, column=0, sticky="nsew")
         results_frame.columnconfigure(0, weight=1)
@@ -1001,11 +1050,17 @@ class HydrostaticTestApp:
             field_key="air.a_micro_per_bar",
             readonly=True,
         )
+        self.inline_coefficient_source_badges["air_a"] = self._create_source_badge(
+            conditions_frame,
+            key="air_a",
+            registry=self.inline_coefficient_source_badges,
+        )
+        self.inline_coefficient_source_badges["air_a"].grid(row=1, column=2, sticky="w", pady=6)
         ttk.Label(
             conditions_frame,
             textvariable=self.coefficient_status_vars["air_a"],
             foreground="#8A6D3B",
-        ).grid(row=1, column=2, columnspan=2, sticky="w", pady=6)
+        ).grid(row=1, column=3, sticky="w", pady=6)
         ttk.Label(conditions_frame, text="A secenegi").grid(row=2, column=0, sticky="w", pady=6)
         air_a_mode_combo = ttk.Combobox(
             conditions_frame,
@@ -1071,11 +1126,20 @@ class HydrostaticTestApp:
 
         actions_frame = ttk.Frame(frame)
         actions_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(14, 0))
-        self.air_a_calculate_button = ttk.Button(actions_frame, text="A Hesapla", command=self._calculate_air_a)
-        self.air_a_calculate_button.pack(side="left")
-        ttk.Button(actions_frame, text="Hava Testini Degerlendir", command=self._run_air_test).pack(
-            side="left", padx=(8, 0)
+        self.air_a_calculate_button = self._create_progress_button(
+            actions_frame,
+            key="air_a_calculate",
+            text="A Hesapla",
+            command=self._on_air_a_calculate_button,
         )
+        self.air_a_calculate_button.pack(side="left")
+        self.air_test_button = self._create_progress_button(
+            actions_frame,
+            key="air_test",
+            text="Hava Testini Degerlendir",
+            command=self._on_air_test_button,
+        )
+        self.air_test_button.pack(side="left", padx=(8, 0))
 
         self._register_help_note(ttk.Label(
             frame,
@@ -1137,16 +1201,28 @@ class HydrostaticTestApp:
             field_key="pressure.b_micro_per_c",
             column=2,
         )
+        self.inline_coefficient_source_badges["pressure_a"] = self._create_source_badge(
+            conditions_frame,
+            key="pressure_a",
+            registry=self.inline_coefficient_source_badges,
+        )
+        self.inline_coefficient_source_badges["pressure_a"].grid(row=2, column=0, sticky="w", pady=(0, 6))
         ttk.Label(
             conditions_frame,
             textvariable=self.coefficient_status_vars["pressure_a"],
             foreground="#8A6D3B",
-        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(0, 6))
+        ).grid(row=2, column=1, sticky="w", pady=(0, 6))
+        self.inline_coefficient_source_badges["pressure_b"] = self._create_source_badge(
+            conditions_frame,
+            key="pressure_b",
+            registry=self.inline_coefficient_source_badges,
+        )
+        self.inline_coefficient_source_badges["pressure_b"].grid(row=2, column=2, sticky="w", pady=(0, 6))
         ttk.Label(
             conditions_frame,
             textvariable=self.coefficient_status_vars["pressure_b"],
             foreground="#8A6D3B",
-        ).grid(row=2, column=2, columnspan=2, sticky="w", pady=(0, 6))
+        ).grid(row=2, column=3, sticky="w", pady=(0, 6))
         ttk.Label(conditions_frame, text="A secenegi").grid(row=3, column=0, sticky="w", pady=6)
         pressure_a_mode_combo = ttk.Combobox(
             conditions_frame,
@@ -1249,19 +1325,31 @@ class HydrostaticTestApp:
             field_key="helper.water_beta_micro_per_c",
             readonly=True,
         )
-        self.pressure_a_calculate_button = ttk.Button(helper_frame, text="A Hesapla", command=self._calculate_pressure_a)
+        self.pressure_a_calculate_button = self._create_progress_button(
+            helper_frame,
+            key="pressure_a_calculate",
+            text="A Hesapla",
+            command=self._on_pressure_a_calculate_button,
+        )
         self.pressure_a_calculate_button.grid(
             row=2, column=0, sticky="w", pady=6
         )
-        self.b_helper_calculate_button = ttk.Button(helper_frame, text="B Hesapla", command=self._calculate_b_helper)
+        self.b_helper_calculate_button = self._create_progress_button(
+            helper_frame,
+            key="pressure_b_calculate",
+            text="B Hesapla",
+            command=self._on_b_helper_calculate_button,
+        )
         self.b_helper_calculate_button.grid(
             row=2, column=1, sticky="w", pady=6
         )
-        ttk.Button(
+        self.pressure_test_button = self._create_progress_button(
             helper_frame,
+            key="pressure_test",
             text="Basinc Testini Degerlendir",
-            command=self._run_pressure_test,
-        ).grid(row=2, column=2, sticky="w", pady=6)
+            command=self._on_pressure_test_button,
+        )
+        self.pressure_test_button.grid(row=2, column=2, sticky="w", pady=6)
         self._register_help_note(ttk.Label(
             helper_frame,
             text=(
@@ -1396,9 +1484,13 @@ class HydrostaticTestApp:
             column=2,
             readonly=True,
         )
-        ttk.Button(pig_frame, text="Pig Hizini Hesapla", command=self._calculate_pig_speed).grid(
-            row=5, column=0, sticky="w", pady=6
+        self.pig_calculate_button = self._create_progress_button(
+            pig_frame,
+            key="pig_calculate",
+            text="Pig Hizini Hesapla",
+            command=self._on_pig_calculate_button,
         )
+        self.pig_calculate_button.grid(row=5, column=0, sticky="w", pady=6)
         ttk.Label(
             pig_frame,
             textvariable=self.pig_status_var,
@@ -1867,6 +1959,7 @@ class HydrostaticTestApp:
             except ValidationError as exc:
                 self.geometry_summary_var.set(f"Segment ozeti hazir degil: {exc}")
                 self._refresh_visual_schema()
+                self._refresh_detail_reports()
                 return
             self.geometry_summary_var.set(
                 "Segmentli geometri aktif. Esdeger ic yaricap = "
@@ -1874,6 +1967,7 @@ class HydrostaticTestApp:
                 f"toplam uzunluk = {geometry.total_length_m:.3f} m"
             )
             self._refresh_visual_schema()
+            self._refresh_detail_reports()
             return
         outside = self._safe_float(self.geometry_vars["outside_diameter_mm"].get())
         wall = self._safe_float(self.geometry_vars["wall_thickness_mm"].get())
@@ -1883,6 +1977,7 @@ class HydrostaticTestApp:
                 "Geometri girildiginde ic cap, ic yaricap ve hacim ozeti burada gosterilir."
             )
             self._refresh_visual_schema()
+            self._refresh_detail_reports()
             return
         try:
             pipe = PipeSection(
@@ -1893,6 +1988,7 @@ class HydrostaticTestApp:
         except ValidationError as exc:
             self.geometry_summary_var.set(f"Geometri ozeti hazir degil: {exc}")
             self._refresh_visual_schema()
+            self._refresh_detail_reports()
             return
         internal_diameter_mm = pipe.internal_radius_mm * 2
         self.geometry_summary_var.set(
@@ -1901,6 +1997,7 @@ class HydrostaticTestApp:
             f"ic hacim Vt = {pipe.internal_volume_m3:.6f} m3"
         )
         self._refresh_visual_schema()
+        self._refresh_detail_reports()
 
     def _on_coefficient_field_changed(self, key: str, variable: tk.StringVar) -> None:
         if key in self._programmatic_coefficient_updates:
@@ -1913,9 +2010,11 @@ class HydrostaticTestApp:
         self.coefficient_status_vars["air_a"].set(self._coefficient_status_text("air_a"))
         self.coefficient_status_vars["pressure_a"].set(self._coefficient_status_text("pressure_a"))
         self.coefficient_status_vars["pressure_b"].set(self._coefficient_status_text("pressure_b"))
+        self._refresh_coefficient_source_badges()
         self._sync_coefficient_field_messages()
         self._update_workflow_hint()
         self._refresh_visual_schema()
+        self._refresh_detail_reports()
 
     def _coefficient_status_text(self, key: str) -> str:
         state = self.coefficient_states[key]
@@ -1928,6 +2027,36 @@ class HydrostaticTestApp:
         if state == "manual":
             return "Hazir: manuel giris"
         return "Bekleniyor"
+
+    def _coefficient_source_text(self, key: str) -> str:
+        state = self.coefficient_states[key]
+        if state == "computed":
+            return "HESAP"
+        if state == "reference":
+            return "REFERANS"
+        if state == "manual":
+            return "MANUEL"
+        if state == "stale":
+            return "YENILE"
+        return "BEKLIYOR"
+
+    def _refresh_coefficient_source_badges(self) -> None:
+        palette = {
+            "computed": ("#EAF7EA", "#1D5F2F"),
+            "reference": ("#EAF2FF", "#1E4E8C"),
+            "manual": ("#FFF6E5", "#8A5B00"),
+            "stale": ("#FDEAEA", "#8B1E1E"),
+            "empty": ("#EEF2FF", "#243B73"),
+        }
+        all_badges = (self.coefficient_source_badges, self.inline_coefficient_source_badges)
+        for key, variable in self.coefficient_source_vars.items():
+            state = self.coefficient_states.get(key, "empty")
+            variable.set(self._coefficient_source_text(key))
+            bg, fg = palette.get(state, palette["empty"])
+            for badge_registry in all_badges:
+                badge = badge_registry.get(key)
+                if badge is not None:
+                    badge.configure(bg=bg, fg=fg)
 
     def _sync_coefficient_field_messages(self) -> None:
         mapping = {
@@ -2052,6 +2181,150 @@ class HydrostaticTestApp:
         key = getattr(info, "key", "")
         return f"{label} [{key}]"
 
+    def _create_source_badge(
+        self,
+        parent: tk.Misc,
+        *,
+        key: str,
+        registry: dict[str, tk.Label],
+    ) -> tk.Label:
+        label = tk.Label(
+            parent,
+            textvariable=self.coefficient_source_vars[key],
+            bg="#EEF2FF",
+            fg="#243B73",
+            padx=8,
+            pady=3,
+            font=("Segoe UI", 8, "bold"),
+        )
+        registry[key] = label
+        return label
+
+    def _create_progress_button(
+        self,
+        parent: tk.Misc,
+        *,
+        key: str,
+        text: str,
+        command: object,
+    ) -> tk.Button:
+        button = tk.Button(
+            parent,
+            text=text,
+            command=command,
+            bg="#EEF2FF",
+            fg="#243B73",
+            activebackground="#DCE7FF",
+            activeforeground="#243B73",
+            relief="flat",
+            bd=0,
+            padx=12,
+            pady=6,
+            cursor="hand2",
+            font=("Segoe UI", 9, "bold"),
+        )
+        self.progress_buttons[key] = button
+        self.progress_button_idle_texts[key] = text
+        return button
+
+    def _set_progress_button_idle_text(self, key: str, text: str) -> None:
+        self.progress_button_idle_texts[key] = text
+        if key not in self.progress_button_busy:
+            button = self.progress_buttons.get(key)
+            if button is not None:
+                button.configure(text=text)
+
+    def _apply_progress_button_appearance(self, key: str, state: str, text: str | None = None) -> None:
+        button = self.progress_buttons.get(key)
+        if button is None:
+            return
+        palette = {
+            "idle": ("#EEF2FF", "#243B73"),
+            "working": ("#FFF6E5", "#8A5B00"),
+            "success": ("#EAF7EA", "#1D5F2F"),
+            "warning": ("#FFF6E5", "#8A5B00"),
+            "error": ("#FDEAEA", "#8B1E1E"),
+            "info": ("#EAF2FF", "#1E4E8C"),
+        }
+        bg, fg = palette.get(state, palette["idle"])
+        target_text = text if text is not None else self.progress_button_idle_texts.get(key, button.cget("text"))
+        button.configure(
+            text=target_text,
+            bg=bg,
+            fg=fg,
+            activebackground=bg,
+            activeforeground=fg,
+        )
+
+    def _reset_progress_button(self, key: str) -> None:
+        self.progress_button_busy.discard(key)
+        self.progress_button_reset_jobs.pop(key, None)
+        self._apply_progress_button_appearance(key, "idle")
+
+    def _finish_progress_button(self, key: str, state: str) -> None:
+        button = self.progress_buttons.get(key)
+        if button is None:
+            return
+        idle_text = self.progress_button_idle_texts.get(key, button.cget("text"))
+        suffix = {
+            "success": "Tamam",
+            "warning": "Kontrol Et",
+            "error": "Hata",
+            "info": "Bilgi",
+        }.get(state)
+        display_text = idle_text if suffix is None else f"{idle_text} - {suffix}"
+        self._apply_progress_button_appearance(key, state, display_text)
+        existing_job = self.progress_button_reset_jobs.pop(key, None)
+        if existing_job is not None:
+            self.root.after_cancel(existing_job)
+        self.progress_button_reset_jobs[key] = self.root.after(1400, lambda: self._reset_progress_button(key))
+
+    def _execute_progress_button_action(
+        self,
+        key: str,
+        action: object,
+        *,
+        result_state_resolver: object,
+        working_text: str | None = None,
+    ) -> object:
+        if key in self.progress_button_busy:
+            return None
+        self.progress_button_busy.add(key)
+        idle_text = self.progress_button_idle_texts.get(key, "")
+        self._apply_progress_button_appearance(key, "working", working_text or f"{idle_text}...")
+        self.root.update_idletasks()
+        try:
+            result = action()
+        except Exception:
+            self._finish_progress_button(key, "error")
+            raise
+        state = result_state_resolver(result)
+        self._finish_progress_button(key, state)
+        return result
+
+    def _bool_progress_state(self, result: object) -> str:
+        return "success" if result else "error"
+
+    def _decision_progress_state(self, _: object = None) -> str:
+        status = self.decision_status_var.get().strip()
+        if status == "BASARILI":
+            return "success"
+        if status == "BASARISIZ":
+            return "warning"
+        if status == "DOGRULANAMADI":
+            return "error"
+        return "info"
+
+    def _pig_progress_state(self, result: object) -> str:
+        if not result:
+            return "error"
+        status = self.pig_status_var.get().strip()
+        if "UYGUN" in status:
+            return "success"
+        if "LIMIT ASILDI" in status:
+            return "warning"
+        return "info"
+
     def _default_water_backend_option_label(self) -> str:
         return self._format_backend_option_label(get_default_water_property_backend().info)
 
@@ -2088,6 +2361,358 @@ class HydrostaticTestApp:
             )
         return "Bu sekmede kurum ici A/B kontrol tablosu kullanilmaz."
 
+    def _default_detail_report_text(self, section: str) -> str:
+        if section == "air":
+            return (
+                "Hava Icerik Testi - Detay Raporu\n\n"
+                "Geometri, A katsayisi ve karar hesabinda kullanilan terimler burada canli olarak gosterilir."
+            )
+        if section == "pressure":
+            return (
+                "Basinc Degisim Testi - Detay Raporu\n\n"
+                "A/B katsayilarinin kaynagi ile karar hesabinda kullanilan tum degerler burada canli olarak gosterilir."
+            )
+        return (
+            "Saha Kontrol - Detay Raporu\n\n"
+            "Kontrol noktasi ozeti ve pig hiz hesabi burada canli olarak gosterilir."
+        )
+
+    def _format_detail_value(self, variable: tk.StringVar, unit: str = "") -> str:
+        value = self._format_var_value(variable)
+        if value == "-" or not unit:
+            return value
+        return f"{value} {unit}"
+
+    def _detail_numeric_issue(self, variable: tk.StringVar, label: str) -> str | None:
+        raw_value = variable.get().strip()
+        if not raw_value:
+            return f"{label} bekleniyor"
+        if self._safe_float(raw_value) is None:
+            return f"{label} gecersiz"
+        return None
+
+    def _detail_pipe_snapshot(self) -> tuple[PipeSection | PipeGeometry | None, str | None]:
+        if self.geometry_segments:
+            try:
+                return (
+                    PipeGeometry(
+                        sections=tuple(segment_info["pipe"] for segment_info in self.geometry_segments)  # type: ignore[arg-type]
+                    ),
+                    None,
+                )
+            except ValidationError as exc:
+                return None, str(exc)
+
+        issues = [
+            issue
+            for issue in (
+                self._detail_numeric_issue(self.geometry_vars["outside_diameter_mm"], "Dis cap"),
+                self._detail_numeric_issue(self.geometry_vars["wall_thickness_mm"], "Et kalinligi"),
+                self._detail_numeric_issue(self.geometry_vars["length_m"], "Hat uzunlugu"),
+            )
+            if issue is not None
+        ]
+        if issues:
+            return None, ", ".join(issues)
+
+        outside = self._safe_float(self.geometry_vars["outside_diameter_mm"].get())
+        wall = self._safe_float(self.geometry_vars["wall_thickness_mm"].get())
+        length = self._safe_float(self.geometry_vars["length_m"].get())
+        if outside is None or wall is None or length is None:
+            return None, "Geometri hazir degil."
+        try:
+            return (
+                PipeSection(
+                    outside_diameter_mm=outside,
+                    wall_thickness_mm=wall,
+                    length_m=length,
+                ),
+                None,
+            )
+        except ValidationError as exc:
+            return None, str(exc)
+
+    def _coefficient_origin_text(self, key: str) -> str:
+        backend_label = self._selected_water_backend_info().label
+        state = self.coefficient_states[key]
+        if key == "air_a":
+            if state == "computed":
+                return f"Program hesabi ({backend_label} backend'i)."
+            if state == "reference":
+                reference_label = self.air_a_reference_var.get().strip() or "referans secilmedi"
+                return f"Referans nokta: {reference_label}."
+            if state == "manual":
+                return "Kullanici girdisi / manuel tablo-prosedur."
+            if state == "stale":
+                return "Mevcut deger var ama kosullar degistigi icin yeniden dogrulanmali."
+            return "Hazir degil; secili moda gore A degeri bekleniyor."
+        if key == "pressure_a":
+            if state == "computed":
+                return f"Program hesabi ({backend_label} backend'i)."
+            if state == "reference":
+                reference_label = self.pressure_a_reference_var.get().strip() or "referans secilmedi"
+                return f"Referans nokta: {reference_label}."
+            if state == "manual":
+                return "Kullanici girdisi / manuel tablo-prosedur."
+            if state == "stale":
+                return "Mevcut deger var ama kosullar degistigi icin yeniden dogrulanmali."
+            return "Hazir degil; secili moda gore A degeri bekleniyor."
+        if state == "computed":
+            return f"Program hesabi (su beta - celik alpha, backend: {backend_label})."
+        if state == "reference":
+            reference_label = self.pressure_b_reference_var.get().strip() or "referans secilmedi"
+            return f"Referans B noktasi: {reference_label} + celik alpha."
+        if state == "manual":
+            return "Kullanici girdisi / manuel tablo-prosedur."
+        if state == "stale":
+            return "Mevcut deger var ama helper kosullari degistigi icin yeniden dogrulanmali."
+        if self.use_b_helper_var.get():
+            return "Hazir degil; B helper veya referans noktasi ile olusturulmayi bekliyor."
+        return "Hazir degil; kullanici tarafindan manuel B degeri bekleniyor."
+
+    def _sync_detail_report_summary(self) -> None:
+        active_tab = self._active_tab_key()
+        if active_tab == "air":
+            detail_text = self.air_detail_report_var.get() or self._default_detail_report_text("air")
+        elif active_tab == "pressure":
+            detail_text = self.pressure_detail_report_var.get() or self._default_detail_report_text("pressure")
+        else:
+            detail_text = self.field_detail_report_var.get() or self._default_detail_report_text("field")
+        self.active_detail_report_var.set(detail_text)
+        self._render_active_detail_report()
+
+    def _render_active_detail_report(self) -> None:
+        if not hasattr(self, "detail_report_text"):
+            return
+        self.detail_report_text.configure(state="normal")
+        self.detail_report_text.delete("1.0", "end")
+        self.detail_report_text.insert("end", self.active_detail_report_var.get())
+        self.detail_report_text.configure(state="disabled")
+
+    def _refresh_detail_reports(self) -> None:
+        self.air_detail_report_var.set(self._build_air_detail_report())
+        self.pressure_detail_report_var.set(self._build_pressure_detail_report())
+        self.field_detail_report_var.set(self._build_field_detail_report())
+        self._sync_detail_report_summary()
+
+    def _build_air_detail_report(self) -> str:
+        lines = [
+            "Hava Icerik Testi - Detay Raporu",
+            "",
+            "Katsayi Durumu",
+            f"A modu: {self.air_a_mode_var.get().strip()}",
+            f"A durum: {self.coefficient_status_vars['air_a'].get()}",
+            f"A kaynagi: {self._coefficient_origin_text('air_a')}",
+            f"A degeri: {self._format_detail_value(self.air_vars['a_micro_per_bar'], '(10^-6 / bar)')}",
+            f"Su backend'i: {self._selected_water_backend_info().label}",
+            f"Backend karsilastirmasi: {self.air_backend_comparison_var.get()}",
+            f"Kontrol tablosu: {self.air_control_table_var.get()}",
+            "",
+            "Kullanici Girdileri",
+            f"Su sicakligi: {self._format_detail_value(self.air_vars['temperature_c'], 'degC')} (kullanici girdisi)",
+            f"Su basinci: {self._format_detail_value(self.air_vars['pressure_bar'], 'bar')} (kullanici girdisi)",
+            f"Basinc artisi P: {self._format_detail_value(self.air_vars['pressure_rise_bar'], 'bar')} (kullanici girdisi)",
+            f"K faktor: {self._format_var_value(self.air_vars['k_factor'])} (kullanici girdisi)",
+            f"Fiili ilave su Vpa: {self._format_detail_value(self.air_vars['actual_added_water_m3'], 'm3')} (kullanici girdisi)",
+            "",
+            "Geometri",
+            f"Ozet: {self.geometry_summary_var.get()}",
+        ]
+        if self.geometry_segments:
+            lines.append(f"Segment ozeti: {self.segment_summary_var.get()}")
+
+        lines.extend(
+            [
+                "",
+                "Degerlendirme Temeli",
+                "Karar kurali: Vpa <= 1.06 x Vp",
+            ]
+        )
+
+        pipe, pipe_error = self._detail_pipe_snapshot()
+        issues = [
+            issue
+            for issue in (
+                pipe_error,
+                self._detail_numeric_issue(self.air_vars["a_micro_per_bar"], "A degeri"),
+                self._detail_numeric_issue(self.air_vars["pressure_rise_bar"], "Basinc artisi P"),
+                self._detail_numeric_issue(self.air_vars["k_factor"], "K faktor"),
+                self._detail_numeric_issue(self.air_vars["actual_added_water_m3"], "Fiili ilave su Vpa"),
+            )
+            if issue is not None
+        ]
+        if self.coefficient_states["air_a"] == "stale":
+            issues.append("A katsayisi guncellenmeli")
+        if issues:
+            lines.append("Degerlendirme hazir degil: " + ", ".join(issues) + ".")
+            return "\n".join(lines)
+
+        assert pipe is not None
+        a_value = self._safe_float(self.air_vars["a_micro_per_bar"].get())
+        pressure_rise = self._safe_float(self.air_vars["pressure_rise_bar"].get())
+        k_factor = self._safe_float(self.air_vars["k_factor"].get())
+        actual_added_water = self._safe_float(self.air_vars["actual_added_water_m3"].get())
+        if (
+            a_value is None
+            or pressure_rise is None
+            or k_factor is None
+            or actual_added_water is None
+        ):
+            lines.append("Degerlendirme hazir degil: sayisal girdiler tamamlanmadi.")
+            return "\n".join(lines)
+
+        try:
+            inputs = AirContentInputs(
+                pipe=pipe,
+                a_micro_per_bar=a_value,
+                pressure_rise_bar=pressure_rise,
+                k_factor=k_factor,
+                actual_added_water_m3=actual_added_water,
+            )
+            result = evaluate_air_content_test(inputs)
+        except ValidationError as exc:
+            lines.append(f"Degerlendirme hazir degil: {exc}")
+            return "\n".join(lines)
+
+        deformation_term = pipe.elasticity_term + inputs.a_micro_per_bar
+        lines.extend(
+            [
+                f"Boru elastisite terimi (0.884 x ri / s): {pipe.elasticity_term:.6f}",
+                f"Toplam deformasyon terimi ((0.884 x ri / s) + A): {deformation_term:.6f}",
+                f"Program hesabi Vp: {result.theoretical_added_water_m3:.6f} m3",
+                f"Kabul siniri (1.06 x Vp): {result.acceptance_limit_m3:.6f} m3",
+                f"Kullanici girdisi Vpa: {result.actual_added_water_m3:.6f} m3",
+                f"Oran (Vpa / Vp): {result.ratio:.6f}",
+                f"Anlik sonuc: {'BASARILI' if result.passed else 'BASARISIZ'}",
+            ]
+        )
+        return "\n".join(lines)
+
+    def _build_pressure_detail_report(self) -> str:
+        lines = [
+            "Basinc Degisim Testi - Detay Raporu",
+            "",
+            "Katsayi Durumu",
+            f"A modu: {self.pressure_a_mode_var.get().strip()}",
+            f"A durum: {self.coefficient_status_vars['pressure_a'].get()}",
+            f"A kaynagi: {self._coefficient_origin_text('pressure_a')}",
+            f"A degeri: {self._format_detail_value(self.pressure_vars['a_micro_per_bar'], '(10^-6 / bar)')}",
+            f"B modu: {self.pressure_b_mode_var.get().strip()}",
+            f"B durum: {self.coefficient_status_vars['pressure_b'].get()}",
+            f"B kaynagi: {self._coefficient_origin_text('pressure_b')}",
+            f"B degeri: {self._format_detail_value(self.pressure_vars['b_micro_per_c'], '(10^-6 / degC)')}",
+            f"B helper modu: {'Acik' if self.use_b_helper_var.get() else 'Kapali'}",
+            f"Celik alpha: {self._format_detail_value(self.b_helper_vars['steel_alpha_micro_per_c'], '(10^-6 / degC)')}",
+            f"Su beta: {self._format_detail_value(self.b_helper_vars['water_beta_micro_per_c'], '(10^-6 / degC)')}",
+            f"Su backend'i: {self._selected_water_backend_info().label}",
+            f"Backend karsilastirmasi: {self.pressure_backend_comparison_var.get()}",
+            f"Kontrol tablosu: {self.pressure_control_table_var.get()}",
+            "",
+            "Kullanici Girdileri",
+            f"Su sicakligi: {self._format_detail_value(self.pressure_vars['temperature_c'], 'degC')} (kullanici girdisi)",
+            f"Su basinci: {self._format_detail_value(self.pressure_vars['pressure_bar'], 'bar')} (kullanici girdisi)",
+            f"dT = Tilk - Tson: {self._format_detail_value(self.pressure_vars['delta_t_c'], 'degC')} (kullanici girdisi)",
+            f"Pa = Pilk - Pson: {self._format_detail_value(self.pressure_vars['actual_pressure_change_bar'], 'bar')} (kullanici girdisi)",
+            "",
+            "Geometri",
+            f"Ozet: {self.geometry_summary_var.get()}",
+        ]
+        if self.geometry_segments:
+            lines.append(f"Segment ozeti: {self.segment_summary_var.get()}")
+
+        lines.extend(
+            [
+                "",
+                "Degerlendirme Temeli",
+                "Karar kurali: (Pa - Pt) <= 0.3 bar",
+                "Formul: Pt = (B x dT) / ((0.884 x ri / s) + A)",
+            ]
+        )
+
+        pipe, pipe_error = self._detail_pipe_snapshot()
+        issues = [
+            issue
+            for issue in (
+                pipe_error,
+                self._detail_numeric_issue(self.pressure_vars["a_micro_per_bar"], "A degeri"),
+                self._detail_numeric_issue(self.pressure_vars["b_micro_per_c"], "B degeri"),
+                self._detail_numeric_issue(self.pressure_vars["delta_t_c"], "dT"),
+                self._detail_numeric_issue(self.pressure_vars["actual_pressure_change_bar"], "Pa"),
+            )
+            if issue is not None
+        ]
+        if self.coefficient_states["pressure_a"] == "stale":
+            issues.append("A katsayisi guncellenmeli")
+        if self.coefficient_states["pressure_b"] == "stale":
+            issues.append("B katsayisi guncellenmeli")
+        if issues:
+            lines.append("Degerlendirme hazir degil: " + ", ".join(issues) + ".")
+            return "\n".join(lines)
+
+        assert pipe is not None
+        a_value = self._safe_float(self.pressure_vars["a_micro_per_bar"].get())
+        b_value = self._safe_float(self.pressure_vars["b_micro_per_c"].get())
+        delta_t = self._safe_float(self.pressure_vars["delta_t_c"].get())
+        actual_pressure_change = self._safe_float(self.pressure_vars["actual_pressure_change_bar"].get())
+        if (
+            a_value is None
+            or b_value is None
+            or delta_t is None
+            or actual_pressure_change is None
+        ):
+            lines.append("Degerlendirme hazir degil: sayisal girdiler tamamlanmadi.")
+            return "\n".join(lines)
+
+        try:
+            inputs = PressureVariationInputs(
+                pipe=pipe,
+                a_micro_per_bar=a_value,
+                b_micro_per_c=b_value,
+                delta_t_c=delta_t,
+                actual_pressure_change_bar=actual_pressure_change,
+            )
+            result = evaluate_pressure_variation_test(inputs)
+        except ValidationError as exc:
+            lines.append(f"Degerlendirme hazir degil: {exc}")
+            return "\n".join(lines)
+
+        deformation_term = pipe.elasticity_term + inputs.a_micro_per_bar
+        lines.extend(
+            [
+                f"Boru elastisite terimi (0.884 x ri / s): {pipe.elasticity_term:.6f}",
+                f"Toplam deformasyon terimi ((0.884 x ri / s) + A): {deformation_term:.6f}",
+                f"Program hesabi Pt: {result.theoretical_pressure_change_bar:.6f} bar",
+                f"Ust kabul siniri (Pt + 0.3): {result.allowable_upper_pressure_change_bar:.6f} bar",
+                f"Kullanici girdisi Pa: {result.actual_pressure_change_bar:.6f} bar",
+                f"Fark (Pa - Pt): {result.margin_bar:.6f} bar",
+                f"Anlik sonuc: {'BASARILI' if result.passed else 'BASARISIZ'}",
+            ]
+        )
+        return "\n".join(lines)
+
+    def _build_field_detail_report(self) -> str:
+        lines = [
+            "Saha Kontrol - Detay Raporu",
+            "",
+            "Kontrol Noktalari",
+            self.check_summary_var.get(),
+        ]
+        lines.extend(self._checked_control_lines())
+        lines.extend(
+            [
+                "",
+                "Pig Hiz Hesabi",
+                f"Pig modu: {self.pig_mode_var.get().strip() or '-'}",
+                f"Mesafe: {self._format_detail_value(self.field_vars['pig_distance_m'], 'm')} (kullanici girdisi)",
+                f"Varis suresi: {self._format_detail_value(self.field_vars['pig_travel_time_min'], 'dakika')} (kullanici girdisi)",
+                f"Hiz (m/sn): {self._format_detail_value(self.field_vars['pig_speed_m_per_s'], 'm/sn')}",
+                f"Hiz (km/sa): {self._format_detail_value(self.field_vars['pig_speed_km_per_h'], 'km/sa')}",
+                f"Durum: {self.pig_status_var.get()}",
+                f"Ozet: {self.pig_summary_var.get()}",
+            ]
+        )
+        return "\n".join(lines)
+
     def _update_water_backend_summary(self) -> None:
         info = self._selected_water_backend_info()
         self.water_backend_summary_var.set(
@@ -2098,11 +2723,14 @@ class HydrostaticTestApp:
         active_tab = self._active_tab_key()
         if active_tab == "air":
             self.active_backend_comparison_var.set(self.air_backend_comparison_var.get())
+            self._sync_detail_report_summary()
             return
         if active_tab == "pressure":
             self.active_backend_comparison_var.set(self.pressure_backend_comparison_var.get())
+            self._sync_detail_report_summary()
             return
         self.active_backend_comparison_var.set(self._default_backend_comparison_text("field"))
+        self._sync_detail_report_summary()
 
     def _sync_control_table_summary(self) -> None:
         active_tab = self._active_tab_key()
@@ -2118,6 +2746,7 @@ class HydrostaticTestApp:
         self.air_control_table_var.set(self._build_air_control_table_summary())
         self.pressure_control_table_var.set(self._build_pressure_control_table_summary())
         self._sync_control_table_summary()
+        self._refresh_detail_reports()
 
     def _build_air_control_table_summary(self) -> str:
         temp_c = self._safe_float(self.air_vars["temperature_c"].get())
@@ -2312,6 +2941,7 @@ class HydrostaticTestApp:
         self._update_contextual_actions()
         self._sync_backend_comparison_summary()
         self._sync_control_table_summary()
+        self._sync_detail_report_summary()
         self._update_live_notice()
         self._refresh_visual_schema()
 
@@ -2378,15 +3008,15 @@ class HydrostaticTestApp:
     def _update_contextual_actions(self) -> None:
         active_tab = self._active_tab_key()
         if active_tab in {"air", "pressure"}:
-            self.run_selected_button.configure(text="Aktif Testi Degerlendir")
-            self.recalculate_button.configure(text="Katsayilari Yenile")
+            self._set_progress_button_idle_text("run_selected", "Aktif Testi Degerlendir")
+            self._set_progress_button_idle_text("recalculate", "Katsayilari Yenile")
             self.clear_form_button.configure(text="Aktif Formu Temizle")
             self.compare_backend_button.configure(
                 state="normal" if len(self.water_backend_infos) > 1 else "disabled"
             )
         else:
-            self.run_selected_button.configure(text="Pig Hizini Hesapla")
-            self.recalculate_button.configure(text="Kontrol Ozetini Yenile")
+            self._set_progress_button_idle_text("run_selected", "Pig Hizini Hesapla")
+            self._set_progress_button_idle_text("recalculate", "Kontrol Ozetini Yenile")
             self.clear_form_button.configure(text="Saha Formunu Temizle")
             self.compare_backend_button.configure(state="disabled")
 
@@ -2400,6 +3030,7 @@ class HydrostaticTestApp:
         )
         self._update_live_notice()
         self._refresh_visual_schema()
+        self._refresh_detail_reports()
 
     def _checked_control_lines(self) -> list[str]:
         lines: list[str] = []
@@ -2444,6 +3075,7 @@ class HydrostaticTestApp:
         )
         self._update_live_notice()
         self._refresh_visual_schema()
+        self._refresh_detail_reports()
 
     def _compare_active_backend(self) -> None:
         active_tab = self._active_tab_key()
@@ -2466,6 +3098,7 @@ class HydrostaticTestApp:
             self._set_banner(str(exc), "error")
             return
         self._sync_backend_comparison_summary()
+        self._refresh_detail_reports()
         self._append_result(title, summary)
         self._set_banner("Backend karsilastirmasi guncellendi.", "success")
 
@@ -2633,28 +3266,117 @@ class HydrostaticTestApp:
             widget.focus_set()
             widget.selection_range(0, "end")
 
-    def _run_selected_test(self) -> None:
+    def _on_air_a_calculate_button(self) -> object:
+        return self._execute_progress_button_action(
+            "air_a_calculate",
+            self._calculate_air_a,
+            result_state_resolver=self._bool_progress_state,
+        )
+
+    def _on_pressure_a_calculate_button(self) -> object:
+        return self._execute_progress_button_action(
+            "pressure_a_calculate",
+            self._calculate_pressure_a,
+            result_state_resolver=self._bool_progress_state,
+        )
+
+    def _on_b_helper_calculate_button(self) -> object:
+        return self._execute_progress_button_action(
+            "pressure_b_calculate",
+            self._calculate_b_helper,
+            result_state_resolver=self._bool_progress_state,
+        )
+
+    def _on_air_test_button(self) -> object:
+        return self._execute_progress_button_action(
+            "air_test",
+            self._run_air_test_impl,
+            result_state_resolver=self._decision_progress_state,
+        )
+
+    def _on_pressure_test_button(self) -> object:
+        return self._execute_progress_button_action(
+            "pressure_test",
+            self._run_pressure_test_impl,
+            result_state_resolver=self._decision_progress_state,
+        )
+
+    def _on_pig_calculate_button(self) -> object:
+        return self._execute_progress_button_action(
+            "pig_calculate",
+            self._calculate_pig_speed,
+            result_state_resolver=self._pig_progress_state,
+        )
+
+    def _run_air_test_impl(self) -> None:
+        self._run_air_test()
+
+    def _run_pressure_test_impl(self) -> None:
+        self._run_pressure_test()
+
+    def _run_selected_test(self) -> object:
         active_tab = self._active_tab_key()
         if active_tab == "air":
-            self._run_air_test()
+            return self._execute_progress_button_action(
+                "run_selected",
+                self._run_air_test_impl,
+                result_state_resolver=self._decision_progress_state,
+            )
+        if active_tab == "pressure":
+            return self._execute_progress_button_action(
+                "run_selected",
+                self._run_pressure_test_impl,
+                result_state_resolver=self._decision_progress_state,
+            )
+        return self._execute_progress_button_action(
+            "run_selected",
+            lambda: self._calculate_pig_speed(),
+            result_state_resolver=self._pig_progress_state,
+        )
+
+    def _run_selected_test_impl(self) -> None:
+        active_tab = self._active_tab_key()
+        if active_tab == "air":
+            self._run_air_test_impl()
         elif active_tab == "pressure":
-            self._run_pressure_test()
+            self._run_pressure_test_impl()
         else:
             self._calculate_pig_speed()
 
-    def _recalculate_active_coefficients(self) -> None:
+    def _recalculate_active_coefficients(self) -> object:
         active_tab = self._active_tab_key()
         if active_tab == "air":
-            self._calculate_air_a()
-            return
+            return self._execute_progress_button_action(
+                "recalculate",
+                self._calculate_air_a,
+                result_state_resolver=self._bool_progress_state,
+            )
         if active_tab == "pressure":
-            if self._calculate_pressure_a():
-                if self.use_b_helper_var.get():
-                    self._calculate_b_helper()
-            return
+            return self._execute_progress_button_action(
+                "recalculate",
+                self._recalculate_active_coefficients_impl,
+                result_state_resolver=self._bool_progress_state,
+            )
+        return self._execute_progress_button_action(
+            "recalculate",
+            self._recalculate_active_coefficients_impl,
+            result_state_resolver=self._pig_progress_state,
+        )
+
+    def _recalculate_active_coefficients_impl(self) -> bool:
+        active_tab = self._active_tab_key()
+        if active_tab == "air":
+            return self._calculate_air_a()
+        if active_tab == "pressure":
+            if not self._calculate_pressure_a():
+                return False
+            if self.use_b_helper_var.get():
+                return self._calculate_b_helper()
+            return True
         self._update_check_summary()
         if self.field_vars["pig_distance_m"].get().strip() and self.field_vars["pig_travel_time_min"].get().strip():
-            self._calculate_pig_speed(log_result=False)
+            return self._calculate_pig_speed(log_result=False)
+        return True
 
     def _clear_active_form(self) -> None:
         active_tab = self._active_tab_key()
@@ -3260,6 +3982,7 @@ class HydrostaticTestApp:
             self.pig_status_var.set("Pig hiz hesabi dogrulanamadi.")
             self.pig_summary_var.set(str(exc))
             self._set_banner(str(exc), "error")
+            self._refresh_detail_reports()
             return False
 
         self.field_vars["pig_speed_m_per_s"].set(f"{result.speed_m_per_s:.6f}")
@@ -3291,6 +4014,7 @@ class HydrostaticTestApp:
         self.pig_status_var.set(f"Pig hizi durumu: {status}")
         self.pig_summary_var.set(summary)
         self._set_banner("Pig hiz hesabi guncellendi.", banner_level)
+        self._refresh_detail_reports()
 
         if log_result:
             self._append_result(
