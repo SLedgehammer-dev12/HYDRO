@@ -11,6 +11,10 @@ $metadataPath = Join-Path $projectRoot "hidrostatik_test\app_metadata.py"
 $entryPoint = Join-Path $projectRoot "Hidrostatik_Test_Chat.py"
 $manifestPath = Join-Path $projectRoot "windows_manifest.xml"
 $releasePath = Join-Path $projectRoot "release"
+$abControlTableCsvPath = Join-Path $projectRoot "hidrostatik_test\data\ab_control_table_v1.csv"
+$abControlTableMetadataPath = Join-Path $projectRoot "hidrostatik_test\data\ab_control_table_v1.meta.json"
+$gailReferenceTableCsvPath = Join-Path $projectRoot "hidrostatik_test\data\gail_reference_table_v1.csv"
+$gailReferenceTableMetadataPath = Join-Path $projectRoot "hidrostatik_test\data\gail_reference_table_v1.meta.json"
 $waterPropertyCsvPath = Join-Path $projectRoot "hidrostatik_test\data\water_property_table_v1.csv"
 $waterPropertyMetadataPath = Join-Path $projectRoot "hidrostatik_test\data\water_property_table_v1.meta.json"
 
@@ -199,6 +203,10 @@ function Invoke-PyInstallerBuild {
         "--distpath", $attemptDistPath,
         "--workpath", $attemptBuildPath,
         "--specpath", $attemptBuildPath,
+        "--add-data", "$abControlTableCsvPath;hidrostatik_test\data",
+        "--add-data", "$abControlTableMetadataPath;hidrostatik_test\data",
+        "--add-data", "$gailReferenceTableCsvPath;hidrostatik_test\data",
+        "--add-data", "$gailReferenceTableMetadataPath;hidrostatik_test\data",
         "--add-data", "$waterPropertyCsvPath;hidrostatik_test\data",
         "--add-data", "$waterPropertyMetadataPath;hidrostatik_test\data",
         "--hidden-import", "CoolProp.CoolProp",
@@ -259,6 +267,18 @@ $env:PYTHONPYCACHEPREFIX = $compileScratchPath
 if (-not (Test-Path -LiteralPath $manifestPath)) {
     throw "Windows manifest bulunamadi: $manifestPath"
 }
+if (-not (Test-Path -LiteralPath $abControlTableCsvPath)) {
+    throw "BOTAŞ referans tablosu CSV dosyasi bulunamadi: $abControlTableCsvPath"
+}
+if (-not (Test-Path -LiteralPath $abControlTableMetadataPath)) {
+    throw "BOTAŞ referans tablosu metadata dosyasi bulunamadi: $abControlTableMetadataPath"
+}
+if (-not (Test-Path -LiteralPath $gailReferenceTableCsvPath)) {
+    throw "GAIL referans tablosu CSV dosyasi bulunamadi: $gailReferenceTableCsvPath"
+}
+if (-not (Test-Path -LiteralPath $gailReferenceTableMetadataPath)) {
+    throw "GAIL referans tablosu metadata dosyasi bulunamadi: $gailReferenceTableMetadataPath"
+}
 if (-not (Test-Path -LiteralPath $waterPropertyCsvPath)) {
     throw "Su ozelligi CSV dosyasi bulunamadi: $waterPropertyCsvPath"
 }
@@ -276,19 +296,27 @@ if (-not $SkipTests) {
     & $PythonExe -m py_compile `
         (Join-Path $projectRoot "Hidrostatik_Test_Chat.py") `
         (Join-Path $projectRoot "hidrostatik_test\app_metadata.py") `
+        (Join-Path $projectRoot "hidrostatik_test\data\ab_control_table.py") `
+        (Join-Path $projectRoot "hidrostatik_test\data\botas_reference_table.py") `
+        (Join-Path $projectRoot "hidrostatik_test\data\gail_reference_table.py") `
         (Join-Path $projectRoot "hidrostatik_test\data\coefficient_reference.py") `
         (Join-Path $projectRoot "hidrostatik_test\data\pipe_catalog.py") `
         (Join-Path $projectRoot "hidrostatik_test\data\water_property_table.py") `
         (Join-Path $projectRoot "hidrostatik_test\domain\hydrotest_core.py") `
         (Join-Path $projectRoot "hidrostatik_test\domain\operations.py") `
+        (Join-Path $projectRoot "hidrostatik_test\domain\pressure_profile.py") `
         (Join-Path $projectRoot "hidrostatik_test\domain\water_properties.py") `
         (Join-Path $projectRoot "hidrostatik_test\services\updater.py") `
         (Join-Path $projectRoot "hidrostatik_test\services\water_property_table_builder.py") `
         (Join-Path $projectRoot "hidrostatik_test\ui\app.py") `
         (Join-Path $projectRoot "tools\generate_water_property_table.py") `
+        (Join-Path $projectRoot "tests\test_ab_control_table.py") `
+        (Join-Path $projectRoot "tests\test_botas_reference_table.py") `
+        (Join-Path $projectRoot "tests\test_gail_reference_table.py") `
         (Join-Path $projectRoot "tests\test_hydrotest_core.py") `
         (Join-Path $projectRoot "tests\test_operations.py") `
         (Join-Path $projectRoot "tests\test_pipe_catalog.py") `
+        (Join-Path $projectRoot "tests\test_pressure_profile.py") `
         (Join-Path $projectRoot "tests\test_ui_workflow.py") `
         (Join-Path $projectRoot "tests\test_water_properties.py") `
         (Join-Path $projectRoot "tests\test_water_property_table.py") `
@@ -297,7 +325,7 @@ if (-not $SkipTests) {
         Write-Warning "py_compile adimi Windows dosya kilidi nedeniyle atlandi. Unit test ve import smoke check devam ediyor."
     }
 
-    & $PythonExe -c "import sys; sys.path.insert(0, r'$projectRoot'); import Hidrostatik_Test_Chat; import hidrostatik_test.app_metadata; import hidrostatik_test.domain.hydrotest_core; import hidrostatik_test.domain.water_properties; import hidrostatik_test.data.pipe_catalog; import hidrostatik_test.data.water_property_table; import hidrostatik_test.services.updater; import hidrostatik_test.services.water_property_table_builder; print('import-ok')"
+    & $PythonExe -c "import sys; sys.path.insert(0, r'$projectRoot'); import Hidrostatik_Test_Chat; import hidrostatik_test.app_metadata; import hidrostatik_test.domain.hydrotest_core; import hidrostatik_test.domain.pressure_profile; import hidrostatik_test.domain.water_properties; import hidrostatik_test.data.ab_control_table; import hidrostatik_test.data.botas_reference_table; import hidrostatik_test.data.gail_reference_table; import hidrostatik_test.data.pipe_catalog; import hidrostatik_test.data.water_property_table; import hidrostatik_test.services.updater; import hidrostatik_test.services.water_property_table_builder; print('import-ok')"
     if ($LASTEXITCODE -ne 0) {
         throw "Import smoke check basarisiz oldu."
     }
@@ -336,8 +364,24 @@ $windowsResourcesEmbedded = $buildResult.UsedWindowsResources
 if (-not (Test-Path -LiteralPath $exePath)) {
     throw "Beklenen exe olusmadi: $exePath"
 }
+$bundledAbControlTableCsvPath = Join-Path $distPath "$binaryName\_internal\hidrostatik_test\data\ab_control_table_v1.csv"
+$bundledAbControlTableMetadataPath = Join-Path $distPath "$binaryName\_internal\hidrostatik_test\data\ab_control_table_v1.meta.json"
+$bundledGailReferenceTableCsvPath = Join-Path $distPath "$binaryName\_internal\hidrostatik_test\data\gail_reference_table_v1.csv"
+$bundledGailReferenceTableMetadataPath = Join-Path $distPath "$binaryName\_internal\hidrostatik_test\data\gail_reference_table_v1.meta.json"
 $bundledWaterPropertyCsvPath = Join-Path $distPath "$binaryName\_internal\hidrostatik_test\data\water_property_table_v1.csv"
 $bundledWaterPropertyMetadataPath = Join-Path $distPath "$binaryName\_internal\hidrostatik_test\data\water_property_table_v1.meta.json"
+if (-not (Test-Path -LiteralPath $bundledAbControlTableCsvPath)) {
+    throw "Bundled A/B kontrol tablosu CSV dosyasi bulunamadi: $bundledAbControlTableCsvPath"
+}
+if (-not (Test-Path -LiteralPath $bundledAbControlTableMetadataPath)) {
+    throw "Bundled A/B kontrol tablosu metadata dosyasi bulunamadi: $bundledAbControlTableMetadataPath"
+}
+if (-not (Test-Path -LiteralPath $bundledGailReferenceTableCsvPath)) {
+    throw "Bundled GAIL referans tablosu CSV dosyasi bulunamadi: $bundledGailReferenceTableCsvPath"
+}
+if (-not (Test-Path -LiteralPath $bundledGailReferenceTableMetadataPath)) {
+    throw "Bundled GAIL referans tablosu metadata dosyasi bulunamadi: $bundledGailReferenceTableMetadataPath"
+}
 if (-not (Test-Path -LiteralPath $bundledWaterPropertyCsvPath)) {
     throw "Bundled su ozelligi CSV dosyasi bulunamadi: $bundledWaterPropertyCsvPath"
 }

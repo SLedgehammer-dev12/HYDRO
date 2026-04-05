@@ -67,13 +67,16 @@ Mevcut kod:
 - `Saha Kontrol` sekmesinde kritik uygulama kontrol noktalarini checklist olarak izletir
 - Pig hizi hesaplayip secili sartname limitine gore asim kontrolu yapar
 - A ve B katsayilari icin otomatik, manuel ve referans modlari sunar
+- `BOTAS referans tablosu` ve `GAIL referans tablosu` seceneklerini tablo modunda ayri veri kaynaklari olarak sunar
 - A ve B icin backend soyutlamasi ile gelecekte dagitima uygun ikinci dogrulama motoru eklenmesine hazirdir
 - `table_v1` backend ile offline uretilen CSV grid uzerinden interpolasyon yapabilir
 - Kurum ici `A/B` kontrol tablosu ile hesaplanan katsayilari ayni noktada karsilastirabilir
 - Segmentli geometri modelini destekler
+- API 5L PSL2 malzeme secimi ile SMYS degerini otomatik atar ve basinc penceresini buna gore hesaplar
+- Canli basinc kontrolu, kot semasi ve 5007 tek kesit limit uyari mantigina sahiptir
 - Windows self-update akisina sahiptir
 - `HYDRO` repo ayrisma gecisi icin legacy `Programlar` release kaynagina fallback destekler
-- 66 otomatik test ile dogrulanir
+- 120 otomatik test ile dogrulanir
 
 Mevcut kod henuz sunlari tam modellememektedir:
 

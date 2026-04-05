@@ -134,7 +134,7 @@ def load_ab_control_table(
     if not csv_path.exists():
         raise FileNotFoundError(f"A/B kontrol tablosu CSV dosyasi bulunamadi: {csv_path}")
 
-    with metadata_path.open("r", encoding="utf-8") as handle:
+    with metadata_path.open("r", encoding="utf-8-sig") as handle:
         metadata = json.load(handle)
 
     spec = ABControlTableSpec(
@@ -159,7 +159,7 @@ def load_ab_control_table(
         for temperature in temperature_points
     }
 
-    with csv_path.open("r", encoding="utf-8", newline="") as handle:
+    with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         if tuple(reader.fieldnames or ()) != spec.csv_columns:
             raise ValueError("A/B kontrol tablosu CSV kolonlari beklenen sema ile uyusmuyor.")

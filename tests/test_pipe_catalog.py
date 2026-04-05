@@ -3,8 +3,10 @@ from __future__ import annotations
 import unittest
 
 from hidrostatik_test.data.pipe_catalog import (
+    find_api_5l_psl2_grade,
     find_pipe_size,
     find_schedule,
+    get_api_5l_psl2_grade_options,
     get_pipe_size_options,
     get_schedule_options,
 )
@@ -37,6 +39,15 @@ class PipeCatalogTests(unittest.TestCase):
         self.assertIn("WT 8.74 mm (B36.10)", options)
         self.assertIn("Sch STD - 9.53 mm", options)
         self.assertIn("Sch XS - 12.70 mm", options)
+
+    def test_api_5l_psl2_grade_lookup_returns_smys(self) -> None:
+        option = next(option for option in get_api_5l_psl2_grade_options() if "X65 / L450" in option)
+        grade = find_api_5l_psl2_grade(option)
+
+        self.assertIsNotNone(grade)
+        assert grade is not None
+        self.assertEqual(grade["grade"], "X65")
+        self.assertEqual(grade["smys_mpa"], 450.0)
 
 
 if __name__ == "__main__":

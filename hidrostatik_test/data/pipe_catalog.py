@@ -18,7 +18,25 @@ Source used to derive this embedded table:
 This table covers NPS 1/8 through NPS 80. It is provided for software
 convenience and should still be validated against the licensed ASME
 B36.10/B36.10M standard or company procedure before field use.
+
+API 5L PSL2 grade-to-SMYS mappings embedded below were derived from the
+publicly mirrored API 5L 43rd edition mechanical property table for Grades
+B, X42, X46, X52, X56, X60, X65, X70, and X80. These values are used in MPa
+and should be checked against the project material specification before final
+field acceptance.
 """
+
+API_5L_PSL2_GRADES = (
+    {"grade": "Grade B", "iso_label": "L245", "smys_mpa": 245.0},
+    {"grade": "X42", "iso_label": "L290", "smys_mpa": 290.0},
+    {"grade": "X46", "iso_label": "L320", "smys_mpa": 320.0},
+    {"grade": "X52", "iso_label": "L360", "smys_mpa": 360.0},
+    {"grade": "X56", "iso_label": "L390", "smys_mpa": 390.0},
+    {"grade": "X60", "iso_label": "L415", "smys_mpa": 415.0},
+    {"grade": "X65", "iso_label": "L450", "smys_mpa": 450.0},
+    {"grade": "X70", "iso_label": "L485", "smys_mpa": 485.0},
+    {"grade": "X80", "iso_label": "L555", "smys_mpa": 555.0},
+)
 
 PIPE_CATALOG = [{'nps': '1/8',
   'dn': '6',
@@ -1003,6 +1021,13 @@ def _format_schedule_option(schedule: dict) -> str:
     return f"WT {wall:.2f} mm (B36.10)"
 
 
+def _format_api_5l_psl2_grade_option(grade_spec: dict) -> str:
+    return (
+        f"API 5L PSL2 {grade_spec['grade']} / {grade_spec['iso_label']} - "
+        f"SMYS {grade_spec['smys_mpa']:.0f} MPa"
+    )
+
+
 def get_pipe_size_options() -> list[str]:
     return [f"NPS {item['nps']} (DN {item['dn']}) - OD {item['outside_diameter_mm']:.2f} mm" for item in PIPE_CATALOG]
 
@@ -1029,4 +1054,15 @@ def find_schedule(option_label: str, schedule_label: str) -> dict | None:
     for schedule in item['schedules']:
         if _format_schedule_option(schedule) == schedule_label:
             return schedule
+    return None
+
+
+def get_api_5l_psl2_grade_options() -> list[str]:
+    return [_format_api_5l_psl2_grade_option(item) for item in API_5L_PSL2_GRADES]
+
+
+def find_api_5l_psl2_grade(option_label: str) -> dict | None:
+    for item in API_5L_PSL2_GRADES:
+        if _format_api_5l_psl2_grade_option(item) == option_label:
+            return item
     return None

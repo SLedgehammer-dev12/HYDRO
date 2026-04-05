@@ -6,6 +6,10 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[
+        ('hidrostatik_test/data/ab_control_table_v1.csv', 'hidrostatik_test/data'),
+        ('hidrostatik_test/data/ab_control_table_v1.meta.json', 'hidrostatik_test/data'),
+        ('hidrostatik_test/data/gail_reference_table_v1.csv', 'hidrostatik_test/data'),
+        ('hidrostatik_test/data/gail_reference_table_v1.meta.json', 'hidrostatik_test/data'),
         ('hidrostatik_test/data/water_property_table_v1.csv', 'hidrostatik_test/data'),
         ('hidrostatik_test/data/water_property_table_v1.meta.json', 'hidrostatik_test/data'),
     ],

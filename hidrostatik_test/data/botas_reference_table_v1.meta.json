@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "table_key": "botas_reference_table_2c_10bar_v1",
+  "interpolation_method": "bilinear",
+  "temperature_axis": {
+    "key": "temp_c",
+    "unit": "degC",
+    "minimum": 2.0,
+    "maximum": 30.0,
+    "step": 2.0,
+    "count": 15
+  },
+  "pressure_axis": {
+    "key": "pressure_bar",
+    "unit": "bar",
+    "minimum": 30.0,
+    "maximum": 120.0,
+    "step": 10.0,
+    "count": 10
+  },
+  "csv_columns": [
+    "temp_c",
+    "pressure_bar",
+    "a_micro_per_bar",
+    "b_micro_per_c"
+  ],
+  "a_unit": "10^-6 / bar",
+  "b_unit": "10^-6 / degC",
+  "source_name": "BOTAŞ referans tablosu",
+  "generated_at_utc": "2026-04-05T00:00:00+00:00",
+  "row_count": 150,
+  "notes": [
+    "Kaynak aile GAIL-STD-PL-DOC-TS-012 Table-1 ve Fig.1 uzerinden turetilmistir.",
+    "A degerleri Fig.1 chart digitization ile tahmini olarak cikartilmistir.",
+    "B degerleri Table-1 text extraction ile exact olarak alinmistir.",
+    "Runtime kullaniminda B, dogrudan tablo degeri olarak sunulur; beta minus steel alpha seklinde yeniden kurulmaz."
+  ]
+}

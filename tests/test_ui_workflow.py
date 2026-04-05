@@ -6,6 +6,7 @@ import tkinter as tk
 import unittest
 from unittest.mock import patch
 
+from hidrostatik_test.data import BOTAS_REFERENCE_OPTION_LABEL, GAIL_REFERENCE_OPTION_LABEL
 from hidrostatik_test.ui.app import (
     AUTO_A_MODE,
     AUTO_B_MODE,
@@ -35,7 +36,7 @@ class UiWorkflowTests(unittest.TestCase):
         self.app.geometry_vars["wall_thickness_mm"].set("8.74")
         self.app.geometry_vars["length_m"].set("1000")
 
-    def test_temperature_change_marks_computed_air_a_stale(self) -> None:
+    def test_temperature_change_refreshes_computed_air_a_live(self) -> None:
         self.app.air_vars["temperature_c"].set("20")
         self.app.air_vars["pressure_bar"].set("80")
 
@@ -44,7 +45,8 @@ class UiWorkflowTests(unittest.TestCase):
 
         self.app.air_vars["temperature_c"].set("21")
 
-        self.assertEqual(self.app.coefficient_states["air_a"], "stale")
+        self.assertEqual(self.app.coefficient_states["air_a"], "computed")
+        self.assertEqual(self.app.field_message_vars["air.a_micro_per_bar"].get(), "Hazir: Hesap guncel.")
 
     def test_pressure_evaluation_auto_calculates_a_and_b(self) -> None:
         self._fill_geometry()
@@ -107,9 +109,11 @@ class UiWorkflowTests(unittest.TestCase):
 
     def test_air_evaluation_accepts_reference_a_mode(self) -> None:
         self._fill_geometry()
+        self.app.air_vars["temperature_c"].set("15")
+        self.app.air_vars["pressure_bar"].set("80")
         self.app.air_a_mode_var.set(REFERENCE_A_MODE)
         self.app._on_air_a_mode_changed()
-        self.app.air_a_reference_var.set("IAPWS95 | T=15 degC | P=80 bar")
+        self.app.air_a_reference_var.set(GAIL_REFERENCE_OPTION_LABEL)
         self.app._on_air_a_reference_changed()
         self.app.air_vars["actual_added_water_m3"].set("0.0079")
 
@@ -117,7 +121,89 @@ class UiWorkflowTests(unittest.TestCase):
 
         self.assertEqual(self.app.decision_status_var.get(), "BASARILI")
         self.assertEqual(self.app.coefficient_states["air_a"], "reference")
-        self.assertEqual(self.app.air_vars["a_micro_per_bar"].get(), "45.786845")
+        self.assertEqual(self.app.air_vars["a_micro_per_bar"].get(), "45.518533")
+
+    def test_reference_option_lists_include_botas_and_gail_tables(self) -> None:
+        self.assertIn(BOTAS_REFERENCE_OPTION_LABEL, self.app.air_a_reference_combo["values"])
+        self.assertIn(GAIL_REFERENCE_OPTION_LABEL, self.app.air_a_reference_combo["values"])
+        self.assertIn(BOTAS_REFERENCE_OPTION_LABEL, self.app.pressure_a_reference_combo["values"])
+        self.assertIn(GAIL_REFERENCE_OPTION_LABEL, self.app.pressure_a_reference_combo["values"])
+        self.assertIn(BOTAS_REFERENCE_OPTION_LABEL, self.app.pressure_b_reference_combo["values"])
+        self.assertIn(GAIL_REFERENCE_OPTION_LABEL, self.app.pressure_b_reference_combo["values"])
+
+    def test_air_reference_mode_accepts_botas_table(self) -> None:
+        self.app.air_vars["temperature_c"].set("10")
+        self.app.air_vars["pressure_bar"].set("50")
+        self.app.air_a_mode_var.set(REFERENCE_A_MODE)
+        self.app._on_air_a_mode_changed()
+        self.app.air_a_reference_var.set(BOTAS_REFERENCE_OPTION_LABEL)
+
+        self.app._on_air_a_reference_changed()
+
+        self.assertEqual(self.app.coefficient_states["air_a"], "reference")
+        self.assertEqual(self.app.air_vars["a_micro_per_bar"].get(), "46.775000")
+
+    def test_air_reference_mode_accepts_gail_table(self) -> None:
+        self.app.air_vars["temperature_c"].set("10")
+        self.app.air_vars["pressure_bar"].set("50")
+        self.app.air_a_mode_var.set(REFERENCE_A_MODE)
+        self.app._on_air_a_mode_changed()
+        self.app.air_a_reference_var.set(GAIL_REFERENCE_OPTION_LABEL)
+
+        self.app._on_air_a_reference_changed()
+
+        self.assertEqual(self.app.coefficient_states["air_a"], "reference")
+        self.assertEqual(self.app.air_vars["a_micro_per_bar"].get(), "46.824270")
+
+    def test_pressure_b_reference_mode_accepts_botas_table_without_helper(self) -> None:
+        self.app.pressure_vars["temperature_c"].set("10")
+        self.app.pressure_vars["pressure_bar"].set("50")
+        self.app.pressure_b_mode_var.set(REFERENCE_B_MODE)
+        self.app._on_pressure_b_mode_changed()
+        self.app.pressure_b_reference_var.set(BOTAS_REFERENCE_OPTION_LABEL)
+
+        self.app._on_pressure_b_reference_changed()
+
+        self.assertEqual(self.app.coefficient_states["pressure_b"], "reference")
+        self.assertEqual(self.app.pressure_vars["b_micro_per_c"].get(), "64.923000")
+        self.assertFalse(self.app.use_b_helper_var.get())
+        self.assertEqual(self.app.b_helper_vars["water_beta_micro_per_c"].get(), "")
+        self.assertEqual(str(self.app.entry_widgets["helper.steel_alpha_micro_per_c"].cget("state")), "disabled")
+
+    def test_pressure_b_reference_mode_accepts_gail_table_without_helper(self) -> None:
+        self.app.pressure_vars["temperature_c"].set("10")
+        self.app.pressure_vars["pressure_bar"].set("50")
+        self.app.pressure_b_mode_var.set(REFERENCE_B_MODE)
+        self.app._on_pressure_b_mode_changed()
+        self.app.pressure_b_reference_var.set(GAIL_REFERENCE_OPTION_LABEL)
+
+        self.app._on_pressure_b_reference_changed()
+
+        self.assertEqual(self.app.coefficient_states["pressure_b"], "reference")
+        self.assertEqual(self.app.pressure_vars["b_micro_per_c"].get(), "60.450000")
+        self.assertFalse(self.app.use_b_helper_var.get())
+        self.assertEqual(self.app.b_helper_vars["water_beta_micro_per_c"].get(), "")
+
+    def test_material_grade_selection_populates_smys(self) -> None:
+        option = next(option for option in self.app.material_grade_combo["values"] if "X65 / L450" in option)
+
+        self.app.material_grade_var.set(option)
+
+        self.assertEqual(self.app.section_profile_vars["smys_mpa"].get(), "450")
+
+    def test_pump_location_requires_explicit_user_selection(self) -> None:
+        self._fill_geometry()
+        self.app.section_profile_vars["highest_elevation_m"].set("100")
+        self.app.section_profile_vars["lowest_elevation_m"].set("0")
+        self.app.section_profile_vars["start_elevation_m"].set("0")
+        self.app.section_profile_vars["end_elevation_m"].set("100")
+        self.app.section_profile_vars["design_pressure_bar"].set("20")
+        self.app.material_grade_var.set(
+            next(option for option in self.app.material_grade_combo["values"] if "Grade B / L245" in option)
+        )
+
+        self.assertEqual(self.app.pump_location_var.get(), "")
+        self.assertIn("Pompa konumu kullanici tarafindan", self.app.section_pressure_summary_var.get())
 
     def test_pressure_evaluation_accepts_manual_b_mode(self) -> None:
         self._fill_geometry()
@@ -138,41 +224,41 @@ class UiWorkflowTests(unittest.TestCase):
 
     def test_pressure_evaluation_accepts_reference_b_mode(self) -> None:
         self._fill_geometry()
+        self.app.pressure_vars["temperature_c"].set("20")
+        self.app.pressure_vars["pressure_bar"].set("100")
         self.app.pressure_b_mode_var.set(REFERENCE_B_MODE)
         self.app._on_pressure_b_mode_changed()
-        self.app.pressure_b_reference_var.set("IAPWS95 | T=20 degC | P=100 bar")
-        self.app.b_helper_vars["steel_alpha_micro_per_c"].set("12.0")
+        self.app.pressure_b_reference_var.set(GAIL_REFERENCE_OPTION_LABEL)
         self.app._on_pressure_b_reference_changed()
-        self.app.pressure_vars["temperature_c"].set("20")
-        self.app.pressure_vars["pressure_bar"].set("80")
         self.app.pressure_vars["delta_t_c"].set("0.6")
-        self.app.pressure_vars["actual_pressure_change_bar"].set("2.1")
+        self.app.pressure_vars["actual_pressure_change_bar"].set("1.9")
 
         self.app._run_pressure_test()
 
         self.assertEqual(self.app.decision_status_var.get(), "BASARILI")
         self.assertEqual(self.app.coefficient_states["pressure_b"], "reference")
-        self.assertTrue(self.app.use_b_helper_var.get())
-        self.assertEqual(self.app.b_helper_vars["water_beta_micro_per_c"].get(), "221.153338")
+        self.assertFalse(self.app.use_b_helper_var.get())
+        self.assertEqual(self.app.b_helper_vars["water_beta_micro_per_c"].get(), "")
 
     def test_pressure_evaluation_accepts_reference_a_mode(self) -> None:
         self._fill_geometry()
+        self.app.pressure_vars["temperature_c"].set("10")
+        self.app.pressure_vars["pressure_bar"].set("50")
         self.app.pressure_a_mode_var.set(REFERENCE_A_MODE)
         self.app._on_pressure_a_mode_changed()
-        self.app.pressure_a_reference_var.set("IAPWS95 | T=10 degC | P=50 bar")
+        self.app.pressure_a_reference_var.set(BOTAS_REFERENCE_OPTION_LABEL)
         self.app._on_pressure_a_reference_changed()
-        self.app.pressure_vars["temperature_c"].set("20")
-        self.app.pressure_vars["pressure_bar"].set("80")
         self.app.pressure_vars["delta_t_c"].set("0.6")
-        self.app.pressure_vars["actual_pressure_change_bar"].set("2.1")
-        self.app.b_helper_vars["steel_alpha_micro_per_c"].set("12.0")
-        self.app.use_b_helper_var.set(True)
+        self.app.pressure_vars["actual_pressure_change_bar"].set("1.9")
+        self.app.pressure_b_mode_var.set(MANUAL_B_MODE)
+        self.app._on_pressure_b_mode_changed()
+        self.app.pressure_vars["b_micro_per_c"].set("180")
 
         self.app._run_pressure_test()
 
         self.assertEqual(self.app.decision_status_var.get(), "BASARILI")
         self.assertEqual(self.app.coefficient_states["pressure_a"], "reference")
-        self.assertEqual(self.app.pressure_vars["a_micro_per_bar"].get(), "47.193089")
+        self.assertEqual(self.app.pressure_vars["a_micro_per_bar"].get(), "46.775000")
 
     def test_pressure_manual_detail_report_shows_sources_and_decision_basis(self) -> None:
         self._fill_geometry()
@@ -202,7 +288,8 @@ class UiWorkflowTests(unittest.TestCase):
         self.app.air_vars["pressure_bar"].set("30")
 
         self.assertTrue(self.app._calculate_air_a(log_result=False))
-        self.assertIn("Kurum ici tablo A = 46.990000", self.app.air_control_table_var.get())
+        self.assertIn("BOTA", self.app.air_control_table_var.get())
+        self.assertIn("GAIL", self.app.air_control_table_var.get())
         self.assertIn("A farki =", self.app.air_control_table_var.get())
 
     def test_pressure_control_table_summary_updates_after_a_and_b_calculation(self) -> None:
@@ -213,8 +300,94 @@ class UiWorkflowTests(unittest.TestCase):
 
         self.assertTrue(self.app._calculate_pressure_a(log_result=False))
         self.assertTrue(self.app._calculate_b_helper(log_result=False))
-        self.assertIn("Kurum ici tablo A = 45.434000, B = 134.050000.", self.app.pressure_control_table_var.get())
+        self.assertIn("BOTA", self.app.pressure_control_table_var.get())
+        self.assertIn("GAIL", self.app.pressure_control_table_var.get())
         self.assertIn("B farki =", self.app.pressure_control_table_var.get())
+
+    def test_geometry_pressure_summary_updates_with_location_class_window(self) -> None:
+        self._fill_geometry()
+        self.app.notebook.select(1)
+        self.app._on_tab_changed()
+        self.app.section_profile_vars["highest_elevation_m"].set("100")
+        self.app.section_profile_vars["lowest_elevation_m"].set("0")
+        self.app.section_profile_vars["start_elevation_m"].set("0")
+        self.app.section_profile_vars["end_elevation_m"].set("100")
+        self.app.section_profile_vars["design_pressure_bar"].set("20")
+        self.app.material_grade_var.set(
+            next(option for option in self.app.material_grade_combo["values"] if "Grade B / L245" in option)
+        )
+        self.app.location_class_var.set("Class 1 - min 1.25 x dizayn basinci")
+        self.app.pump_location_var.set("Baslangic noktasi")
+        self.app.pressure_vars["pressure_bar"].set("35")
+
+        summary = self.app.section_pressure_summary_var.get()
+
+        self.assertIn("Grade B / L245", summary)
+        self.assertIn("100% SMYS limiti", summary)
+        self.assertIn("34.797824", summary)
+        self.assertIn("105.378937", summary)
+        self.assertIn("minimum saglandi", summary)
+        self.assertIn("maksimum asilmadi", summary)
+
+    def test_geometry_pressure_status_card_updates_with_location_class_window(self) -> None:
+        self._fill_geometry()
+        self.app.notebook.select(1)
+        self.app._on_tab_changed()
+        self.app.section_profile_vars["highest_elevation_m"].set("100")
+        self.app.section_profile_vars["lowest_elevation_m"].set("0")
+        self.app.section_profile_vars["start_elevation_m"].set("0")
+        self.app.section_profile_vars["end_elevation_m"].set("100")
+        self.app.section_profile_vars["design_pressure_bar"].set("20")
+        self.app.material_grade_var.set(
+            next(option for option in self.app.material_grade_combo["values"] if "Grade B / L245" in option)
+        )
+        self.app.location_class_var.set("Class 1 - min 1.25 x dizayn basinci")
+        self.app.pump_location_var.set("Baslangic noktasi")
+        self.app.pressure_vars["pressure_bar"].set("35")
+
+        self.assertEqual(self.app.section_pressure_status_var.get(), "PENCERE ICINDE")
+        self.assertIn("min 34.797824 bar", self.app.section_pressure_window_var.get())
+        self.assertIn("Izlenen basinc = 35.000000 bar", self.app.section_pressure_status_detail_var.get())
+        self.assertEqual(self.app.section_pressure_status_label.cget("bg"), "#E6F4EA")
+
+    def test_geometry_pressure_status_reports_section_length_limit_exceedance(self) -> None:
+        self.app.notebook.select(1)
+        self.app._on_tab_changed()
+        self.app.geometry_vars["outside_diameter_mm"].set("406.4")
+        self.app.geometry_vars["wall_thickness_mm"].set("8.74")
+        self.app.geometry_vars["length_m"].set("21000")
+        self.app.section_profile_vars["highest_elevation_m"].set("100")
+        self.app.section_profile_vars["lowest_elevation_m"].set("0")
+        self.app.section_profile_vars["start_elevation_m"].set("0")
+        self.app.section_profile_vars["end_elevation_m"].set("100")
+        self.app.section_profile_vars["design_pressure_bar"].set("20")
+        self.app.material_grade_var.set(
+            next(option for option in self.app.material_grade_combo["values"] if "Grade B / L245" in option)
+        )
+        self.app.location_class_var.set("Class 1 - min 1.25 x dizayn basinci")
+        self.app.pump_location_var.set("Baslangic noktasi")
+
+        self.assertEqual(self.app.section_pressure_status_var.get(), "KESIT LIMIT ASIMI")
+        self.assertIn("20 km limitini asiyor", self.app.section_pressure_status_detail_var.get())
+        self.assertIn("Test bolumu uzunlugu", self.app.section_pressure_summary_var.get())
+        self.assertEqual(self.app.section_pressure_status_label.cget("bg"), "#FFF6E5")
+
+    def test_pressure_live_decision_updates_without_manual_run(self) -> None:
+        self._fill_geometry()
+        self.app.notebook.select(1)
+        self.app._on_tab_changed()
+        self.root.update_idletasks()
+        self.app.pressure_vars["temperature_c"].set("20")
+        self.app.pressure_vars["pressure_bar"].set("80")
+        self.app.pressure_vars["delta_t_c"].set("0.6")
+        self.app.pressure_vars["actual_pressure_change_bar"].set("2.1")
+        self.app.b_helper_vars["steel_alpha_micro_per_c"].set("12.0")
+
+        self.assertEqual(self.app.decision_title_var.get(), "Basinc Degisim Testi")
+        self.assertEqual(self.app.decision_status_var.get(), "BASARILI")
+        self.assertIn("Canli sonuc: Pt =", self.app.decision_summary_var.get())
+        self.assertEqual(self.app.coefficient_states["pressure_a"], "computed")
+        self.assertEqual(self.app.coefficient_states["pressure_b"], "computed")
 
     def test_empty_required_field_sets_feedback(self) -> None:
         self.app._run_air_test()
@@ -244,11 +417,22 @@ class UiWorkflowTests(unittest.TestCase):
     def test_notebook_contains_field_control_tab(self) -> None:
         labels = [self.app.notebook.tab(index, "text") for index in range(self.app.notebook.index("end"))]
 
-        self.assertEqual(labels, ["Hava Icerik Testi", "Basinc Degisim Testi", "Saha Kontrol"])
+        self.assertEqual(labels, ["Hava Icerik Testi", "Basinc Degisim Testi", "Saha Grubu"])
 
     def test_default_water_backend_is_coolprop(self) -> None:
         self.assertEqual(self.app.water_backend_var.get(), "CoolProp EOS [coolprop]")
         self.assertIn("Secili backend: CoolProp EOS", self.app.water_backend_summary_var.get())
+
+    def test_backend_change_recalculates_auto_coefficients(self) -> None:
+        self.app.air_vars["temperature_c"].set("12.3")
+        self.app.air_vars["pressure_bar"].set("57.7")
+        self.app._calculate_air_a(log_result=False)
+
+        self.app.water_backend_var.set("Table Interpolation v1 [table_v1]")
+        self.app._on_water_backend_changed()
+
+        self.assertEqual(self.app.coefficient_states["air_a"], "computed")
+        self.assertEqual(self.app.air_vars["a_micro_per_bar"].get(), "46.586510")
 
     def test_check_summary_counts_checked_controls(self) -> None:
         self.app.control_check_vars["ambient_temp"].set(True)
@@ -328,12 +512,78 @@ class UiWorkflowTests(unittest.TestCase):
             if menu.type(index) == "cascade"
         ]
 
-        self.assertEqual(labels, ["Dosya", "Rapor", "Guncelleme", "Hakkinda"])
+        self.assertEqual(labels, ["Dosya", "Hesap", "Rapor", "Guncelleme", "Hakkinda"])
+
+    def test_input_snapshot_roundtrip_restores_state(self) -> None:
+        self._fill_geometry()
+        self.app.air_vars["temperature_c"].set("18")
+        self.app.air_vars["pressure_bar"].set("65")
+        self.app.air_a_mode_var.set(REFERENCE_A_MODE)
+        self.app._on_air_a_mode_changed()
+        self.app.air_a_reference_var.set(BOTAS_REFERENCE_OPTION_LABEL)
+        self.app.material_grade_var.set(
+            next(option for option in self.app.material_grade_combo["values"] if "X65 / L450" in option)
+        )
+        self.app.control_check_vars["ambient_temp"].set(True)
+        self.app.water_backend_var.set("Table Interpolation v1 [table_v1]")
+        self.app._on_water_backend_changed()
+
+        snapshot = self.app._build_input_snapshot()
+
+        self.app.air_vars["temperature_c"].set("")
+        self.app.air_a_reference_var.set("")
+        self.app.control_check_vars["ambient_temp"].set(False)
+        self.app.water_backend_var.set("CoolProp EOS [coolprop]")
+
+        self.app._apply_input_snapshot(snapshot)
+
+        self.assertEqual(self.app.air_vars["temperature_c"].get(), "18")
+        self.assertEqual(self.app.air_a_reference_var.get(), BOTAS_REFERENCE_OPTION_LABEL)
+        self.assertTrue(self.app.control_check_vars["ambient_temp"].get())
+        self.assertEqual(self.app.water_backend_var.get(), "Table Interpolation v1 [table_v1]")
+        self.assertEqual(self.app.section_profile_vars["smys_mpa"].get(), "450")
+
+    def test_decision_card_colors_follow_result(self) -> None:
+        self.app._update_decision_card("Basinc Degisim Testi", "BASARILI", "Test gecti")
+        self.assertEqual(self.app.decision_status_label.cget("bg"), "#E6F4EA")
+
+        self.app._update_decision_card("Basinc Degisim Testi", "BASARISIZ", "Test kaldi")
+        self.assertEqual(self.app.decision_status_label.cget("bg"), "#FDE7E9")
 
     def test_side_panel_uses_tabbed_workspace(self) -> None:
         labels = [self.app.side_notebook.tab(index, "text") for index in range(self.app.side_notebook.index("end"))]
 
-        self.assertEqual(labels, ["Rehber", "Durum", "Kayit"])
+        self.assertEqual(labels, ["Detay Raporu", "Karar ve Akis", "Kayit"])
+
+    def test_three_pane_layout_contains_left_center_and_right_panels(self) -> None:
+        self.root.update_idletasks()
+
+        panes = {str(pane) for pane in self.app.content_pane.panes()}
+
+        self.assertIn(str(self.app.left_panel), panes)
+        self.assertIn(str(self.app.center_panel), panes)
+        self.assertIn(str(self.app.side_panel), panes)
+
+    def test_active_input_panel_switches_with_notebook_tab(self) -> None:
+        self.root.update_idletasks()
+        self.assertTrue(self.app.active_input_frames["air"].winfo_ismapped())
+        self.assertFalse(self.app.active_input_frames["pressure"].winfo_ismapped())
+        self.assertFalse(self.app.active_input_frames["field"].winfo_ismapped())
+
+        self.app.notebook.select(1)
+        self.app._on_tab_changed()
+        self.root.update_idletasks()
+
+        self.assertEqual(self.app.active_input_title_label.cget("text"), "Aktif test girdileri: Basinc Degisim Testi")
+        self.assertFalse(self.app.active_input_frames["air"].winfo_ismapped())
+        self.assertTrue(self.app.active_input_frames["pressure"].winfo_ismapped())
+
+        self.app.notebook.select(2)
+        self.app._on_tab_changed()
+        self.root.update_idletasks()
+
+        self.assertEqual(self.app.active_input_title_label.cget("text"), "Aktif test girdileri: Saha Grubu")
+        self.assertTrue(self.app.active_input_frames["field"].winfo_ismapped())
 
     def test_side_panel_can_be_hidden_and_restored(self) -> None:
         self.root.update_idletasks()
@@ -424,17 +674,50 @@ class UiWorkflowTests(unittest.TestCase):
 
         self.assertIn("Gecerli bir sayi", self.app.field_message_vars["air.temperature_c"].get())
         self.assertIn("gecersiz", self.app.live_notice_var.get())
+        self.assertEqual(str(self.app.entry_widgets["air.temperature_c"].cget("style")), "Hydro.error.TEntry")
 
-    def test_stale_coefficient_sets_live_warning_message(self) -> None:
+    def test_semantic_invalid_input_sets_error_style(self) -> None:
+        self.app.geometry_vars["outside_diameter_mm"].set("10")
+        self.app.geometry_vars["wall_thickness_mm"].set("6")
+
+        self.assertIn("yarisindan kucuk", self.app.field_message_vars["geometry.wall_thickness_mm"].get())
+        self.assertEqual(
+            str(self.app.entry_widgets["geometry.wall_thickness_mm"].cget("style")),
+            "Hydro.error.TEntry",
+        )
+
+    def test_spec_warning_input_sets_warning_style(self) -> None:
+        self.app.air_vars["pressure_rise_bar"].set("1.2")
+
+        self.assertIn("tam 1.0 bar", self.app.field_message_vars["air.pressure_rise_bar"].get())
+        self.assertEqual(
+            str(self.app.entry_widgets["air.pressure_rise_bar"].cget("style")),
+            "Hydro.warning.TEntry",
+        )
+
+    def test_table_mode_without_reference_highlights_reference_combo(self) -> None:
+        self.app.air_a_mode_var.set(REFERENCE_A_MODE)
+        self.app._on_air_a_mode_changed()
+
+        self.assertEqual(str(self.app.air_a_reference_combo.cget("style")), "Hydro.warning.TCombobox")
+
+    def test_started_profile_without_pump_location_highlights_combo(self) -> None:
+        self.app.section_profile_vars["highest_elevation_m"].set("100")
+        self.app.section_profile_vars["lowest_elevation_m"].set("0")
+        self.app.section_profile_vars["design_pressure_bar"].set("20")
+
+        self.assertEqual(str(self.app.pump_location_combo.cget("style")), "Hydro.warning.TCombobox")
+
+    def test_live_coefficient_refresh_sets_success_message(self) -> None:
         self.app.air_vars["temperature_c"].set("20")
         self.app.air_vars["pressure_bar"].set("80")
         self.assertTrue(self.app._calculate_air_a(log_result=False))
 
         self.app.air_vars["pressure_bar"].set("81")
 
-        self.assertEqual(self.app.coefficient_states["air_a"], "stale")
-        self.assertIn("yeniden hesaplayin", self.app.field_message_vars["air.a_micro_per_bar"].get())
-        self.assertIn("guncellenmeli", self.app.live_notice_var.get())
+        self.assertEqual(self.app.coefficient_states["air_a"], "computed")
+        self.assertEqual(self.app.field_message_vars["air.a_micro_per_bar"].get(), "Hazir: Hesap guncel.")
+        self.assertIn("tutarli gorunuyor", self.app.live_notice_var.get())
 
     def test_backend_change_marks_auto_coefficients_stale(self) -> None:
         self.app.air_vars["temperature_c"].set("20")
@@ -445,7 +728,7 @@ class UiWorkflowTests(unittest.TestCase):
         self.app.water_backend_var.set("Table Interpolation v1 [table_v1]")
         self.app._on_water_backend_changed()
 
-        self.assertEqual(self.app.coefficient_states["air_a"], "stale")
+        self.assertEqual(self.app.coefficient_states["air_a"], "computed")
         self.assertIn("Table Interpolation v1", self.app.water_backend_summary_var.get())
         self.assertIn("Backend secimi degisti", self.app.air_backend_comparison_var.get())
 
@@ -560,6 +843,9 @@ class UiWorkflowTests(unittest.TestCase):
         self.app.pressure_vars["delta_t_c"].set("0.6")
         self.app.pressure_vars["temperature_c"].set("20")
         self.app.pressure_vars["pressure_bar"].set("80")
+        self.app.material_grade_var.set(
+            next(option for option in self.app.material_grade_combo["values"] if "X65 / L450" in option)
+        )
         self.app.b_helper_vars["steel_alpha_micro_per_c"].set("12.0")
         self.app._compare_active_backend()
         self.app.control_check_vars["ambient_temp"].set(True)
@@ -578,9 +864,11 @@ class UiWorkflowTests(unittest.TestCase):
         self.assertIn("Su backend'i: CoolProp EOS", report)
         self.assertIn("Hava backend karsilastirmasi: Hava A karsilastirmasi", report)
         self.assertIn("Basinc backend karsilastirmasi: Basinc A/B karsilastirmasi", report)
-        self.assertIn("A referans noktasi: -", report)
-        self.assertIn("B referans noktasi: -", report)
+        self.assertIn("A referans tablosu: -", report)
+        self.assertIn("B referans tablosu: -", report)
         self.assertIn("Dis cap (mm): 406.4", report)
+        self.assertIn("Boru malzeme kalitesi: API 5L PSL2 X65 / L450 - SMYS 450 MPa", report)
+        self.assertIn("SMYS (MPa): 450", report)
         self.assertIn("Su basinci (bar): 80", report)
         self.assertIn("dT = Tilk - Tson", report)
         self.assertIn("Pa = Pilk - Pson", report)

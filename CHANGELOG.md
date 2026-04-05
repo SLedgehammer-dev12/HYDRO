@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.5.9 - 2026-04-06
+
+- Arayuz uc bolmeli ve yeniden boyutlandirilabilir hale getirildi; girdi paneli sola, aktif test sekmeleri ortaya, detay raporu saga tasindi.
+- A/B secim akisi `Otomatik / Tablo / Manuel` olarak sadelelestirildi; tablo modunda `BOTAS referans tablosu` ile `GAIL referans tablosu` ayri secenekler olarak sunuluyor, su backend secimi ust menuden yonetiliyor.
+- Test bolumu profilinde API 5L PSL2 malzeme secimi, otomatik SMYS atamasi, canli basinc penceresi, kot semasi ve `%100 SMYS` span kontrolu eklendi.
+- NGTL 5007 tek kesit limitleri (`20 km` ve `12.500 m3`) geometri ve basinc kontrolu icine alindi; asim durumlari canli uyari olarak gosteriliyor.
+- Girdiler icin genel canli dogrulama sistemi eklendi; hatali veya eksik alanlar renkli olarak vurgulaniyor ve kullaniciya aciklayici etiketler gosteriliyor.
+- Dinamik hesap akisi guclendirildi; ilgili girdiler degistiginde katsayilar, basinc kontrolu ve nihai karar karti otomatik yenileniyor.
+- Otomatik test paketi 120 teste cikarildi.
+
 ## 1.5.8 - 2026-04-03
 
 - Aktif sekme icin canli `Detay Raporu` paneli eklendi; katsayi kaynagi, kullanici girdileri ve karar hesabinda kullanilan ara terimler arayuzde gorunur hale getirildi.
