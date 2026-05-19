@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "source_pdf": "c:\\Users\\omere\\OneDrive\\Desktop\\techvol3_20240823_143533.pdf",
+  "source_pages": {
+    "table_1_b": [
+      56,
+      57,
+      58,
+      59
+    ],
+    "fig_1_a": [
+      60
+    ]
+  },
+  "temperature_axis": {
+    "minimum": 2,
+    "maximum": 30,
+    "step": 2,
+    "count": 15
+  },
+  "pressure_axis": {
+    "minimum": 30,
+    "maximum": 120,
+    "step": 10,
+    "count": 10
+  },
+  "csv_columns": [
+    "temp_c",
+    "pressure_bar",
+    "a_micro_per_bar_estimated",
+    "b_micro_per_c",
+    "a_source_kind",
+    "b_source_kind"
+  ],
+  "notes": [
+    "A values are estimated from the raster Fig.1 chart using OCR-assisted axis calibration and peak tracking.",
+    "B values are exact text extraction from Table-1.",
+    "This combined dataset is exposed in the UI as the BOTAŞ referans tablosu option.",
+    "Use as reference/provenance data, not as a replacement for the workbook-derived table without engineering signoff."
+  ],
+  "row_count": 150
+}

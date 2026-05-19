@@ -1,0 +1,6 @@
+interface:
+  display_name: "Domain Expert"
+  short_description: "Write or modify domain-layer calculations, dataclasses, and validation logic"
+  default_prompt: "Use $domain-expert when changing formulas, adding evaluation functions, modifying PipeSection/PipeGeometry, or altering acceptance criteria in hidrostatik_test/domain/. Always verify with domain tests before considering work done."
+policy:
+  allow_implicit_invocation: false

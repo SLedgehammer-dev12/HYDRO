@@ -1,0 +1,6 @@
+interface:
+  display_name: "Refactoring Architect"
+  short_description: "Restructure code: extract modules, split files, reorganize imports, reduce method count"
+  default_prompt: "Use $refactoring-architect when splitting large files (especially app_main.py), extracting mixins, moving constants to config.py, or reorganizing the package structure. Preserve all imports, keep tests passing at every step, and never break the app.py re-export chain."
+policy:
+  allow_implicit_invocation: false

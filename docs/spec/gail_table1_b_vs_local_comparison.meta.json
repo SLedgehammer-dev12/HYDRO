@@ -1,0 +1,30 @@
+{
+  "comparison_row_count": 250,
+  "pressure_nodes_bar": [
+    30,
+    40,
+    50,
+    60,
+    70,
+    80,
+    90,
+    100,
+    110,
+    120
+  ],
+  "temp_range_c": [
+    1,
+    25
+  ],
+  "mean_abs_error_b_micro_per_c": 4.516664,
+  "max_abs_error_b_micro_per_c": 5.174,
+  "mean_abs_error_pct_raw": 19.500754,
+  "max_abs_error_pct_raw": 1921.73913,
+  "mean_abs_error_pct_for_abs_local_b_ge_20": 5.438761,
+  "max_abs_error_pct_for_abs_local_b_ge_20": 21.353739,
+  "notes": [
+    "B values are exact text extraction from public Table-1 at 10-bar nodes.",
+    "Raw percentage error is distorted around the zero-crossing of B; use the filtered percentage stats for engineering interpretation.",
+    "Local workbook-derived table is consistently higher than public Table-1 over overlapping nodes."
+  ]
+}

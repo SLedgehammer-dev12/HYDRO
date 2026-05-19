@@ -1,0 +1,6 @@
+interface:
+  display_name: "Test Writer"
+  short_description: "Write unit and integration tests following project conventions"
+  default_prompt: "Use $test-writer to create or extend test files in tests/. Domain tests must cover both accept and reject scenarios with spec-aligned values. UI tests use real Tk objects with setUp/tearDown. Run pytest after writing."
+policy:
+  allow_implicit_invocation: false

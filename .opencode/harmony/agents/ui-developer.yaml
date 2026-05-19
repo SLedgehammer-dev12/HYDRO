@@ -1,0 +1,6 @@
+interface:
+  display_name: "UI Developer"
+  short_description: "Modify Tkinter UI code, tab layouts, widget creation, and operator workflow"
+  default_prompt: "Use $ui-developer when working with hidrostatik_test/ui/ files. Follow the mixin pattern: new tab-specific methods go in tab_*.py mixin, widget helpers in widget_factory.py. Always run pytest tests/ after changes."
+policy:
+  allow_implicit_invocation: false

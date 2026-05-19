@@ -1,0 +1,7 @@
+interface:
+  display_name: "Hydrotest Spec Audit"
+  short_description: "Check code against NGTL 5007 requirements"
+  default_prompt: "Use $hydrotest-spec-audit to verify a formula or workflow against NGTL 5007."
+
+policy:
+  allow_implicit_invocation: false

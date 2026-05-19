@@ -1,0 +1,41 @@
+{
+  "source_pdf": "c:\\Users\\omere\\OneDrive\\Desktop\\techvol3_20240823_143533.pdf",
+  "source_page": 60,
+  "figure_title": "Fig.1 Water Compressibility Factor",
+  "extraction_method": "OCR-assisted axis calibration + peak tracking on raster chart",
+  "temperature_curves_detected": [
+    2,
+    4,
+    6,
+    8,
+    10,
+    12,
+    14,
+    16,
+    18,
+    20,
+    22,
+    24,
+    26,
+    28,
+    30
+  ],
+  "pressure_range_bar": [
+    30,
+    120
+  ],
+  "pressure_step_bar": 1,
+  "row_count": 1365,
+  "comparison_row_count": 1092,
+  "comparison_stats": {
+    "mean_abs_error_a_micro_per_bar": 0.062185,
+    "max_abs_error_a_micro_per_bar": 0.229057,
+    "mean_abs_error_pct": 0.134614,
+    "max_abs_error_pct": 0.501849
+  },
+  "notes": [
+    "A values are estimated from the public chart; they are not machine-readable source values.",
+    "Detected chart contains 15 temperature curves labeled 2,4,...,30 degC.",
+    "Use for trend comparison and provenance, not as a replacement for the workbook-derived control table without engineering signoff."
+  ]
+}
