@@ -363,6 +363,7 @@ $windowsResourcesEmbedded = $buildResult.UsedWindowsResources
 
 if (-not (Test-Path -LiteralPath $exePath)) {
     throw "Beklenen exe olusmadi: $exePath"
+}
 $releaseExePath = Join-Path $releasePath "$artifactBaseName.exe"
 
 if (-not $SkipArchive) {
