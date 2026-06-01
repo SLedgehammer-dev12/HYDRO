@@ -140,7 +140,7 @@ class BCoefficientTests(unittest.TestCase):
         )
 
         for temp_c, pressure_bar, expected_a, expected_beta, expected_b in reference_points:
-            with self.subTest(temp_c=temp_c, pressure_bar=pressure_bar):
+            with self.subTest(temp_c=temp_c, pressure_bar=pressure_bar, backend="coolprop"):
                 a_value = calculate_water_compressibility_a(temp_c=temp_c, pressure_bar=pressure_bar)
                 beta_value = calculate_water_thermal_expansion_beta(temp_c=temp_c, pressure_bar=pressure_bar)
                 b_value = calculate_b_coefficient(beta_value, 12.0)
@@ -148,6 +148,23 @@ class BCoefficientTests(unittest.TestCase):
                 self.assertTrue(isclose(a_value, expected_a, rel_tol=1e-9))
                 self.assertTrue(isclose(beta_value, expected_beta, rel_tol=1e-9))
                 self.assertTrue(isclose(b_value, expected_b, rel_tol=1e-9))
+
+        try:
+            from hidrostatik_test.domain.water_properties import IAPWS95WaterPropertyBackend
+            iapws_backend = IAPWS95WaterPropertyBackend()
+        except (ImportError, Exception):
+            iapws_backend = None
+
+        if iapws_backend is not None:
+            for temp_c, pressure_bar, expected_a, expected_beta, expected_b in reference_points:
+                with self.subTest(temp_c=temp_c, pressure_bar=pressure_bar, backend="iapws95"):
+                    a_value = calculate_water_compressibility_a(temp_c=temp_c, pressure_bar=pressure_bar, backend=iapws_backend)
+                    beta_value = calculate_water_thermal_expansion_beta(temp_c=temp_c, pressure_bar=pressure_bar, backend=iapws_backend)
+                    b_value = calculate_b_coefficient(beta_value, 12.0)
+
+                    self.assertTrue(isclose(a_value, expected_a, rel_tol=1e-6))
+                    self.assertTrue(isclose(beta_value, expected_beta, rel_tol=1e-6))
+                    self.assertTrue(isclose(b_value, expected_b, rel_tol=1e-6))
 
 
 class WaterPropertyValidationTests(unittest.TestCase):

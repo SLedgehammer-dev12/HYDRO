@@ -37,3 +37,11 @@ dogrulanmasi konusunu kapsar.
 - `table_v1` backend'i ve offline grid uretim akisi kod tabanina eklenmistir.
 - Baslangic grid `0-40 degC` ve `1-150 bar` araliginda `6150` nokta icin
   `water_property_table_v1.csv` dosyasina uretilmistir.
+
+## IAPWS-95 Dev Backend
+
+- **Kurulum:** `pip install iapws` (geliştirme ortamı bağımlılığı).
+- **Aktivasyon:** UI üzerinde "Gelistirici Modu" toggle butonu aktif edildiğinde kullanılabilir.
+- **Lisans Uyarısı:** `iapws` kütüphanesi GPLv3 lisanslıdır. GPLv3 lisans yayılımını önlemek amacıyla bu kütüphane release build paketlerine dahil edilmez ve sadece geliştirme/development ortamında çapraz doğrulama amacıyla çalıştırılır.
+- **Kullanım:** CoolProp backend sonuçlarını gerçek zamanlı IAPWS-95 formülasyonu ile çapraz kontrol etmek için kullanılır.
+

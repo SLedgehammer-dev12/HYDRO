@@ -63,5 +63,30 @@ class WaterPropertyBackendTests(unittest.TestCase):
         self.assertTrue(isclose(calculate_water_thermal_expansion_beta(10.0, 50.0, backend=backend), 150.0))
 
 
+try:
+    from hidrostatik_test.domain.water_properties import IAPWS95WaterPropertyBackend
+    HAS_IAPWS95 = True
+except ImportError:
+    HAS_IAPWS95 = False
+
+
+@unittest.skipUnless(HAS_IAPWS95, "iapws kutuphanesi kurulu degil")
+class TestIAPWS95Backend(unittest.TestCase):
+    def setUp(self):
+        self.backend = IAPWS95WaterPropertyBackend()
+
+    def test_iapws95_matches_reference_a_at_t10_p50(self):
+        a = self.backend.calculate_water_compressibility_a(10.0, 50.0)
+        self.assertAlmostEqual(a, 47.193088967078, places=6)
+
+    def test_iapws95_matches_reference_a_at_t15_p80(self):
+        a = self.backend.calculate_water_compressibility_a(15.0, 80.0)
+        self.assertAlmostEqual(a, 45.786845210898, places=6)
+
+    def test_iapws95_matches_reference_a_at_t20_p100(self):
+        a = self.backend.calculate_water_compressibility_a(20.0, 100.0)
+        self.assertAlmostEqual(a, 44.744088115012, places=6)
+
+
 if __name__ == "__main__":
     unittest.main()

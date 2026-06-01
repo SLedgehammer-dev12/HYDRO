@@ -324,7 +324,7 @@ class UiWorkflowTests(unittest.TestCase):
 
         self.assertIn("Grade B / L245", summary)
         self.assertIn("100% SMYS limiti", summary)
-        self.assertIn("34.797824", summary)
+        self.assertIn("34.797844", summary)
         self.assertIn("105.378937", summary)
         self.assertIn("minimum saglandi", summary)
         self.assertIn("maksimum asilmadi", summary)
@@ -346,7 +346,7 @@ class UiWorkflowTests(unittest.TestCase):
         self.app.pressure_vars["pressure_bar"].set("35")
 
         self.assertEqual(self.app.section_pressure_status_var.get(), "PENCERE ICINDE")
-        self.assertIn("min 34.797824 bar", self.app.section_pressure_window_var.get())
+        self.assertIn("min 34.797844 bar", self.app.section_pressure_window_var.get())
         self.assertIn("Izlenen basinc = 35.000000 bar", self.app.section_pressure_status_detail_var.get())
         self.assertEqual(self.app.section_pressure_status_label.cget("bg"), "#E6F4EA")
 
@@ -693,6 +693,16 @@ class UiWorkflowTests(unittest.TestCase):
         self.assertEqual(
             str(self.app.entry_widgets["air.pressure_rise_bar"].cget("style")),
             "Hydro.warning.TEntry",
+        )
+
+    def test_ambient_temp_below_limit_sets_error_style(self) -> None:
+        self.app.air_vars["temperature_c"].set("0")
+
+        self.assertIn("10.1", self.app.field_message_vars["air.temperature_c"].get())
+        self.assertIn("altinda", self.app.field_message_vars["air.temperature_c"].get())
+        self.assertEqual(
+            str(self.app.entry_widgets["air.temperature_c"].cget("style")),
+            "Hydro.error.TEntry",
         )
 
     def test_table_mode_without_reference_highlights_reference_combo(self) -> None:

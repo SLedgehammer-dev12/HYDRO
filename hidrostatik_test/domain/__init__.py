@@ -15,11 +15,18 @@ from .hydrotest_core import (
     evaluate_pressure_variation_test,
 )
 from .operations import (
+    AMBIENT_TEMP_LIMIT_C,
     PigSpeedLimit,
     PigSpeedResult,
     evaluate_pig_speed,
     get_pig_speed_limit,
     get_pig_speed_limit_options,
+)
+from .pressurization import (
+    PRESSURIZATION_VOLUME_DEVIATION_LIMIT_PERCENT,
+    PressurizationInputs,
+    PressurizationResult,
+    evaluate_pressurization,
 )
 from .pressure_profile import (
     END_PUMP_LOCATION,
@@ -39,6 +46,7 @@ from .water_properties import (
     WaterPropertyBackend,
     WaterPropertyBackendInfo,
     WaterPropertyError,
+    calculate_water_density,
     get_available_water_property_backends,
     get_default_water_property_backend,
     get_water_property_backend,
@@ -46,7 +54,9 @@ from .water_properties import (
 
 __all__ = [
     "AIR_CONTENT_ACCEPTANCE_FACTOR",
+    "AMBIENT_TEMP_LIMIT_C",
     "PRESSURE_VARIATION_ACCEPTANCE_BAR",
+    "PRESSURIZATION_VOLUME_DEVIATION_LIMIT_PERCENT",
     "AirContentInputs",
     "AirContentResult",
     "END_PUMP_LOCATION",
@@ -59,6 +69,8 @@ __all__ = [
     "PressureWindow",
     "PressureVariationInputs",
     "PressureVariationResult",
+    "PressurizationInputs",
+    "PressurizationResult",
     "LocationClassRule",
     "START_PUMP_LOCATION",
     "SectionPressureProfileInputs",
@@ -69,8 +81,10 @@ __all__ = [
     "ValidationError",
     "calculate_b_coefficient",
     "calculate_water_compressibility_a",
+    "calculate_water_density",
     "calculate_water_thermal_expansion_beta",
     "evaluate_pig_speed",
+    "evaluate_pressurization",
     "evaluate_section_pressure_profile",
     "evaluate_air_content_test",
     "evaluate_pressure_variation_test",

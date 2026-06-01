@@ -1,5 +1,9 @@
 # Hidrostatik Test Degerlendirme
 
+[![Test](https://github.com/SLedgehammer-dev12/HYDRO/actions/workflows/test.yml/badge.svg)](https://github.com/SLedgehammer-dev12/HYDRO/actions/workflows/test.yml)
+[![Lint](https://github.com/SLedgehammer-dev12/HYDRO/actions/workflows/lint.yml/badge.svg)](https://github.com/SLedgehammer-dev12/HYDRO/actions/workflows/lint.yml)
+[![Windows Release](https://github.com/SLedgehammer-dev12/HYDRO/actions/workflows/windows-release.yml/badge.svg)](https://github.com/SLedgehammer-dev12/HYDRO/actions/workflows/windows-release.yml)
+
 Bu proje, `4-NGTL 0-GN-P-002-5007 R4 Hidrostatik Test ve Icten Denetleme Sartnamesi`
 ile hizalanan bir masaustu hidrostatik test degerlendirme uygulamasidir.
 Kod tabani artik build artefact'larindan ayrilmistir; kaynak kod, testler,

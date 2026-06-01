@@ -5,6 +5,8 @@ from typing import Final
 
 from .hydrotest_core import FLOAT_TOLERANCE, ValidationError
 
+AMBIENT_TEMP_LIMIT_C: float = 2.0
+
 
 @dataclass(frozen=True)
 class PigSpeedLimit:

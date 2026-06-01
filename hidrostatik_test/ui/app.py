@@ -61,7 +61,7 @@ from ..domain.hydrotest_core import (
     evaluate_pressure_variation_test,
 )
 from ..domain.pressure_profile import SectionPressureProfileInputs, SectionPressureProfileResult
-from ..domain.operations import evaluate_pig_speed, get_pig_speed_limit, get_pig_speed_limit_options
+from ..domain.operations import evaluate_pig_speed, get_pig_speed_limit, get_pig_speed_limit_options, AMBIENT_TEMP_LIMIT_C
 from ..data.pipe_catalog import (
     find_api_5l_psl2_grade,
     find_pipe_size,
@@ -71,6 +71,11 @@ from ..data.pipe_catalog import (
     get_schedule_options,
 )
 from ..services.updater import UpdateError, UpdateInfo, fetch_latest_update_info, install_update, open_release_page
+from .helpers import format_field_message, get_visual_level
+from .validators import safe_float as _safe_float_util
+from .wizard import WizardController
+from ..domain.session_manager import SessionManager, TestSession
+from ..domain.time_series import TimeSeriesStore, THERMAL_BALANCE_THRESHOLD_C, THERMAL_BALANCE_MIN_HOURS
 
 DEFAULT_DECISION_TITLE = "Henuz degerlendirme yapilmadi"
 DEFAULT_DECISION_STATUS = "BEKLIYOR"
@@ -195,8 +200,9 @@ class HydrostaticTestApp:
             BOTAS_REFERENCE_OPTION_LABEL,
             GAIL_REFERENCE_OPTION_LABEL,
         )
-        self.water_backend_infos = tuple(
-            info for info in get_available_water_property_backends() if info.distribution_ready
+        self.dev_mode_var = tk.BooleanVar(value=False)
+        self.water_backend_infos = get_available_water_property_backends(
+            include_dev_backends=self.dev_mode_var.get()
         )
         self.water_backend_option_map = {
             self._format_backend_option_label(info): info.key for info in self.water_backend_infos
@@ -299,6 +305,7 @@ class HydrostaticTestApp:
         self.detail_wraplength = 360
 
         self._build_menu()
+        self.wizard = WizardController(self)
         self._build_ui()
         self._register_traces()
         self._bind_shortcuts()
@@ -320,6 +327,19 @@ class HydrostaticTestApp:
         self._update_check_summary()
         self._update_pig_limit_hint()
         self._refresh_visual_schema()
+        import sys
+        is_testing = "unittest" in sys.modules or "pytest" in sys.modules
+        if is_testing:
+            import tempfile
+            self.session_manager = SessionManager(
+                sessions_dir=Path(tempfile.mkdtemp()),
+                use_db=False
+            )
+            self.session_manager.create_session("Test Oturumu")
+        else:
+            self.session_manager = SessionManager(use_db=True)
+            self.session_manager.restore_last_session()
+            self._apply_session_to_ui()
         self.root.after(1200, self._check_for_updates_on_startup)
 
     def _build_menu(self) -> None:
@@ -329,23 +349,27 @@ class HydrostaticTestApp:
         file_menu.add_command(label="Girdileri Kaydet", command=self._save_input_snapshot)
         file_menu.add_command(label="Girdileri Yukle", command=self._load_input_snapshot)
         file_menu.add_separator()
+        file_menu.add_command(label="Oturum Gecmisi...", command=self._open_session_browser)
+        file_menu.add_separator()
         file_menu.add_command(label="Raporu Kaydet", command=self._save_report)
         file_menu.add_separator()
         file_menu.add_command(label="Cikis", command=self.root.destroy)
         menu_bar.add_cascade(label="Dosya", menu=file_menu)
 
         calc_menu = tk.Menu(menu_bar, tearoff=False)
-        backend_menu = tk.Menu(calc_menu, tearoff=False)
-        for option_label in self.water_backend_option_map.keys():
-            backend_menu.add_radiobutton(
-                label=option_label,
-                variable=self.water_backend_var,
-                value=option_label,
-                command=self._on_water_backend_changed,
-            )
-        calc_menu.add_cascade(label="Su Ozelligi Backend'i", menu=backend_menu)
+        self.backend_menu = tk.Menu(calc_menu, tearoff=False)
+        self._refresh_backend_menu()
+        calc_menu.add_cascade(label="Su Ozelligi Backend'i", menu=self.backend_menu)
+        calc_menu.add_separator()
+        calc_menu.add_checkbutton(
+            label="Gelistirici Modu (Dev Backends)",
+            variable=self.dev_mode_var,
+            command=self._on_dev_mode_changed,
+        )
         calc_menu.add_separator()
         calc_menu.add_command(label="Backendleri Karsilastir", command=self._compare_active_backend)
+        calc_menu.add_separator()
+        calc_menu.add_command(label="Wizard Modu Ac/Kapat", command=self._toggle_wizard)
         menu_bar.add_cascade(label="Hesap", menu=calc_menu)
 
         report_menu = tk.Menu(menu_bar, tearoff=False)
@@ -531,6 +555,12 @@ class HydrostaticTestApp:
         self.help_notes_visible_var.set(not self.help_notes_visible_var.get())
         self._apply_help_notes_visibility()
 
+    def _toggle_wizard(self) -> None:
+        self.wizard.toggle()
+        self.wizard_toggle_button.configure(
+            text="Wizard Durdur" if self.wizard.active else "Wizard Baslat"
+        )
+
     def _apply_help_notes_visibility(self) -> None:
         if not hasattr(self, "help_notes_toggle_button"):
             return
@@ -703,7 +733,8 @@ class HydrostaticTestApp:
         scroll_root, container, _canvas = self._create_scrollable_region(self.root, padding=16)
         scroll_root.pack(fill="both", expand=True)
         container.columnconfigure(0, weight=1)
-        container.rowconfigure(3, weight=1)
+        container.rowconfigure(4, weight=1)
+        container.rowconfigure(3, weight=0)
 
         self.intro_label = self._register_help_note(ttk.Label(
             container,
@@ -743,14 +774,42 @@ class HydrostaticTestApp:
             command=self._toggle_help_notes_visibility,
         )
         self.help_notes_toggle_button.pack(side="left", padx=(8, 0))
+        self.wizard_toggle_button = ttk.Button(
+            workspace_tools,
+            text="Wizard Baslat",
+            command=self._toggle_wizard,
+        )
+        self.wizard_toggle_button.pack(side="left", padx=(8, 0))
         ttk.Label(
             workspace_tools,
             text="Dar calisma modunda yardim panellerini gizleyip sadece giris alanlarini kullanabilirsiniz.",
             foreground="#35506B",
         ).pack(side="left", padx=(12, 0))
 
+        session_frame = ttk.Frame(workspace_tools)
+        session_frame.pack(side="right", padx=(12, 0))
+
+        ttk.Label(session_frame, text="Oturum:").pack(side="left")
+        self.session_combo = ttk.Combobox(
+            session_frame, state="readonly", width=24
+        )
+        self.session_combo.pack(side="left", padx=(4, 0))
+        self.session_combo.bind("<<ComboboxSelected>>", self._on_session_selected)
+
+        self.new_session_button = ttk.Button(
+            session_frame, text="Yeni", command=self._new_session
+        )
+        self.new_session_button.pack(side="left", padx=(4, 0))
+
+        self.save_session_button = ttk.Button(
+            session_frame, text="Kaydet", command=self._save_current_session
+        )
+        self.save_session_button.pack(side="left", padx=(4, 0))
+
+        self.wizard.build_wizard_bar(container)
+
         content_pane = ttk.Panedwindow(container, orient="horizontal")
-        content_pane.grid(row=3, column=0, sticky="nsew")
+        content_pane.grid(row=4, column=0, sticky="nsew")
         self.content_pane = content_pane
 
         left_panel = ttk.Frame(content_pane, padding=(0, 0, 10, 0))
@@ -830,6 +889,7 @@ class HydrostaticTestApp:
         session_tab = ttk.Frame(self.side_notebook, padding=8)
         session_tab.columnconfigure(0, weight=1)
         session_tab.rowconfigure(0, weight=1)
+        session_tab.rowconfigure(1, weight=0)
         self.side_notebook.add(session_tab, text="Kayit")
 
         detail_frame = ttk.LabelFrame(detail_tab, text="Detay Raporu", padding=12)
@@ -1026,6 +1086,34 @@ class HydrostaticTestApp:
         ttk.Button(results_actions, text="Sonuclari Temizle", command=self._clear_results).pack(
             side="left", padx=(8, 0)
         )
+
+        time_series_frame = ttk.LabelFrame(session_tab, text="Zaman Serisi Kaydi", padding=12)
+        time_series_frame.grid(row=1, column=0, sticky="ew", pady=(12, 0))
+        time_series_frame.columnconfigure(1, weight=1)
+        time_series_frame.columnconfigure(3, weight=1)
+        time_series_frame.columnconfigure(5, weight=1)
+
+        ttk.Label(time_series_frame, text="Basinc (bar):").grid(row=0, column=0, sticky="w")
+        self.ts_pressure_var = tk.StringVar()
+        ts_press_entry = ttk.Entry(time_series_frame, textvariable=self.ts_pressure_var, width=8)
+        ts_press_entry.grid(row=0, column=1, sticky="ew", padx=(4, 8))
+
+        ttk.Label(time_series_frame, text="Sicaklik (°C):").grid(row=0, column=2, sticky="w")
+        self.ts_temp_var = tk.StringVar()
+        ts_temp_entry = ttk.Entry(time_series_frame, textvariable=self.ts_temp_var, width=8)
+        ts_temp_entry.grid(row=0, column=3, sticky="ew", padx=(4, 8))
+
+        ttk.Label(time_series_frame, text="Hacim (m3):").grid(row=0, column=4, sticky="w")
+        self.ts_volume_var = tk.StringVar()
+        ts_vol_entry = ttk.Entry(time_series_frame, textvariable=self.ts_volume_var, width=8)
+        ts_vol_entry.grid(row=0, column=5, sticky="ew", padx=(4, 8))
+
+        ts_actions = ttk.Frame(time_series_frame)
+        ts_actions.grid(row=1, column=0, columnspan=6, sticky="ew", pady=(10, 0))
+        ttk.Button(ts_actions, text="Ekle", command=self._add_time_series_record).pack(side="left")
+        ttk.Button(ts_actions, text="Son 24 Saat", command=self._show_time_series_24h).pack(side="left", padx=(8, 0))
+        ttk.Button(ts_actions, text="Termal Denge Kontrolu", command=self._check_thermal_balance_ui).pack(side="left", padx=(8, 0))
+
         self._show_active_input_panel()
         self._position_content_sashes()
 
@@ -2244,6 +2332,17 @@ class HydrostaticTestApp:
             "write", lambda *_: self._on_coefficient_field_changed("pressure_b", self.pressure_vars["b_micro_per_c"])
         )
 
+        for variable in (
+            list(self.geometry_vars.values())
+            + list(self.section_profile_vars.values())
+            + list(self.air_vars.values())
+            + list(self.pressure_vars.values())
+            + list(self.field_vars.values())
+            + list(self.b_helper_vars.values())
+            + list(self.control_check_vars.values())
+        ):
+            variable.trace_add("write", lambda *_: self._session_auto_save_check())
+
     def _bind_shortcuts(self) -> None:
         self.root.bind("<Control-Return>", lambda *_: self._run_selected_test())
         self.root.bind("<F5>", lambda *_: self._recalculate_active_coefficients())
@@ -2562,26 +2661,14 @@ class HydrostaticTestApp:
         return all(value is not None for value in required_values)
 
     def _safe_float(self, value: str) -> float | None:
-        normalized = value.strip().replace(",", ".")
-        if not normalized:
-            return None
-        try:
-            return float(normalized)
-        except ValueError:
-            return None
+        return _safe_float_util(value)
 
     def _set_field_message(self, field_key: str, message: str, level: str = "info") -> None:
         var = self.field_message_vars.get(field_key)
         if var is None:
             return
-        prefixes = {
-            "info": "",
-            "success": "Hazir: ",
-            "warning": "Uyari: ",
-            "error": "Hata: ",
-        }
-        var.set(f"{prefixes.get(level, '')}{message}" if message else "")
-        visual_level = "neutral" if level == "info" else level
+        var.set(format_field_message(message, level))
+        visual_level = get_visual_level(level)
         self._apply_field_visual_state(field_key, visual_level)
 
     def _clear_field_message(self, field_key: str) -> None:
@@ -2773,6 +2860,20 @@ class HydrostaticTestApp:
         if field_key in {"air.temperature_c", "pressure.temperature_c"} and numeric_value is not None:
             if numeric_value < -5 or numeric_value > 60:
                 return ("Girilmis sicaklik tipik saha araliginin disinda gorunuyor.", "warning")
+        if field_key == "air.temperature_c" and numeric_value is not None:
+            if numeric_value < AMBIENT_TEMP_LIMIT_C:
+                return (
+                    f"NGTL 5007 Madde 10.1: Dolum sirasinda hava sicakligi +{AMBIENT_TEMP_LIMIT_C:.0f}°C altinda. "
+                    f"Dolum yapilmamali veya ek onlem alinmali.",
+                    "error",
+                )
+        if field_key == "pressure.temperature_c" and numeric_value is not None:
+            if 0 <= numeric_value < 4:
+                return (
+                    "0-4°C araliginda su genlesme katsayisi (beta) negatiftir. "
+                    "B katsayisi hesaplanamaz. Lutfen 5°C ustu sicaklik bekleyin veya manuel B girin.",
+                    "warning",
+                )
         if field_key in {"air.pressure_bar", "pressure.pressure_bar"} and numeric_value is not None and numeric_value <= 0:
             return ("Su basinci sifirdan buyuk olmalidir.", "error")
         if field_key == "pressure.actual_pressure_change_bar" and numeric_value is not None and numeric_value < 0:
@@ -4438,14 +4539,48 @@ class HydrostaticTestApp:
             "Backend secimi degisti. Basinc testi icin tekrar karsilastirin."
         )
         self._sync_backend_comparison_summary()
-        self._set_banner(
-            f"Su ozelligi backend'i {self._selected_water_backend_info().label} olarak secildi.",
-            "info",
-        )
+        
+        info = self._selected_water_backend_info()
+        if not getattr(info, "distribution_ready", True):
+            self._set_banner(
+                f"(Gelistirme Modu) Su ozelligi backend'i {info.label} olarak secildi. "
+                "GPLv3 lisansli iapws kutuphanesi. Sadece gelistirme ortaminda kullanilabilir.",
+                "warning",
+            )
+        else:
+            self._set_banner(
+                f"Su ozelligi backend'i {info.label} olarak secildi.",
+                "info",
+            )
+            
         self._refresh_live_test_decision()
         self._update_live_notice()
         self._refresh_visual_schema()
         self._refresh_detail_reports()
+
+    def _on_dev_mode_changed(self) -> None:
+        from ..domain.water_properties import get_available_water_property_backends
+        all_infos = get_available_water_property_backends(
+            include_dev_backends=self.dev_mode_var.get()
+        )
+        self.water_backend_option_map = {
+            self._format_backend_option_label(info): info.key
+            for info in all_infos
+        }
+        # Rebuild backend menu
+        self._refresh_backend_menu()
+
+    def _refresh_backend_menu(self) -> None:
+        if not hasattr(self, "backend_menu"):
+            return
+        self.backend_menu.delete(0, "end")
+        for option_label in self.water_backend_option_map.keys():
+            self.backend_menu.add_radiobutton(
+                label=option_label,
+                variable=self.water_backend_var,
+                value=option_label,
+                command=self._on_water_backend_changed,
+            )
 
     def _refresh_auto_coefficients_for_selected_backend(self) -> None:
         air_ready = (
@@ -5483,6 +5618,28 @@ class HydrostaticTestApp:
         self.results_text.see("end")
         self.results_text.configure(state="disabled")
 
+        if hasattr(self, "session_manager") and self.session_manager:
+            session = self.session_manager.get_active_session()
+            if session:
+                self.session_manager.add_result({"title": title, "content": content})
+                
+                if hasattr(self.session_manager, "_db") and self.session_manager._db:
+                    test_type = "field"
+                    if "Hava" in title:
+                        test_type = "air"
+                    elif "Basinc" in title:
+                        test_type = "pressure"
+                    
+                    self.session_manager._db.add_test_entry(
+                        session_id=session.id,
+                        test_type=test_type,
+                        inputs=self._build_input_snapshot(),
+                        result={"title": title, "content": content},
+                        decision_status=self.decision_status_var.get(),
+                        decision_title=self.decision_title_var.get(),
+                        decision_summary=self.decision_summary_var.get(),
+                    )
+
     def _clear_air_form(self) -> None:
         for key, variable in self.air_vars.items():
             if key in {"k_factor", "pressure_rise_bar"}:
@@ -5698,6 +5855,7 @@ class HydrostaticTestApp:
                 }
                 for segment_info in self.geometry_segments
             ],
+            "report_entries": self.report_entries,
         }
 
     def _apply_input_snapshot(self, payload: dict[str, object]) -> None:
@@ -5786,6 +5944,22 @@ class HydrostaticTestApp:
         self._update_check_summary()
         self._update_pig_limit_hint()
 
+        # Restore results log
+        self.report_entries.clear()
+        self.report_entries.extend(payload.get("report_entries", []))
+        self.results_text.configure(state="normal")
+        self.results_text.delete("1.0", "end")
+        if self.report_entries:
+            for entry in self.report_entries:
+                self.results_text.insert("end", f"\n{entry}\n")
+        else:
+            self.results_text.insert(
+                "end",
+                "Oturum sonuclari burada zaman damgasi ile listelenecek.\n"
+                "Not: Bu panel bir karar ozeti degil, kayit gunlugudur.\n",
+            )
+        self.results_text.configure(state="disabled")
+
         active_tab = str(payload.get("active_tab", "air"))
         if active_tab == "pressure":
             self.notebook.select(1)
@@ -5842,18 +6016,82 @@ class HydrostaticTestApp:
         file_path = filedialog.asksaveasfilename(
             title="Hidrostatik Test Raporunu Kaydet",
             defaultextension=".txt",
-            filetypes=[("Text Files", "*.txt"), ("All Files", "*.*")],
+            filetypes=[
+                ("Text Files", "*.txt"),
+                ("PDF Files", "*.pdf"),
+                ("Excel Files", "*.xlsx"),
+                ("All Files", "*.*")
+            ],
             initialfile=initial_name,
         )
         if not file_path:
             return
 
-        try:
-            Path(file_path).write_text(self._build_report_text(), encoding="utf-8")
-        except OSError as exc:
-            self._set_banner(f"Rapor kaydedilemedi: {exc}", "error")
-            messagebox.showerror("Hata", f"Rapor kaydedilemedi: {exc}")
-            return
+        ext = Path(file_path).suffix.lower()
+        if ext in [".pdf", ".xlsx"]:
+            from ..services.report_export import export_pdf_report, export_excel_report
+            title = f"{APP_NAME} Raporu"
+            metadata = {
+                "Surum": APP_VERSION,
+                "Referans sartname": f"{SPEC_DOCUMENT_CODE} - {SPEC_DOCUMENT_TITLE}",
+                "Olusturma zamani": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                "Su backend'i": self._selected_water_backend_info().label,
+                "Backend ozeti": self.water_backend_summary_var.get(),
+            }
+            geometry_data = {
+                "Dis cap (mm)": self._format_var_value(self.geometry_vars['outside_diameter_mm']),
+                "Et kalinligi (mm)": self._format_var_value(self.geometry_vars['wall_thickness_mm']),
+                "Hat uzunlugu (m)": self._format_var_value(self.geometry_vars['length_m']),
+                "Liste secimi": self.geometry_catalog_vars['size_option'].get().strip() or '-',
+                "Schedule secimi": self.geometry_catalog_vars['schedule_option'].get().strip() or '-',
+                "En yuksek nokta kotu (m)": self._format_var_value(self.section_profile_vars['highest_elevation_m']),
+                "En dusuk nokta kotu (m)": self._format_var_value(self.section_profile_vars['lowest_elevation_m']),
+                "Baslangic noktasi kotu (m)": self._format_var_value(self.section_profile_vars['start_elevation_m']),
+                "Bitis noktasi kotu (m)": self._format_var_value(self.section_profile_vars['end_elevation_m']),
+                "Dizayn basinci (bar)": self._format_var_value(self.section_profile_vars['design_pressure_bar']),
+                "Boru malzeme kalitesi": self.material_grade_var.get().strip() or '-',
+                "SMYS (MPa)": self._format_var_value(self.section_profile_vars['smys_mpa']),
+                "Location Class": self.location_class_var.get().strip() or '-',
+                "Pompa konumu": self.pump_location_var.get().strip() or '-',
+            }
+            test_results = {
+                "Hava Su derecesi (degC)": self._format_var_value(self.air_vars['temperature_c']),
+                "Hava Su basinci (bar)": self._format_var_value(self.air_vars['pressure_bar']),
+                "A (Hava)": self._format_var_value(self.air_vars['a_micro_per_bar']),
+                "Vpa (Hava)": self._format_var_value(self.air_vars['actual_added_water_m3']),
+                "Basinc Su derecesi (degC)": self._format_var_value(self.pressure_vars['temperature_c']),
+                "Basinc Su basinci (bar)": self._format_var_value(self.pressure_bar),
+                "A (Basinc)": self._format_var_value(self.pressure_vars['a_micro_per_bar']),
+                "B (Basinc)": self._format_var_value(self.pressure_vars['b_micro_per_c']),
+                "dT": self._format_var_value(self.pressure_vars['delta_t_c']),
+                "Pa": self._format_var_value(self.pressure_vars['actual_pressure_change_bar']),
+                "Karar": self.decision_status_var.get(),
+                "Karar Ozeti": self.decision_summary_var.get(),
+            }
+            checklist_data = []
+            for key, label, reference in FIELD_CHECK_DEFINITIONS:
+                checklist_data.append({
+                    "checked": self.control_check_vars[key].get(),
+                    "label": label,
+                    "ref": reference
+                })
+
+            try:
+                if ext == ".pdf":
+                    export_pdf_report(Path(file_path), title, metadata, geometry_data, test_results, checklist_data)
+                else:
+                    export_excel_report(Path(file_path), title, metadata, geometry_data, test_results, checklist_data)
+            except Exception as exc:
+                self._set_banner(f"Rapor kaydedilemedi: {exc}", "error")
+                messagebox.showerror("Hata", f"Rapor kaydedilemedi: {exc}")
+                return
+        else:
+            try:
+                Path(file_path).write_text(self._build_report_text(), encoding="utf-8")
+            except OSError as exc:
+                self._set_banner(f"Rapor kaydedilemedi: {exc}", "error")
+                messagebox.showerror("Hata", f"Rapor kaydedilemedi: {exc}")
+                return
 
         self._set_banner("Rapor basariyla kaydedildi.", "success")
         messagebox.showinfo("Kaydedildi", f"Rapor kaydedildi:\n{file_path}")
@@ -5871,6 +6109,259 @@ class HydrostaticTestApp:
                 "ve farkli et kalinliklarina sahip segmentler birlikte modellenebilir."
             ),
         )
+
+
+    def _refresh_session_list(self) -> None:
+        if not hasattr(self, "session_manager") or not hasattr(self, "session_combo"):
+            return
+        sessions = self.session_manager.list_sessions()
+        self.session_combo["values"] = [s["name"] for s in sessions]
+        active = self.session_manager.get_active_session()
+        if active:
+            self.session_combo.set(active.name)
+
+    def _on_session_selected(self, _event: tk.Event | None = None) -> None:
+        name = self.session_combo.get()
+        sessions = self.session_manager.list_sessions()
+        for s in sessions:
+            if s["name"] == name:
+                self.session_manager.switch_session(s["id"])
+                self._apply_session_to_ui()
+                break
+
+    def _new_session(self) -> None:
+        name = f"Oturum {len(self.session_manager.list_sessions()) + 1}"
+        self.session_manager.create_session(name)
+        self._clear_all_inputs()
+        self._reset_decision_card()
+        self._refresh_session_list()
+        self._set_banner(f"Yeni oturum '{name}' baslatildi.", "success")
+
+    def _save_current_session(self) -> None:
+        self._capture_ui_to_session()
+        self.session_manager._save_active_session()
+        self._set_banner("Oturum kaydedildi.", "success")
+
+    def _capture_ui_to_session(self) -> None:
+        if hasattr(self, "session_manager"):
+            inputs = self._build_input_snapshot()
+            self.session_manager.update_inputs(inputs)
+
+    def _apply_session_to_ui(self) -> None:
+        session = self.session_manager.get_active_session()
+        if not session:
+            return
+        if session.inputs:
+            self._apply_input_snapshot(session.inputs)
+            
+        # Restore wizard if wizard controller is active
+        if hasattr(self, "wizard") and self.wizard:
+            if session.wizard_state:
+                self.wizard._restore_from_session()
+                # Check if wizard was active
+                was_active = session.wizard_state.get("active", False)
+                if was_active != self.wizard.active:
+                    self.wizard.set_active(was_active)
+                    self.wizard_toggle_button.configure(
+                        text="Wizard Durdur" if was_active else "Wizard Baslat"
+                    )
+        self._refresh_session_list()
+
+    def _clear_all_inputs(self) -> None:
+        for variable in self.geometry_vars.values():
+            variable.set("")
+        for variable in self.section_profile_vars.values():
+            variable.set("")
+        for variable in self.geometry_catalog_vars.values():
+            variable.set("")
+        self.material_grade_var.set("")
+        self.location_class_var.set(get_location_class_options()[0])
+        self.pump_location_var.set("")
+        self._remove_touched_fields("geometry")
+        self._clear_feedback("geometry")
+        
+        self._clear_air_form()
+        self._clear_pressure_form()
+        self._clear_field_form()
+        self._clear_results()
+        
+        self.geometry_segments.clear()
+        self._refresh_segment_tree()
+        self._refresh_geometry_summary()
+
+    def _session_auto_save_check(self) -> None:
+        if hasattr(self, "session_manager"):
+            self._capture_ui_to_session()
+
+    def _add_time_series_record(self) -> None:
+        try:
+            pressure = self._safe_float(self.ts_pressure_var.get())
+            temperature = self._safe_float(self.ts_temp_var.get())
+            volume_str = self.ts_volume_var.get().strip()
+            volume = self._safe_float(volume_str) if volume_str else None
+            
+            if pressure is None or temperature is None:
+                self._set_banner("Basinc ve sicaklik degerlerini girin.", "warning")
+                return
+            session = self.session_manager.get_active_session()
+            if session:
+                # TimeSeriesStore session'a bağlı
+                tss = TimeSeriesStore.from_dict(session.time_series)
+                tss.add_record(
+                    pressure_bar=pressure,
+                    temperature_c=temperature,
+                    volume_m3=volume,
+                    notes="Manuel kayit",
+                )
+                session.time_series = tss.to_dict()
+                
+                # Also save to SQLite DB if active
+                if hasattr(self.session_manager, "_db") and self.session_manager._db:
+                    self.session_manager._db.add_time_series_record(
+                        session_id=session.id,
+                        pressure_bar=pressure,
+                        temperature_c=temperature,
+                        volume_m3=volume,
+                        notes="Manuel kayit",
+                    )
+                
+                # Auto save active session
+                self.session_manager._save_active_session()
+                
+                self._set_banner(f"Kayit eklendi: {len(tss.records)} kayit.", "success")
+                self.ts_pressure_var.set("")
+                self.ts_temp_var.set("")
+                self.ts_volume_var.set("")
+        except Exception as exc:
+            self._set_banner(f"Kayit eklenemedi: {exc}", "error")
+
+    def _show_time_series_24h(self) -> None:
+        session = self.session_manager.get_active_session()
+        if not session or not session.time_series:
+            messagebox.showinfo("Zaman Serisi Kayitlari", "Henuz hic kayit bulunmuyor.")
+            return
+        tss = TimeSeriesStore.from_dict(session.time_series)
+        if not tss.records:
+            messagebox.showinfo("Zaman Serisi Kayitlari", "Henuz hic kayit bulunmuyor.")
+            return
+        
+        lines = ["Zaman | Basinc (bar) | Sicaklik (°C) | Hacim (m3)"]
+        lines.append("-" * 50)
+        for r in tss.records[-20:]: # show last 20 records
+            vol_str = f"{r.volume_m3:.4f}" if r.volume_m3 is not None else "-"
+            lines.append(
+                f"{r.timestamp.strftime('%H:%M:%S')} | {r.pressure_bar:.2f} bar | {r.temperature_c:.2f} °C | {vol_str}"
+            )
+        
+        messagebox.showinfo("Son Kayitlar (En son 20)", "\n".join(lines))
+
+    def _check_thermal_balance_ui(self) -> None:
+        session = self.session_manager.get_active_session()
+        if not session or not session.time_series:
+            self._set_banner("Denge kontrolu icin en az 24 saatlik kayit gereklidir.", "warning")
+            return
+        tss = TimeSeriesStore.from_dict(session.time_series)
+        is_balanced, temp_diff = tss.check_thermal_balance()
+        
+        if is_balanced:
+            msg = f"Termal Denge Saglandi!\nSicaklik degisimi: {temp_diff:.3f} °C (Limit <= {THERMAL_BALANCE_THRESHOLD_C} °C)\nSure: {tss.get_duration_hours():.1f} saat (Limit >= {THERMAL_BALANCE_MIN_HOURS} saat)"
+            messagebox.showinfo("Termal Denge Kontrolu", msg)
+            self._set_banner("Termal denge dogrulandi.", "success")
+        else:
+            if temp_diff == float("inf"):
+                msg = f"Termal denge saglanamadi.\nYetersiz veri veya sure yetersiz.\nSure: {tss.get_duration_hours():.1f} saat (Limit >= 24 saat)."
+            else:
+                msg = f"Termal denge saglanamadi.\nSicaklik degisimi limit disi: {temp_diff:.3f} °C (Limit <= {THERMAL_BALANCE_THRESHOLD_C} °C)\nSure: {tss.get_duration_hours():.1f} saat."
+            messagebox.showwarning("Termal Denge Kontrolu", msg)
+            self._set_banner("Termal denge saglanamadi.", "warning")
+
+
+    def _open_session_browser(self) -> None:
+        browser = tk.Toplevel(self.root)
+        browser.title("Oturum Gecmisi")
+        browser.geometry("800x500")
+
+        # Treeview: session listesi
+        columns = ("id", "name", "test_count", "created", "updated")
+        tree = ttk.Treeview(browser, columns=columns, show="headings")
+        tree.heading("id", text="ID")
+        tree.heading("name", text="Oturum Adi")
+        tree.heading("test_count", text="Test Sayisi")
+        tree.heading("created", text="Olusturulma")
+        tree.heading("updated", text="Son Guncelleme")
+
+        tree.column("id", width=100, anchor="center")
+        tree.column("name", width=200, anchor="w")
+        tree.column("test_count", width=100, anchor="center")
+        tree.column("created", width=180, anchor="center")
+        tree.column("updated", width=180, anchor="center")
+
+        for s in self.session_manager.list_sessions():
+            entries = self.session_manager._db.get_session_entries(s["id"]) if (hasattr(self.session_manager, '_db') and self.session_manager._db) else []
+            tree.insert("", "end", values=(
+                s["id"][:8],
+                s["name"],
+                len(entries),
+                s["created_at"][:19].replace("T", " "),
+                s["updated_at"][:19].replace("T", " "),
+            ))
+
+        tree.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Ac/Yenile/Kapat butonlari
+        button_frame = ttk.Frame(browser)
+        button_frame.pack(fill="x", padx=10, pady=(0, 10))
+        ttk.Button(button_frame, text="Secili Oturumu Ac",
+                   command=lambda: [self._load_browser_session(tree), browser.destroy()]).pack(side="left")
+        ttk.Button(button_frame, text="Istatistikler",
+                   command=self._show_db_statistics).pack(side="left", padx=(8, 0))
+        ttk.Button(button_frame, text="Kapat",
+                   command=browser.destroy).pack(side="right")
+
+    def _show_db_statistics(self) -> None:
+        if not hasattr(self.session_manager, '_db') or not self.session_manager._db:
+            self._set_banner("Istatistikler sadece SQLite modunda kullanilabilir.", "warning")
+            return
+        stats = self.session_manager._db.get_statistics()
+        status_lines = []
+        for status, count in stats.get("by_status", {}).items():
+            status_lines.append(f"  - {status}: {count}")
+        status_str = "\n".join(status_lines) if status_lines else "  - Yok"
+        
+        type_lines = []
+        for t, count in stats.get("by_type", {}).items():
+            type_lines.append(f"  - {t}: {count}")
+        type_str = "\n".join(type_lines) if type_lines else "  - Yok"
+
+        msg = (
+            f"Toplam oturum: {stats['total_sessions']}\n"
+            f"Toplam test: {stats['total_tests']}\n"
+            f"Zaman serisi kaydi: {stats['time_series_records']}\n\n"
+            f"Test Durumlari:\n{status_str}\n\n"
+            f"Test Tipleri:\n{type_str}"
+        )
+        messagebox.showinfo("Veritabani Istatistikleri", msg)
+
+    def _load_browser_session(self, tree: ttk.Treeview) -> None:
+        selection = tree.selection()
+        if not selection:
+            messagebox.showwarning("Uyari", "Lutfen listeden bir oturum secin.")
+            return
+        item = tree.item(selection[0])
+        prefix = item["values"][0]
+        sessions = self.session_manager.list_sessions()
+        target_id = None
+        for s in sessions:
+            if s["id"][:8] == prefix:
+                target_id = s["id"]
+                break
+        
+        if target_id:
+            self.session_manager.switch_session(target_id)
+            self._apply_session_to_ui()
+            self._set_banner(f"'{item['values'][1]}' oturumu yuklendi.", "success")
+        else:
+            messagebox.showerror("Hata", "Secilen oturum bulunamadi.")
 
 
 def main() -> None:

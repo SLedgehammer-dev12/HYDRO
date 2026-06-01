@@ -51,3 +51,20 @@ coll = COLLECT(
     upx_exclude=[],
     name='HidrostatikTest',
 )
+
+import sys
+if sys.platform == 'darwin':
+    app = BUNDLE(
+        coll,
+        name='HidrostatikTest.app',
+        icon=None,
+        bundle_identifier='com.hidrostatik.degerlendirme',
+        info_plist={
+            'NSPrincipalClass': 'NSApplication',
+            'NSAppleScriptEnabled': False,
+            'CFBundleDisplayName': 'Hidrostatik Test Degerlendirme',
+            'CFBundleName': 'HidrostatikTest',
+            'CFBundleShortVersionString': '1.6.0',
+            'CFBundleVersion': '1.6.0',
+        }
+    )

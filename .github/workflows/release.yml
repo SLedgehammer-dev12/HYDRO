@@ -1,0 +1,160 @@
+name: Release App
+
+on:
+  push:
+    tags:
+      - "hidrostatik-test-v*"
+  workflow_dispatch:
+    inputs:
+      pre_release:
+        description: 'Pre-release olarak isaretle'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run tests
+        run: |
+          python -m unittest discover -s tests -p "test_*.py"
+
+  build-windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r .\requirements-dev.txt
+
+      - name: Build release package
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\build_exe.ps1
+
+      - name: Resolve release assets
+        id: assets
+        shell: pwsh
+        run: |
+          $zip = (Get-ChildItem -LiteralPath .\release -Filter '*.zip' | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+          $sha = (Get-ChildItem -LiteralPath .\release -Filter '*.sha256.txt' | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+          $notes = (Get-ChildItem -LiteralPath .\release -Filter '*-RELEASE-NOTES.md' | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+          "zip=$zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "notes=$notes" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Upload windows assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-assets
+          path: |
+            ${{ steps.assets.outputs.zip }}
+            ${{ steps.assets.outputs.sha }}
+            ${{ steps.assets.outputs.notes }}
+
+  build-macos:
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Build release package
+        run: |
+          chmod +x ./build_dmg.sh
+          ./build_dmg.sh
+
+      - name: Resolve release assets
+        id: assets
+        shell: bash
+        run: |
+          dmg=$(ls release/*.dmg | head -n 1)
+          sha=$(ls release/*.sha256.txt | head -n 1)
+          notes=$(ls release/*-RELEASE-NOTES.md | head -n 1)
+          echo "dmg=$dmg" >> $GITHUB_OUTPUT
+          echo "sha=$sha" >> $GITHUB_OUTPUT
+          echo "notes=$notes" >> $GITHUB_OUTPUT
+
+      - name: Upload macos assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-assets
+          path: |
+            ${{ steps.assets.outputs.dmg }}
+            ${{ steps.assets.outputs.sha }}
+            ${{ steps.assets.outputs.notes }}
+
+  publish-release:
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download Windows assets
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-assets
+          path: windows-release
+
+      - name: Download macOS assets
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-assets
+          path: macos-release
+
+      - name: Create unified release notes
+        run: |
+          echo "# Hidrostatik Test Degerlendirme Release" > unified-notes.md
+          echo "" >> unified-notes.md
+          echo "## Yenilikler (Changelog)" >> unified-notes.md
+          echo "Sürüm 1.6.0 ile gelen tüm yenilikleri görmek için [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) dosyasına göz atabilirsiniz." >> unified-notes.md
+          echo "" >> unified-notes.md
+          echo "### Windows Sürümü" >> unified-notes.md
+          cat windows-release/*-RELEASE-NOTES.md | grep -v "#" >> unified-notes.md || true
+          echo "" >> unified-notes.md
+          echo "### macOS Sürümü" >> unified-notes.md
+          cat macos-release/*-RELEASE-NOTES.md | grep -v "#" >> unified-notes.md || true
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            windows-release/*.zip
+            windows-release/*.sha256.txt
+            macos-release/*.dmg
+            macos-release/*.sha256.txt
+          body_path: unified-notes.md
+          prerelease: ${{ github.event.inputs.pre_release == 'true' }}

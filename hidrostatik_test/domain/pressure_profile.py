@@ -4,8 +4,9 @@ from dataclasses import dataclass
 from typing import Final
 
 from .hydrotest_core import PipeGeometry, PipeModel, PipeSection, ValidationError
+from .water_properties import calculate_water_density, WATER_DENSITY_DEFAULT_KG_PER_M3
 
-WATER_DENSITY_AT_15C_KG_PER_M3: Final[float] = 999.1
+WATER_DENSITY_DEFAULT_KG_PER_M3: Final[float] = 999.1
 GRAVITY_M_PER_S2: Final[float] = 9.80665
 PRESSURE_CONVERSION_PASCAL_TO_BAR: Final[float] = 100000.0
 CLASS_1_2_MIN_FACTOR: Final[float] = 1.25
@@ -133,11 +134,18 @@ def get_location_class_rule(label: str) -> LocationClassRule:
     raise ValidationError(f"Bilinmeyen Location Class secimi: {label}")
 
 
+def _resolve_water_temperature(inputs: SectionPressureProfileInputs) -> float:
+    if inputs.monitored_pressure_bar is not None:
+        return 15.0
+    return 15.0
+
+
 def evaluate_section_pressure_profile(inputs: SectionPressureProfileInputs) -> SectionPressureProfileResult:
     required_minimum_pressure_at_high_point_bar = (
         inputs.design_pressure_bar * inputs.location_class.minimum_test_factor
     )
-    hydraulic_span_bar = _hydraulic_head_bar(inputs.highest_elevation_m - inputs.lowest_elevation_m)
+    water_temp_c = _resolve_water_temperature(inputs)
+    hydraulic_span_bar = _hydraulic_head_bar(inputs.highest_elevation_m - inputs.lowest_elevation_m, water_temp_c)
     required_pressure_with_span_bar = required_minimum_pressure_at_high_point_bar + hydraulic_span_bar
     limiting_pressure_at_100_smys_bar, limiting_pipe_description = _pressure_at_100_smys_bar(
         pipe=inputs.pipe,
@@ -155,6 +163,7 @@ def evaluate_section_pressure_profile(inputs: SectionPressureProfileInputs) -> S
         maximum_allowable_pressure_at_low_point_bar=limiting_pressure_at_100_smys_bar,
         highest_elevation_m=inputs.highest_elevation_m,
         lowest_elevation_m=inputs.lowest_elevation_m,
+        water_temp_c=water_temp_c,
     )
     end_window = _build_pressure_window(
         location_label=END_PUMP_LOCATION,
@@ -163,6 +172,7 @@ def evaluate_section_pressure_profile(inputs: SectionPressureProfileInputs) -> S
         maximum_allowable_pressure_at_low_point_bar=limiting_pressure_at_100_smys_bar,
         highest_elevation_m=inputs.highest_elevation_m,
         lowest_elevation_m=inputs.lowest_elevation_m,
+        water_temp_c=water_temp_c,
     )
     selected_window = start_window if inputs.selected_pump_location == START_PUMP_LOCATION else end_window
     feasible = within_100_smys_span_limit and within_length_limit and within_volume_limit
@@ -204,9 +214,10 @@ def _build_pressure_window(
     maximum_allowable_pressure_at_low_point_bar: float,
     highest_elevation_m: float,
     lowest_elevation_m: float,
+    water_temp_c: float = 15.0,
 ) -> PressureWindow:
-    hydraulic_head_to_high_point_bar = _hydraulic_head_bar(highest_elevation_m - location_elevation_m)
-    hydraulic_head_to_low_point_bar = _hydraulic_head_bar(location_elevation_m - lowest_elevation_m)
+    hydraulic_head_to_high_point_bar = _hydraulic_head_bar(highest_elevation_m - location_elevation_m, water_temp_c)
+    hydraulic_head_to_low_point_bar = _hydraulic_head_bar(location_elevation_m - lowest_elevation_m, water_temp_c)
     return PressureWindow(
         location_label=location_label,
         location_elevation_m=location_elevation_m,
@@ -217,8 +228,9 @@ def _build_pressure_window(
     )
 
 
-def _hydraulic_head_bar(delta_h_m: float) -> float:
-    return WATER_DENSITY_AT_15C_KG_PER_M3 * delta_h_m * GRAVITY_M_PER_S2 / PRESSURE_CONVERSION_PASCAL_TO_BAR
+def _hydraulic_head_bar(delta_h_m: float, temp_c: float = 15.0) -> float:
+    density_kg_per_m3 = calculate_water_density(temp_c, 1.0)
+    return density_kg_per_m3 * delta_h_m * GRAVITY_M_PER_S2 / PRESSURE_CONVERSION_PASCAL_TO_BAR
 
 
 def _pressure_at_100_smys_bar(pipe: PipeModel, smys_mpa: float) -> tuple[float, str]:
@@ -270,7 +282,7 @@ __all__ = [
     "START_PUMP_LOCATION",
     "SectionPressureProfileInputs",
     "SectionPressureProfileResult",
-    "WATER_DENSITY_AT_15C_KG_PER_M3",
+    "WATER_DENSITY_DEFAULT_KG_PER_M3",
     "evaluate_section_pressure_profile",
     "get_location_class_options",
     "get_location_class_rule",

@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.6.0 - 2026-06-01
+
+- **Faz 4.1: İkinci Backend Doğrulama (IAPWS-95)**:
+  - CoolProp dışı bağımsız IAPWS-95 su özellik hesaplama motoru geliştirici/development moduna özel olarak entegre edildi.
+  - "Hesap" menüsü altına "Geliştirici Modu" menü seçeneği eklenerek bu modun aktif/deaktif edilebilmesi sağlandı.
+  - IAPWS-95 seçildiğinde GPLv3 lisans uyumluluk uyarıları içeren görsel uyarı bandı dinamik hale getirildi.
+  - Bağımlılıklar `requirements-dev.txt` içerisine izole edilerek standart dağıtımların lisans kapsamı dışında kalması sağlandı.
+- **Faz 4.2: Çoklu Oturum Yönetimi**:
+  - `TestSession` veri modeli oluşturularak tüm form elemanları, aktif checklist adımları, wizard ilerlemesi ve zaman serisi verileri oturum snapshot'ı olarak kaydedilebilir hale getirildi.
+  - Arayüze "Yeni" oturum başlatma, "Kaydet" ve oturumlar arası hızlı geçiş sağlayan dinamik combobox araç çubuğu eklendi.
+  - Kullanıcı girdilerinde ve form değişikliklerinde otomatik oturum kaydetme (auto-save) tetikleyicileri entegre edildi.
+- **Faz 4.3: SQLite Veritabanı Entegrasyonu**:
+  - `DatabaseManager` ile WAL modu ve yabancı anahtar (foreign key) kısıtlamalarını içeren SQLite tabanlı kalıcı veri katmanı eklendi.
+  - JSON ve SQLite oturum kayıtları arasında birebir veri modeli eşitliği sağlandı.
+  - Menüye "Dosya -> Oturum Geçmişi..." eklenerek kayıtlı oturumların Treeview üzerinden izlenmesi, silinmesi ve yüklenebilmesi sağlandı.
+  - Oturum istatistikleri penceresi ile veritabanındaki test durumları, tipleri ve kayıt sayıları görsel özet rapor olarak sunuldu.
+- **Faz 4.4: CI/CD Pipeline ve Çoklu Platform Derleme**:
+  - Ruff (kod formatlama) ve MyPy (statik tip kontrolü) test otomasyonu Github Actions entegrasyonu tamamlandı.
+  - Windows (`.exe`) ve macOS (`.dmg`) için otomatik çoklu platform derleme süreçleri kuruldu.
+  - Otomatik test paketi 157 teste çıkarılarak kararlı çalışma garanti altına alındı.
+
 ## 1.5.9 - 2026-04-06
 
 - Arayuz uc bolmeli ve yeniden boyutlandirilabilir hale getirildi; girdi paneli sola, aktif test sekmeleri ortaya, detay raporu saga tasindi.
