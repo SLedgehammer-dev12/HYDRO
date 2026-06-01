@@ -109,10 +109,10 @@ function Write-ReleaseNotes {
 - import smoke check
 
 ## Build Notes
-- Windows one-dir package generated with PyInstaller
+- Windows standalone executable (.exe) generated with PyInstaller
 - UPX disabled to reduce antivirus false positives
 - $resourceStatus
-- CoolProp dependency bundled into the distribution folder
+- CoolProp dependency and CSV/JSON data tables bundled directly into the executable
 - Startup update check and manual update control are enabled
 - Code signing was not applied in this package
 
@@ -197,7 +197,7 @@ function Invoke-PyInstallerBuild {
         "--noconfirm",
         "--clean",
         "--windowed",
-        "--onedir",
+        "--onefile",
         "--noupx",
         "--name", $binaryName,
         "--distpath", $attemptDistPath,
@@ -236,7 +236,7 @@ function Invoke-PyInstallerBuild {
         ExitCode = $LASTEXITCODE
         DistPath = $attemptDistPath
         BuildPath = $attemptBuildPath
-        ExePath = Join-Path $attemptDistPath "$binaryName\$binaryName.exe"
+        ExePath = Join-Path $attemptDistPath "$binaryName.exe"
         UsedWindowsResources = $UseWindowsResources
     }
 }
@@ -248,7 +248,7 @@ $publisherName = Get-MetadataValue "PUBLISHER_NAME"
 $copyrightNotice = Get-MetadataValue "COPYRIGHT_NOTICE"
 $releaseTagPrefix = Get-MetadataValue "RELEASE_TAG_PREFIX"
 $artifactBaseName = "$binaryName-v$appVersion-windows-x64"
-$zipPath = Join-Path $releasePath "$artifactBaseName.zip"
+$releaseExePath = Join-Path $releasePath "$artifactBaseName.exe"
 $hashPath = Join-Path $releasePath "$artifactBaseName.sha256.txt"
 $notesPath = Join-Path $releasePath "$artifactBaseName-RELEASE-NOTES.md"
 $releaseTag = "$releaseTagPrefix$appVersion"
@@ -363,42 +363,18 @@ $windowsResourcesEmbedded = $buildResult.UsedWindowsResources
 
 if (-not (Test-Path -LiteralPath $exePath)) {
     throw "Beklenen exe olusmadi: $exePath"
-}
-$bundledAbControlTableCsvPath = Join-Path $distPath "$binaryName\_internal\hidrostatik_test\data\ab_control_table_v1.csv"
-$bundledAbControlTableMetadataPath = Join-Path $distPath "$binaryName\_internal\hidrostatik_test\data\ab_control_table_v1.meta.json"
-$bundledGailReferenceTableCsvPath = Join-Path $distPath "$binaryName\_internal\hidrostatik_test\data\gail_reference_table_v1.csv"
-$bundledGailReferenceTableMetadataPath = Join-Path $distPath "$binaryName\_internal\hidrostatik_test\data\gail_reference_table_v1.meta.json"
-$bundledWaterPropertyCsvPath = Join-Path $distPath "$binaryName\_internal\hidrostatik_test\data\water_property_table_v1.csv"
-$bundledWaterPropertyMetadataPath = Join-Path $distPath "$binaryName\_internal\hidrostatik_test\data\water_property_table_v1.meta.json"
-if (-not (Test-Path -LiteralPath $bundledAbControlTableCsvPath)) {
-    throw "Bundled A/B kontrol tablosu CSV dosyasi bulunamadi: $bundledAbControlTableCsvPath"
-}
-if (-not (Test-Path -LiteralPath $bundledAbControlTableMetadataPath)) {
-    throw "Bundled A/B kontrol tablosu metadata dosyasi bulunamadi: $bundledAbControlTableMetadataPath"
-}
-if (-not (Test-Path -LiteralPath $bundledGailReferenceTableCsvPath)) {
-    throw "Bundled GAIL referans tablosu CSV dosyasi bulunamadi: $bundledGailReferenceTableCsvPath"
-}
-if (-not (Test-Path -LiteralPath $bundledGailReferenceTableMetadataPath)) {
-    throw "Bundled GAIL referans tablosu metadata dosyasi bulunamadi: $bundledGailReferenceTableMetadataPath"
-}
-if (-not (Test-Path -LiteralPath $bundledWaterPropertyCsvPath)) {
-    throw "Bundled su ozelligi CSV dosyasi bulunamadi: $bundledWaterPropertyCsvPath"
-}
-if (-not (Test-Path -LiteralPath $bundledWaterPropertyMetadataPath)) {
-    throw "Bundled su ozelligi metadata dosyasi bulunamadi: $bundledWaterPropertyMetadataPath"
-}
+$releaseExePath = Join-Path $releasePath "$artifactBaseName.exe"
 
 if (-not $SkipArchive) {
     Write-Host "Release artifact'lari uretiliyor..."
-    New-ReleaseArchive -SourcePath (Join-Path $distPath $binaryName) -DestinationPath $zipPath
-    $hash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    Set-Content -LiteralPath $hashPath -Value "$hash  $([System.IO.Path]::GetFileName($zipPath))" -Encoding ASCII
+    Copy-Item -LiteralPath $exePath -Destination $releaseExePath -Force
+    $hash = (Get-FileHash -LiteralPath $releaseExePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    Set-Content -LiteralPath $hashPath -Value "$hash  $([System.IO.Path]::GetFileName($releaseExePath))" -Encoding ASCII
     Write-ReleaseNotes `
         -OutputPath $notesPath `
         -AppName $appName `
         -AppVersion $appVersion `
-        -ArtifactName ([System.IO.Path]::GetFileName($zipPath)) `
+        -ArtifactName ([System.IO.Path]::GetFileName($releaseExePath)) `
         -HashFileName ([System.IO.Path]::GetFileName($hashPath)) `
         -WindowsResourcesEmbedded $windowsResourcesEmbedded `
         -ReleaseTag $releaseTag
@@ -408,7 +384,7 @@ Write-Host ""
 Write-Host "Build tamamlandi."
 Write-Host "Exe yolu: $exePath"
 if (-not $SkipArchive) {
-    Write-Host "Zip yolu: $zipPath"
+    Write-Host "Release Exe yolu: $releaseExePath"
     Write-Host "SHA256: $hashPath"
     Write-Host "Release notes: $notesPath"
     Write-Host "Git tag onerisi: $releaseTag"
