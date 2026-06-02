@@ -215,12 +215,10 @@ function Invoke-PyInstallerBuild {
         "--exclude-module", "CoolProp.tests",
         "--exclude-module", "matplotlib",
         "--exclude-module", "pandas",
-        "--exclude-module", "scipy",
         "--exclude-module", "pytest",
         "--exclude-module", "PyQt5",
         "--exclude-module", "PyQt6",
         "--exclude-module", "PySide6",
-        "--exclude-module", "openpyxl",
         "--exclude-module", "lxml",
         "--exclude-module", "pyarrow"
     )

@@ -17,7 +17,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['CoolProp.GUI', 'CoolProp.Plots', 'CoolProp.tests', 'matplotlib', 'pandas', 'scipy', 'pytest', 'PyQt5', 'PyQt6', 'PySide6', 'openpyxl', 'lxml', 'pyarrow'],
+    excludes=['CoolProp.GUI', 'CoolProp.Plots', 'CoolProp.tests', 'matplotlib', 'pandas', 'pytest', 'PyQt5', 'PyQt6', 'PySide6', 'lxml', 'pyarrow'],
     noarchive=False,
     optimize=0,
 )

@@ -140,7 +140,7 @@ jobs:
           echo "# Hidrostatik Test Degerlendirme Release" > unified-notes.md
           echo "" >> unified-notes.md
           echo "## Yenilikler (Changelog)" >> unified-notes.md
-          echo "Sürüm 1.6.0 ile gelen tüm yenilikleri görmek için [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) dosyasına göz atabilirsiniz." >> unified-notes.md
+          echo "En güncel yenilikleri ve tüm sürüm geçmişini görmek için [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) dosyasına göz atabilirsiniz." >> unified-notes.md
           echo "" >> unified-notes.md
           echo "### Windows Sürümü" >> unified-notes.md
           cat windows-release/*-RELEASE-NOTES.md | grep -v "#" >> unified-notes.md || true

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.1 - 2026-06-02
+
+- **Derleme Hata Düzeltmeleri (Hotfix)**:
+  - PyInstaller excludes listesinden `scipy` kaldırıldı; böylece `WaterPropertyTableBackend` interpolasyon hesaplamasında kullanılan `scipy.interpolate` modülünün bulunamaması nedeniyle uygulamanın açılışta çökmesi kökünden engellendi.
+  - PyInstaller excludes listesinden `openpyxl` kaldırıldı; böylece rapor dışa aktarma (Excel Export) adımında karşılaşılan Excel motoru yükleme hatası çözüme kavuşturuldu.
+  - Windows (`.exe`) ve macOS (`.dmg`) paketleme spec ve betik dosyaları güncellenerek kararlı çalışma her iki platformda da garantiye alındı.
+
 ## 1.6.0 - 2026-06-01
 
 - **Faz 4.1: İkinci Backend Doğrulama (IAPWS-95)**:
