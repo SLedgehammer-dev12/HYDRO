@@ -2372,7 +2372,8 @@ class HydrostaticTestApp:
         try:
             update_info = fetch_latest_update_info()
         except UpdateError as exc:
-            self.root.after(0, lambda: self._handle_update_check_error(str(exc), user_requested))
+            exc_str = str(exc)
+            self.root.after(0, lambda: self._handle_update_check_error(exc_str, user_requested))
             return
         self.root.after(0, lambda: self._handle_update_check_result(update_info, user_requested))
 

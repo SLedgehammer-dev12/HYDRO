@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.2 - 2026-06-06
+
+- **Çalışma Zamanı Düzeltmeleri (Runtime Hotfixes)**:
+  - macOS ve Linux sistemlerinde otomatik veya manuel güncelleme denetimi yapılırken powershell komut satırı aracının bulunmaması durumunda oluşan `FileNotFoundError` hatası giderildi (PowerShell yoksa düzgün bir şekilde hata yakalanıp atlanmaktadır).
+  - Güncelleme denetimi hata geri bildirimi sırasında `Tkinter` callback'lerinde oluşan lambda değişken kapsamı hatası (`NameError: cannot access free variable 'exc'`) giderilerek arayüz kararlılığı artırıldı.
+  - Bağımlılık paketleme spec'inde (`HidrostatikTest.spec`) ve betiklerinde (`build_exe.ps1`) `iapws` kütüphanesi hariç bırakılarak GPLv3 lisans uyumluluğu ve paketleme bütünlüğü sağlandı.
+
 ## 1.6.1 - 2026-06-02
 
 - **Derleme Hata Düzeltmeleri (Hotfix)**:

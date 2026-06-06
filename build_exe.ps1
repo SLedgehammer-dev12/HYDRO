@@ -220,7 +220,8 @@ function Invoke-PyInstallerBuild {
         "--exclude-module", "PyQt6",
         "--exclude-module", "PySide6",
         "--exclude-module", "lxml",
-        "--exclude-module", "pyarrow"
+        "--exclude-module", "pyarrow",
+        "--exclude-module", "iapws"
     )
 
     if ($UseWindowsResources) {

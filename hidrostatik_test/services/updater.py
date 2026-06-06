@@ -184,6 +184,8 @@ def _run_powershell(script: str, timeout_seconds: int) -> str:
             timeout=timeout_seconds,
             check=False,
         )
+    except FileNotFoundError as exc:
+        raise UpdateError("PowerShell bu sistemde bulunamadi.") from exc
     except subprocess.TimeoutExpired as exc:
         raise UpdateError("PowerShell ag cagrisi zaman asimina ugradi.") from exc
 
