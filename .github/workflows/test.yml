@@ -41,13 +41,22 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
-      - name: Run tests
+      - name: Run tests with coverage
         run: |
           if [[ "${{ runner.os }}" == "Linux" ]]; then
-            xvfb-run python -m unittest discover -s tests -p "test_*.py" -v
+            xvfb-run python -m coverage run -m unittest discover -s tests -p "test_*.py" -v
           else
-            python -m unittest discover -s tests -p "test_*.py" -v
+            python -m coverage run -m unittest discover -s tests -p "test_*.py" -v
           fi
+
+      - name: Report coverage
+        run: |
+          python -m coverage report --fail-under=70 --skip-covered --show-missing
+
+      - name: Run mypy on domain layer
+        continue-on-error: true
+        run: |
+          python -m mypy hidrostatik_test/domain/ hidrostatik_test/ui/constants.py --strict-equality
 
       - name: Upload test results (on failure)
         if: failure()

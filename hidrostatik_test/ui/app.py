@@ -3128,9 +3128,9 @@ class HydrostaticTestApp:
                 self._set_field_message(field_key, "Kosullar degisti, yeniden hesaplayin.", "warning")
             elif state == CoefficientState.COMPUTED:
                 self._set_field_message(field_key, "Hesap guncel.", "success")
-            elif state == "reference":
+            elif state == CoefficientState.REFERENCE:
                 self._set_field_message(field_key, "Referans noktadan yuklendi.", "success")
-            elif state == "manual":
+            elif state == CoefficientState.MANUAL:
                 self._set_field_message(field_key, "Manuel giris aktif.", "info")
             elif existing_message is not None and not existing_message.get():
                 hint = self._auto_field_hint(field_key)
