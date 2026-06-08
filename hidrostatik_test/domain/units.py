@@ -18,26 +18,28 @@ MM_TO_M: Final[float] = 1e-3
 M3_TO_L: Final[float] = 1000.0
 
 
-def convert_pressure(value: float, from_unit: str, to_unit: str) -> float:
+def convert(value: float, from_unit: str, to_unit: str) -> float:
     quantity = Q_(value, from_unit)
     return quantity.to(to_unit).magnitude
+
+
+def convert_pressure(value: float, from_unit: str, to_unit: str) -> float:
+    return convert(value, from_unit, to_unit)
 
 
 def convert_length(value: float, from_unit: str, to_unit: str) -> float:
-    quantity = Q_(value, from_unit)
-    return quantity.to(to_unit).magnitude
+    return convert(value, from_unit, to_unit)
 
 
 def convert_temperature(value: float, from_unit: str, to_unit: str) -> float:
-    quantity = Q_(value, from_unit)
-    return quantity.to(to_unit).magnitude
+    return convert(value, from_unit, to_unit)
 
 
 def validate_unit(value: float, unit: str) -> bool:
     try:
         Q_(value, unit)
         return True
-    except (pint.UndefinedUnitError, pint.DimensionalityError):
+    except pint.errors.PintError:
         return False
 
 
@@ -51,6 +53,7 @@ __all__ = [
     "Q_",
     "Temperature",
     "Volume",
+    "convert",
     "convert_length",
     "convert_pressure",
     "convert_temperature",

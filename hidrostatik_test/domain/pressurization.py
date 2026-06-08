@@ -47,7 +47,7 @@ def evaluate_pressurization(inputs: PressurizationInputs) -> PressurizationResul
     pressure_deviation_bar = inputs.pressure_bar - inputs.expected_pressure_bar
 
     within_volume_limit = abs(volume_deviation_percent) <= PRESSURIZATION_VOLUME_DEVIATION_LIMIT_PERCENT + FLOAT_TOLERANCE
-    within_pressure_limit = pressure_deviation_bar <= FLOAT_TOLERANCE
+    within_pressure_limit = abs(pressure_deviation_bar) <= FLOAT_TOLERANCE
 
     passed = within_volume_limit and within_pressure_limit
 

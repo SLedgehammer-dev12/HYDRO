@@ -7,14 +7,16 @@ import unittest
 from unittest.mock import patch
 
 from hidrostatik_test.data import BOTAS_REFERENCE_OPTION_LABEL, GAIL_REFERENCE_OPTION_LABEL
-from hidrostatik_test.ui.app import (
+from hidrostatik_test.ui.app import HydrostaticTestApp
+
+from hidrostatik_test.domain.coefficient_manager import CoefficientState
+from hidrostatik_test.ui.constants import (
     AUTO_A_MODE,
     AUTO_B_MODE,
     MANUAL_A_MODE,
     MANUAL_B_MODE,
     REFERENCE_A_MODE,
     REFERENCE_B_MODE,
-    HydrostaticTestApp,
 )
 from hidrostatik_test.app_metadata import APP_VERSION, SPEC_DOCUMENT_CODE
 
@@ -41,11 +43,11 @@ class UiWorkflowTests(unittest.TestCase):
         self.app.air_vars["pressure_bar"].set("80")
 
         self.assertTrue(self.app._calculate_air_a(log_result=False))
-        self.assertEqual(self.app.coefficient_states["air_a"], "computed")
+        self.assertEqual(self.app.coefficient_manager.get("air_a"), CoefficientState.COMPUTED)
 
         self.app.air_vars["temperature_c"].set("21")
 
-        self.assertEqual(self.app.coefficient_states["air_a"], "computed")
+        self.assertEqual(self.app.coefficient_manager.get("air_a"), CoefficientState.COMPUTED)
         self.assertEqual(self.app.field_message_vars["air.a_micro_per_bar"].get(), "Hazir: Hesap guncel.")
 
     def test_pressure_evaluation_auto_calculates_a_and_b(self) -> None:
@@ -62,8 +64,8 @@ class UiWorkflowTests(unittest.TestCase):
         self.assertEqual(self.app.decision_status_var.get(), "BASARILI")
         self.assertNotEqual(self.app.pressure_vars["a_micro_per_bar"].get(), "")
         self.assertNotEqual(self.app.pressure_vars["b_micro_per_c"].get(), "")
-        self.assertEqual(self.app.coefficient_states["pressure_a"], "computed")
-        self.assertEqual(self.app.coefficient_states["pressure_b"], "computed")
+        self.assertEqual(self.app.coefficient_manager.get("pressure_a"), CoefficientState.COMPUTED)
+        self.assertEqual(self.app.coefficient_manager.get("pressure_b"), CoefficientState.COMPUTED)
 
     def test_air_evaluation_accepts_manual_a_mode(self) -> None:
         self._fill_geometry()
@@ -77,7 +79,7 @@ class UiWorkflowTests(unittest.TestCase):
         self.app._run_air_test()
 
         self.assertEqual(self.app.decision_status_var.get(), "BASARILI")
-        self.assertEqual(self.app.coefficient_states["air_a"], "manual")
+        self.assertEqual(self.app.coefficient_manager.get("air_a"), CoefficientState.MANUAL)
         self.assertIn("Manuel", self.app.air_a_mode_var.get())
 
     def test_air_manual_detail_report_marks_manual_a_source(self) -> None:
@@ -120,7 +122,7 @@ class UiWorkflowTests(unittest.TestCase):
         self.app._run_air_test()
 
         self.assertEqual(self.app.decision_status_var.get(), "BASARILI")
-        self.assertEqual(self.app.coefficient_states["air_a"], "reference")
+        self.assertEqual(self.app.coefficient_manager.get("air_a"), CoefficientState.REFERENCE)
         self.assertEqual(self.app.air_vars["a_micro_per_bar"].get(), "45.518533")
 
     def test_reference_option_lists_include_botas_and_gail_tables(self) -> None:
@@ -140,7 +142,7 @@ class UiWorkflowTests(unittest.TestCase):
 
         self.app._on_air_a_reference_changed()
 
-        self.assertEqual(self.app.coefficient_states["air_a"], "reference")
+        self.assertEqual(self.app.coefficient_manager.get("air_a"), CoefficientState.REFERENCE)
         self.assertEqual(self.app.air_vars["a_micro_per_bar"].get(), "46.775000")
 
     def test_air_reference_mode_accepts_gail_table(self) -> None:
@@ -152,7 +154,7 @@ class UiWorkflowTests(unittest.TestCase):
 
         self.app._on_air_a_reference_changed()
 
-        self.assertEqual(self.app.coefficient_states["air_a"], "reference")
+        self.assertEqual(self.app.coefficient_manager.get("air_a"), CoefficientState.REFERENCE)
         self.assertEqual(self.app.air_vars["a_micro_per_bar"].get(), "46.824270")
 
     def test_pressure_b_reference_mode_accepts_botas_table_without_helper(self) -> None:
@@ -164,7 +166,7 @@ class UiWorkflowTests(unittest.TestCase):
 
         self.app._on_pressure_b_reference_changed()
 
-        self.assertEqual(self.app.coefficient_states["pressure_b"], "reference")
+        self.assertEqual(self.app.coefficient_manager.get("pressure_b"), CoefficientState.REFERENCE)
         self.assertEqual(self.app.pressure_vars["b_micro_per_c"].get(), "64.923000")
         self.assertFalse(self.app.use_b_helper_var.get())
         self.assertEqual(self.app.b_helper_vars["water_beta_micro_per_c"].get(), "")
@@ -179,7 +181,7 @@ class UiWorkflowTests(unittest.TestCase):
 
         self.app._on_pressure_b_reference_changed()
 
-        self.assertEqual(self.app.coefficient_states["pressure_b"], "reference")
+        self.assertEqual(self.app.coefficient_manager.get("pressure_b"), CoefficientState.REFERENCE)
         self.assertEqual(self.app.pressure_vars["b_micro_per_c"].get(), "60.450000")
         self.assertFalse(self.app.use_b_helper_var.get())
         self.assertEqual(self.app.b_helper_vars["water_beta_micro_per_c"].get(), "")
@@ -218,7 +220,7 @@ class UiWorkflowTests(unittest.TestCase):
         self.app._run_pressure_test()
 
         self.assertEqual(self.app.decision_status_var.get(), "BASARILI")
-        self.assertEqual(self.app.coefficient_states["pressure_b"], "manual")
+        self.assertEqual(self.app.coefficient_manager.get("pressure_b"), CoefficientState.MANUAL)
         self.assertFalse(self.app.use_b_helper_var.get())
         self.assertEqual(self.app.b_helper_vars["water_beta_micro_per_c"].get(), "")
 
@@ -236,7 +238,7 @@ class UiWorkflowTests(unittest.TestCase):
         self.app._run_pressure_test()
 
         self.assertEqual(self.app.decision_status_var.get(), "BASARILI")
-        self.assertEqual(self.app.coefficient_states["pressure_b"], "reference")
+        self.assertEqual(self.app.coefficient_manager.get("pressure_b"), CoefficientState.REFERENCE)
         self.assertFalse(self.app.use_b_helper_var.get())
         self.assertEqual(self.app.b_helper_vars["water_beta_micro_per_c"].get(), "")
 
@@ -257,7 +259,7 @@ class UiWorkflowTests(unittest.TestCase):
         self.app._run_pressure_test()
 
         self.assertEqual(self.app.decision_status_var.get(), "BASARILI")
-        self.assertEqual(self.app.coefficient_states["pressure_a"], "reference")
+        self.assertEqual(self.app.coefficient_manager.get("pressure_a"), CoefficientState.REFERENCE)
         self.assertEqual(self.app.pressure_vars["a_micro_per_bar"].get(), "46.775000")
 
     def test_pressure_manual_detail_report_shows_sources_and_decision_basis(self) -> None:
@@ -386,8 +388,8 @@ class UiWorkflowTests(unittest.TestCase):
         self.assertEqual(self.app.decision_title_var.get(), "Basinc Degisim Testi")
         self.assertEqual(self.app.decision_status_var.get(), "BASARILI")
         self.assertIn("Canli sonuc: Pt =", self.app.decision_summary_var.get())
-        self.assertEqual(self.app.coefficient_states["pressure_a"], "computed")
-        self.assertEqual(self.app.coefficient_states["pressure_b"], "computed")
+        self.assertEqual(self.app.coefficient_manager.get("pressure_a"), CoefficientState.COMPUTED)
+        self.assertEqual(self.app.coefficient_manager.get("pressure_b"), CoefficientState.COMPUTED)
 
     def test_empty_required_field_sets_feedback(self) -> None:
         self.app._run_air_test()
@@ -431,7 +433,7 @@ class UiWorkflowTests(unittest.TestCase):
         self.app.water_backend_var.set("Table Interpolation v1 [table_v1]")
         self.app._on_water_backend_changed()
 
-        self.assertEqual(self.app.coefficient_states["air_a"], "computed")
+        self.assertEqual(self.app.coefficient_manager.get("air_a"), CoefficientState.COMPUTED)
         self.assertEqual(self.app.air_vars["a_micro_per_bar"].get(), "46.586510")
 
     def test_check_summary_counts_checked_controls(self) -> None:
@@ -621,8 +623,8 @@ class UiWorkflowTests(unittest.TestCase):
         self.assertEqual(self.app.pressure_vars["temperature_c"].get(), "")
         self.assertEqual(self.app.pressure_vars["pressure_bar"].get(), "")
         self.assertEqual(self.app.pressure_vars["delta_t_c"].get(), "")
-        self.assertEqual(self.app.coefficient_states["pressure_a"], "empty")
-        self.assertEqual(self.app.coefficient_states["pressure_b"], "empty")
+        self.assertEqual(self.app.coefficient_manager.get("pressure_a"), CoefficientState.EMPTY)
+        self.assertEqual(self.app.coefficient_manager.get("pressure_b"), CoefficientState.EMPTY)
 
     def test_clear_active_air_form_resets_custom_k_and_decision(self) -> None:
         self.app.notebook.select(0)
@@ -725,7 +727,7 @@ class UiWorkflowTests(unittest.TestCase):
 
         self.app.air_vars["pressure_bar"].set("81")
 
-        self.assertEqual(self.app.coefficient_states["air_a"], "computed")
+        self.assertEqual(self.app.coefficient_manager.get("air_a"), CoefficientState.COMPUTED)
         self.assertEqual(self.app.field_message_vars["air.a_micro_per_bar"].get(), "Hazir: Hesap guncel.")
         self.assertIn("tutarli gorunuyor", self.app.live_notice_var.get())
 
@@ -733,12 +735,12 @@ class UiWorkflowTests(unittest.TestCase):
         self.app.air_vars["temperature_c"].set("20")
         self.app.air_vars["pressure_bar"].set("80")
         self.assertTrue(self.app._calculate_air_a(log_result=False))
-        self.assertEqual(self.app.coefficient_states["air_a"], "computed")
+        self.assertEqual(self.app.coefficient_manager.get("air_a"), CoefficientState.COMPUTED)
 
         self.app.water_backend_var.set("Table Interpolation v1 [table_v1]")
         self.app._on_water_backend_changed()
 
-        self.assertEqual(self.app.coefficient_states["air_a"], "computed")
+        self.assertEqual(self.app.coefficient_manager.get("air_a"), CoefficientState.COMPUTED)
         self.assertIn("Table Interpolation v1", self.app.water_backend_summary_var.get())
         self.assertIn("Backend secimi degisti", self.app.air_backend_comparison_var.get())
 

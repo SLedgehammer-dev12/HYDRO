@@ -13,33 +13,25 @@ def _setup_numpy_dll_paths() -> None:
         return
 
     if sys.platform == "win32":
-        numpy_core_dir = os.path.join(meipass, "numpy", "core")
-        if os.path.isdir(numpy_core_dir):
-            try:
-                os.add_dll_directory(numpy_core_dir)
-            except AttributeError:
-                pass
+        import glob
 
-        scipy_dirs = [
-            os.path.join(meipass, "scipy", "linalg"),
-            os.path.join(meipass, "scipy", "interpolate"),
-            os.path.join(meipass, "scipy", "special"),
-        ]
-        for d in scipy_dirs:
-            if os.path.isdir(d):
-                try:
-                    os.add_dll_directory(d)
-                except AttributeError:
-                    pass
-
-        for root, _dirs, files in os.walk(meipass):
-            for f in files:
-                if f.endswith((".dll", ".pyd")):
+        registered = set()
+        for pattern in [
+            os.path.join(meipass, "numpy", "core", "*.dll"),
+            os.path.join(meipass, "numpy", "core", "*.pyd"),
+            os.path.join(meipass, "scipy", "**", "*.dll"),
+            os.path.join(meipass, "scipy", "**", "*.pyd"),
+            os.path.join(meipass, "**", "*.dll"),
+            os.path.join(meipass, "**", "*.pyd"),
+        ]:
+            for f in glob.glob(pattern, recursive=True):
+                d = os.path.dirname(f)
+                if d not in registered:
+                    registered.add(d)
                     try:
-                        os.add_dll_directory(root)
+                        os.add_dll_directory(d)
                     except AttributeError:
-                        break
-            break
+                        pass
 
     if sys.platform == "darwin":
         _orig_dyld = os.environ.get("DYLD_LIBRARY_PATH", "")

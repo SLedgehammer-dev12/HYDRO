@@ -3,10 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final
 
-from .hydrotest_core import PipeGeometry, PipeModel, PipeSection, ValidationError
+from .hydrotest_core import PipeModel, PipeSection, ValidationError
 from .water_properties import calculate_water_density, WATER_DENSITY_DEFAULT_KG_PER_M3
 
-WATER_DENSITY_DEFAULT_KG_PER_M3: Final[float] = 999.1
 GRAVITY_M_PER_S2: Final[float] = 9.80665
 PRESSURE_CONVERSION_PASCAL_TO_BAR: Final[float] = 100000.0
 CLASS_1_2_MIN_FACTOR: Final[float] = 1.25
@@ -134,17 +133,11 @@ def get_location_class_rule(label: str) -> LocationClassRule:
     raise ValidationError(f"Bilinmeyen Location Class secimi: {label}")
 
 
-def _resolve_water_temperature(inputs: SectionPressureProfileInputs) -> float:
-    if inputs.monitored_pressure_bar is not None:
-        return 15.0
-    return 15.0
-
-
 def evaluate_section_pressure_profile(inputs: SectionPressureProfileInputs) -> SectionPressureProfileResult:
     required_minimum_pressure_at_high_point_bar = (
         inputs.design_pressure_bar * inputs.location_class.minimum_test_factor
     )
-    water_temp_c = _resolve_water_temperature(inputs)
+    water_temp_c = 15.0
     hydraulic_span_bar = _hydraulic_head_bar(inputs.highest_elevation_m - inputs.lowest_elevation_m, water_temp_c)
     required_pressure_with_span_bar = required_minimum_pressure_at_high_point_bar + hydraulic_span_bar
     limiting_pressure_at_100_smys_bar, limiting_pipe_description = _pressure_at_100_smys_bar(

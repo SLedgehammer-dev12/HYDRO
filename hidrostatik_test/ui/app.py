@@ -77,10 +77,20 @@ from .wizard import WizardController
 from ..domain.session_manager import SessionManager, TestSession
 from ..domain.time_series import TimeSeriesStore, THERMAL_BALANCE_THRESHOLD_C, THERMAL_BALANCE_MIN_HOURS
 
-DEFAULT_DECISION_TITLE = "Henuz degerlendirme yapilmadi"
-DEFAULT_DECISION_STATUS = "BEKLIYOR"
-DEFAULT_DECISION_SUMMARY = (
-    "Girdileri tamamlayip ilgili testi calistirdiginizde nihai karar burada gosterilecek."
+from ..domain.coefficient_manager import CoefficientManager, CoefficientState
+from .constants import (
+    AUTO_A_MODE,
+    AUTO_B_MODE,
+    DEFAULT_DECISION_STATUS,
+    DEFAULT_DECISION_SUMMARY,
+    DEFAULT_DECISION_TITLE,
+    FIELD_CHECK_DEFINITIONS,
+    MANUAL_A_MODE,
+    MANUAL_B_MODE,
+    REFERENCE_A_MODE,
+    REFERENCE_B_MODE,
+    TABLE_A_MODE,
+    TABLE_B_MODE,
 )
 AUTO_A_MODE = "Otomatik"
 TABLE_A_MODE = "Tablo"
@@ -263,11 +273,7 @@ class HydrostaticTestApp:
             value="Acilista otomatik kontrol yapilir. Isterseniz elle de guncelleme kontrolu baslatabilirsiniz."
         )
         self.update_download_dir_var = tk.StringVar(value=str(self._default_update_download_dir()))
-        self.coefficient_states = {
-            "air_a": "empty",
-            "pressure_a": "empty",
-            "pressure_b": "empty",
-        }
+        self.coefficient_manager = CoefficientManager()
         self.coefficient_status_vars = {
             "air_a": tk.StringVar(value="Bekleniyor"),
             "pressure_a": tk.StringVar(value="Bekleniyor"),
@@ -2528,9 +2534,7 @@ class HydrostaticTestApp:
         open_release_page(target_url)
 
     def _mark_dependencies_changed(self, keys: tuple[str, ...]) -> None:
-        for key in keys:
-            if self.coefficient_states[key] in {"computed", "reference"}:
-                self.coefficient_states[key] = "stale"
+        self.coefficient_manager.mark_dependencies_changed(keys)
         self._refresh_coefficient_statuses()
         self._update_workflow_hint()
 
@@ -2747,7 +2751,7 @@ class HydrostaticTestApp:
         warning_count = 0
         stale_coefficients = [
             key
-            for key, value in self.coefficient_states.items()
+            for key, value in self.coefficient_manager.as_dict().items()
             if value == "stale" and key in self._relevant_coefficient_keys()
         ]
         for field_key in self._relevant_field_keys():
@@ -3052,7 +3056,10 @@ class HydrostaticTestApp:
     def _on_coefficient_field_changed(self, key: str, variable: tk.StringVar) -> None:
         if key in self._programmatic_coefficient_updates:
             return
-        self.coefficient_states[key] = "manual" if variable.get().strip() else "empty"
+        self.coefficient_manager.set(
+            key,
+            CoefficientState.MANUAL if variable.get().strip() else CoefficientState.EMPTY,
+        )
         self._refresh_coefficient_statuses()
         self._update_workflow_hint()
 
@@ -3067,42 +3074,42 @@ class HydrostaticTestApp:
         self._refresh_detail_reports()
 
     def _coefficient_status_text(self, key: str) -> str:
-        state = self.coefficient_states[key]
-        if state == "computed":
+        state = self.coefficient_manager.get(key)
+        if state == CoefficientState.COMPUTED:
             return "Hazir: otomatik hesap"
-        if state == "reference":
+        if state == CoefficientState.REFERENCE:
             return "Hazir: tablo referansi"
-        if state == "stale":
+        if state == CoefficientState.STALE:
             return "Guncellenmeli: secenek veya kosullar degisti"
-        if state == "manual":
+        if state == CoefficientState.MANUAL:
             return "Hazir: manuel giris"
         return "Bekleniyor"
 
     def _coefficient_source_text(self, key: str) -> str:
-        state = self.coefficient_states[key]
-        if state == "computed":
+        state = self.coefficient_manager.get(key)
+        if state == CoefficientState.COMPUTED:
             return "HESAP"
-        if state == "reference":
+        if state == CoefficientState.REFERENCE:
             return "REFERANS"
-        if state == "manual":
+        if state == CoefficientState.MANUAL:
             return "MANUEL"
-        if state == "stale":
+        if state == CoefficientState.STALE:
             return "YENILE"
         return "BEKLIYOR"
 
     def _refresh_coefficient_source_badges(self) -> None:
         palette = {
-            "computed": ("#EAF7EA", "#1D5F2F"),
-            "reference": ("#EAF2FF", "#1E4E8C"),
-            "manual": ("#FFF6E5", "#8A5B00"),
-            "stale": ("#FDEAEA", "#8B1E1E"),
-            "empty": ("#EEF2FF", "#243B73"),
+            CoefficientState.COMPUTED: ("#EAF7EA", "#1D5F2F"),
+            CoefficientState.REFERENCE: ("#EAF2FF", "#1E4E8C"),
+            CoefficientState.MANUAL: ("#FFF6E5", "#8A5B00"),
+            CoefficientState.STALE: ("#FDEAEA", "#8B1E1E"),
+            CoefficientState.EMPTY: ("#EEF2FF", "#243B73"),
         }
         all_badges = (self.coefficient_source_badges, self.inline_coefficient_source_badges)
         for key, variable in self.coefficient_source_vars.items():
-            state = self.coefficient_states.get(key, "empty")
+            state = self.coefficient_manager.get(key)
             variable.set(self._coefficient_source_text(key))
-            bg, fg = palette.get(state, palette["empty"])
+            bg, fg = palette.get(state, palette[CoefficientState.EMPTY])
             for badge_registry in all_badges:
                 badge = badge_registry.get(key)
                 if badge is not None:
@@ -3115,11 +3122,11 @@ class HydrostaticTestApp:
             "pressure_b": "pressure.b_micro_per_c",
         }
         for coefficient_key, field_key in mapping.items():
-            state = self.coefficient_states[coefficient_key]
+            state = self.coefficient_manager.get(coefficient_key)
             existing_message = self.field_message_vars.get(field_key)
-            if state == "stale":
+            if state == CoefficientState.STALE:
                 self._set_field_message(field_key, "Kosullar degisti, yeniden hesaplayin.", "warning")
-            elif state == "computed":
+            elif state == CoefficientState.COMPUTED:
                 self._set_field_message(field_key, "Hesap guncel.", "success")
             elif state == "reference":
                 self._set_field_message(field_key, "Referans noktadan yuklendi.", "success")
@@ -3870,46 +3877,46 @@ class HydrostaticTestApp:
 
     def _coefficient_origin_text(self, key: str) -> str:
         backend_label = self._selected_water_backend_info().label
-        state = self.coefficient_states[key]
+        state = self.coefficient_manager.get(key)
         if key == "air_a":
-            if state == "computed":
+            if state == CoefficientState.COMPUTED:
                 return f"Program hesabi ({backend_label} backend'i)."
-            if state == "reference":
+            if state == CoefficientState.REFERENCE:
                 reference_label = self.air_a_reference_var.get().strip() or "tablo secilmedi"
                 return (
                     f"{self._selected_reference_table_label(reference_label)}: aktif sicaklik/basinc noktasinda "
                     "tablo/interpolasyon degeri."
                 )
-            if state == "manual":
+            if state == CoefficientState.MANUAL:
                 return "Kullanici girdisi / manuel tablo-prosedur."
-            if state == "stale":
+            if state == CoefficientState.STALE:
                 return "Mevcut deger var ama kosullar degistigi icin yeniden dogrulanmali."
             return "Hazir degil; secili moda gore A degeri bekleniyor."
         if key == "pressure_a":
-            if state == "computed":
+            if state == CoefficientState.COMPUTED:
                 return f"Program hesabi ({backend_label} backend'i)."
-            if state == "reference":
+            if state == CoefficientState.REFERENCE:
                 reference_label = self.pressure_a_reference_var.get().strip() or "tablo secilmedi"
                 return (
                     f"{self._selected_reference_table_label(reference_label)}: aktif sicaklik/basinc noktasinda "
                     "tablo/interpolasyon degeri."
                 )
-            if state == "manual":
+            if state == CoefficientState.MANUAL:
                 return "Kullanici girdisi / manuel tablo-prosedur."
-            if state == "stale":
+            if state == CoefficientState.STALE:
                 return "Mevcut deger var ama kosullar degistigi icin yeniden dogrulanmali."
             return "Hazir degil; secili moda gore A degeri bekleniyor."
-        if state == "computed":
+        if state == CoefficientState.COMPUTED:
             return f"Program hesabi (su beta - celik alpha, backend: {backend_label})."
-        if state == "reference":
+        if state == CoefficientState.REFERENCE:
             reference_label = self.pressure_b_reference_var.get().strip() or "tablo secilmedi"
             return (
                 f"{self._selected_reference_table_label(reference_label)}: B degeri aktif sicaklik/basinc "
                 "noktasinda tablo/interpolasyon ile alindi."
             )
-        if state == "manual":
+        if state == CoefficientState.MANUAL:
             return "Kullanici girdisi / manuel tablo-prosedur."
-        if state == "stale":
+        if state == CoefficientState.STALE:
             return "Mevcut deger var ama helper kosullari degistigi icin yeniden dogrulanmali."
         if self.use_b_helper_var.get():
             return "Hazir degil; B helper veya tablo secimi ile olusturulmayi bekliyor."
@@ -3990,7 +3997,7 @@ class HydrostaticTestApp:
             )
             if issue is not None
         ]
-        if self.coefficient_states["air_a"] == "stale":
+        if self.coefficient_manager.get("air_a") == CoefficientState.STALE:
             issues.append("A katsayisi guncellenmeli")
         if issues:
             lines.append("Degerlendirme hazir degil: " + ", ".join(issues) + ".")
@@ -4091,9 +4098,9 @@ class HydrostaticTestApp:
             )
             if issue is not None
         ]
-        if self.coefficient_states["pressure_a"] == "stale":
+        if self.coefficient_manager.get("pressure_a") == CoefficientState.STALE:
             issues.append("A katsayisi guncellenmeli")
-        if self.coefficient_states["pressure_b"] == "stale":
+        if self.coefficient_manager.get("pressure_b") == CoefficientState.STALE:
             issues.append("B katsayisi guncellenmeli")
         if issues:
             lines.append("Degerlendirme hazir degil: " + ", ".join(issues) + ".")
@@ -4278,11 +4285,11 @@ class HydrostaticTestApp:
 
     def _mark_water_backend_change(self) -> None:
         if self._air_a_is_auto() and self.air_vars["a_micro_per_bar"].get().strip():
-            self.coefficient_states["air_a"] = "stale"
+            self.coefficient_manager.set("air_a", CoefficientState.STALE)
         if self._pressure_a_is_auto() and self.pressure_vars["a_micro_per_bar"].get().strip():
-            self.coefficient_states["pressure_a"] = "stale"
+            self.coefficient_manager.set("pressure_a", CoefficientState.STALE)
         if self._pressure_b_is_auto() and self.pressure_vars["b_micro_per_c"].get().strip():
-            self.coefficient_states["pressure_b"] = "stale"
+            self.coefficient_manager.set("pressure_b", CoefficientState.STALE)
             self.b_helper_vars["water_beta_micro_per_c"].set("")
         self._refresh_coefficient_statuses()
 
@@ -4993,13 +5000,22 @@ class HydrostaticTestApp:
             meta["required"] = mode == MANUAL_A_MODE
             meta["readonly"] = mode != MANUAL_A_MODE
         if mode == AUTO_A_MODE:
-            self.coefficient_states[key] = "stale" if variable.get().strip() else "empty"
+            self.coefficient_manager.set(
+                key,
+                CoefficientState.STALE if variable.get().strip() else CoefficientState.EMPTY,
+            )
             self._set_banner(auto_banner, "info")
         elif mode == REFERENCE_A_MODE:
-            self.coefficient_states[key] = "reference" if variable.get().strip() else "empty"
+            self.coefficient_manager.set(
+                key,
+                CoefficientState.REFERENCE if variable.get().strip() else CoefficientState.EMPTY,
+            )
             self._set_banner(reference_banner, "info")
         else:
-            self.coefficient_states[key] = "manual" if variable.get().strip() else "empty"
+            self.coefficient_manager.set(
+                key,
+                CoefficientState.MANUAL if variable.get().strip() else CoefficientState.EMPTY,
+            )
             self._set_banner(manual_banner, "warning")
         self._refresh_coefficient_statuses()
         self._update_live_notice()
@@ -5086,8 +5102,9 @@ class HydrostaticTestApp:
             self.field_meta["helper.water_beta_micro_per_c"]["required"] = False
             self.field_meta["helper.water_beta_micro_per_c"]["readonly"] = helper_active
             if auto_mode:
-                self.coefficient_states["pressure_b"] = (
-                    "stale" if self.pressure_vars["b_micro_per_c"].get().strip() else "empty"
+                self.coefficient_manager.set(
+                    "pressure_b",
+                    CoefficientState.STALE if self.pressure_vars["b_micro_per_c"].get().strip() else CoefficientState.EMPTY,
                 )
                 self.helper_mode_summary_var.set(
                     "B secenegi otomatik. B alani kilitlidir; helper su beta ve celik alpha ile hesaplar."
@@ -5097,8 +5114,9 @@ class HydrostaticTestApp:
                     "info",
                 )
             else:
-                self.coefficient_states["pressure_b"] = (
-                    "reference" if self.pressure_vars["b_micro_per_c"].get().strip() else "empty"
+                self.coefficient_manager.set(
+                    "pressure_b",
+                    CoefficientState.REFERENCE if self.pressure_vars["b_micro_per_c"].get().strip() else CoefficientState.EMPTY,
                 )
                 self.b_helper_vars["water_beta_micro_per_c"].set("")
                 self.helper_mode_summary_var.set(
@@ -5126,8 +5144,9 @@ class HydrostaticTestApp:
             self.field_meta["helper.water_beta_micro_per_c"]["required"] = False
             self.field_meta["helper.water_beta_micro_per_c"]["readonly"] = True
             self.b_helper_vars["water_beta_micro_per_c"].set("")
-            self.coefficient_states["pressure_b"] = (
-                "manual" if self.pressure_vars["b_micro_per_c"].get().strip() else "empty"
+            self.coefficient_manager.set(
+                "pressure_b",
+                CoefficientState.MANUAL if self.pressure_vars["b_micro_per_c"].get().strip() else CoefficientState.EMPTY,
             )
             self.helper_mode_summary_var.set(
                 "B secenegi manuel. B degerini tabloda veya prosedurde dogrulanan haliyle dogrudan girin."
@@ -5159,7 +5178,7 @@ class HydrostaticTestApp:
                 self._focus_field("air.a_micro_per_bar")
             return False
         table_label = self._selected_reference_table_label(selected_label)
-        self._set_coefficient_value("air_a", self.air_vars["a_micro_per_bar"], point.a_micro_per_bar, state="reference")
+        self._set_coefficient_value("air_a", self.air_vars["a_micro_per_bar"], point.a_micro_per_bar, state=CoefficientState.REFERENCE)
         if log_result:
             self._append_result(
                 "Hava Icerik Testi - A referansi",
@@ -5189,7 +5208,7 @@ class HydrostaticTestApp:
                 self._focus_field("pressure.a_micro_per_bar")
             return False
         table_label = self._selected_reference_table_label(selected_label)
-        self._set_coefficient_value("pressure_a", self.pressure_vars["a_micro_per_bar"], point.a_micro_per_bar, state="reference")
+        self._set_coefficient_value("pressure_a", self.pressure_vars["a_micro_per_bar"], point.a_micro_per_bar, state=CoefficientState.REFERENCE)
         if log_result:
             self._append_result(
                 "Basinc Degisim Testi - A referansi",
@@ -5220,7 +5239,7 @@ class HydrostaticTestApp:
             return False
         table_label = self._selected_reference_table_label(selected_label)
         self.b_helper_vars["water_beta_micro_per_c"].set("")
-        self._set_coefficient_value("pressure_b", self.pressure_vars["b_micro_per_c"], point.b_micro_per_c, state="reference")
+        self._set_coefficient_value("pressure_b", self.pressure_vars["b_micro_per_c"], point.b_micro_per_c, state=CoefficientState.REFERENCE)
         if log_result:
             self._append_result(
                 "Basinc Degisim Testi - B referansi",
@@ -5240,15 +5259,14 @@ class HydrostaticTestApp:
         key: str,
         variable: tk.StringVar,
         value: float,
-        *,
-        state: str = "computed",
+        state: CoefficientState = CoefficientState.COMPUTED,
     ) -> None:
         self._programmatic_coefficient_updates.add(key)
         try:
             variable.set(f"{value:.6f}")
         finally:
             self._programmatic_coefficient_updates.discard(key)
-        self.coefficient_states[key] = state
+        self.coefficient_manager.set(key, state)
         self._refresh_coefficient_statuses()
 
     def _update_decision_card(self, title: str, status: str, summary: str) -> None:
@@ -5394,7 +5412,7 @@ class HydrostaticTestApp:
         return bool(self.pressure_vars["b_micro_per_c"].get().strip())
 
     def _ensure_coefficient_ready(self, key: str) -> bool:
-        if self.coefficient_states[key] in {"computed", "reference", "manual"} and self.coefficient_value_present(key):
+        if self.coefficient_manager.is_ready(key) and self.coefficient_value_present(key):
             return True
         if key == "air_a":
             if self._air_a_is_auto():
@@ -5656,7 +5674,7 @@ class HydrostaticTestApp:
             variable.set("")
         self.air_vars["pressure_rise_bar"].set("1.0")
         self.air_vars["k_factor"].set(self._default_k_factor())
-        self.coefficient_states["air_a"] = "empty"
+        self.coefficient_manager.set("air_a", CoefficientState.EMPTY)
         self.air_backend_comparison_var.set(self._default_backend_comparison_text("air"))
         self.air_control_table_var.set(self._default_control_table_text("air"))
         self._remove_touched_fields("air")
@@ -5673,8 +5691,8 @@ class HydrostaticTestApp:
             variable.set("")
         self.b_helper_vars["water_beta_micro_per_c"].set("")
         self.b_helper_vars["steel_alpha_micro_per_c"].set(self._default_steel_alpha())
-        self.coefficient_states["pressure_a"] = "empty"
-        self.coefficient_states["pressure_b"] = "empty"
+        self.coefficient_manager.set("pressure_a", CoefficientState.EMPTY)
+        self.coefficient_manager.set("pressure_b", CoefficientState.EMPTY)
         self.pressure_backend_comparison_var.set(self._default_backend_comparison_text("pressure"))
         self.pressure_control_table_var.set(self._default_control_table_text("pressure"))
         self._remove_touched_fields("pressure")

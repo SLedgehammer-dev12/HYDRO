@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from bisect import bisect_left
 from dataclasses import dataclass
+from functools import cached_property
 from math import isfinite
 from pathlib import Path
 from typing import Final, Literal, Protocol
@@ -246,11 +247,12 @@ class TableInterpolationWaterPropertyBackend:
         _validate_state_inputs(temp_c, pressure_bar)
         return self._interpolate_density(temp_c, pressure_bar)
 
-    def _grid(self) -> WaterPropertyTableGrid:
+    @cached_property
+    def grid(self) -> WaterPropertyTableGrid:
         return load_water_property_table(self.csv_path, self.metadata_path)
 
     def _interpolate(self, temp_c: float, pressure_bar: float, use_beta: bool) -> float:
-        grid = self._grid()
+        grid = self.grid
         temperature_points = grid.temperature_points
         pressure_points = grid.pressure_points
         source_grid = grid.beta_grid if use_beta else grid.a_grid
