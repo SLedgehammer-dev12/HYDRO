@@ -3437,7 +3437,7 @@ PIPE_CATALOG = [
  }
 ]
 
-def _format_schedule_option(schedule: dict) -> str:
+def _format_schedule_option(schedule: dict[str, object]) -> str:
     label = str(schedule['label']).strip()
     wall = float(schedule['wall_thickness_mm'])
     if label:
@@ -3445,7 +3445,7 @@ def _format_schedule_option(schedule: dict) -> str:
     return f"WT {wall:.2f} mm (B36.10)"
 
 
-def _format_api_5l_psl2_grade_option(grade_spec: dict) -> str:
+def _format_api_5l_psl2_grade_option(grade_spec: dict[str, object]) -> str:
     return (
         f"API 5L PSL2 {grade_spec['grade']} / {grade_spec['iso_label']} - "
         f"SMYS {grade_spec['smys_mpa']:.0f} MPa"
@@ -3456,7 +3456,7 @@ def get_pipe_size_options() -> list[str]:
     return [f"NPS {item['nps']} (DN {item['dn']}) - OD {item['outside_diameter_mm']:.2f} mm" for item in PIPE_CATALOG]
 
 
-def find_pipe_size(option_label: str) -> dict | None:
+def find_pipe_size(option_label: str) -> dict[str, object] | None:
     for item in PIPE_CATALOG:
         label = f"NPS {item['nps']} (DN {item['dn']}) - OD {item['outside_diameter_mm']:.2f} mm"
         if label == option_label:
@@ -3471,7 +3471,7 @@ def get_schedule_options(option_label: str) -> list[str]:
     return [_format_schedule_option(schedule) for schedule in item['schedules']]
 
 
-def find_schedule(option_label: str, schedule_label: str) -> dict | None:
+def find_schedule(option_label: str, schedule_label: str) -> dict[str, object] | None:
     item = find_pipe_size(option_label)
     if item is None:
         return None
@@ -3485,7 +3485,7 @@ def get_api_5l_psl2_grade_options() -> list[str]:
     return [_format_api_5l_psl2_grade_option(item) for item in API_5L_PSL2_GRADES]
 
 
-def find_api_5l_psl2_grade(option_label: str) -> dict | None:
+def find_api_5l_psl2_grade(option_label: str) -> dict[str, object] | None:
     for item in API_5L_PSL2_GRADES:
         if _format_api_5l_psl2_grade_option(item) == option_label:
             return item

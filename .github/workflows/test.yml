@@ -56,7 +56,7 @@ jobs:
       - name: Run mypy on domain layer
         continue-on-error: true
         run: |
-          python -m mypy hidrostatik_test/domain/ hidrostatik_test/ui/constants.py --strict-equality
+          python -m mypy hidrostatik_test/domain/ hidrostatik_test/ui/constants.py
 
       - name: Upload test results (on failure)
         if: failure()

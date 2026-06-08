@@ -46,12 +46,15 @@ class TimeSeriesRecord:
                 except ValueError:
                     pass
 
+        raw_p = data.get("pressure_bar", 0.0)
+        raw_t = data.get("temperature_c", 0.0)
+        raw_notes = data.get("notes", "")
         return cls(
             timestamp=timestamp,
-            pressure_bar=float(data.get("pressure_bar", 0.0)),
-            temperature_c=float(data.get("temperature_c", 0.0)),
+            pressure_bar=float(raw_p) if raw_p is not None else 0.0,
+            temperature_c=float(raw_t) if raw_t is not None else 0.0,
             volume_m3=volume_m3,
-            notes=str(data.get("notes", "")),
+            notes=str(raw_notes) if raw_notes is not None else "",
         )
 
 
@@ -69,7 +72,10 @@ class TimeSeriesStore:
         store = cls()
         if not data or "records" not in data:
             return store
-        for r_data in data["records"]:
+        raw_records = data.get("records")
+        if not isinstance(raw_records, list):
+            return store
+        for r_data in raw_records:
             if isinstance(r_data, dict):
                 store.records.append(TimeSeriesRecord.from_dict(r_data))
         return store

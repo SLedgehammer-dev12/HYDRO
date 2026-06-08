@@ -91,7 +91,7 @@ class PipeGeometry:
 PipeModel: TypeAlias = PipeSection | PipeGeometry
 
 
-def calculate_water_compressibility_a(temp_c: float, pressure_bar: float, backend: object | None = None) -> float:
+def calculate_water_compressibility_a(temp_c: float, pressure_bar: float, backend: str | None = None) -> float:
     try:
         return calculate_water_compressibility_a_with_backend(temp_c, pressure_bar, backend=backend)
     except WaterPropertyError as exc:
@@ -99,7 +99,7 @@ def calculate_water_compressibility_a(temp_c: float, pressure_bar: float, backen
 
 
 def calculate_water_thermal_expansion_beta(
-    temp_c: float, pressure_bar: float, backend: object | None = None
+    temp_c: float, pressure_bar: float, backend: str | None = None
 ) -> float:
     try:
         return calculate_water_thermal_expansion_beta_with_backend(temp_c, pressure_bar, backend=backend)

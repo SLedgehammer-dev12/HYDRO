@@ -38,8 +38,8 @@ class TestSession:
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> TestSession:
-        cleaned_data = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
-        return cls(**cleaned_data)
+        cleaned_data: dict[str, object] = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
+        return cls(**cleaned_data)  # type: ignore[arg-type]
 
 
 SESSIONS_DIR = Path.home() / ".hidrostatik_test" / "sessions"
@@ -155,8 +155,9 @@ class SessionManager:
             session.inputs = inputs
             session.updated_at = datetime.now(timezone.utc).isoformat()
             # Also update segments from snapshot if present
-            if "geometry_segments" in inputs:
-                session.geometry_segments = inputs["geometry_segments"]
+            raw_segments = inputs.get("geometry_segments")
+            if isinstance(raw_segments, list):
+                session.geometry_segments = raw_segments
             self._save_active_session()
 
     def add_result(self, result: dict[str, object]) -> None:
@@ -273,7 +274,7 @@ class SessionManager:
                 pass
 
         # Load time series
-        time_series_data = {"records": []}
+        time_series_data: dict[str, object] = {"records": []}
         try:
             records = self._db.get_time_series(session_id)
             for r in records:

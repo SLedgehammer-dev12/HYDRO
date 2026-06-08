@@ -4,7 +4,7 @@ from typing import Final
 
 import pint
 
-ureg = pint.UnitRegistry()
+ureg: pint.UnitRegistry = pint.UnitRegistry()
 Q_ = ureg.Quantity
 
 Pressure = ureg.bar

@@ -150,11 +150,11 @@ def load_ab_control_table(
 
     temperature_points = spec.temperature_axis.points
     pressure_points = spec.pressure_axis.points
-    a_lookup = {
+    a_lookup: dict[float, dict[float, float | None]] = {
         temperature: {pressure: None for pressure in pressure_points}
         for temperature in temperature_points
     }
-    b_lookup = {
+    b_lookup: dict[float, dict[float, float | None]] = {
         temperature: {pressure: None for pressure in pressure_points}
         for temperature in temperature_points
     }

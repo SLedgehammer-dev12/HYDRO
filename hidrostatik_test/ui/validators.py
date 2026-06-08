@@ -45,12 +45,19 @@ def validate_elevation_inputs(
     start_elevation_m: float | None,
     end_elevation_m: float | None,
 ) -> tuple[str | None, str]:
-    if any(v is None for v in [highest_elevation_m, lowest_elevation_m, start_elevation_m, end_elevation_m]):
+    if (
+        highest_elevation_m is None
+        or lowest_elevation_m is None
+        or start_elevation_m is None
+        or end_elevation_m is None
+    ):
         return None, "incomplete"
     
     if highest_elevation_m < lowest_elevation_m:
         return "En yuksek nokta kotu, en dusuk noktadan kucuk olamaz.", "error"
     
+    assert start_elevation_m is not None
+    assert end_elevation_m is not None
     for label, elevation in [("Baslangic", start_elevation_m), ("Bitis", end_elevation_m)]:
         if elevation < lowest_elevation_m or elevation > highest_elevation_m:
             return f"{label} noktasi kotu, min/max kot araligi icinde olmalidir.", "error"

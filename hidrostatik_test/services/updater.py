@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -337,6 +339,46 @@ def open_release_page(url: str | None = None) -> None:
     webbrowser.open(url or RELEASES_PAGE_URL)
 
 
+def _checksum_url(asset_download_url: str) -> str:
+    return f"{asset_download_url}.sha256.txt"
+
+
+def _download_checksum(
+    asset_download_url: str,
+    timeout_seconds: int,
+) -> str:
+    checksum_url = _checksum_url(asset_download_url)
+    request = Request(checksum_url, headers=_build_headers("text/plain"))
+    try:
+        with urlopen(request, timeout=timeout_seconds) as response:
+            content = response.read().decode("utf-8").strip()
+    except HTTPError as exc:
+        if exc.code == 404:
+            raise UpdateError(
+                "SHA-256 dogrulama dosyasi GitHub release'de bulunamadi. Guvenlik riski nedeniyle guncelleme iptal edildi."
+            ) from exc
+        raise UpdateError(f"SHA-256 dosyasi indirilemedi: HTTP {exc.code}") from exc
+    parts = content.replace("\t", " ").split()
+    if not parts:
+        raise UpdateError("SHA-256 dosyasi bos.")
+    return parts[0].lower()
+
+
+def _verify_sha256(file_path: Path, expected_hex: str) -> None:
+    hash_sha256 = hashlib.sha256()
+    with file_path.open("rb") as f:
+        while True:
+            chunk = f.read(65536)
+            if not chunk:
+                break
+            hash_sha256.update(chunk)
+    actual = hash_sha256.hexdigest().lower()
+    if actual != expected_hex.lower():
+        raise UpdateError(
+            f"SHA-256 dogrulamasi basarisiz. Beklenen: {expected_hex.lower()}, Gerceklesen: {actual}."
+        )
+
+
 def _download_asset(
     asset: ReleaseAsset,
     target_path: Path,
@@ -351,6 +393,9 @@ def _download_asset(
         target_path,
         on_progress=progress_callback,
     )
+
+    expected_sha = _download_checksum(asset.download_url, timeout_seconds)
+    _verify_sha256(target_path, expected_sha)
 
 
 def _find_extracted_app_dir(extract_root: Path) -> Path:

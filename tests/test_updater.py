@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -167,9 +168,15 @@ class UpdaterTests(unittest.TestCase):
                 self.assertEqual(url, asset.download_url)
                 dest.write_bytes(b"downloaded-data")
 
-            with patch(
-                "hidrostatik_test.services.download_manager.DownloadManager.download_file",
-                side_effect=fake_download,
+            with (
+                patch(
+                    "hidrostatik_test.services.download_manager.DownloadManager.download_file",
+                    side_effect=fake_download,
+                ),
+                patch(
+                    "hidrostatik_test.services.updater._download_checksum",
+                    return_value=hashlib.sha256(b"downloaded-data").hexdigest(),
+                ),
             ):
                 _download_asset(asset, target_path, 10)
 

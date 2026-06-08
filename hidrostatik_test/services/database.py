@@ -118,8 +118,8 @@ class DatabaseManager:
         session_id: str,
         name: str,
         notes: str = "",
-        inputs: dict | None = None,
-        wizard_state: dict | None = None,
+        inputs: dict[str, object] | None = None,
+        wizard_state: dict[str, object] | None = None,
     ) -> None:
         now = datetime.now().isoformat()
         inputs_str = json.dumps(inputs or {}, ensure_ascii=False)
@@ -184,7 +184,10 @@ class DatabaseManager:
             ),
         )
         self.conn.commit()
-        return cursor.lastrowid
+        last_id = cursor.lastrowid
+        if last_id is None:
+            raise RuntimeError("Database session kaydi basarisiz.")
+        return last_id
 
     def get_session_entries(self, session_id: str) -> list[dict[str, Any]]:
         cursor = self.conn.execute(
@@ -218,7 +221,10 @@ class DatabaseManager:
             (session_id, datetime.now().isoformat(), pressure_bar, temperature_c, volume_m3, notes),
         )
         self.conn.commit()
-        return cursor.lastrowid
+        last_id = cursor.lastrowid
+        if last_id is None:
+            raise RuntimeError("Database time series kaydi basarisiz.")
+        return last_id
 
     def get_time_series(
         self, session_id: str, limit: int = 1000
