@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.7.1 - 2026-06-08
+
+- **PyInstaller Derleme Düzeltmeleri (Build & Packaging Fixes)**:
+  - Windows `.exe`'de "Importing the numpy C-extensions failed" hatası giderildi.
+  - macOS `.app`'in açılışta sessizce çökmesi engellendi.
+  - `build_exe.ps1`'e `--collect-all numpy` ve `--collect-all scipy` parametreleri eklenerek C-extension modüllerinin paketlenmesi sağlandı.
+  - `HidrostatikTest.spec`'e numpy/scipy hidden import'ları eklendi (`numpy.core._multiarray_umath`, `scipy.interpolate` vb.).
+  - PyInstaller runtime hook (`_pyinstaller_hook.py`) oluşturuldu: Windows'ta `os.add_dll_directory()` ile DLL yolları, macOS'te `DYLD_LIBRARY_PATH` ile `.dylib` yolları ayarlanır.
+  - Spec dosyasındaki versiyon `1.6.0` → `1.7.0` olarak güncellendi (önceden outdated'ti).
+- **Import Esneklik İyileştirmeleri (Import Resilience)**:
+  - `numpy`, `scipy`, `CoolProp` import'ları `try/except` bloklarına alındı. Eksik kütüphane durumunda uygulama çökmek yerine `table_v1` (bilinear) backend'i ile çalışmaya devam eder.
+  - `bicubic` interpolasyon numpy/scipy yoksa otomatik olarak `bilinear` (saf Python) fallback'e düşer.
+- **macOS İmzalama ve Hardened Runtime**:
+  - `build_dmg.sh`'e ad-hoc code signing adımı eklendi (`codesign --deep --force --sign -`).
+  - `runtime_entitlements.plist` oluşturuldu: `com.apple.security.cs.disable-library-validation`, `allow-unsigned-executable-memory`, `allow-dyld-environment-variables` exception'ları ile imzasız `.dylib` yüklenmesine izin verilir.
+  - `Info.plist`'e `NSHighResolutionCapable`, `NSAppTransportSecurity` eklendi.
+
 ## 1.7.0 - 2026-06-08
 
 - **Güncelleme Mekanizması Yeniden Tasarlandı (Update Manager Redesign)**:

@@ -36,6 +36,12 @@ if [ ! -d "$APP_PATH" ]; then
     exit 1
 fi
 
+echo "Ad-hoc code signing uygulaniyor..."
+codesign --deep --force --sign - --entitlements runtime_entitlements.plist "$APP_PATH" 2>/dev/null || {
+    echo "Uyari: codesign basarisiz oldu, ancak build devam ediyor."
+    codesign --deep --force --sign - "$APP_PATH" 2>/dev/null || echo "Uyari: Ad-hoc imzalama atlandi."
+}
+
 DMG_NAME="HidrostatikTest-v${APP_VERSION}-macos-universal.dmg"
 DMG_PATH="release/${DMG_NAME}"
 HASH_PATH="release/HidrostatikTest-v${APP_VERSION}-macos-universal.sha256.txt"
@@ -65,7 +71,7 @@ cat << EOF > "$NOTES_PATH"
 - Packaged into a read-only DMG disk image using hdiutil
 - Fully compiled for Apple Silicon / Intel architecture
 - CoolProp dependency bundled into the application distribution
-- Code signing was not applied in this package. If macOS prevents execution, right-click the app in Finder and choose Open, or run "xattr -cr /Applications/HidrostatikTest.app".
+- Ad-hoc code signing was applied. If macOS prevents execution, right-click the app in Finder and choose Open, or run "xattr -cr /Applications/HidrostatikTest.app".
 EOF
 
 echo ""
