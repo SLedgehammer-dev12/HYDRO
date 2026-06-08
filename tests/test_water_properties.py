@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from math import isclose
+from unittest.mock import patch
 
 from hidrostatik_test.domain import (
     WaterPropertyBackendInfo,
@@ -9,9 +10,19 @@ from hidrostatik_test.domain import (
     ValidationError,
     calculate_water_compressibility_a,
     calculate_water_thermal_expansion_beta,
+    calculate_water_density,
     get_available_water_property_backends,
     get_default_water_property_backend,
     get_water_property_backend,
+)
+from hidrostatik_test.domain.water_properties import (
+    ABSOLUTE_ZERO_C,
+    WATER_DENSITY_DEFAULT_KG_PER_M3,
+    _axis_bounds,
+    _bilinear_interpolate,
+    _linear_interpolate,
+    scale_isothermal_compressibility_pa_to_micro_per_bar,
+    scale_expansion_coefficient_k_to_micro_per_c,
 )
 
 
@@ -61,6 +72,108 @@ class WaterPropertyBackendTests(unittest.TestCase):
 
         self.assertTrue(isclose(calculate_water_compressibility_a(10.0, 50.0, backend=backend), 60.0))
         self.assertTrue(isclose(calculate_water_thermal_expansion_beta(10.0, 50.0, backend=backend), 150.0))
+
+
+class ValidationAndEdgeTests(unittest.TestCase):
+    def test_validate_inputs_absolute_zero(self) -> None:
+        with self.assertRaises(ValidationError):
+            calculate_water_compressibility_a(ABSOLUTE_ZERO_C - 1, 50.0)
+        with self.assertRaises(ValidationError):
+            calculate_water_thermal_expansion_beta(ABSOLUTE_ZERO_C - 1, 50.0)
+
+    def test_validate_inputs_non_positive_pressure(self) -> None:
+        with self.assertRaises(ValidationError):
+            calculate_water_compressibility_a(20.0, 0.0)
+        with self.assertRaises(ValidationError):
+            calculate_water_compressibility_a(20.0, -1.0)
+
+    def test_scale_compressibility_non_positive(self) -> None:
+        with self.assertRaises(WaterPropertyError):
+            scale_isothermal_compressibility_pa_to_micro_per_bar(0.0)
+        with self.assertRaises(WaterPropertyError):
+            scale_isothermal_compressibility_pa_to_micro_per_bar(-1e-12)
+
+    def test_scale_expansion_non_finite(self) -> None:
+        with self.assertRaises(WaterPropertyError):
+            scale_expansion_coefficient_k_to_micro_per_c(float("inf"))
+        with self.assertRaises(WaterPropertyError):
+            scale_expansion_coefficient_k_to_micro_per_c(float("nan"))
+
+    def test_axis_bounds_below_range(self) -> None:
+        points = (10.0, 20.0, 30.0)
+        with self.assertRaises(WaterPropertyError):
+            _axis_bounds(5.0, points, "test")
+
+    def test_axis_bounds_above_range(self) -> None:
+        points = (10.0, 20.0, 30.0)
+        with self.assertRaises(WaterPropertyError):
+            _axis_bounds(35.0, points, "test")
+
+    def test_axis_bounds_exact_match(self) -> None:
+        points = (10.0, 20.0, 30.0)
+        lo, hi = _axis_bounds(20.0, points, "test")
+        self.assertEqual(lo, 1)
+        self.assertEqual(hi, 1)
+
+    def test_axis_bounds_within_range(self) -> None:
+        points = (10.0, 20.0, 30.0)
+        lo, hi = _axis_bounds(25.0, points, "test")
+        self.assertEqual(lo, 1)
+        self.assertEqual(hi, 2)
+
+    def test_bilinear_interpolate_exact_corner(self) -> None:
+        result = _bilinear_interpolate(10.0, 50.0, 10.0, 20.0, 50.0, 60.0, 1.0, 2.0, 3.0, 4.0)
+        self.assertEqual(result, 1.0)
+
+    def test_bilinear_interpolate_same_t(self) -> None:
+        result = _bilinear_interpolate(10.0, 55.0, 10.0, 10.0, 50.0, 60.0, 1.0, 2.0, 3.0, 4.0)
+        # Linear along pressure: 1.0 + (55-50)/(60-50) * (3-1) = 1.0 + 0.5*2 = 2.0
+        self.assertAlmostEqual(result, 2.0)
+
+    def test_bilinear_interpolate_same_p(self) -> None:
+        result = _bilinear_interpolate(15.0, 50.0, 10.0, 20.0, 50.0, 50.0, 1.0, 2.0, 3.0, 4.0)
+        # Linear along temperature: 1.0 + (15-10)/(20-10) * (2-1) = 1.0 + 0.5 = 1.5
+        self.assertAlmostEqual(result, 1.5)
+
+    def test_linear_interpolate_exact(self) -> None:
+        self.assertEqual(_linear_interpolate(10.0, 10.0, 20.0, 1.0, 2.0), 1.0)
+
+    def test_linear_interpolate_equal_x(self) -> None:
+        self.assertEqual(_linear_interpolate(10.0, 10.0, 10.0, 5.0, 99.0), 5.0)
+
+    def test_linear_interpolate_midpoint(self) -> None:
+        self.assertAlmostEqual(_linear_interpolate(15.0, 10.0, 20.0, 1.0, 3.0), 2.0)
+
+    @patch("hidrostatik_test.domain.water_properties._HAS_COOLPROP", False)
+    def test_density_fallback_when_no_coolprop(self) -> None:
+        backend = get_water_property_backend("table_v1")
+        density = backend.calculate_water_density(20.0, 50.0)
+        self.assertEqual(density, WATER_DENSITY_DEFAULT_KG_PER_M3)
+
+    def test_resolve_backend_default(self) -> None:
+        from hidrostatik_test.domain.water_properties import resolve_water_property_backend
+        backend = resolve_water_property_backend()
+        self.assertIsNotNone(backend)
+
+    def test_resolve_backend_none_returns_default(self) -> None:
+        from hidrostatik_test.domain.water_properties import resolve_water_property_backend
+        backend = resolve_water_property_backend(None)
+        self.assertIsNotNone(backend)
+
+    def test_resolve_backend_str_returns_specific(self) -> None:
+        from hidrostatik_test.domain.water_properties import resolve_water_property_backend
+        backend = resolve_water_property_backend("table_v1")
+        self.assertEqual(backend.info.key, "table_v1")
+
+    def test_table_backend_exact_grid_point(self) -> None:
+        backend = get_water_property_backend("table_v1")
+        a = backend.calculate_water_compressibility_a(20.0, 50.0)
+        self.assertIsInstance(a, float)
+        self.assertGreater(a, 0.0)
+
+    def test_table_backend_resolves_backend_by_key(self) -> None:
+        backend = get_water_property_backend("table_v1")
+        self.assertEqual(backend.info.key, "table_v1")
 
 
 try:

@@ -16,6 +16,12 @@ from hidrostatik_test.services.updater import (
     RuntimeContext,
     UpdateInfo,
     _download_asset,
+    _download_checksum,
+    _extract_asset,
+    _matches_project_release,
+    _select_latest_release,
+    _verify_sha256,
+    _version_from_tag,
     _write_update_script,
     fetch_latest_update_info,
     install_update,
@@ -25,14 +31,28 @@ from hidrostatik_test.ui.app import HydrostaticTestApp
 NEXT_TEST_VERSION = f"{int(APP_VERSION.split('.', 1)[0]) + 1}.0.0"
 
 
-class _FakeResponse:
+class _FakeJsonResponse:
     def __init__(self, payload: object) -> None:
         self._payload = json.dumps(payload).encode("utf-8")
 
     def read(self, *_args, **_kwargs) -> bytes:
         return self._payload
 
-    def __enter__(self) -> "_FakeResponse":
+    def __enter__(self) -> "_FakeJsonResponse":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        return False
+
+
+class _FakeBytesResponse:
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+
+    def read(self, *_args, **_kwargs) -> bytes:
+        return self._data
+
+    def __enter__(self) -> "_FakeBytesResponse":
         return self
 
     def __exit__(self, exc_type, exc, tb) -> bool:
@@ -62,7 +82,7 @@ class UpdaterTests(unittest.TestCase):
             },
         ]
 
-        with patch("hidrostatik_test.services.updater.urlopen", return_value=_FakeResponse(payload)):
+        with patch("hidrostatik_test.services.updater.urlopen", return_value=_FakeJsonResponse(payload)):
             info = fetch_latest_update_info()
 
         self.assertEqual(info.latest_version, NEXT_TEST_VERSION)
@@ -84,7 +104,7 @@ class UpdaterTests(unittest.TestCase):
             }
         ]
 
-        with patch("hidrostatik_test.services.updater.urlopen", return_value=_FakeResponse(payload)):
+        with patch("hidrostatik_test.services.updater.urlopen", return_value=_FakeJsonResponse(payload)):
             info = fetch_latest_update_info()
 
         self.assertEqual(info.latest_version, APP_VERSION)
@@ -143,9 +163,9 @@ class UpdaterTests(unittest.TestCase):
         def fake_urlopen(request, timeout=10):
             url = request.full_url
             if url.endswith("/HYDRO/releases"):
-                return _FakeResponse(primary_payload)
+                return _FakeJsonResponse(primary_payload)
             if url.endswith("/Programlar/releases"):
-                return _FakeResponse(legacy_payload)
+                return _FakeJsonResponse(legacy_payload)
             raise AssertionError(f"Beklenmeyen URL: {url}")
 
         with patch("hidrostatik_test.services.updater.urlopen", side_effect=fake_urlopen):
@@ -274,6 +294,149 @@ class UpdaterTests(unittest.TestCase):
         self.assertIn("Çalışan programlar", script_text)
         self.assertIn("Copy-Item -LiteralPath", script_text)
         self.assertIn("Start-Process -FilePath $ExePath", script_text)
+
+
+class UpdaterUtilityTests(unittest.TestCase):
+    def test_version_from_tag_with_prefix(self) -> None:
+        self.assertEqual(_version_from_tag("hidrostatik-test-v1.2.3"), "1.2.3")
+
+    def test_version_from_tag_with_v_prefix_only(self) -> None:
+        self.assertEqual(_version_from_tag("v9.9.9"), "9.9.9")
+
+    def test_version_from_tag_without_prefix(self) -> None:
+        self.assertEqual(_version_from_tag("1.0.0"), "1.0.0")
+
+    def test_matches_project_release_by_tag(self) -> None:
+        release = {"tag_name": "hidrostatik-test-v1.7.2", "assets": []}
+        self.assertTrue(_matches_project_release(release))
+
+    def test_matches_project_release_by_asset_for_windows(self) -> None:
+        release = {
+            "tag_name": "custom-tag",
+            "assets": [
+                {"name": "HidrostatikTest-v1.7.2-windows-x64.zip", "browser_download_url": "https://example.com/app.zip", "size": 42}
+            ],
+        }
+        self.assertTrue(_matches_project_release(release))
+
+    def test_matches_project_release_by_asset_for_macos(self) -> None:
+        release = {
+            "tag_name": "custom-tag",
+            "assets": [
+                {"name": "HidrostatikTest-v1.7.2-macos-universal.dmg", "browser_download_url": "https://example.com/app.dmg", "size": 42}
+            ],
+        }
+        self.assertTrue(_matches_project_release(release))
+
+    def test_matches_project_release_returns_false_for_unrelated(self) -> None:
+        release = {"tag_name": "other-app-v1.0.0", "assets": [{"name": "OtherApp.exe", "browser_download_url": "https://example.com/other.exe", "size": 42}]}
+        self.assertFalse(_matches_project_release(release))
+
+    def test_select_latest_release_ignores_drafts(self) -> None:
+        releases = [
+            {"tag_name": "hidrostatik-test-v1.0.0", "draft": True, "prerelease": False, "assets": []},
+            {"tag_name": "hidrostatik-test-v2.0.0", "draft": False, "prerelease": False, "assets": []},
+        ]
+        selected = _select_latest_release(releases, "HYDRO")
+        self.assertEqual(selected["tag_name"], "hidrostatik-test-v2.0.0")
+
+    def test_select_latest_release_ignores_prereleases(self) -> None:
+        releases = [
+            {"tag_name": "hidrostatik-test-v1.0.0", "draft": False, "prerelease": True, "assets": []},
+            {"tag_name": "hidrostatik-test-v2.0.0", "draft": False, "prerelease": False, "assets": []},
+        ]
+        selected = _select_latest_release(releases, "HYDRO")
+        self.assertEqual(selected["tag_name"], "hidrostatik-test-v2.0.0")
+
+    def test_select_latest_release_sorts_by_version_desc(self) -> None:
+        releases = [
+            {"tag_name": "hidrostatik-test-v1.0.0", "draft": False, "prerelease": False, "assets": []},
+            {"tag_name": "hidrostatik-test-v3.0.0", "draft": False, "prerelease": False, "assets": []},
+            {"tag_name": "hidrostatik-test-v2.0.0", "draft": False, "prerelease": False, "assets": []},
+        ]
+        selected = _select_latest_release(releases, "HYDRO")
+        self.assertEqual(selected["tag_name"], "hidrostatik-test-v3.0.0")
+
+    def test_select_latest_release_raises_when_no_matching(self) -> None:
+        releases: list[dict[str, object]] = [{"tag_name": "other-app-v1.0.0", "draft": False, "prerelease": False, "assets": []}]
+        with self.assertRaisesRegex(RuntimeError, "yayin bulunamadi"):
+            _select_latest_release(releases, "HYDRO")
+
+    def test_extract_asset_matches_windows_zip_exactly(self) -> None:
+        release = {
+            "tag_name": "hidrostatik-test-v1.7.2",
+            "assets": [
+                {"name": "HidrostatikTest-v1.7.2-windows-x64.zip", "browser_download_url": "https://example.com/app.zip", "size": 100},
+                {"name": "HidrostatikTest-v1.7.2-macos-universal.dmg", "browser_download_url": "https://example.com/app.dmg", "size": 200},
+            ],
+        }
+        asset = _extract_asset(release, "1.7.2")
+        self.assertIsNotNone(asset)
+        self.assertEqual(asset.name, "HidrostatikTest-v1.7.2-windows-x64.zip")
+        self.assertEqual(asset.size, 100)
+
+    def test_extract_asset_uses_fallback_when_no_exact_match(self) -> None:
+        release = {
+            "tag_name": "hidrostatik-test-v1.7.0",
+            "assets": [
+                {"name": "HidrostatikTest-v1.7.0-windows-x64.zip", "browser_download_url": "https://example.com/old.zip", "size": 50},
+            ],
+        }
+        asset = _extract_asset(release, "1.7.2")
+        self.assertIsNotNone(asset)
+        self.assertEqual(asset.name, "HidrostatikTest-v1.7.0-windows-x64.zip")
+
+    def test_extract_asset_returns_none_when_no_assets(self) -> None:
+        release = {"tag_name": "hidrostatik-test-v1.7.2", "assets": []}
+        asset = _extract_asset(release, "1.7.2")
+        self.assertIsNone(asset)
+
+    def test_verify_sha256_passes_for_matching_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_path = Path(temp_dir) / "test.bin"
+            file_path.write_bytes(b"hello world")
+            expected = hashlib.sha256(b"hello world").hexdigest()
+            _verify_sha256(file_path, expected)
+
+    def test_verify_sha256_raises_for_mismatched_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_path = Path(temp_dir) / "test.bin"
+            file_path.write_bytes(b"hello world")
+            with self.assertRaisesRegex(RuntimeError, "SHA-256 dogrulamasi basarisiz"):
+                _verify_sha256(file_path, "0000000000000000000000000000000000000000000000000000000000000000")
+
+    def test_download_checksum_parses_sha_from_response(self) -> None:
+        content = b"abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890  filename.zip"
+        with patch("hidrostatik_test.services.updater.urlopen", return_value=_FakeBytesResponse(content)):
+            result = _download_checksum("https://example.com/app.zip", 10)
+        self.assertEqual(result, "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890")
+
+    def test_download_checksum_parses_sha_with_tabs(self) -> None:
+        content = b"abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890\tfilename.zip"
+        with patch("hidrostatik_test.services.updater.urlopen", return_value=_FakeBytesResponse(content)):
+            result = _download_checksum("https://example.com/app.zip", 10)
+        self.assertEqual(result, "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890")
+
+    def test_download_checksum_normalizes_to_lowercase(self) -> None:
+        content = b"ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890"
+        with patch("hidrostatik_test.services.updater.urlopen", return_value=_FakeBytesResponse(content)):
+            result = _download_checksum("https://example.com/app.zip", 10)
+        self.assertEqual(result, "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890")
+
+    def test_download_checksum_raises_on_empty_content(self) -> None:
+        with patch("hidrostatik_test.services.updater.urlopen", return_value=_FakeBytesResponse(b"   ")):
+            with self.assertRaisesRegex(RuntimeError, "SHA-256 dosyasi bos"):
+                _download_checksum("https://example.com/app.zip", 10)
+
+    def test_download_checksum_raises_on_404(self) -> None:
+        from urllib.error import HTTPError
+
+        def fake_urlopen(request, timeout=10):
+            raise HTTPError("https://example.com/app.zip.sha256.txt", 404, "Not Found", {}, None)
+
+        with patch("hidrostatik_test.services.updater.urlopen", side_effect=fake_urlopen):
+            with self.assertRaisesRegex(RuntimeError, "SHA-256 dogrulama dosyasi.*bulunamadi"):
+                _download_checksum("https://example.com/app.zip", 10)
 
 
 class UpdateUiTests(unittest.TestCase):
