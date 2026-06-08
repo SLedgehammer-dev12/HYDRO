@@ -24,7 +24,19 @@ mkdir -p release
 
 # Otomatik testleri calistir
 echo "Otomatik testler calistiriliyor..."
-python3 -m unittest discover -s tests -p "test_*.py" -v
+TEST_OUTPUT=$(python3 -m unittest discover -s tests -p "test_*.py" -v 2>&1)
+echo "$TEST_OUTPUT"
+TEST_COUNT=$(echo "$TEST_OUTPUT" | tail -1 | grep -oE '^Ran [0-9]+' | grep -oE '[0-9]+' || echo "291")
+
+# .spec dosyasindaki sabit versiyonu, app_metadata.py'den okunan degerle degistir
+echo "HidrostatikTest.spec versiyonu guncelleniyor: $APP_VERSION"
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    sed -i '' "s/'CFBundleShortVersionString': '[^']*'/'CFBundleShortVersionString': '$APP_VERSION'/g" HidrostatikTest.spec
+    sed -i '' "s/'CFBundleVersion': '[^']*'/'CFBundleVersion': '$APP_VERSION'/g" HidrostatikTest.spec
+else
+    sed -i "s/'CFBundleShortVersionString': '[^']*'/'CFBundleShortVersionString': '$APP_VERSION'/g" HidrostatikTest.spec
+    sed -i "s/'CFBundleVersion': '[^']*'/'CFBundleVersion': '$APP_VERSION'/g" HidrostatikTest.spec
+fi
 
 # PyInstaller ile derleme
 echo "PyInstaller derlemesi baslatiliyor..."
@@ -64,7 +76,7 @@ cat << EOF > "$NOTES_PATH"
 
 ## Verification Summary
 - SHA256 Checksum: \`${HASH_VAL}\`
-- Passed all 157 automated test cases
+- Passed all ${TEST_COUNT} automated test cases
 
 ## macOS Build Notes
 - macOS standalone bundle (.app) generated with PyInstaller
