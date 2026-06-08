@@ -53,6 +53,14 @@ jobs:
         run: |
           powershell -ExecutionPolicy Bypass -File .\build_exe.ps1
 
+      - name: Verify build artifacts
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -LiteralPath .\release -Filter '*.exe' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $exe) { throw "No .exe file found." }
+          if ($exe.Length -lt 10MB) { throw "Executable too small ($($exe.Length) bytes)." }
+          Write-Host "Artifact verified: $($exe.Name) ($('{0:N0}' -f ($exe.Length / 1MB)) MB)" -ForegroundColor Green
+
       - name: Resolve release assets
         id: assets
         shell: pwsh
@@ -94,6 +102,15 @@ jobs:
         run: |
           chmod +x ./build_dmg.sh
           ./build_dmg.sh
+
+      - name: Verify build artifacts
+        shell: bash
+        run: |
+          dmg=$(ls release/*.dmg 2>/dev/null | head -n 1)
+          if [ -z "$dmg" ]; then echo "ERROR: No .dmg file found."; exit 1; fi
+          size=$(du -sm "$dmg" | cut -f1)
+          if [ "$size" -lt 10 ]; then echo "ERROR: DMG too small (${size} MB)."; exit 1; fi
+          echo "Artifact verified: $(basename "$dmg") (${size} MB)"
 
       - name: Resolve release assets
         id: assets

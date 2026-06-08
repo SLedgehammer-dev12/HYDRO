@@ -22,8 +22,10 @@ from ..app_metadata import (
     RELEASES_API_URL,
     RELEASES_PAGE_URL,
     RELEASE_ASSET_TEMPLATE,
+    RELEASE_ASSET_TEMPLATE_MACOS,
     RELEASE_TAG_PREFIX,
 )
+from .download_manager import DownloadManager, ProgressCallback
 
 DEFAULT_TIMEOUT_SECONDS = 10
 POWERSHELL_JSON_DEPTH = 32
@@ -86,29 +88,42 @@ def _matches_project_release(release: dict[str, Any]) -> bool:
     if tag_name.startswith(RELEASE_TAG_PREFIX):
         return True
     asset_template_prefix = RELEASE_ASSET_TEMPLATE.split("{version}", 1)[0]
+    macos_template_prefix = RELEASE_ASSET_TEMPLATE_MACOS.split("{version}", 1)[0]
     for asset in release.get("assets", []):
         asset_name = str(asset.get("name", ""))
         if asset_name.startswith(asset_template_prefix) and asset_name.endswith(".zip"):
+            return True
+        if asset_name.startswith(macos_template_prefix) and asset_name.endswith(".dmg"):
             return True
     return False
 
 
 def _extract_asset(release: dict[str, Any], version: str) -> ReleaseAsset | None:
-    expected_name = RELEASE_ASSET_TEMPLATE.format(version=version)
+    expected_win = RELEASE_ASSET_TEMPLATE.format(version=version)
+    expected_mac = RELEASE_ASSET_TEMPLATE_MACOS.format(version=version)
     fallback_asset: ReleaseAsset | None = None
+    platform = sys.platform
+
     for asset in release.get("assets", []):
         asset_name = str(asset.get("name", ""))
-        if not asset_name.lower().endswith(".zip"):
-            continue
         release_asset = ReleaseAsset(
             name=asset_name,
             download_url=str(asset.get("browser_download_url", "")),
             size=int(asset.get("size", 0) or 0),
         )
-        if asset_name == expected_name:
-            return release_asset
-        if fallback_asset is None:
-            fallback_asset = release_asset
+
+        if platform.startswith("darwin") and asset_name.lower().endswith(".dmg"):
+            if asset_name == expected_mac:
+                return release_asset
+            if fallback_asset is None:
+                fallback_asset = release_asset
+
+        if asset_name.lower().endswith(".zip"):
+            if asset_name == expected_win:
+                return release_asset
+            if fallback_asset is None:
+                fallback_asset = release_asset
+
     return fallback_asset
 
 
@@ -304,7 +319,12 @@ def get_runtime_context() -> RuntimeContext:
     frozen = bool(getattr(sys, "frozen", False))
     executable_path = Path(sys.executable if frozen else __file__).resolve()
     install_dir = executable_path.parent if frozen else Path(__file__).resolve().parent
-    can_self_update = frozen and sys.platform.startswith("win") and executable_path.suffix.lower() == ".exe"
+    if frozen and sys.platform.startswith("darwin"):
+        install_dir = executable_path.parent.parent.parent.parent
+    can_self_update = frozen and (
+        (sys.platform.startswith("win") and executable_path.suffix.lower() == ".exe")
+        or (sys.platform.startswith("darwin") and executable_path.suffix == "")
+    )
     return RuntimeContext(
         frozen=frozen,
         can_self_update=can_self_update,
@@ -317,27 +337,20 @@ def open_release_page(url: str | None = None) -> None:
     webbrowser.open(url or RELEASES_PAGE_URL)
 
 
-def _download_asset(asset: ReleaseAsset, target_path: Path, timeout_seconds: int) -> None:
-    headers = _build_headers("application/octet-stream")
-    request = Request(asset.download_url, headers=headers)
-    try:
-        with urlopen(request, timeout=timeout_seconds) as response, target_path.open("wb") as output:
-            while True:
-                chunk = response.read(1024 * 256)
-                if not chunk:
-                    break
-                output.write(chunk)
-    except HTTPError as exc:
-        raise UpdateError(f"Release paketi indirilemedi: HTTP {exc.code}") from exc
-    except URLError:
-        try:
-            if target_path.exists():
-                target_path.unlink()
-            _download_via_powershell(asset.download_url, headers, target_path, timeout_seconds)
-        except UpdateError as fallback_exc:
-            raise UpdateError(
-                "Release paketi indirilemedi. Python TLS dogrulamasi ve Windows fallback denemesi basarisiz oldu."
-            ) from fallback_exc
+def _download_asset(
+    asset: ReleaseAsset,
+    target_path: Path,
+    timeout_seconds: int,
+    progress_callback: ProgressCallback | None = None,
+) -> None:
+    from .download_manager import DownloadManager
+
+    dm = DownloadManager()
+    dm.download_file(
+        asset.download_url,
+        target_path,
+        on_progress=progress_callback,
+    )
 
 
 def _find_extracted_app_dir(extract_root: Path) -> Path:
@@ -348,6 +361,63 @@ def _find_extracted_app_dir(extract_root: Path) -> Path:
     if len(directories) == 1:
         return directories[0]
     raise UpdateError("Indirilen paket beklenen uygulama klasorunu icermiyor.")
+
+
+def _install_macos_update(asset_path: Path, app_name: str = BINARY_NAME) -> None:
+    import subprocess
+    import tempfile
+
+    mount_point = Path(f"/Volumes/{app_name}")
+    try:
+        subprocess.run(
+            ["hdiutil", "attach", str(asset_path), "-noautoopen", "-quiet"],
+            check=True,
+            timeout=60,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise UpdateError(f"DMG mount edilemedi: {exc}") from exc
+
+    try:
+        dmg_app = mount_point / f"{app_name}.app"
+        if not dmg_app.exists():
+            alt = list(mount_point.glob("*.app"))
+            if alt:
+                dmg_app = alt[0]
+            else:
+                raise UpdateError("DMG icinde .app bulunamadi.")
+
+        apps_dir = Path("/Applications")
+        apps_dir.mkdir(parents=True, exist_ok=True)
+        target_app = apps_dir / dmg_app.name
+
+        time.sleep(1)
+        subprocess.run(
+            ["ditto", str(dmg_app), str(target_app)],
+            check=True,
+            timeout=120,
+        )
+
+        subprocess.run(
+            ["xattr", "-cr", str(target_app)],
+            check=False,
+            timeout=30,
+        )
+
+    finally:
+        try:
+            subprocess.run(
+                ["hdiutil", "detach", str(mount_point), "-quiet"],
+                check=False,
+                timeout=30,
+            )
+        except Exception:
+            pass
+
+    subprocess.Popen(
+        ["open", str(target_app)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
 
 def _write_update_script(
@@ -390,6 +460,7 @@ def install_update(
     update_info: UpdateInfo,
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
     download_root: Path | None = None,
+    progress_callback: ProgressCallback | None = None,
 ) -> str:
     if not update_info.update_available:
         return "up_to_date"
@@ -408,11 +479,24 @@ def install_update(
         working_root = Path(tempfile.mkdtemp(prefix="hidrostatik-update-", dir=str(download_root)))
     else:
         working_root = Path(tempfile.mkdtemp(prefix="hidrostatik-update-"))
-    zip_path = working_root / update_info.asset.name
+
+    asset_path = working_root / update_info.asset.name
+
+    _download_asset(
+        update_info.asset,
+        asset_path,
+        timeout_seconds,
+        progress_callback=progress_callback,
+    )
+
+    if sys.platform.startswith("darwin") and update_info.asset.name.endswith(".dmg"):
+        _install_macos_update(asset_path, BINARY_NAME)
+        return "self_update"
+
+    zip_path = asset_path
     extract_root = working_root / "extract"
     extract_root.mkdir(parents=True, exist_ok=True)
 
-    _download_asset(update_info.asset, zip_path, timeout_seconds)
     with zipfile.ZipFile(zip_path, "r") as archive:
         archive.extractall(extract_root)
 

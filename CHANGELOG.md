@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.7.0 - 2026-06-08
+
+- **Güncelleme Mekanizması Yeniden Tasarlandı (Update Manager Redesign)**:
+  - `DownloadManager` servisi eklendi: chunked HTTP download, pause/resume, SHA-256 doğrulama, exponential backoff retry.
+  - `DownloadDialog` UI widget eklendi: Toplevel progress bar, anlık hız/ETA gösterimi, duraklat/devam et/iptal kontrolleri.
+  - Güncelleme akışı tarayıcı yönlendirme yerine uygulama içi indirme yöneticisi ile çalışacak şekilde yeniden tasarlandı.
+  - macOS self-update desteği eklendi: DMG mount → kopyalama → xattr temizlik → yeni app açma.
+- **Test ve Derleme Altyapısı**:
+  - Windows ve macOS build doğrulama scriptleri eklendi (`tests/test_build_windows.ps1`, `tests/test_build_macos.sh`).
+  - Release workflow'una build artifact boyut doğrulama adımı eklendi.
+  - Otomatik test paketi 157 test ile korunmaya devam ediyor.
+
 ## 1.6.2 - 2026-06-06
 
 - **Çalışma Zamanı Düzeltmeleri (Runtime Hotfixes)**:

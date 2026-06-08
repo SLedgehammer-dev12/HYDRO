@@ -778,69 +778,63 @@ class UiWorkflowTests(unittest.TestCase):
 
             self.assertIn(str(target_dir), self.app.update_download_summary_var.get())
 
-    def test_apply_available_update_uses_selected_download_directory(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            target_dir = Path(temp_dir) / "updates"
-            self.app.update_download_dir_var.set(str(target_dir))
-            self.app.latest_update_info = type(
-                "UpdateInfoLike",
-                (),
-                {
-                    "update_available": True,
-                    "latest_version": "9.9.9",
-                },
-            )()
-            captured: dict[str, object] = {}
+    def test_apply_available_update_uses_download_dialog(self) -> None:
+        self.app.latest_update_info = type(
+            "UpdateInfoLike",
+            (),
+            {
+                "update_available": True,
+                "latest_version": "9.9.9",
+                "asset": type(
+                    "AssetLike",
+                    (),
+                    {
+                        "name": "update.zip",
+                        "download_url": "https://example.com/update.zip",
+                        "size": 1024,
+                    },
+                )(),
+            },
+        )()
+        download_dir = Path(tempfile.mkdtemp())
+        self.app.update_download_dir_var.set(str(download_dir))
 
-            class _FakeThread:
-                def start(self) -> None:
-                    return None
+        dialog_shown = False
 
-            def fake_thread(*, target, args=(), daemon=None):
-                captured["target"] = target
-                captured["args"] = args
-                captured["daemon"] = daemon
-                return _FakeThread()
+        class FakeDialog:
+            def __init__(self, **kwargs):
+                nonlocal dialog_shown
+                dialog_shown = True
 
-            with patch("hidrostatik_test.ui.app.messagebox.askyesnocancel", return_value=False), patch(
-                "hidrostatik_test.ui.app.threading.Thread",
-                side_effect=fake_thread,
-            ):
-                self.app._apply_available_update()
+            def wait(self):
+                return "completed"
 
-            self.assertTrue(self.app.update_install_in_progress)
-            self.assertEqual(captured["target"], self.app._perform_update_install)
-            self.assertEqual(captured["args"], (target_dir,))
-            self.assertIn(str(target_dir), self.app.update_detail_var.get())
+        with patch(
+            "hidrostatik_test.ui.download_dialog.DownloadDialog",
+            side_effect=FakeDialog,
+        ), patch.object(
+            self.app, "_perform_update_install_after_download"
+        ) as mock_install:
+            self.app._apply_available_update()
 
-    def test_apply_available_update_prompts_for_folder_selection_options(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            target_dir = Path(temp_dir) / "updates"
-            self.app.update_download_dir_var.set(str(target_dir))
-            self.app.latest_update_info = type(
-                "UpdateInfoLike",
-                (),
-                {
-                    "update_available": True,
-                    "latest_version": "9.9.9",
-                },
-            )()
-            captured: dict[str, str] = {}
+        self.assertTrue(dialog_shown)
+        mock_install.assert_called_once()
 
-            def fake_prompt(title: str, message: str):
-                captured["title"] = title
-                captured["message"] = message
-                return None
+    def test_apply_available_update_opens_release_page_when_no_asset(self) -> None:
+        self.app.latest_update_info = type(
+            "UpdateInfoLike",
+            (),
+            {
+                "update_available": True,
+                "latest_version": "9.9.9",
+                "asset": None,
+            },
+        )()
 
-            with patch("hidrostatik_test.ui.app.messagebox.askyesnocancel", side_effect=fake_prompt):
-                self.app._apply_available_update()
+        with patch.object(self.app, "_open_release_page") as mock_open:
+            self.app._apply_available_update()
 
-            self.assertEqual(captured["title"], "Guncelleme Indirme Klasoru")
-            self.assertIn(str(target_dir), captured["message"])
-            self.assertIn("Evet: farkli klasor sec", captured["message"])
-            self.assertIn("Hayir: mevcut klasorle devam et", captured["message"])
-            self.assertIn("Iptal: islemi durdur", captured["message"])
-            self.assertFalse(self.app.update_install_in_progress)
+        mock_open.assert_called_once()
 
     def test_report_text_contains_version_spec_and_input_snapshot(self) -> None:
         self._fill_geometry()

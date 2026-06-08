@@ -153,7 +153,7 @@ class UpdaterTests(unittest.TestCase):
         self.assertEqual(info.latest_version, NEXT_TEST_VERSION)
         self.assertEqual(info.source_repository, "SLedgehammer-dev12/Programlar")
 
-    def test_download_asset_falls_back_to_powershell_when_python_tls_fails(self) -> None:
+    def test_download_asset_uses_download_manager(self) -> None:
         asset = ReleaseAsset(
             name=f"HidrostatikTest-v{NEXT_TEST_VERSION}-windows-x64.zip",
             download_url="https://example.com/app.zip",
@@ -163,20 +163,18 @@ class UpdaterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             target_path = Path(temp_dir) / asset.name
 
-            def fake_powershell_download(url: str, headers: dict[str, str], target: Path, timeout: int) -> None:
+            def fake_download(url: str, dest: Path, on_progress=None):
                 self.assertEqual(url, asset.download_url)
-                self.assertIn("User-Agent", headers)
-                self.assertEqual(timeout, 10)
-                target.write_bytes(b"zip-data")
+                dest.write_bytes(b"downloaded-data")
 
-            with patch("hidrostatik_test.services.updater.urlopen", side_effect=URLError("tls failure")), patch(
-                "hidrostatik_test.services.updater._download_via_powershell",
-                side_effect=fake_powershell_download,
+            with patch(
+                "hidrostatik_test.services.download_manager.DownloadManager.download_file",
+                side_effect=fake_download,
             ):
                 _download_asset(asset, target_path, 10)
 
             self.assertTrue(target_path.exists())
-            self.assertEqual(target_path.read_bytes(), b"zip-data")
+            self.assertEqual(target_path.read_bytes(), b"downloaded-data")
 
     def test_install_update_uses_selected_download_root(self) -> None:
         info = UpdateInfo(
@@ -211,7 +209,7 @@ class UpdaterTests(unittest.TestCase):
                 captured["dir"] = dir
                 return str(working_root)
 
-            def write_test_zip(asset: ReleaseAsset, target_path: Path, timeout: int) -> None:
+            def write_test_zip(asset: ReleaseAsset, target_path: Path, timeout: int, **kwargs: object) -> None:
                 del asset, timeout
                 import zipfile
 

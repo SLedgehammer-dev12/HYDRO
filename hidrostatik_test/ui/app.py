@@ -379,9 +379,12 @@ class HydrostaticTestApp:
 
         update_menu = tk.Menu(menu_bar, tearoff=False)
         update_menu.add_command(label="Guncelleme Kontrol Et", command=self._check_for_updates_manually)
-        update_menu.add_command(label="Guncellemeyi Uygula", command=self._apply_available_update)
-        update_menu.add_command(label="Indirme Klasoru Sec", command=self._choose_update_download_dir)
+        update_menu.add_command(
+            label="Guncellemeyi Indir ve Uygula",
+            command=self._apply_available_update,
+        )
         update_menu.add_separator()
+        update_menu.add_command(label="Indirme Klasoru Sec", command=self._choose_update_download_dir)
         update_menu.add_command(label="Release Sayfasini Ac", command=self._open_release_page)
         menu_bar.add_cascade(label="Guncelleme", menu=update_menu)
 
@@ -2433,51 +2436,56 @@ class HydrostaticTestApp:
         if not self.latest_update_info.update_available:
             messagebox.showinfo("Bilgi", "Kurulacak yeni bir surum bulunmuyor.")
             return
-        try:
-            download_root = self._resolve_update_download_dir(create=True)
-        except OSError as exc:
-            messagebox.showerror("Guncelleme", f"Indirme klasoru hazirlanamadi: {exc}")
+        if self.latest_update_info.asset is None:
+            self._open_release_page()
             return
-        folder_choice = messagebox.askyesnocancel(
-            "Guncelleme Indirme Klasoru",
-            (
-                "Guncelleme paketinin nereye indirilecegini secin.\n\n"
-                f"Mevcut klasor:\n{download_root}\n\n"
-                "Evet: farkli klasor sec\n"
-                "Hayir: mevcut klasorle devam et\n"
-                "Iptal: islemi durdur"
-            ),
-        )
-        if folder_choice is None:
-            self._set_banner("Guncelleme kurulumu kullanici tarafindan iptal edildi.", "info")
-            return
-        if folder_choice:
-            if not self._choose_update_download_dir():
-                self._set_banner("Guncelleme indirme klasoru secilmedigi icin islem baslatilmadi.", "warning")
-                return
-            try:
-                download_root = self._resolve_update_download_dir(create=True)
-            except OSError as exc:
-                messagebox.showerror("Guncelleme", f"Indirme klasoru hazirlanamadi: {exc}")
-                return
-        self.update_install_in_progress = True
-        self.update_status_var.set(f"Guncelleme indiriliyor: {self.latest_update_info.latest_version}")
-        self.update_detail_var.set(
-            f"Release paketi indiriliyor ve kurulum hazirlaniyor. Indirme klasoru: {download_root}"
-        )
-        worker = threading.Thread(target=self._perform_update_install, args=(download_root,), daemon=True)
-        worker.start()
 
-    def _perform_update_install(self, download_root: Path) -> None:
+        from ..services.download_manager import DownloadManager
+        from ..ui.download_dialog import DownloadDialog
+
+        self.update_install_in_progress = True
+        self._set_banner(
+            f"Guncelleme indiriliyor: {self.latest_update_info.latest_version}",
+            "info",
+        )
+
+        dialog = DownloadDialog(
+            parent=self.root,
+            download_manager=DownloadManager,
+            file_url=self.latest_update_info.asset.download_url,
+            file_name=self.latest_update_info.asset.name,
+            dest_path=Path(
+                self._resolve_update_download_dir(create=True)
+            ) / self.latest_update_info.asset.name,
+            total_bytes=self.latest_update_info.asset.size,
+            title=f"Guncelleme: {self.latest_update_info.latest_version}",
+        )
+        result = dialog.wait()
+
+        if result == "completed":
+            self._perform_update_install_after_download()
+        elif result == "cancelled":
+            self.update_install_in_progress = False
+            self._set_banner("Guncelleme kullanici tarafindan iptal edildi.", "info")
+        else:
+            self.update_install_in_progress = False
+            self._set_banner("Guncelleme indirilemedi.", "error")
+
+    def _perform_update_install_after_download(self) -> None:
+        import tempfile
         if self.latest_update_info is None:
-            self.root.after(0, lambda: self._handle_update_install_error("Guncel release bilgisi bulunamadi."))
+            self._handle_update_install_error("Guncel release bilgisi bulunamadi.")
             return
+        from ..services.updater import install_update
         try:
-            install_mode = install_update(self.latest_update_info, download_root=download_root)
+            install_mode = install_update(
+                self.latest_update_info,
+                download_root=Path(tempfile.mkdtemp(prefix="hidrostatik-install-")),
+            )
         except UpdateError as exc:
-            self.root.after(0, lambda: self._handle_update_install_error(str(exc)))
+            self._handle_update_install_error(str(exc))
             return
-        self.root.after(0, lambda: self._handle_update_install_result(install_mode))
+        self._handle_update_install_result(install_mode)
 
     def _handle_update_install_error(self, message: str) -> None:
         self.update_install_in_progress = False
