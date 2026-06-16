@@ -1,6 +1,6 @@
 CoolProp==7.0.0
 scipy>=1.11.0
-numpy>=1.24.0
+numpy>=2.4.6
 pint>=0.22.0
 openpyxl>=3.1.5
 reportlab>=4.5.1
