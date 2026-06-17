@@ -1,5 +1,5 @@
 -r requirements.txt
 pyinstaller==6.12.0
-iapws>=1.5.4
+iapws>=1.5.5
 coverage>=7.6
 mypy>=1.13
