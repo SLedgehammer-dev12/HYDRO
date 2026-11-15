@@ -172,12 +172,13 @@ export function AirPage() {
         }
         actions={
           <>
-            <Button variant="ghost" icon={<Sigma size={14} />} onClick={() => setTab("coefficients")}>
-              Katsayılar
+            <Button size="lg" variant="ghost" icon={<Sigma size={15} />} onClick={() => setTab("coefficients")}>
+              Katsayılar & Detay
             </Button>
             <Button
+              size="lg"
               variant="primary"
-              icon={<CheckCircle2 size={14} />}
+              icon={<CheckCircle2 size={15} />}
               loading={calculateAir.isPending}
               disabled={missing.length > 0}
               title={missing.length ? `Eksik: ${missing.join(", ")}` : "Testi değerlendir"}
@@ -426,7 +427,7 @@ export function AirPage() {
                   Basınç testine geç
                 </Button>
                 <Button size="lg" variant="ghost" onClick={() => setTab("coefficients")}>
-                  A kaynağını gör
+                  Katsayı detayını gör
                 </Button>
               </>
             }

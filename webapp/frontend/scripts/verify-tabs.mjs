@@ -27,13 +27,13 @@ const ROUTES = [
   ["projects", "Proje kayıtları ve kesit envanteri", "projects"],
   ["geometry", "Kesit, segmentler, kotlar ve saha profili", "geometry"],
   ["field", "Kesit, segmentler, kotlar ve saha profili", "geometry"],
-  ["coefficients", "A/B hazırlama", "coefficients"],
-  ["coefficient-detail", "Üç kaynak, backend ve A onarım", "coefficient_detail"],
   ["air", "Hava içerik değerlendirmesi", "air"],
   ["pressure", "Basınç değişim değerlendirmesi", "pressure"],
   ["reports", "Rapor önizleme", "reports"],
   ["ocr", "Test Raporu Kontrolü", "ocr"],
   ["settings", "Hesaplama, görünüm ve oturum", "settings"],
+  ["coefficients", "A/B hazırlama, üç kaynak ve backend karşılaştırması", "coefficients"],
+  ["coefficient-detail", "A/B hazırlama, üç kaynak ve backend karşılaştırması", "coefficients"],
   ["dashboard", "Merhaba", "dashboard"],
 ];
 

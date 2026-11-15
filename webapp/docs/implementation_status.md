@@ -8,7 +8,7 @@ Dal: `feat/ergonomics-ocr`
 | Alan | Durum | Kanit |
 | --- | --- | --- |
 | Backend API | Calisiyor | 51 path (`/api/projects` dahil), 95 pytest |
-| Frontend kabuk | Calisiyor | 10 sekme (Projeler & Kesitler, birlesik Geometri & Saha, Katsayi Detayi dahil), responsive, tema |
+| Frontend kabuk | Calisiyor | 9 sekme (Projeler & Kesitler, birlesik Geometri & Saha, son sekmede birlesik Katsayilar & Detay), responsive, tema |
 | Hesaplamalar | Parity | A/B, hava, basinc, profil, pig, pressurization, termal denge |
 | Proje & Kesit DB | Calisiyor | `projects` + `sessions.project_id` + `inputs.section_meta`, kesit siralama/acma/kopyalama/silme |
 | Oturum | Calisiyor | SQLite, revision/ETag, snapshot, audit |

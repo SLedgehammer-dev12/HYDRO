@@ -167,12 +167,13 @@ export function PressurePage() {
         }
         actions={
           <>
-            <Button variant="ghost" icon={<Sigma size={14} />} onClick={() => setTab("coefficients")}>
-              A/B katsayıları
+            <Button size="lg" variant="ghost" icon={<Sigma size={15} />} onClick={() => setTab("coefficients")}>
+              Katsayılar & Detay
             </Button>
             <Button
+              size="lg"
               variant="primary"
-              icon={<CheckCircle2 size={14} />}
+              icon={<CheckCircle2 size={15} />}
               loading={calculate.isPending}
               disabled={missing.length > 0}
               title={missing.length ? `Eksik: ${missing.join(", ")}` : "Testi değerlendir"}
@@ -425,11 +426,11 @@ export function PressurePage() {
             }
             actions={
               <>
-                <Button size="lg" variant="primary" icon={<ArrowRight size={15} />} onClick={() => setTab("geometry")}>
-                  Geometri & Sahaya geç
+                <Button size="lg" variant="primary" icon={<ArrowRight size={15} />} onClick={() => setTab("reports")}>
+                  Raporlara geç
                 </Button>
                 <Button size="lg" variant="ghost" onClick={() => setTab("coefficients")}>
-                  B kaynağını gör
+                  Katsayı detayını gör
                 </Button>
               </>
             }

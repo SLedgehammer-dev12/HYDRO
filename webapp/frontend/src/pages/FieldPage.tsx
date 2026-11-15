@@ -74,6 +74,7 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
   const results = useAppStore((state) => state.results);
   const patchInputs = useAppStore((state) => state.patchInputs);
   const toggleCheck = useAppStore((state) => state.toggleCheck);
+  const setTab = useAppStore((state) => state.setTab);
   const pushToast = useAppStore((state) => state.pushToast);
 
   const { data: meta } = useMeta();
@@ -216,16 +217,22 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
   );
 
   const headerActions = (
-    <Button
-      variant="primary"
-      icon={<CheckCircle2 size={14} />}
-      loading={calculateProfile.isPending}
-      disabled={missing.length > 0}
-      title={missing.length ? `Eksik: ${missing.join(", ")}` : "Profili doğrula"}
-      onClick={evaluateProfile}
-    >
-      Profili doğrula
-    </Button>
+    <>
+      <Button
+        size="lg"
+        variant="primary"
+        icon={<CheckCircle2 size={15} />}
+        loading={calculateProfile.isPending}
+        disabled={missing.length > 0}
+        title={missing.length ? `Eksik: ${missing.join(", ")}` : "Profili doğrula"}
+        onClick={evaluateProfile}
+      >
+        Profili doğrula
+      </Button>
+      <Button size="lg" icon={<ArrowRight size={15} />} onClick={() => setTab("air")}>
+        Hava testine geç
+      </Button>
+    </>
   );
 
   return (
@@ -648,9 +655,14 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
         <p className="text-[10.5px] text-[var(--text-faint)]">
           Basınç penceresi kararı ASME B31.8 ve proje prosedürüyle birlikte değerlendirilmelidir.
         </p>
-        <Button size="sm" variant="ghost" icon={<ArrowRight size={12} />} onClick={() => window.scrollTo({ top: 0 })}>
-          Başa dön
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" variant="ghost" onClick={() => window.scrollTo({ top: 0 })}>
+            Başa dön
+          </Button>
+          <Button size="lg" variant="primary" icon={<ArrowRight size={15} />} onClick={() => setTab("air")}>
+            Hava içerik testine geç
+          </Button>
+        </div>
       </div>
     </div>
   );

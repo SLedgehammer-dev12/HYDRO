@@ -43,26 +43,10 @@ export const TABS: TabMeta[] = [
     description: "Kesit, segment, kot, malzeme, basınç penceresi ve pig",
   },
   {
-    key: "coefficients",
-    label: "Katsayılar",
-    path: "/coefficients",
-    index: 4,
-    group: "calisma",
-    description: "A/B hazırlama ve testlere hızlı geçiş",
-  },
-  {
-    key: "coefficient_detail",
-    label: "Katsayı Detayı",
-    path: "/coefficient-detail",
-    index: 5,
-    group: "calisma",
-    description: "Üç kaynak, backend ve A onarım karşılaştırması",
-  },
-  {
     key: "air",
     label: "Hava İçerik",
     path: "/air",
-    index: 6,
+    index: 4,
     group: "calisma",
     description: "Hava içerik testi değerlendirmesi",
   },
@@ -70,7 +54,7 @@ export const TABS: TabMeta[] = [
     key: "pressure",
     label: "Basınç Değişim",
     path: "/pressure",
-    index: 7,
+    index: 5,
     group: "calisma",
     description: "Basınç değişim testi değerlendirmesi",
   },
@@ -78,7 +62,7 @@ export const TABS: TabMeta[] = [
     key: "reports",
     label: "Raporlar",
     path: "/reports",
-    index: 8,
+    index: 6,
     group: "cikti",
     description: "Rapor önizleme ve dışa aktarma",
   },
@@ -86,7 +70,7 @@ export const TABS: TabMeta[] = [
     key: "ocr",
     label: "OCR",
     path: "/ocr",
-    index: 9,
+    index: 7,
     group: "cikti",
     description: "Rapor yükleme, alan onayı, uyuşmazlık",
   },
@@ -94,9 +78,26 @@ export const TABS: TabMeta[] = [
     key: "settings",
     label: "Ayarlar",
     path: "/settings",
-    index: 10,
+    index: 8,
     group: "cikti",
     description: "Backend, görünüm ve oturum yönetimi",
+  },
+  {
+    key: "coefficients",
+    label: "Katsayılar",
+    path: "/coefficients",
+    index: 9,
+    group: "cikti",
+    description: "A/B hazırlama, üç kaynak, backend ve A onarım karşılaştırması",
+  },
+  {
+    key: "coefficient_detail",
+    label: "Katsayı Detayı",
+    path: "/coefficient-detail",
+    index: 0,
+    group: "cikti",
+    description: "Eski bağlantı; birleşik Katsayılar sayfasına yönlendirilir",
+    hidden: true,
   },
   {
     key: "field",
@@ -109,7 +110,7 @@ export const TABS: TabMeta[] = [
   },
 ];
 
-/** Kenar çubuğunda görünen sekmeler (eski `field` gizlidir). */
+/** Kenar çubuğunda görünen sekmeler (eski `field` ve `coefficient_detail` gizlidir). */
 export const VISIBLE_TABS = TABS.filter((tab) => !tab.hidden);
 
 export const TAB_BY_KEY: Record<TabKey, TabMeta> = TABS.reduce(
@@ -122,14 +123,16 @@ export const TAB_BY_KEY: Record<TabKey, TabMeta> = TABS.reduce(
 
 export function tabFromHash(hash: string): TabKey {
   const path = hash.replace(/^#/, "").split("?")[0] || "/";
-  /* Eski `#/field` bağlantıları birleşik Geometri & Saha sayfasına gider. */
+  /* Eski `#/field` ve `#/coefficient-detail` bağlantıları birleşik sayfalara gider. */
   if (path === "/field") return "geometry";
+  if (path === "/coefficient-detail") return "coefficients";
   const found = TABS.find((tab) => !tab.hidden && tab.path === path);
   return found?.key ?? "dashboard";
 }
 
 export function hashForTab(tab: TabKey): string {
   if (tab === "field") return "#/geometry";
+  if (tab === "coefficient_detail") return "#/coefficients";
   return `#${TAB_BY_KEY[tab].path}`;
 }
 

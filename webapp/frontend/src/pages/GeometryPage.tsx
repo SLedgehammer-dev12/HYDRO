@@ -15,7 +15,6 @@ import {
 } from "lucide-react";
 import { PageHeader } from "../components/layout/PageHeader";
 import { SectionIdentityCard } from "../components/SectionIdentityCard";
-import PipelineScene from "../components/three/PipelineScene";
 import { SectionCard, KpiCard, ResultTile } from "../components/ui/Card";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
@@ -27,7 +26,7 @@ import { useCatalog, useCalculateGeometry, useMeta } from "../hooks/queries";
 import { useAppStore } from "../store/useAppStore";
 import { PUMP_LABELS } from "../lib/constants";
 import { fmt, formatInput, num, parseNumber } from "../lib/format";
-import { buildSceneData, computeGeometry, sectionsFromInputs } from "../lib/mock";
+import { computeGeometry, sectionsFromInputs } from "../lib/mock";
 import type { GeometryIn } from "../lib/types";
 
 function SegmentNumberCell({
@@ -173,8 +172,6 @@ export function GeometryPage() {
     });
   }
 
-  const scene = buildSceneData(inputs, results);
-
   const totalLength = geometry?.total_length_m ?? 0;
   const totalVolume = geometry?.internal_volume_m3 ?? 0;
 
@@ -201,8 +198,8 @@ export function GeometryPage() {
         }
         actions={
           <>
-            <Button size="lg" icon={<ArrowRight size={15} />} onClick={() => setTab("coefficients")}>
-              Katsayılara geç
+            <Button size="lg" icon={<ArrowRight size={15} />} onClick={() => setTab("air")}>
+              Hava testine geç
             </Button>
             <Button
               size="lg"
@@ -612,18 +609,6 @@ export function GeometryPage() {
           Tek kesit veya en az bir geçerli segment girildiğinde toplamlar ve doğrulama etkinleşir.
         </InlineNotice>
       ) : null}
-
-      <SectionCard
-        title="3D saha önizlemesi"
-        description="Geometri değişiklikleri sahneye anında yansır; kot profili 4 noktadan yaklaşık türetilir."
-        icon={Layers}
-        action={<Badge tone="info">{scene.segments.length} segment</Badge>}
-        bodyClassName="pt-2"
-      >
-        <div className="scene-shell">
-          <PipelineScene data={scene} className="min-h-[320px]" />
-        </div>
-      </SectionCard>
 
       <FieldPage embedded />
     </div>

@@ -147,7 +147,7 @@ HYDRO/                                  # mevcut masaüstü repo kökü
     │   ├── src/
     │   │   ├── main.tsx
     │   │   ├── app/                    # router, layout, providers
-    │   │   ├── pages/                  # Dashboard, Projects, Geometry (+Field), Coefficients, CoefficientDetail, Air, Pressure, Reports, OCR, Settings
+    │   │   ├── pages/                  # Dashboard, Projects, Geometry (+Field), Air, Pressure, Reports, OCR, Settings, Coefficients (+Detail)
     │   │   ├── features/               # alan bazlı bileşen + hook + test
     │   │   ├── components/
     │   │   │   ├── ui/                 # Button, Field, Card, Badge, Table, Banner

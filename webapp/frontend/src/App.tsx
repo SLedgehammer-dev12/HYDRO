@@ -11,7 +11,6 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { GeometryPage } from "./pages/GeometryPage";
 import { CoefficientsPage } from "./pages/CoefficientsPage";
-import { CoefficientDetailPage } from "./pages/CoefficientDetailPage";
 import { AirPage } from "./pages/AirPage";
 import { PressurePage } from "./pages/PressurePage";
 import { ReportsPage } from "./pages/ReportsPage";
@@ -175,9 +174,9 @@ export default function App() {
       case "geometry":
         return <GeometryPage />;
       case "coefficients":
-        return <CoefficientsPage />;
       case "coefficient_detail":
-        return <CoefficientDetailPage />;
+        /* Eski `#/coefficient-detail` bağlantısı birleşik Katsayılar sayfasına gider. */
+        return <CoefficientsPage />;
       case "air":
         return <AirPage />;
       case "pressure":

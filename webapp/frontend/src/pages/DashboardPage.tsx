@@ -57,13 +57,11 @@ export function DashboardPage() {
     ? { tab: "projects" as const, label: "Proje ve kesit seç", detail: "Kesit kaydı bir projeye bağlanmadan çalışma başlatılamaz." }
     : !geometry
     ? { tab: "geometry" as const, label: "Geometriyi tamamla", detail: "Dış çap, et kalınlığı ve uzunluk girilmeden hesap yapılamaz." }
-    : !airAReady || !bReady
-      ? { tab: "coefficients" as const, label: "Katsayıları hazırla", detail: "A ve B katsayıları testlerin temel girdisidir." }
-      : !air
-        ? { tab: "air" as const, label: "Hava içerik testini değerlendir", detail: "Vpa girildikten sonra tek tıkla karar üretilir." }
-        : !pressure
-          ? { tab: "pressure" as const, label: "Basınç değişim testini değerlendir", detail: "ΔT ve Pa değerleri hazır." }
-          : { tab: "reports" as const, label: "Raporu üret", detail: "Kararlar hazır; PDF, Excel veya TXT olarak dışa aktarın." };
+    : !air
+      ? { tab: "air" as const, label: "Hava içerik testini değerlendir", detail: "Vpa girildikten sonra tek tıkla karar üretilir." }
+      : !pressure
+        ? { tab: "pressure" as const, label: "Basınç değişim testini değerlendir", detail: "ΔT ve Pa değerleri hazır." }
+        : { tab: "reports" as const, label: "Raporu üret", detail: "Kararlar hazır; PDF, Excel veya TXT olarak dışa aktarın." };
 
   const prep = [
     {
@@ -337,7 +335,7 @@ export function DashboardPage() {
           bodyClassName="pt-2"
         >
           <div className="scene-shell">
-            <PipelineScene data={scene} className="min-h-[300px]" />
+            <PipelineScene data={scene} preview className="min-h-[300px]" />
           </div>
           {scene.warnings?.length ? (
             <p className="mt-2 text-[10.5px] leading-relaxed text-[var(--text-faint)]">{scene.warnings[0]}</p>
