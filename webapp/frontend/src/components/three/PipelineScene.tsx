@@ -32,18 +32,16 @@ import {
 export interface PipelineSceneProps {
   data: SceneData;
   className?: string;
-  /** Dashboard gibi özet kartlarda daha alçak tuval ve tablosuz önizleme modu. */
-  preview?: boolean;
 }
 
 const PIG_RATES = [1, 4, 16];
 
 /**
- * Full 3D field view for the pipeline: terrain, pressure-coloured segments,
- * inline equipment, inspection pig, flow tracers, cutaway and camera presets.
- * The scene never calculates; it only visualises `SceneData`.
+ * Birleşik 3D saha görünümü: arazi, basınç/kullanım renkli segmentler,
+ * ekipmanlar, pig simülasyonu, akış izleri, kesit düzlemi, kamera presetleri
+ * ve erişilebilir segment/ekipman veri tablosu tek bileşende.
  */
-export default function PipelineScene({ data, className, preview = false }: PipelineSceneProps) {
+export default function PipelineScene({ data, className }: PipelineSceneProps) {
   const resolved = useMemo(() => resolveSceneData(data), [data]);
   const scene = resolved.data;
   const layout = useMemo(() => buildSceneLayout(scene), [scene]);
@@ -160,13 +158,13 @@ export default function PipelineScene({ data, className, preview = false }: Pipe
 
   return (
     <section
-      aria-label={preview ? "Boru hattı 3D saha önizlemesi" : "Boru hattı 3D tam saha sahnesi"}
+      aria-label="Boru hattı 3D saha görünümü"
       className={twMerge(
         "relative isolate overflow-hidden rounded-2xl border border-line bg-ink-950 text-mist-100 shadow-[0_18px_50px_-30px_rgba(0,0,0,0.9)]",
         className,
       )}
     >
-      <div className={preview ? "relative h-[360px] w-full" : "relative h-[620px] w-full sm:h-[600px]"}>
+      <div className="relative h-[620px] w-full sm:h-[600px]">
         <SceneLabels>
           {webglAvailable ? (
             <SceneCanvas
@@ -201,9 +199,7 @@ export default function PipelineScene({ data, className, preview = false }: Pipe
             <div className="pointer-events-auto w-full rounded-xl border border-line/70 bg-ink-950/85 px-3 py-2 shadow-lg sm:max-w-[300px]">
               <div className="flex items-center gap-2">
                 <span className="inline-block h-1.5 w-1.5 rounded-full bg-cyan" />
-                <p className="text-[11px] font-semibold text-mist-100">
-                  {preview ? "Saha önizlemesi" : "Tam saha görünümü"}
-                </p>
+                <p className="text-[11px] font-semibold text-mist-100">3D saha görünümü</p>
                 {resolved.isDemo ? (
                   <span className="rounded bg-cyan/15 px-1.5 py-0.5 text-[9px] font-medium text-cyan">
                     Demo
@@ -214,7 +210,7 @@ export default function PipelineScene({ data, className, preview = false }: Pipe
                 {numberFormat0.format(scene.segments.length)} segment ·{" "}
                 {formatDistance(layout.totalLengthM)} · {scene.equipment.length} ekipman
               </p>
-              {!preview && scene.warnings && scene.warnings.length > 0 ? (
+              {scene.warnings && scene.warnings.length > 0 ? (
                 <p
                   className="mt-1.5 rounded border border-amber/40 bg-amber/10 px-1.5 py-1 text-[10px] leading-snug text-amber"
                   title={scene.warnings.join(" · ")}
@@ -224,18 +220,16 @@ export default function PipelineScene({ data, className, preview = false }: Pipe
                   {scene.warnings.length > 1 ? ` (+${scene.warnings.length - 1})` : ""}
                 </p>
               ) : null}
-              {!preview ? (
-                <a
-                  href={`#${tableId}`}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    openTable();
-                  }}
-                  className="mt-1 inline-block text-[10px] text-cyan/90 underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan"
-                >
-                  3D&apos;yi atla → veri tablosu
-                </a>
-              ) : null}
+              <a
+                href={`#${tableId}`}
+                onClick={(event) => {
+                  event.preventDefault();
+                  openTable();
+                }}
+                className="mt-1 inline-block text-[10px] text-cyan/90 underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan"
+              >
+                3D&apos;yi atla → veri tablosu
+              </a>
             </div>
 
             <PresetToolbar
@@ -274,28 +268,26 @@ export default function PipelineScene({ data, className, preview = false }: Pipe
         </div>
       </div>
 
-      {!preview ? (
-        <div ref={tableWrapRef}>
-          <details
-            open={tableOpen}
-            onToggle={(event) => setTableOpen(event.currentTarget.open)}
-            className="group bg-ink-950"
-          >
-            <summary className="flex cursor-pointer list-none items-center justify-between gap-2 border-t border-line/70 px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-mist-500 transition-colors hover:text-mist-200 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan">
-              <span>Veri tablosu · erişilebilir alternatif</span>
-              <span aria-hidden className="text-mist-500 transition-transform group-open:rotate-180">
-                ▾
-              </span>
-            </summary>
-            <SceneDataTable
-              id={tableId}
-              scene={scene}
-              mode={colorMode}
-              ranges={layout.ranges}
-            />
-          </details>
-        </div>
-      ) : null}
+      <div ref={tableWrapRef}>
+        <details
+          open={tableOpen}
+          onToggle={(event) => setTableOpen(event.currentTarget.open)}
+          className="group bg-ink-950"
+        >
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 border-t border-line/70 px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-mist-500 transition-colors hover:text-mist-200 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan">
+            <span>Veri tablosu · segmentler ve ekipman ({scene.segments.length} kesit · {scene.equipment.length} ekipman)</span>
+            <span aria-hidden className="text-mist-500 transition-transform group-open:rotate-180">
+              ▾
+            </span>
+          </summary>
+          <SceneDataTable
+            id={tableId}
+            scene={scene}
+            mode={colorMode}
+            ranges={layout.ranges}
+          />
+        </details>
+      </div>
     </section>
   );
 }

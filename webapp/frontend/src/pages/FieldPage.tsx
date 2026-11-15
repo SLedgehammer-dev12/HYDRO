@@ -237,6 +237,25 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
 
   return (
     <div id={embedded ? "saha" : undefined} className={embedded ? "space-y-5 border-t border-[var(--border)] pt-5" : "space-y-5"}>
+      <div id="sahne-3d">
+        <SectionCard
+          title="3D saha görünümü"
+          description="Önizleme ve tam saha tek görünümde birleştirildi: segmentler, kot profili, ekipmanlar, pig simülasyonu, kesit düzlemi ve eşdeğer veri tablosu."
+          icon={Layers}
+          action={
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Badge tone="info">{scene.segments.length} segment</Badge>
+              <Badge tone="neutral">{scene.equipment.length} ekipman</Badge>
+            </div>
+          }
+          bodyClassName="pt-2"
+        >
+          <div className="scene-shell">
+            <PipelineScene data={scene} className="min-h-[480px]" />
+          </div>
+        </SectionCard>
+      </div>
+
       {embedded ? (
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="min-w-0">
@@ -580,76 +599,17 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
             {pig ? <p className="mt-2 text-[10.5px] leading-relaxed text-[var(--text-muted)]">{pig.summary}</p> : null}
           </SectionCard>
 
-          <SectionCard
-            title="Eğilim"
-            description="Kot profili ve izlenen basınç."
-            icon={Mountain}
-          >
-            <ElevationProfileChart inputs={inputs} height={170} />
-          </SectionCard>
+          {!embedded ? (
+            <SectionCard
+              title="Eğilim"
+              description="Kot profili ve izlenen basınç."
+              icon={Mountain}
+            >
+              <ElevationProfileChart inputs={inputs} height={170} />
+            </SectionCard>
+          ) : null}
         </div>
       </div>
-
-      <SectionCard
-        title="3D tam saha"
-        description="Kamera ve kesit kontrolleri 3D bileşeninde. Sahne yüklenemezse aşağıdaki tablo eşdeğer bilgiyi verir."
-        icon={Layers}
-        action={
-          <Button size="sm" variant="ghost" onClick={() => document.getElementById("scene-table")?.scrollIntoView({ block: "center" })}>
-            3D’yi atla → tablo
-          </Button>
-        }
-        bodyClassName="pt-2"
-      >
-        {scene.warnings?.length ? (
-          <div className="mb-2">
-            <InlineNotice tone="warning" title="Yaklaşık sahne">
-              {scene.warnings.join(" ")}
-            </InlineNotice>
-          </div>
-        ) : null}
-        <div className="scene-shell">
-          <PipelineScene data={scene} className="min-h-[480px]" />
-        </div>
-
-        <div id="scene-table" className="mt-3 table-wrap scroll-thin">
-          <table className="data">
-            <caption>3D sahne eşdeğer veri tablosu</caption>
-            <thead>
-              <tr>
-                <th scope="col">#</th>
-                <th scope="col">Segment</th>
-                <th scope="col" className="num">Başlangıç (m)</th>
-                <th scope="col" className="num">Bitiş (m)</th>
-                <th scope="col" className="num">Kot başlangıç</th>
-                <th scope="col" className="num">Kot bitiş</th>
-                <th scope="col" className="num">OD / WT</th>
-                <th scope="col" className="num">P (bar)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {scene.segments.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="text-center text-[var(--text-faint)]">Segment yok</td>
-                </tr>
-              ) : (
-                scene.segments.map((segment, index) => (
-                  <tr key={segment.id}>
-                    <td className="font-mono text-[11px]">{index + 1}</td>
-                    <td>{segment.label}</td>
-                    <td className="num">{num(segment.start_m, 0)}</td>
-                    <td className="num">{num(segment.end_m, 0)}</td>
-                    <td className="num">{num(segment.start_elevation_m, 1)}</td>
-                    <td className="num">{num(segment.end_elevation_m, 1)}</td>
-                    <td className="num">{num(segment.outside_diameter_mm, 1)} / {num(segment.wall_thickness_mm, 2)}</td>
-                    <td className="num">{num(segment.pressure_bar, 1)}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </SectionCard>
 
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3.5 py-2.5">
         <p className="text-[10.5px] text-[var(--text-faint)]">
