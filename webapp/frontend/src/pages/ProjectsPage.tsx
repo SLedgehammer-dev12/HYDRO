@@ -5,6 +5,7 @@ import {
   Building2,
   CheckCircle2,
   Copy,
+  FileScan,
   FolderOpen,
   GitCompareArrows,
   Layers,
@@ -18,9 +19,10 @@ import { SectionCard, KpiCard } from "../components/ui/Card";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { ConfirmDialog, Modal } from "../components/ui/Dialog";
-import { FieldGrid, TextField } from "../components/ui/Field";
+import { FieldGrid, NumberField, TextField } from "../components/ui/Field";
 import { EmptyState, InlineNotice } from "../components/ui/State";
 import {
+  useCreateDraftSectionsBatch,
   useCreateProject,
   useCreateSession,
   useDeleteProject,
@@ -28,6 +30,7 @@ import {
   useDuplicateSession,
   useOpenSession,
   useProjects,
+  useScanPlanProfile,
   useSessions,
   useUpdateProject,
 } from "../hooks/queries";
@@ -43,7 +46,14 @@ import {
   resolveSectionMeta,
 } from "../lib/kp";
 import { dateTime, num, relativeTime } from "../lib/format";
-import type { Project, SectionMeta, SessionListItem, SessionStatus } from "../lib/types";
+import type {
+  DraftSectionItem,
+  PlanProfileScanResponse,
+  Project,
+  SectionMeta,
+  SessionListItem,
+  SessionStatus,
+} from "../lib/types";
 
 interface ProjectForm {
   name: string;
@@ -100,6 +110,8 @@ export function ProjectsPage() {
   const duplicateSession = useDuplicateSession();
   const deleteSession = useDeleteSection();
   const openSession = useOpenSession();
+  const scanPlanProfile = useScanPlanProfile();
+  const createDraftBatch = useCreateDraftSectionsBatch();
 
   const [selectedId, setSelectedId] = useState<string | null>(projectId);
   const selected = useMemo(
@@ -146,6 +158,14 @@ export function ProjectsPage() {
     test_date: new Date().toISOString().slice(0, 10),
     notes: "",
   });
+
+  /* Plan-Profil PDF tarama ve taslak kesit üretimi modal durumu */
+  const [scanDialogOpen, setScanDialogOpen] = useState(false);
+  const [scanFile, setScanFile] = useState<File | null>(null);
+  const [maxSectionLenM, setMaxSectionLenM] = useState<number | null>(12_000);
+  const [maxElevDiffM, setMaxElevDiffM] = useState<number | null>(180);
+  const [scanResult, setScanResult] = useState<PlanProfileScanResponse | null>(null);
+  const [editableDrafts, setEditableDrafts] = useState<DraftSectionItem[]>([]);
 
   /* Yeni kesit eklenirken bir önceki kesitin bitiş KP'sini bul */
   const lastOrderedSection = useMemo(() => {
@@ -318,6 +338,81 @@ export function ProjectsPage() {
     });
   }
 
+  function openScanDialog() {
+    if (!selected) return;
+    setScanResult(null);
+    setEditableDrafts([]);
+    setScanDialogOpen(true);
+  }
+
+  function runPlanProfileScan() {
+    if (!scanFile) {
+      pushToast("warning", "PDF seçilmedi", "Taranacak Plan-Profil PDF dosyasını seçin.");
+      return;
+    }
+    scanPlanProfile.mutate(
+      {
+        file: scanFile,
+        maxSectionLengthM: maxSectionLenM ?? 12_000,
+        maxElevationDiffM: maxElevDiffM,
+      },
+      {
+        onSuccess: (result) => {
+          setScanResult(result);
+          setEditableDrafts(result.draft_sections);
+        },
+      },
+    );
+  }
+
+  function updateDraftRow(index: number, patch: Partial<DraftSectionItem>) {
+    setEditableDrafts((current) => {
+      const next = current.map((item, idx) => (idx === index ? { ...item, ...patch } : item));
+      /* Başlangıç/bitiş KP değiştiyse uzunluğu ve ardışık sürekliliği yeniden hesapla */
+      return next.map((item, idx) => {
+        const sM = parseKpMeters(item.start_kp);
+        const eM = parseKpMeters(item.end_kp);
+        const len = sM !== null && eM !== null && eM > sM ? Math.round((eM - sM) * 100) / 100 : item.length_m;
+        let continuityOk = true;
+        let continuityNote = "Başlangıç kesiti";
+        if (idx > 0) {
+          const prev = next[idx - 1];
+          const prevEndM = parseKpMeters(prev.end_kp);
+          if (prevEndM !== null && sM !== null) {
+            const diff = Math.round(sM - prevEndM);
+            continuityOk = Math.abs(diff) <= 0.5;
+            continuityNote = continuityOk
+              ? `Önceki (${prev.section_no}) bitiş KP (${prev.end_kp}) ile eşleşiyor.`
+              : `${prev.section_no} bitişi (${prev.end_kp}) ile ${diff > 0 ? `+${diff} m boşluk` : `${Math.abs(diff)} m bindirme`}`;
+          }
+        }
+        return {
+          ...item,
+          start_m: sM ?? item.start_m,
+          end_m: eM ?? item.end_m,
+          length_m: len,
+          continuity_ok: continuityOk,
+          continuity_note: continuityNote,
+        };
+      });
+    });
+  }
+
+  function commitDraftSections() {
+    if (!selected || editableDrafts.length === 0) return;
+    createDraftBatch.mutate(
+      {
+        projectId: selected.id,
+        sections: editableDrafts,
+      },
+      {
+        onSuccess: () => {
+          setScanDialogOpen(false);
+        },
+      },
+    );
+  }
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -461,6 +556,14 @@ export function ProjectsPage() {
             icon={Layers}
             action={
               <div className="flex flex-wrap items-center gap-1.5">
+                <Button
+                  size="lg"
+                  icon={<FileScan size={15} />}
+                  disabled={!selected}
+                  onClick={openScanDialog}
+                >
+                  Plan-Profil PDF’den taslak üret
+                </Button>
                 <Button
                   size="lg"
                   variant="primary"
@@ -835,6 +938,169 @@ export function ProjectsPage() {
             placeholder="Kısa saha notu"
             maxLength={240}
           />
+        </div>
+      </Modal>
+
+      <Modal
+        open={scanDialogOpen}
+        onClose={() => setScanDialogOpen(false)}
+        title="Plan-Profil PDF’den taslak kesit (section) üret"
+        description="Plan-profil PDF dosyasındaki KP istasyonları, kot noktaları ve boru parametreleri taranarak uç uca eşleşen taslak kesitler oluşturulur."
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setScanDialogOpen(false)}>
+              Kapat
+            </Button>
+            <Button
+              icon={<FileScan size={14} />}
+              loading={scanPlanProfile.isPending}
+              disabled={!scanFile}
+              onClick={runPlanProfileScan}
+            >
+              PDF’i tara ve taslakları üret
+            </Button>
+            {editableDrafts.length > 0 ? (
+              <Button
+                variant="primary"
+                icon={<CheckCircle2 size={14} />}
+                loading={createDraftBatch.isPending}
+                onClick={commitDraftSections}
+              >
+                Taslakları projeye kaydet ({editableDrafts.length} kesit)
+              </Button>
+            ) : null}
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3">
+            <label className="field-label block">Plan-Profil PDF / görsel dosyası</label>
+            <input
+              type="file"
+              accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff"
+              className="mt-1.5 block w-full text-[12px] text-[var(--text-soft)] file:mr-3 file:rounded-lg file:border file:border-[var(--border)] file:bg-[var(--surface-3)] file:px-3 file:py-1.5 file:text-[11.5px] file:font-semibold file:text-[var(--text)]"
+              onChange={(event) => {
+                const file = event.target.files?.[0] ?? null;
+                setScanFile(file);
+                setScanResult(null);
+                setEditableDrafts([]);
+              }}
+            />
+            <FieldGrid cols={2} className="mt-3">
+              <NumberField
+                label="Hedef maks. kesit boyu"
+                unit="m"
+                value={maxSectionLenM}
+                onChange={setMaxSectionLenM}
+                min={500}
+                max={20000}
+                help="NGTL 5007 üst sınırı: 20.000 m"
+              />
+              <NumberField
+                label="Maks. kot farkı (opsiyonel)"
+                unit="m"
+                value={maxElevDiffM}
+                onChange={setMaxElevDiffM}
+                min={20}
+                max={1000}
+                help="Kot farkı aşılırsa kesit daha erken bölünür"
+              />
+            </FieldGrid>
+          </div>
+
+          {scanResult ? (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-[11px]">
+                <Badge tone="info">{scanResult.page_count} sayfa</Badge>
+                <Badge tone="neutral">
+                  KP {scanResult.min_kp} → {scanResult.max_kp} ({num(scanResult.total_length_m, 0)} m)
+                </Badge>
+                <Badge tone="neutral">{scanResult.station_count} KP noktası</Badge>
+                <Badge tone="neutral">{scanResult.elevation_point_count} kot noktası</Badge>
+                {scanResult.pipe_meta.outside_diameter_mm ? (
+                  <span className="chip">
+                    OD {num(scanResult.pipe_meta.outside_diameter_mm, 1)} mm · WT{" "}
+                    {num(scanResult.pipe_meta.wall_thickness_mm, 2)} mm
+                  </span>
+                ) : null}
+                <Badge tone={editableDrafts.every((d) => d.continuity_ok) ? "pass" : "warning"}>
+                  {editableDrafts.every((d) => d.continuity_ok)
+                    ? "Tüm taslak KP'ler uç uca eşleşiyor"
+                    : "KP farkı var"}
+                </Badge>
+              </div>
+
+              {scanResult.warnings.length > 0 ? (
+                <InlineNotice tone="warning" title="Tarama notu">
+                  {scanResult.warnings.join(" ")}
+                </InlineNotice>
+              ) : null}
+
+              <div className="table-wrap max-h-[280px] overflow-y-auto scroll-thin">
+                <table className="data">
+                  <caption>Üretilen taslak kesitler (kaydetmeden önce düzenleyebilirsiniz)</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">Kesit No</th>
+                      <th scope="col">Başlangıç KP</th>
+                      <th scope="col">Bitiş KP</th>
+                      <th scope="col" className="num">Uzunluk (m)</th>
+                      <th scope="col" className="num">Kot (Baş/Bit/Min/Max)</th>
+                      <th scope="col">KP Sürekliliği</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {editableDrafts.map((draft, idx) => (
+                      <tr key={`${draft.section_no}-${idx}`}>
+                        <td>
+                          <input
+                            type="text"
+                            value={draft.section_no}
+                            onChange={(e) => updateDraftRow(idx, { section_no: e.target.value })}
+                            className="field-input h-7 w-[72px] px-2 font-mono text-[11px]"
+                            aria-label={`Kesit no ${idx + 1}`}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="text"
+                            value={draft.start_kp}
+                            onChange={(e) => updateDraftRow(idx, { start_kp: e.target.value })}
+                            className="field-input h-7 w-[92px] px-2 font-mono text-[11px]"
+                            aria-label={`Başlangıç KP ${idx + 1}`}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="text"
+                            value={draft.end_kp}
+                            onChange={(e) => updateDraftRow(idx, { end_kp: e.target.value })}
+                            className="field-input h-7 w-[92px] px-2 font-mono text-[11px]"
+                            aria-label={`Bitiş KP ${idx + 1}`}
+                          />
+                        </td>
+                        <td className="num font-mono">{num(draft.length_m, 0)}</td>
+                        <td className="num font-mono text-[10.5px]">
+                          {draft.start_elevation_m !== null
+                            ? `${num(draft.start_elevation_m, 0)} / ${num(draft.end_elevation_m, 0)} (${num(draft.lowest_elevation_m, 0)}–${num(draft.highest_elevation_m, 0)} m)`
+                            : "—"}
+                        </td>
+                        <td>
+                          <Badge tone={draft.continuity_ok ? "pass" : "warning"}>
+                            {idx === 0
+                              ? "Başlangıç"
+                              : draft.continuity_ok
+                                ? "Eşleşiyor"
+                                : draft.continuity_note}
+                          </Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
         </div>
       </Modal>
 

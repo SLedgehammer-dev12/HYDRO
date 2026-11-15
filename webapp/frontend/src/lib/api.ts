@@ -392,6 +392,42 @@ export const api = {
   deleteProject: (id: string, signal?: AbortSignal) =>
     apiFetch<void>(`/projects/${id}`, { method: "DELETE", signal }),
 
+  scanPlanProfile: (
+    params: {
+      file: File;
+      maxSectionLengthM?: number;
+      maxElevationDiffM?: number | null;
+    },
+    signal?: AbortSignal,
+  ) => {
+    const form = new FormData();
+    form.append("file", params.file);
+    form.append("max_section_length_m", String(params.maxSectionLengthM ?? 12000));
+    if (params.maxElevationDiffM !== null && params.maxElevationDiffM !== undefined) {
+      form.append("max_elevation_diff_m", String(params.maxElevationDiffM));
+    }
+    return apiFetch<import("./types").PlanProfileScanResponse>("/projects/plan-profile/scan", {
+      method: "POST",
+      body: form,
+      signal,
+      timeoutMs: 90_000,
+    });
+  },
+
+  createProjectSectionsBatch: (
+    projectId: string,
+    sections: Array<Partial<import("./types").DraftSectionItem>>,
+    signal?: AbortSignal,
+  ) =>
+    apiFetch<{ project_id: string; created_count: number; items: SessionListItem[] }>(
+      `/projects/${projectId}/sections/batch`,
+      {
+        method: "POST",
+        body: { sections },
+        signal,
+      },
+    ),
+
   createSession: (
     body: { name?: string; project_id?: string | null; inputs?: Record<string, unknown> },
     signal?: AbortSignal,

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
 from sqlalchemy.orm import Session as OrmSession
 
 from .. import schemas
 from ..core.timeutil import json_safe
 from ..db import get_db
+from ..services import plan_profile as plan_profile_service
 from ..services import projects as project_service
 from .deps import Workspace, get_workspace
 
@@ -78,6 +79,39 @@ def delete_project(
     project = project_service.get_project(db, project_id, workspace.hash)
     project_service.delete_project(db, project, hard=hard)
     return Response(status_code=204)
+
+
+@router.post("/plan-profile/scan")
+def scan_plan_profile(
+    file: UploadFile = File(...),
+    max_section_length_m: float = Form(default=12_000.0),
+    max_elevation_diff_m: float | None = Form(default=None),
+    language: str | None = Form(default=None),
+) -> dict:
+    payload = plan_profile_service.scan_plan_profile_upload(
+        file_name=file.filename,
+        stream=file.file,
+        max_section_length_m=max_section_length_m,
+        max_elevation_diff_m=max_elevation_diff_m,
+        language=language,
+    )
+    return json_safe(payload)
+
+
+@router.post("/{project_id}/sections/batch", status_code=201)
+def create_sections_batch(
+    project_id: str,
+    payload: schemas.DraftSectionBatchCreate,
+    db: OrmSession = Depends(get_db),
+    workspace: Workspace = Depends(get_workspace),
+) -> dict:
+    result = plan_profile_service.create_sections_from_drafts(
+        db,
+        workspace_hash=workspace.hash,
+        project_id=project_id,
+        drafts=[item.model_dump() for item in payload.sections],
+    )
+    return json_safe(result)
 
 
 __all__ = ["router"]

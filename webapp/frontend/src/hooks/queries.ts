@@ -475,6 +475,45 @@ export function useDeleteSection() {
   });
 }
 
+export function useScanPlanProfile() {
+  return useMutation<
+    import("../lib/types").PlanProfileScanResponse,
+    Error,
+    { file: File; maxSectionLengthM?: number; maxElevationDiffM?: number | null }
+  >({
+    mutationFn: async (params) => api.scanPlanProfile(params),
+    onError: (error) => {
+      useAppStore.getState().pushToast("error", "Plan-profil taranamadı", error.message);
+    },
+  });
+}
+
+export function useCreateDraftSectionsBatch() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    { project_id: string; created_count: number; items: SessionListItem[] },
+    Error,
+    { projectId: string; sections: Array<Partial<import("../lib/types").DraftSectionItem>> }
+  >({
+    mutationFn: async ({ projectId, sections }) =>
+      api.createProjectSectionsBatch(projectId, sections),
+    onSuccess: (data) => {
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      void queryClient.invalidateQueries({ queryKey: ["projects"] });
+      useAppStore
+        .getState()
+        .pushToast(
+          "success",
+          "Taslak kesitler oluşturuldu",
+          `${data.created_count} taslak kesit projeye kaydedildi.`,
+        );
+    },
+    onError: (error) => {
+      useAppStore.getState().pushToast("error", "Taslak kesitler kaydedilemedi", error.message);
+    },
+  });
+}
+
 export function useOpenSession() {
   const queryClient = useQueryClient();
   return useMutation<Session, Error, string>({

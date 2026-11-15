@@ -1724,7 +1724,13 @@ Kısmi güncelleme; `mapping` gönderilirse **tam değiştirilir** (merge edilme
 - `DELETE` → soft delete; bağlı kesit oturumları silinmez, `project_id=null` olur; 204.
 **Hatalar:** 404, 422.
 
-Not: Kesit kimliği (`section_no`, `description`, `location`, `start_kp`, `end_kp`, `test_date`, `test_type`, `notes`) oturumun `inputs.section_meta` alanı içinde saklanır ve `GET /api/sessions` yanıtındaki her öğenin `section_meta` alanında da döner; oturumlar `GET /api/sessions?project_id={id}` ile projeye göre filtrelenir.
+### 11.4 `POST /api/projects/plan-profile/scan`
+
+Plan-profil (alignment sheet) PDF/görsel dosyasını tarayarak KP istasyonlarını, kot noktalarını, boru bilgilerini ve uç uca eşleşen taslak kesit (`draft_sections`) listesini döner.
+
+### 11.5 `POST /api/projects/{id}/sections/batch`
+
+Onaylanan `sections` taslak kesit listesini seçili proje altında toplu olarak `sessions` tablosuna (`status="draft"`, `inputs.section_meta` + `geometry` + `section_profile` dolu) kaydeder; 201.
 
 ---
 

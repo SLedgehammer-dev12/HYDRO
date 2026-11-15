@@ -200,6 +200,29 @@ class ProjectSummary(StrictModel):
     updated_at: str | None = None
 
 
+class DraftSectionIn(StrictModel):
+    section_no: str = Field(min_length=1, max_length=40)
+    start_kp: str = Field(min_length=1, max_length=40)
+    end_kp: str = Field(min_length=1, max_length=40)
+    length_m: float | None = Field(default=None, gt=0, le=1_000_000)
+    description: str | None = Field(default=None, max_length=240)
+    start_elevation_m: float | None = None
+    end_elevation_m: float | None = None
+    highest_elevation_m: float | None = None
+    lowest_elevation_m: float | None = None
+    outside_diameter_mm: float | None = Field(default=None, gt=0, le=5000)
+    wall_thickness_mm: float | None = Field(default=None, gt=0, le=200)
+    design_pressure_bar: float | None = Field(default=None, gt=0, le=1000)
+    material_grade: str | None = Field(default=None, max_length=120)
+    smys_mpa: float | None = Field(default=None, gt=0, le=2000)
+    test_date: str | None = Field(default=None, max_length=40)
+    notes: str | None = Field(default=None, max_length=400)
+
+
+class DraftSectionBatchCreate(StrictModel):
+    sections: list[DraftSectionIn] = Field(min_length=1, max_length=100)
+
+
 
 class SessionDuplicate(StrictModel):
     name: str | None = Field(default=None, max_length=200)

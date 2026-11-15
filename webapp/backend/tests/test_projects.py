@@ -264,3 +264,99 @@ def test_project_section_kp_meta_persisted_and_listed(client, headers):
     assert by_no["K-02"]["start_kp"] == "12+000"
     assert by_no["K-02"]["end_kp"] == "24+500"
     assert by_no["K-01"]["end_kp"] == by_no["K-02"]["start_kp"]
+
+
+def _make_simple_pdf_bytes(lines: list[str]) -> bytes:
+    """Minimal geçerli tek sayfalı PDF (gömülü metin katmanlı) üretir."""
+    escaped = [
+        line.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+        for line in lines
+    ]
+    ops = ["BT", "/F1 11 Tf", "50 750 Td", "14 TL"]
+    for idx, line in enumerate(escaped):
+        if idx == 0:
+            ops.append(f"({line}) Tj")
+        else:
+            ops.append(f"T* ({line}) Tj")
+    ops.append("ET")
+    stream_bytes = "\n".join(ops).encode("latin-1", errors="ignore")
+
+    objs: list[bytes] = [
+        b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+        b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+        b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n",
+        b"4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+        f"5 0 obj\n<< /Length {len(stream_bytes)} >>\nstream\n".encode("ascii")
+        + stream_bytes
+        + b"\nendstream\nendobj\n",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for obj in objs:
+        offsets.append(len(out))
+        out.extend(obj)
+    xref_pos = len(out)
+    out.extend(f"xref\n0 {len(offsets)}\n0000000000 65535 f \n".encode("ascii"))
+    for off in offsets[1:]:
+        out.extend(f"{off:010d} 00000 n \n".encode("ascii"))
+    out.extend(
+        f"trailer\n<< /Size {len(offsets)} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n".encode(
+            "ascii"
+        )
+    )
+    return bytes(out)
+
+
+def test_plan_profile_pdf_scan_and_batch_create(client, headers):
+    pdf_bytes = _make_simple_pdf_bytes(
+        [
+            "BOTAS PLAN PROFIL PAFTASI - DOGU HATTI",
+            "Outside Diameter: 406.4 mm   Wall Thickness: 8.74 mm   Design Pressure: 80 bar   Grade: X65",
+            "KP 0+000   Kot: 200.0 m",
+            "KP 6+000   Kot: 245.5 m",
+            "KP 12+000  Kot: 310.0 m",
+            "KP 18+000  Kot: 275.0 m",
+            "KP 24+000  Kot: 190.0 m",
+        ]
+    )
+
+    scan_res = client.post(
+        "/api/projects/plan-profile/scan",
+        files={"file": ("plan_profile_dogu.pdf", pdf_bytes, "application/pdf")},
+        data={"max_section_length_m": "12000"},
+        headers=headers,
+    )
+    assert scan_res.status_code == 200, scan_res.text
+    scanned = scan_res.json()
+    assert scanned["min_kp"] == "0+000"
+    assert scanned["max_kp"] == "24+000"
+    assert scanned["total_length_m"] == 24000.0
+    assert scanned["continuity_ok"] is True
+    drafts = scanned["draft_sections"]
+    assert len(drafts) == 2
+    assert drafts[0]["section_no"] == "K-01"
+    assert drafts[0]["start_kp"] == "0+000"
+    assert drafts[0]["end_kp"] == "12+000"
+    assert drafts[0]["start_elevation_m"] == 200.0
+    assert drafts[0]["end_elevation_m"] == 310.0
+    assert drafts[1]["section_no"] == "K-02"
+    assert drafts[1]["start_kp"] == "12+000"
+    assert drafts[1]["end_kp"] == "24+000"
+    assert drafts[0]["end_kp"] == drafts[1]["start_kp"]
+
+    project = _create_project(client, headers, name="Plan Profil Projesi", code="PP-01")
+    batch_res = client.post(
+        f"/api/projects/{project['id']}/sections/batch",
+        json={"sections": drafts},
+        headers=headers,
+    )
+    assert batch_res.status_code == 201, batch_res.text
+    batch_data = batch_res.json()
+    assert batch_data["created_count"] == 2
+
+    sessions = client.get(
+        f"/api/sessions?project_id={project['id']}", headers=headers
+    ).json()["items"]
+    assert len(sessions) == 2
+    by_no = {s["section_meta"]["section_no"]: s["section_meta"] for s in sessions}
+    assert by_no["K-01"]["end_kp"] == by_no["K-02"]["start_kp"] == "12+000"

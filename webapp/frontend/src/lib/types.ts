@@ -513,6 +513,52 @@ export interface SectionMeta {
   notes: string;
 }
 
+export interface DraftSectionItem {
+  section_no: string;
+  start_kp: string;
+  end_kp: string;
+  start_m: number;
+  end_m: number;
+  length_m: number;
+  description: string;
+  start_elevation_m: number | null;
+  end_elevation_m: number | null;
+  highest_elevation_m: number | null;
+  lowest_elevation_m: number | null;
+  outside_diameter_mm: number | null;
+  wall_thickness_mm: number | null;
+  design_pressure_bar: number | null;
+  material_grade: string;
+  smys_mpa: number | null;
+  prev_end_kp: string | null;
+  continuity_ok: boolean;
+  continuity_note: string;
+}
+
+export interface PlanProfileScanResponse {
+  file_name: string;
+  page_count: number;
+  extraction_method: string;
+  strategy: "explicit" | "auto_split";
+  station_count: number;
+  elevation_point_count: number;
+  min_kp: string;
+  max_kp: string;
+  total_length_m: number;
+  pipe_meta: {
+    outside_diameter_mm: number | null;
+    wall_thickness_mm: number | null;
+    design_pressure_bar: number | null;
+    material_grade: string;
+    smys_mpa: number | null;
+  };
+  profile_points: Array<{ kp: string; station_m: number; elevation_m: number }>;
+  draft_sections: DraftSectionItem[];
+  continuity_ok: boolean;
+  continuity_issues: string[];
+  warnings: string[];
+}
+
 export interface SessionResultSummary {
   air?: ResultSummaryEntry;
   pressure?: ResultSummaryEntry;
