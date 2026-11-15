@@ -9,9 +9,9 @@ Bu dosya `skills/graphify` tarafindan uretilmistir. Elle duzenlemeyin;
 | Metrik | Deger |
 | --- | ---: |
 | Dosya | 74 |
-| Sembol (sinif + fonksiyon) | 1707 |
-| Dugum | 1788 |
-| Kenar | 15039 |
+| Sembol (sinif + fonksiyon) | 1709 |
+| Dugum | 1790 |
+| Kenar | 15099 |
 | SQLite tablosu | 7 |
 | Test edilen kaynak dosya | 31 / 32 |
 
@@ -45,7 +45,7 @@ Bu dosya `skills/graphify` tarafindan uretilmistir. Elle duzenlemeyin;
 | Dosya | Sinif | Fonksiyon | Toplam |
 | --- | ---: | ---: | ---: |
 | `hidrostatik_test/ui/app.py` | 1 | 293 | 294 |
-| `tests/test_ui_workflow.py` | 2 | 125 | 127 |
+| `tests/test_ui_workflow.py` | 2 | 127 | 129 |
 | `tests/test_updater.py` | 8 | 93 | 101 |
 | `tests/test_wizard.py` | 14 | 55 | 69 |
 | `tests/test_validators.py` | 6 | 60 | 66 |
@@ -114,11 +114,11 @@ Bu dosya `skills/graphify` tarafindan uretilmistir. Elle duzenlemeyin;
 
 | Sembol | Cagri noktasi | Ornek cagiranlar |
 | --- | ---: | --- |
-| `assertEqual` | 357 | `tests/test_ab_control_table.py:test_default_load_keeps_permissive_behaviour`, `tests/test_ab_control_table.py:test_excessive_adjacent_jump_is_reported`, `tests/test_ab_control_table.py:test_known_seven_degree_anomaly_is_reported` (+354) |
+| `assertEqual` | 359 | `tests/test_ab_control_table.py:test_default_load_keeps_permissive_behaviour`, `tests/test_ab_control_table.py:test_excessive_adjacent_jump_is_reported`, `tests/test_ab_control_table.py:test_known_seven_degree_anomaly_is_reported` (+356) |
 | `get` | 312 | `docs/legacy/Hidrostatik_Test_Chat_v0.py:calculate_A`, `docs/legacy/Hidrostatik_Test_Chat_v0.py:run_air_content_test`, `docs/legacy/Hidrostatik_Test_Chat_v0.py:run_pressure_test` (+309) |
 | `set` | 217 | `hidrostatik_test/_pyinstaller_hook.py:_setup_numpy_dll_paths`, `hidrostatik_test/data/ab_control_table.py:_load_ab_control_repair_grid`, `hidrostatik_test/services/download_manager.py:cancel` (+214) |
 | `assertTrue` | 176 | `tests/test_ab_control_table.py:test_duplicate_grid_node_is_reported`, `tests/test_ab_control_table.py:test_exact_grid_node_matches_imported_workbook_value`, `tests/test_ab_control_table.py:test_known_seven_degree_anomaly_is_reported` (+173) |
-| `str` | 163 | `hidrostatik_test/data/ab_control_table.py:_axis_from_metadata`, `hidrostatik_test/data/ab_control_table.py:_spec_from_metadata`, `hidrostatik_test/data/ab_control_table.py:load_ab_control_table` (+160) |
+| `str` | 165 | `hidrostatik_test/data/ab_control_table.py:_axis_from_metadata`, `hidrostatik_test/data/ab_control_table.py:_spec_from_metadata`, `hidrostatik_test/data/ab_control_table.py:load_ab_control_table` (+162) |
 | `assertIn` | 139 | `tests/test_ab_control_table.py:test_exact_grid_node_matches_imported_workbook_value`, `tests/test_ab_control_table.py:test_midpoint_uses_bilinear_interpolation`, `tests/test_ab_control_table.py:test_seven_degree_anomaly_is_repaired_at_runtime` (+136) |
 | `len` | 119 | `hidrostatik_test/data/ab_control_table.py:__init__`, `hidrostatik_test/data/ab_control_table.py:_axis_bounds`, `hidrostatik_test/data/ab_control_table.py:_axis_index_or_none` (+116) |
 | `Path` | 118 | `hidrostatik_test/data/ab_control_table.py:count_repaired_ab_control_points`, `hidrostatik_test/data/ab_control_table.py:find_ab_control_table_issues`, `hidrostatik_test/data/ab_control_table.py:load_ab_control_table` (+115) |
@@ -133,12 +133,12 @@ Bu dosya `skills/graphify` tarafindan uretilmistir. Elle duzenlemeyin;
 | `isclose` | 53 | `tests/test_ab_control_table.py:test_exact_grid_node_matches_imported_workbook_value`, `tests/test_ab_control_table.py:test_known_seven_degree_anomaly_is_reported`, `tests/test_ab_control_table.py:test_midpoint_uses_bilinear_interpolation` (+50) |
 | `_set_banner` | 47 | `hidrostatik_test/ui/app.py:_add_geometry_segment`, `hidrostatik_test/ui/app.py:_add_time_series_record`, `hidrostatik_test/ui/app.py:_apply_air_a_reference` (+44) |
 | `configure` | 46 | `hidrostatik_test/ui/app.py:_append_result`, `hidrostatik_test/ui/app.py:_apply_b_helper_mode`, `hidrostatik_test/ui/app.py:_apply_field_visual_state` (+43) |
+| `items` | 43 | `hidrostatik_test/domain/coefficient_manager.py:as_dict`, `hidrostatik_test/domain/coefficient_manager.py:from_dict`, `hidrostatik_test/domain/report_schema.py:validate_report` (+40) |
 | `assertIsNotNone` | 42 | `tests/test_database.py:test_timestamps_are_utc_iso8601`, `tests/test_download_manager.py:test_get_task_returns_detached_copy`, `tests/test_e2e_workflow.py:test_session_persistence_with_sqlite` (+39) |
-| `items` | 41 | `hidrostatik_test/domain/coefficient_manager.py:as_dict`, `hidrostatik_test/domain/coefficient_manager.py:from_dict`, `hidrostatik_test/domain/report_schema.py:validate_report` (+38) |
+| `cget` | 41 | `hidrostatik_test/ui/app.py:_apply_progress_button_appearance`, `hidrostatik_test/ui/app.py:_finish_progress_button`, `tests/test_download_dialog.py:test_cancel_while_running_asks_once` (+38) |
 | `assertIsNone` | 41 | `tests/test_coefficient_reference.py:test_lookup_accepts_exact_labels_only`, `tests/test_database.py:test_delete_session_cascades`, `tests/test_download_dialog.py:test_cancel_declined_keeps_download_running` (+38) |
 | `exists` | 40 | `hidrostatik_test/data/ab_control_table.py:find_ab_control_table_issues`, `hidrostatik_test/data/ab_control_table.py:load_ab_control_table`, `hidrostatik_test/data/water_property_table.py:load_water_property_table` (+37) |
 | `isinstance` | 40 | `hidrostatik_test/data/ab_control_table.py:_axis_from_metadata`, `hidrostatik_test/data/ab_control_table.py:_spec_from_metadata`, `hidrostatik_test/data/pipe_catalog.py:_item_schedules` (+37) |
-| `cget` | 39 | `hidrostatik_test/ui/app.py:_apply_progress_button_appearance`, `hidrostatik_test/ui/app.py:_finish_progress_button`, `tests/test_download_dialog.py:test_cancel_while_running_asks_once` (+36) |
 | `getattr` | 36 | `hidrostatik_test/_pyinstaller_hook.py:_setup_numpy_dll_paths`, `hidrostatik_test/domain/report_schema.py:get_field`, `hidrostatik_test/services/download_manager.py:_content_length` (+33) |
 | `assertAlmostEqual` | 35 | `tests/test_coefficient_sources.py:test_auto_linear_value_preserves_historic_model`, `tests/test_coefficient_sources.py:test_auto_volumetric_value_uses_three_alpha`, `tests/test_operations.py:test_cleaning_pig_speed_passes_when_below_limit` (+32) |
 | `_safe_float` | 35 | `hidrostatik_test/ui/app.py:_active_monitored_pressure_bar`, `hidrostatik_test/ui/app.py:_add_time_series_record`, `hidrostatik_test/ui/app.py:_build_air_control_table_summary` (+32) |

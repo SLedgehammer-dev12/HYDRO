@@ -7,7 +7,7 @@
 - Build artefact'lari `dist/` (PyInstaller ham cikti) ve `release/` (yayina hazir paketler) altinda ayrildi; ikisi de git disi
 - Eski prototip ve onceki calisma notlari `docs/legacy/` altina arsivlendi
 - Yerel calisma klasoru `hidrostatik-test-v1.5.9` yayin adayi ile hizalandi
-- Otomatik test paketi 651 test ile geciyor
+- Otomatik test paketi 653 test ile geciyor
 - Updater birincil olarak `SLedgehammer-dev12/HYDRO`, gecis icin ikinci kaynak olarak `SLedgehammer-dev12/Programlar` release'lerini tarayacak sekilde calisiyor
 - UI artik kok seviyede ve sekme seviyesinde kaydirilabilir
 - `Boru Kesiti` alani sikistirildi; segment tablosu varsayilan olarak gizli ve ihtiyac halinde aciliyor

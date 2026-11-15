@@ -688,6 +688,75 @@ class UiWorkflowTests(unittest.TestCase):
         self.assertEqual(self.app.geometry_vars["outside_diameter_mm"].get(), "406.40")
         self.assertEqual(self.app.geometry_vars["wall_thickness_mm"].get(), "12.70")
 
+    def test_geometry_inputs_use_two_row_layout_and_keep_entry_width(self) -> None:
+        fields = self.app.geometry_fields_frame
+
+        self.assertEqual(fields.grid_info()["row"], 1)
+        self.assertEqual(fields.grid_info()["columnspan"], 2)
+
+        expected_rows = {
+            "geometry.outside_diameter_mm": 0,
+            "geometry.wall_thickness_mm": 0,
+            "geometry.length_m": 1,
+        }
+        for field_key, expected_row in expected_rows.items():
+            entry = self.app.entry_widgets[field_key]
+            self.assertIs(entry.master.master, fields)
+            self.assertEqual(entry.master.grid_info()["row"], expected_row)
+            self.assertGreaterEqual(int(entry.cget("width")), 14)
+            self.assertEqual(str(entry.grid_info()["sticky"]).lower(), "ew")
+
+    def test_profile_inputs_use_single_column_layout(self) -> None:
+        fields = self.app.profile_fields_frame
+
+        self.assertEqual(fields.grid_info()["row"], 0)
+        self.assertEqual(str(fields.columnconfigure(1)["weight"]), "1")
+
+        expected_rows = {
+            "geometry.highest_elevation_m": 0,
+            "geometry.lowest_elevation_m": 1,
+            "geometry.start_elevation_m": 2,
+            "geometry.end_elevation_m": 3,
+            "geometry.design_pressure_bar": 4,
+            "geometry.material_grade": 5,
+            "geometry.smys_mpa": 6,
+            "geometry.location_class": 7,
+            "geometry.pump_location": 8,
+        }
+        for field_key, expected_row in expected_rows.items():
+            widget = self.app.input_widgets[field_key]
+            if widget.master is fields:
+                entry_cell = widget
+            elif widget.master.master is fields:
+                entry_cell = widget.master
+            else:
+                self.fail(f"{field_key} beklenen alt cercevede degil")
+            self.assertEqual(entry_cell.grid_info()["row"], expected_row)
+            self.assertEqual(entry_cell.grid_info()["column"], 1)
+            self.assertEqual(str(entry_cell.grid_info()["sticky"]).lower(), "ew")
+
+            label_widget = self.app.field_label_widgets[field_key]
+            self.assertIs(label_widget.master, fields)
+            self.assertEqual(label_widget.grid_info()["row"], expected_row)
+            self.assertEqual(label_widget.grid_info()["column"], 0)
+
+        used_columns = {int(str(slave.grid_info()["column"])) for slave in fields.grid_slaves()}
+        self.assertEqual(used_columns, {0, 1})
+        for field_key in (
+            "geometry.highest_elevation_m",
+            "geometry.lowest_elevation_m",
+            "geometry.start_elevation_m",
+            "geometry.end_elevation_m",
+            "geometry.design_pressure_bar",
+            "geometry.smys_mpa",
+        ):
+            self.assertGreaterEqual(int(self.app.entry_widgets[field_key].cget("width")), 14)
+
+        visual_frame = self.app.section_profile_canvas.master
+        self.assertEqual(visual_frame.grid_info()["row"], 1)
+        self.assertEqual(visual_frame.grid_info()["column"], 0)
+        self.assertEqual(str(visual_frame.grid_info()["sticky"]).lower(), "ew")
+
     def test_segment_addition_switches_geometry_to_segment_mode(self) -> None:
         self.app.geometry_vars["outside_diameter_mm"].set("406.4")
         self.app.geometry_vars["wall_thickness_mm"].set("8.74")

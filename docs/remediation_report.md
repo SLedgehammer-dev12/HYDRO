@@ -9,7 +9,7 @@ Yontem: Graphify haritasi + paralel dosya-sahipligi iscileri + dogrulama dalgasi
 
 | Alan | Durum | Kanit |
 | --- | --- | --- |
-| Domain fizigi | Tamam | 651 test, domain mypy temiz |
+| Domain fizigi | Tamam | 653 test, domain mypy temiz |
 | Veri katmani | Tamam (veri duzeltmesi haric) | 12 + 10 test, anomali tespiti |
 | Servisler / updater | Tamam | 113 hedefli test, guvenli cikarma + rollback |
 | UI dogruluk | Tamam | 82 UI testi + 4 e2e |
@@ -22,7 +22,7 @@ Yontem: Graphify haritasi + paralel dosya-sahipligi iscileri + dogrulama dalgasi
 
 **Dogrulama:**
 
-- `python3 -m unittest discover -s tests -p "test_*.py"` → **651 test OK**
+- `python3 -m unittest discover -s tests -p "test_*.py"` → **653 test OK**
 - `python3 -m coverage run -m unittest discover ...` → **%81** kaynak-only branch kapsami
 - `python3 -m ruff check .` → **All checks passed**
 - `python3 -m ruff format --check .` → **59+ dosya formatli**

@@ -788,10 +788,10 @@ class HydrostaticTestApp:
         )
         if visible:
             self.geometry_segment_frame.grid(
-                row=6, column=0, columnspan=6, sticky="ew", pady=(8, 0)
+                row=6, column=0, columnspan=2, sticky="ew", pady=(8, 0)
             )
             self.geometry_segment_summary_label.grid(
-                row=7, column=0, columnspan=6, sticky="w", pady=(6, 0)
+                row=7, column=0, columnspan=2, sticky="w", pady=(6, 0)
             )
         else:
             self.geometry_segment_frame.grid_remove()
@@ -1515,12 +1515,13 @@ class HydrostaticTestApp:
         geometry_frame = ttk.LabelFrame(parent, text="Boru Kesiti", padding=8)
         geometry_frame.grid(row=0, column=0, sticky="ew")
         geometry_frame.columnconfigure(1, weight=1)
-        geometry_frame.columnconfigure(3, weight=1)
-        geometry_frame.columnconfigure(5, weight=1)
 
-        ttk.Label(geometry_frame, text="ASME B36.10 NPS").grid(row=0, column=0, sticky="w", pady=6)
+        catalog_frame = ttk.Frame(geometry_frame)
+        catalog_frame.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 4))
+        catalog_frame.columnconfigure(1, weight=1)
+        ttk.Label(catalog_frame, text="ASME B36.10 NPS").grid(row=0, column=0, sticky="w", pady=6)
         self.pipe_size_combo = ttk.Combobox(
-            geometry_frame,
+            catalog_frame,
             textvariable=self.geometry_catalog_vars["size_option"],
             state="readonly",
             values=get_pipe_size_options(),
@@ -1529,99 +1530,105 @@ class HydrostaticTestApp:
         self.pipe_size_combo.grid(row=0, column=1, sticky="ew", padx=(0, 12), pady=6)
         self.pipe_size_combo.bind("<<ComboboxSelected>>", self._on_pipe_size_selected)
 
-        ttk.Label(geometry_frame, text="Schedule / Et kalinligi").grid(
-            row=0, column=2, sticky="w", pady=6
+        ttk.Label(catalog_frame, text="Schedule / Et kalinligi").grid(
+            row=1, column=0, sticky="w", pady=6
         )
         self.pipe_schedule_combo = ttk.Combobox(
-            geometry_frame,
+            catalog_frame,
             textvariable=self.geometry_catalog_vars["schedule_option"],
             state="readonly",
             values=(),
             width=18,
         )
-        self.pipe_schedule_combo.grid(row=0, column=3, sticky="ew", padx=(0, 12), pady=6)
+        self.pipe_schedule_combo.grid(row=1, column=1, sticky="ew", padx=(0, 12), pady=6)
+        catalog_actions = ttk.Frame(catalog_frame)
+        catalog_actions.grid(row=2, column=0, columnspan=2, sticky="w", pady=(0, 4))
         ttk.Button(
-            geometry_frame, text="Listeden Doldur", command=self._apply_catalog_selection
-        ).grid(row=0, column=4, sticky="w", pady=6)
+            catalog_actions, text="Listeden Doldur", command=self._apply_catalog_selection
+        ).pack(side="left")
         self.geometry_toggle_button = ttk.Button(
-            geometry_frame,
+            catalog_actions,
             text="Detaylari Goster",
             command=self._toggle_geometry_details,
         )
-        self.geometry_toggle_button.grid(row=0, column=5, sticky="e", pady=6)
+        self.geometry_toggle_button.pack(side="left", padx=(8, 0))
 
+        geometry_fields_frame = ttk.Frame(geometry_frame)
+        geometry_fields_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 4))
+        geometry_fields_frame.columnconfigure(1, weight=1)
+        geometry_fields_frame.columnconfigure(3, weight=1)
+        self.geometry_fields_frame = geometry_fields_frame
         self._add_entry(
-            geometry_frame,
-            row=1,
+            geometry_fields_frame,
+            row=0,
             label="Dis cap (mm)",
             variable=self.geometry_vars["outside_diameter_mm"],
             field_key="geometry.outside_diameter_mm",
         )
         self._add_entry(
-            geometry_frame,
-            row=1,
+            geometry_fields_frame,
+            row=0,
             label="Et kalinligi (mm)",
             variable=self.geometry_vars["wall_thickness_mm"],
             field_key="geometry.wall_thickness_mm",
             column=2,
         )
         self._add_entry(
-            geometry_frame,
+            geometry_fields_frame,
             row=1,
             label="Hat uzunlugu (m)",
             variable=self.geometry_vars["length_m"],
             field_key="geometry.length_m",
-            column=4,
         )
 
         profile_frame = ttk.LabelFrame(
             geometry_frame, text="Test Bolumu Profili ve Basinc Penceresi", padding=8
         )
-        profile_frame.grid(row=2, column=0, columnspan=6, sticky="ew", pady=(6, 4))
-        profile_frame.columnconfigure(1, weight=1)
-        profile_frame.columnconfigure(3, weight=1)
-        profile_frame.columnconfigure(4, weight=1)
+        profile_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 4))
+        profile_frame.columnconfigure(0, weight=1)
+        profile_fields_frame = ttk.Frame(profile_frame)
+        profile_fields_frame.grid(row=0, column=0, sticky="ew", pady=(0, 4))
+        profile_fields_frame.columnconfigure(1, weight=1)
+        self.profile_fields_frame = profile_fields_frame
         self._add_entry(
-            profile_frame,
+            profile_fields_frame,
             row=0,
             label="En yuksek nokta kotu (m)",
             variable=self.section_profile_vars["highest_elevation_m"],
             field_key="geometry.highest_elevation_m",
         )
         self._add_entry(
-            profile_frame,
-            row=0,
+            profile_fields_frame,
+            row=1,
             label="En dusuk nokta kotu (m)",
             variable=self.section_profile_vars["lowest_elevation_m"],
             field_key="geometry.lowest_elevation_m",
-            column=2,
         )
         self._add_entry(
-            profile_frame,
-            row=1,
+            profile_fields_frame,
+            row=2,
             label="Baslangic noktasi kotu (m)",
             variable=self.section_profile_vars["start_elevation_m"],
             field_key="geometry.start_elevation_m",
         )
         self._add_entry(
-            profile_frame,
-            row=1,
+            profile_fields_frame,
+            row=3,
             label="Bitis noktasi kotu (m)",
             variable=self.section_profile_vars["end_elevation_m"],
             field_key="geometry.end_elevation_m",
-            column=2,
         )
         self._add_entry(
-            profile_frame,
-            row=2,
+            profile_fields_frame,
+            row=4,
             label="Dizayn basinci (bar)",
             variable=self.section_profile_vars["design_pressure_bar"],
             field_key="geometry.design_pressure_bar",
         )
-        material_grade_label = ttk.Label(profile_frame, text="Boru malzeme kalitesi")
-        material_grade_label.grid(row=2, column=2, sticky="w", pady=6)
-        material_grade_container = ttk.Frame(profile_frame)
-        material_grade_container.grid(row=2, column=3, sticky="ew", padx=(0, 12), pady=6)
+        material_grade_label = ttk.Label(profile_fields_frame, text="Boru malzeme kalitesi")
+        material_grade_label.grid(row=5, column=0, sticky="w", pady=6)
+        material_grade_container = ttk.Frame(profile_fields_frame)
+        material_grade_container.grid(row=5, column=1, sticky="ew", padx=(0, 12), pady=6)
         material_grade_container.columnconfigure(0, weight=1)
         self.material_grade_combo = ttk.Combobox(
             material_grade_container,
@@ -1629,7 +1636,7 @@ class HydrostaticTestApp:
             state="readonly",
             values=get_api_5l_psl2_grade_options(),
             style="Hydro.neutral.TCombobox",
-            width=28,
+            width=20,
         )
         self.material_grade_combo.grid(row=0, column=0, sticky="ew")
         self._register_choice_widget(
@@ -1644,29 +1651,29 @@ class HydrostaticTestApp:
             material_grade_container,
             text="API 5L PSL2 kalite secildiginde SMYS otomatik doldurulur.",
             foreground="#6B7280",
-            wraplength=self.input_subframe_wraplength,
+            wraplength=200,
             justify="left",
         ).grid(row=1, column=0, sticky="w", pady=(3, 0))
         self._add_entry(
-            profile_frame,
-            row=3,
+            profile_fields_frame,
+            row=6,
             label="SMYS (MPa)",
             variable=self.section_profile_vars["smys_mpa"],
             field_key="geometry.smys_mpa",
             column=0,
             readonly=True,
         )
-        location_class_label = ttk.Label(profile_frame, text="Location Class")
-        location_class_label.grid(row=3, column=2, sticky="w", pady=6)
+        location_class_label = ttk.Label(profile_fields_frame, text="Location Class")
+        location_class_label.grid(row=7, column=0, sticky="w", pady=6)
         self.location_class_combo = ttk.Combobox(
-            profile_frame,
+            profile_fields_frame,
             textvariable=self.location_class_var,
             state="readonly",
             values=get_location_class_options(),
             style="Hydro.neutral.TCombobox",
-            width=28,
+            width=20,
         )
-        self.location_class_combo.grid(row=3, column=3, sticky="ew", padx=(0, 12), pady=6)
+        self.location_class_combo.grid(row=7, column=1, sticky="ew", padx=(0, 12), pady=6)
         self._register_choice_widget(
             field_key="geometry.location_class",
             widget=self.location_class_combo,
@@ -1675,17 +1682,17 @@ class HydrostaticTestApp:
             required=True,
             label_widget=location_class_label,
         )
-        pump_location_label = ttk.Label(profile_frame, text="Pompa konumu")
-        pump_location_label.grid(row=4, column=0, sticky="w", pady=6)
+        pump_location_label = ttk.Label(profile_fields_frame, text="Pompa konumu")
+        pump_location_label.grid(row=8, column=0, sticky="w", pady=6)
         self.pump_location_combo = ttk.Combobox(
-            profile_frame,
+            profile_fields_frame,
             textvariable=self.pump_location_var,
             state="readonly",
             values=get_pump_location_options(),
             style="Hydro.neutral.TCombobox",
             width=18,
         )
-        self.pump_location_combo.grid(row=4, column=1, sticky="ew", padx=(0, 12), pady=6)
+        self.pump_location_combo.grid(row=8, column=1, sticky="ew", padx=(0, 12), pady=6)
         self._register_choice_widget(
             field_key="geometry.pump_location",
             widget=self.pump_location_combo,
@@ -1695,28 +1702,25 @@ class HydrostaticTestApp:
             label_widget=pump_location_label,
         )
         profile_visual_frame = ttk.LabelFrame(profile_frame, text="Kot Semasi", padding=6)
-        profile_visual_frame.grid(
-            row=0, column=4, rowspan=5, sticky="nsew", padx=(6, 0), pady=(0, 6)
-        )
+        profile_visual_frame.grid(row=1, column=0, sticky="ew", pady=(0, 6))
         profile_visual_frame.columnconfigure(0, weight=1)
-        profile_visual_frame.rowconfigure(0, weight=1)
         self.section_profile_canvas = tk.Canvas(
             profile_visual_frame,
-            height=180,
+            height=120,
             highlightthickness=0,
             bg="#FFFFFF",
         )
-        self.section_profile_canvas.grid(row=0, column=0, sticky="nsew")
+        self.section_profile_canvas.grid(row=0, column=0, sticky="ew")
         ttk.Label(
             profile_visual_frame,
             text="Start/End, en yuksek ve en dusuk kot sematik olarak gosterilir. Secili pompa noktasi vurgulanir.",
             foreground="#6B7280",
-            wraplength=240,
+            wraplength=self.input_subframe_wraplength,
             justify="left",
         ).grid(row=1, column=0, sticky="w", pady=(6, 0))
         status_frame = ttk.LabelFrame(profile_frame, text="Canli Basinc Kontrolu", padding=8)
-        status_frame.grid(row=5, column=0, columnspan=5, sticky="ew", pady=(8, 0))
-        status_frame.columnconfigure(1, weight=1)
+        status_frame.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        status_frame.columnconfigure(0, weight=1)
         self.section_pressure_status_label = tk.Label(
             status_frame,
             textvariable=self.section_pressure_status_var,
@@ -1730,34 +1734,34 @@ class HydrostaticTestApp:
         ttk.Label(
             status_frame,
             textvariable=self.section_pressure_window_var,
-            wraplength=self.workspace_wraplength,
+            wraplength=self.input_subframe_wraplength,
             justify="left",
             foreground="#16365D",
-        ).grid(row=0, column=1, sticky="ew", padx=(12, 0))
+        ).grid(row=1, column=0, sticky="ew", pady=(6, 0))
         ttk.Label(
             status_frame,
             textvariable=self.section_pressure_status_detail_var,
-            wraplength=self.workspace_wraplength,
+            wraplength=self.input_subframe_wraplength,
             justify="left",
             foreground="#35506B",
-        ).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        ).grid(row=2, column=0, sticky="ew", pady=(6, 0))
         ttk.Label(
             status_frame,
             textvariable=self.section_pressure_logic_var,
-            wraplength=self.workspace_wraplength,
+            wraplength=self.input_subframe_wraplength,
             justify="left",
             foreground="#6B7280",
-        ).grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        ).grid(row=3, column=0, sticky="ew", pady=(6, 0))
         ttk.Label(
             profile_frame,
             textvariable=self.section_pressure_summary_var,
-            wraplength=self.input_wraplength,
+            wraplength=self.input_subframe_wraplength,
             justify="left",
             foreground="#35506B",
-        ).grid(row=6, column=0, columnspan=5, sticky="ew", pady=(8, 0))
+        ).grid(row=3, column=0, sticky="ew", pady=(8, 0))
 
         segment_actions = ttk.Frame(geometry_frame)
-        segment_actions.grid(row=3, column=0, columnspan=6, sticky="w", pady=(2, 6))
+        segment_actions.grid(row=3, column=0, columnspan=2, sticky="w", pady=(2, 6))
         ttk.Button(segment_actions, text="Segment Ekle", command=self._add_geometry_segment).pack(
             side="left"
         )
@@ -1782,12 +1786,12 @@ class HydrostaticTestApp:
         self.segment_tree.heading("od", text="OD (mm)")
         self.segment_tree.heading("wt", text="Et (mm)")
         self.segment_tree.heading("length", text="Uzunluk (m)")
-        self.segment_tree.column("segment", width=70, anchor="center")
-        self.segment_tree.column("nps", width=120, anchor="w")
-        self.segment_tree.column("schedule", width=120, anchor="w")
-        self.segment_tree.column("od", width=80, anchor="e")
-        self.segment_tree.column("wt", width=80, anchor="e")
-        self.segment_tree.column("length", width=90, anchor="e")
+        self.segment_tree.column("segment", width=45, anchor="center")
+        self.segment_tree.column("nps", width=75, anchor="w")
+        self.segment_tree.column("schedule", width=60, anchor="w")
+        self.segment_tree.column("od", width=50, anchor="e")
+        self.segment_tree.column("wt", width=45, anchor="e")
+        self.segment_tree.column("length", width=55, anchor="e")
         self.segment_tree.grid(row=0, column=0, sticky="ew")
         segment_scroll = ttk.Scrollbar(
             self.geometry_segment_frame, orient="vertical", command=self.segment_tree.yview
@@ -1801,14 +1805,14 @@ class HydrostaticTestApp:
             wraplength=self.input_wraplength,
             justify="left",
             foreground="#35506B",
-        ).grid(row=4, column=0, columnspan=6, sticky="w", pady=(4, 0))
+        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(4, 0))
         ttk.Label(
             geometry_frame,
             textvariable=self.section_feedback_vars["geometry"],
             foreground="#A4262C",
             wraplength=self.input_wraplength,
             justify="left",
-        ).grid(row=5, column=0, columnspan=6, sticky="w", pady=(6, 0))
+        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(6, 0))
         self.geometry_segment_summary_label = ttk.Label(
             geometry_frame,
             textvariable=self.segment_summary_var,

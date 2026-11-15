@@ -113,7 +113,7 @@ Mevcut kod:
 - Oturumlari SQLite ve JSON olarak kaydedip geri yukleyebilir; PDF/Excel rapor uretir
 - Windows `.zip` ve macOS `.dmg` paketleri icin SHA-256 dogrulamali self-update akisina sahiptir
 - `HYDRO` repo ayrisma gecisi icin legacy `Programlar` release kaynagina fallback destekler
-- 651 otomatik test ile dogrulanir
+- 653 otomatik test ile dogrulanir
 
 Mevcut kod henuz sunlari tam modellememektedir:
 
