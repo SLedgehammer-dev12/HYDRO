@@ -25,6 +25,10 @@ CRITICAL_FILES = (
     "hidrostatik_test/services/database.py",
     "hidrostatik_test/services/report_export.py",
     "hidrostatik_test/ui/app.py",
+    "webapp/backend/app/main.py",
+    "webapp/backend/app/api/calculations.py",
+    "webapp/backend/app/services/calculations.py",
+    "webapp/backend/app/services/sessions.py",
 )
 
 
@@ -32,6 +36,8 @@ def package_of(path: str) -> str:
     parts = Path(path).parts
     if len(parts) >= 2 and parts[0] == "hidrostatik_test":
         return ".".join(parts[:2])
+    if len(parts) >= 4 and parts[0] == "webapp" and parts[1] == "backend":
+        return ".".join(parts[:4])
     return parts[0] if parts else "."
 
 
@@ -45,7 +51,7 @@ def importers_of(graph: dict, target_file: str) -> list[str]:
     """Resolve exact import edges (including ``from pkg import module``) to files."""
     module_to_file: dict[str, str] = {}
     for node in graph["nodes"].values():
-        if node["type"] != "file" or not node["path"].startswith("hidrostatik_test/"):
+        if node["type"] != "file" or not node["path"].startswith(("hidrostatik_test/", "webapp/backend/app/")):
             continue
         path = node["path"]
         parts = list(Path(path).with_suffix("").parts)
@@ -103,7 +109,10 @@ def main() -> None:
 
     test_mappings = graph.get("test_mappings", {})
     source_files = [
-        f for f in files if f.startswith("hidrostatik_test/") and not f.endswith("__init__.py")
+        f
+        for f in files
+        if f.startswith(("hidrostatik_test/", "webapp/backend/app/"))
+        and not f.endswith("__init__.py")
     ]
     tested_sources = {f for f in test_mappings if f in source_files}
     untested = [f for f in source_files if f not in tested_sources]

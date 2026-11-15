@@ -166,7 +166,7 @@ class CodebaseGraphBuilder:
 
             # Map table references across files
             for rel_path, symbols in self.file_to_symbols.items():
-                if rel_path.startswith("hidrostatik_test/"):
+                if rel_path.startswith(("hidrostatik_test/", "webapp/backend/app/")):
                     full_p = self.root_dir / rel_path
                     if full_p.exists():
                         txt = full_p.read_text(encoding="utf-8", errors="replace")
@@ -181,13 +181,46 @@ class CodebaseGraphBuilder:
         except Exception:
             pass
 
+
+        # Web backend SQLAlchemy models
+        models_file = self.root_dir / "webapp" / "backend" / "app" / "models.py"
+        if models_file.exists():
+            try:
+                txt = models_file.read_text(encoding="utf-8", errors="replace")
+                tables = set(re.findall(r"__tablename__\s*=\s*[\"']([a-zA-Z0-9_]+)", txt))
+                for table in tables:
+                    table_id = f"table:{table}"
+                    self.nodes[table_id] = {
+                        "type": "db_table",
+                        "name": table,
+                        "path": "webapp/backend/app/models.py",
+                    }
+                for rel_path in self.file_to_symbols:
+                    if not rel_path.startswith("webapp/backend/app/"):
+                        continue
+                    full_p = self.root_dir / rel_path
+                    if not full_p.exists():
+                        continue
+                    body = full_p.read_text(encoding="utf-8", errors="replace")
+                    for table in tables:
+                        if re.search(r"\b" + re.escape(table) + r"\b", body):
+                            self.table_usages[table].add(rel_path)
+                            self.edges.append({
+                                "source": f"file:{rel_path}",
+                                "target": f"table:{table}",
+                                "relation": "queries_table",
+                            })
+            except Exception:
+                pass
+
+
     def _map_tests_to_sources(self):
         # Map test_*.py files to modules in kasp/
         test_files = [f for f in self.file_to_symbols.keys() if Path(f).name.startswith("test_")]
         for tf in test_files:
             content = (self.root_dir / tf).read_text(encoding="utf-8", errors="replace")
             for rel_path in self.file_to_symbols.keys():
-                if rel_path.startswith("hidrostatik_test/"):
+                if rel_path.startswith(("hidrostatik_test/", "webapp/backend/app/")):
                     mod_name = Path(rel_path).stem
                     mod_import = rel_path.replace("/", ".").replace(".py", "")
                     if mod_name in content or mod_import in content:

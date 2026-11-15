@@ -45,8 +45,12 @@
   alan/guven cikarimi, hesaplanan degerlerle toleransli karsilastirma, CLI
   (`tools/ocr_report.py`) ve `Rapor > Test Raporu Kontrol (OCR)...` arayuzu
   (ozet/alan/uyusmazlik/uyari sekmeleri, JSON kaydetme, insan onayi).
+- **Web uygulamasi (Faz 3)**: FastAPI + SQLAlchemy backend, React 19 + Vite +
+  Tailwind + Three.js frontend; 9 sekmeli arayuz, tam saha 3D sahnesi, oturum,
+  rapor exportu, OCR yukleme/analiz ve Docker dagitimi. 87 backend testi,
+  653 masaustu testi, 9/9 sekme smoke.
 - **Graphify**: `skills/graphify/` ve `docs/codebase_map.md`
-  (1.700+ dugum, 15.000+ kenar).
+  (2.200+ dugum, 18.000+ kenar, web backend dahil).
 - **Test ve E2E**: 550+ otomatik test; kaynak-only branch kapsami ~%79;
   geometri -> A/B -> hava + basinc -> karar -> txt/pdf/xlsx rapor -> SQLite
   oturum kaliciligi -> updater asset/imza sozlesmesi e2e akisi.

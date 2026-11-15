@@ -1,0 +1,33 @@
+services:
+  hydro:
+    build:
+      context: ..
+      dockerfile: webapp/Dockerfile
+    image: hydro-web:local
+    ports:
+      - "8080:8080"
+    environment:
+      HYDRO_HOST: "0.0.0.0"
+      HYDRO_PORT: "8080"
+      HYDRO_DATA_DIR: "/data"
+      HYDRO_DATABASE_URL: "sqlite:////data/hydro_web.db"
+      # Auth'suz MVP yalniz guvenilir agda calistirilmalidir.
+      HYDRO_CORS_ORIGINS: "http://localhost:8080,http://127.0.0.1:8080"
+    volumes:
+      - hydro-data:/data
+    restart: unless-stopped
+
+  # Postgres'e gecis icin: HYDRO_DATABASE_URL=postgresql+psycopg://hydro:hydro@db:5432/hydro
+  # db:
+  #   image: postgres:16-alpine
+  #   environment:
+  #     POSTGRES_DB: hydro
+  #     POSTGRES_USER: hydro
+  #     POSTGRES_PASSWORD: hydro
+  #   volumes:
+  #     - hydro-db:/var/lib/postgresql/data
+  #   restart: unless-stopped
+
+volumes:
+  hydro-data:
+  # hydro-db:

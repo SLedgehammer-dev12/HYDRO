@@ -1,0 +1,20 @@
+# HYDRO Web (FastAPI) bagimliliklari.
+# Cekirdek hesaplama motoru icin ayrica: pip install -r requirements.txt
+# OCR (PDF metin katmani + Tesseract) icin: pip install -r requirements-ocr.txt
+#
+# Ust sinirlar ayni ana surum hattinda kalip kirilma riskini azaltmak icin konuldu.
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1
+pydantic>=2.7,<3
+SQLAlchemy>=2.0,<3
+python-multipart>=0.0.9,<1
+
+# Testler
+pytest>=8,<9
+httpx>=0.27,<1
+
+# SQLite varsayilan; async kullanmak isterseniz (opsiyonel):
+# aiosqlite>=0.20,<1
+#
+# Postgres (uretim) icin:
+# psycopg[binary]>=3.2,<4

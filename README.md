@@ -9,6 +9,21 @@ ile hizalanan bir masaustu hidrostatik test degerlendirme uygulamasidir.
 Kod tabani build artefact'larindan ayrilmistir; kaynak kod, testler,
 dokumantasyon, agent rolleri ve skill dosyalari ayri klasorlerde tutulur.
 
+## Web Uygulamasi
+
+Ayni domain motorunu kullanan, modern React + 3D saha sahnesi + OCR rapor kontrolu
+iceren web uygulamasi `webapp/` altindadir.
+
+```bash
+python3 -m pip install -r requirements.txt -r requirements-ocr.txt -r webapp/requirements-web.txt
+python3 webapp/run_web.py --host 127.0.0.1 --port 8080
+# http://127.0.0.1:8080
+```
+
+- Durum ve dogrulama: `webapp/docs/implementation_status.md`
+- Mimari / parity / API / UX: `webapp/docs/`
+- Docker: `docker compose -f webapp/docker-compose.yml up --build`
+
 ## Hizli Baslangic
 
 - Uygulamayi calistir: `python Hidrostatik_Test_Chat.py`
@@ -41,6 +56,12 @@ HYDRO/
 |   |-- services/
 |   `-- ui/
 |-- tests/
+|-- webapp/
+|   |-- backend/       # FastAPI + SQLAlchemy
+|   |-- frontend/      # React 19 + Vite + Three.js
+|   |-- docs/          # mimari, parity, API, UX, durum
+|   |-- Dockerfile
+|   `-- run_web.py
 |-- docs/
 |   |-- project_structure.md
 |   |-- release.md

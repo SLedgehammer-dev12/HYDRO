@@ -39,3 +39,11 @@ update_signing_key*
 # Isletim sistemi dosyalari
 .DS_Store
 Thumbs.db
+
+# Web app
+webapp/frontend/node_modules/
+webapp/frontend/dist/
+webapp/frontend/.vite/
+webapp/data/
+webapp/**/__pycache__/
+*.tsbuildinfo

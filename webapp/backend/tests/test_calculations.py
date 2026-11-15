@@ -1,0 +1,312 @@
+"""Calculation endpoint tests."""
+
+from __future__ import annotations
+
+import math
+
+from conftest import air_payload, pressure_payload, profile_payload
+
+
+def test_geometry_single_and_multi(client):
+    single = client.post(
+        "/api/calculations/geometry",
+        json={
+            "sections": [
+                {
+                    "outside_diameter_mm": 406.4,
+                    "wall_thickness_mm": 8.74,
+                    "length_m": 1000.0,
+                }
+            ]
+        },
+    )
+    assert single.status_code == 200
+    body = single.json()
+    assert body["section_count"] == 1
+    assert math.isclose(body["internal_radius_mm"], 194.46, abs_tol=1e-9)
+    assert math.isclose(body["elasticity_term"], 0.884 * 194.46 / 8.74, rel_tol=1e-12)
+
+    multi = client.post(
+        "/api/calculations/geometry",
+        json={
+            "sections": [
+                {
+                    "outside_diameter_mm": 406.4,
+                    "wall_thickness_mm": 8.74,
+                    "length_m": 1000.0,
+                },
+                {
+                    "outside_diameter_mm": 323.9,
+                    "wall_thickness_mm": 6.35,
+                    "length_m": 500.0,
+                },
+            ]
+        },
+    ).json()
+    assert multi["section_count"] == 2
+    assert multi["total_length_m"] == 1500.0
+    assert math.isclose(
+        multi["internal_volume_m3"],
+        body["internal_volume_m3"] + math.pi * ((323.9 / 2 - 6.35) / 1000) ** 2 * 500.0,
+        rel_tol=1e-12,
+    )
+
+
+def test_air_content_pass(client):
+    body = client.post("/api/calculations/air-content", json=air_payload()).json()
+    assert body["passed"] is True
+    assert body["decision"]["status"] == "BASARILI"
+    assert body["decision"]["rule"] == "Vpa < 1.06 x Vp"
+    assert body["acceptance_limit_m3"] > body["actual_added_water_m3"]
+    assert math.isclose(
+        body["decision"]["margin"],
+        body["acceptance_limit_m3"] - body["actual_added_water_m3"],
+        rel_tol=1e-12,
+    )
+
+
+def test_air_content_exact_boundary_fails(client):
+    baseline = client.post("/api/calculations/air-content", json=air_payload()).json()
+    exact = client.post(
+        "/api/calculations/air-content",
+        json=air_payload(actual_added_water_m3=baseline["acceptance_limit_m3"]),
+    ).json()
+    assert exact["passed"] is False
+    assert exact["decision"]["status"] == "BASARISIZ"
+
+
+def test_air_content_rejects_non_one_bar_rise(client):
+    response = client.post("/api/calculations/air-content", json=air_payload(pressure_rise_bar=1.1))
+    assert response.status_code == 400
+    assert response.json()["code"] == "domain_validation_error"
+
+
+def test_pressure_variation_pass(client):
+    body = client.post("/api/calculations/pressure-variation", json=pressure_payload()).json()
+    assert body["passed"] is True
+    assert body["decision"]["status"] == "BASARILI"
+    assert body["negative_b"] is False
+    assert math.isclose(
+        body["allowable_upper_pressure_change_bar"],
+        body["theoretical_pressure_change_bar"] + 0.3,
+        rel_tol=1e-12,
+    )
+    assert math.isclose(
+        body["margin_bar"],
+        body["actual_pressure_change_bar"] - body["theoretical_pressure_change_bar"],
+        rel_tol=1e-12,
+    )
+
+
+def test_pressure_variation_negative_b_is_valid(client):
+    body = client.post(
+        "/api/calculations/pressure-variation",
+        json=pressure_payload(b_micro_per_c=-60.0, actual_pressure_change_bar=-1.9),
+    ).json()
+    assert body["negative_b"] is True
+    assert body["theoretical_pressure_change_bar"] < 0
+    assert body["passed"] is True
+    assert "B negatif" in body["decision"]["summary"]
+
+
+def test_pressure_profile_window(client):
+    body = client.post("/api/calculations/pressure-profile", json=profile_payload()).json()
+    assert body["feasible"] is True
+    assert body["within_length_limit"] is True
+    assert body["within_volume_limit"] is True
+    assert math.isclose(body["required_minimum_pressure_at_high_point_bar"], 100.0)
+    assert math.isclose(
+        body["required_pressure_with_span_bar"],
+        body["required_minimum_pressure_at_high_point_bar"] + body["hydraulic_span_bar"],
+        rel_tol=1e-12,
+    )
+    assert body["selected_window"]["minimum_required_pressure_bar"] < 112.0
+    assert body["selected_window"]["maximum_allowable_pressure_bar"] > 112.0
+    assert body["monitored_meets_minimum"] is True
+    assert body["monitored_under_maximum"] is True
+    assert body["decision"]["status"] == "BASARILI"
+
+
+def test_pressure_profile_length_limit(client):
+    body = client.post(
+        "/api/calculations/pressure-profile",
+        json=profile_payload(
+            geometry={
+                "sections": [
+                    {
+                        "outside_diameter_mm": 406.4,
+                        "wall_thickness_mm": 8.74,
+                        "length_m": 21000.0,
+                    }
+                ]
+            }
+        ),
+    ).json()
+    assert body["within_length_limit"] is False
+    assert body["feasible"] is False
+    assert body["decision"]["status"] == "BASARISIZ"
+
+
+def test_pressure_profile_volume_limit(client):
+    body = client.post(
+        "/api/calculations/pressure-profile",
+        json=profile_payload(
+            geometry={
+                "sections": [
+                    {
+                        "outside_diameter_mm": 2000.0,
+                        "wall_thickness_mm": 10.0,
+                        "length_m": 5000.0,
+                    }
+                ]
+            },
+            smys_mpa=450.0,
+        ),
+    ).json()
+    assert body["within_volume_limit"] is False
+    assert body["feasible"] is False
+
+
+def test_pressure_profile_unknown_location_class(client):
+    response = client.post(
+        "/api/calculations/pressure-profile",
+        json=profile_payload(location_class="Class 9"),
+    )
+    assert response.status_code == 400
+    assert response.json()["code"] == "domain_validation_error"
+
+
+def test_pig_speed_modes(client):
+    cases = [
+        ("Temizlik pigi", 5000.0, 45.0, "UYGUN", True),
+        ("Temizlik pigi", 5000.0, 20.0, "LIMIT ASILDI", False),
+        ("Serbest kontrol", 5000.0, 45.0, "BILGI", None),
+    ]
+    for mode, distance, travel, status, passed in cases:
+        response = client.post(
+            "/api/calculations/pig-speed",
+            json={"mode": mode, "distance_m": distance, "travel_time_min": travel},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["status"] == status
+        assert body["passed"] is passed
+        assert body["speed_m_per_s"] > 0
+        assert math.isclose(body["speed_km_per_h"], body["speed_m_per_s"] * 3.6, rel_tol=1e-12)
+
+
+def test_pig_speed_invalid_mode(client):
+    response = client.post(
+        "/api/calculations/pig-speed",
+        json={"mode": "Uzay pigi", "distance_m": 100, "travel_time_min": 10},
+    )
+    assert response.status_code == 400
+    assert response.json()["code"] == "domain_validation_error"
+
+
+def test_pressurization_pass(client):
+    body = client.post(
+        "/api/calculations/pressurization",
+        json={
+            "initial_volume_m3": 10.0,
+            "added_volume_m3": 0.5,
+            "theoretical_volume_m3": 10.48,
+            "pressure_bar": 80.05,
+            "expected_pressure_bar": 80.0,
+        },
+    ).json()
+    assert body["passed"] is True
+    assert body["within_volume_limit"] is True
+    assert body["within_pressure_limit"] is True
+    assert body["underfilled"] is False
+    assert math.isclose(body["volume_limit_percent"], 0.2)
+
+
+def test_pressurization_underfill(client):
+    body = client.post(
+        "/api/calculations/pressurization",
+        json={
+            "initial_volume_m3": 10.0,
+            "added_volume_m3": 0.0,
+            "theoretical_volume_m3": 10.5,
+            "pressure_bar": 80.0,
+            "expected_pressure_bar": 80.0,
+        },
+    ).json()
+    assert body["underfilled"] is True
+    assert body["volume_shortfall_percent"] > 4.0
+
+
+def test_thermal_balance_insufficient(client):
+    body = client.post(
+        "/api/calculations/thermal-balance",
+        json={
+            "records": [
+                {
+                    "timestamp": "2026-11-14T08:00:00Z",
+                    "pressure_bar": 80.0,
+                    "temperature_c": 18.2,
+                },
+                {
+                    "timestamp": "2026-11-15T08:00:00Z",
+                    "pressure_bar": 80.0,
+                    "temperature_c": 18.1,
+                },
+                {
+                    "timestamp": "2026-11-15T12:00:00Z",
+                    "pressure_bar": 80.0,
+                    "temperature_c": 18.15,
+                },
+            ]
+        },
+    ).json()
+    assert body["duration_hours"] == 28.0
+    assert body["balanced"] is False
+    assert body["temp_diff_c"] is None
+    assert body["decision"]["status"] == "DOGRULANAMADI"
+
+
+def test_thermal_balance_stable(client):
+    records = []
+    for hour in range(0, 27, 2):
+        day = 14 if hour < 24 else 15
+        records.append(
+            {
+                "timestamp": f"2026-11-{day:02d}T{(hour % 24):02d}:00:00Z",
+                "pressure_bar": 80.0,
+                "temperature_c": 18.10,
+            }
+        )
+    body = client.post("/api/calculations/thermal-balance", json={"records": records}).json()
+    assert body["duration_hours"] == 26.0
+    assert body["balanced"] is True
+    assert body["temp_diff_c"] == 0.0
+    assert body["decision"]["status"] == "BASARILI"
+
+
+def test_water_density(client):
+    body = client.post(
+        "/api/calculations/water-density",
+        json={"temperature_c": 15.0, "pressure_bar": 1.0},
+    ).json()
+    assert 990.0 < body["density_kg_per_m3"] < 1010.0
+
+
+def test_water_density_error(client):
+    response = client.post(
+        "/api/calculations/water-density",
+        json={"temperature_c": -300.0, "pressure_bar": 1.0},
+    )
+    assert response.status_code == 400
+    assert response.json()["code"] == "water_property_error"
+
+
+def test_geometry_semantic_errors(client):
+    for section in (
+        {"outside_diameter_mm": -1, "wall_thickness_mm": 8.74, "length_m": 10},
+        {"outside_diameter_mm": 16, "wall_thickness_mm": 8.0, "length_m": 10},
+        {"outside_diameter_mm": 406.4, "wall_thickness_mm": 8.74, "length_m": 0},
+    ):
+        response = client.post("/api/calculations/geometry", json={"sections": [section]})
+        assert response.status_code == 400
+        assert response.json()["code"] == "domain_validation_error"

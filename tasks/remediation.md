@@ -80,6 +80,18 @@ davranis regresyonlarini testle sabitlemek ve e2e akisi eklemek.
 - [ ] Gercek saha raporlariyla kalibrasyon (ornek PDF/JPG bekleniyor)
 - [ ] Onaylanan alanlari forma otomatik doldurma ve denetim izi
 
+## Faz 3 - Web uygulamasi
+- [x] FastAPI + SQLAlchemy backend, 46 path, 87 pytest
+- [x] React 19 + Vite + Tailwind, 9 sekmeli arayuz
+- [x] Tam saha 3D sahnesi (segment, kot, ekipman, pig, akis, kesit)
+- [x] Oturum kaydi, snapshot, audit, PDF/XLSX/TXT export
+- [x] OCR yukleme/analiz/uyusmazlik/insan onayi arayuzu
+- [x] Dockerfile + docker-compose
+- [ ] OCR rapor formati esleme profili (yarin gelecek format)
+- [ ] OCR DB kuyrugu + worker + iptal
+- [ ] Alembic migration, projects API, auth/OIDC
+- [ ] Frontend kod bolme ve vitest kapsami
+
 ## Karar gerektirenler (cozulenler + kalanlar)
 
 ### Cozulenler
