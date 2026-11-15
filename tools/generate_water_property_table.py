@@ -8,7 +8,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from hidrostatik_test.services.water_property_table_builder import generate_default_water_property_table
+from hidrostatik_test.services.water_property_table_builder import (
+    generate_default_water_property_table,
+)
 
 
 def main() -> int:

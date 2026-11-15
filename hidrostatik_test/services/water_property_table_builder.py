@@ -120,7 +120,9 @@ def _axis_to_payload(axis: WaterPropertyTableAxis) -> dict[str, object]:
     }
 
 
-def _sample_backend_row(backend_instance: object, temp_c: float, pressure_bar: float) -> tuple[float, float]:
+def _sample_backend_row(
+    backend_instance: object, temp_c: float, pressure_bar: float
+) -> tuple[float, float]:
     try:
         return (
             backend_instance.calculate_water_compressibility_a(temp_c, pressure_bar),
@@ -131,8 +133,12 @@ def _sample_backend_row(backend_instance: object, temp_c: float, pressure_bar: f
             adjusted_temp_c = temp_c + (0.01 * nudge_index)
             try:
                 return (
-                    backend_instance.calculate_water_compressibility_a(adjusted_temp_c, pressure_bar),
-                    backend_instance.calculate_water_thermal_expansion_beta(adjusted_temp_c, pressure_bar),
+                    backend_instance.calculate_water_compressibility_a(
+                        adjusted_temp_c, pressure_bar
+                    ),
+                    backend_instance.calculate_water_thermal_expansion_beta(
+                        adjusted_temp_c, pressure_bar
+                    ),
                 )
             except WaterPropertyError:
                 continue

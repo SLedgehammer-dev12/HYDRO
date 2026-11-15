@@ -1,5 +1,92 @@
 # -*- mode: python ; coding: utf-8 -*-
+#
+# macOS paketleme spec dosyasi (build_dmg.sh tarafindan kullanilir).
+# Surum bilgisi tek kaynaktan, hidrostatik_test/app_metadata.py dosyasindan okunur;
+# bu dosyada sabit surum string'i tutulmaz.
 
+import importlib.util
+import os
+import pathlib
+import subprocess
+import sys
+
+PROJECT_ROOT = pathlib.Path(SPECPATH)
+
+
+def _load_app_metadata():
+    metadata_path = PROJECT_ROOT / 'hidrostatik_test' / 'app_metadata.py'
+    spec = importlib.util.spec_from_file_location('hidrostatik_test_app_metadata', metadata_path)
+    if spec is None or spec.loader is None:
+        raise SystemExit(f'app_metadata.py yuklenemedi: {metadata_path}')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _target_arch():
+    """macOS icin universal2'yi dener, mimari uygun degilse yerel mimariye duser.
+
+    PyInstaller universal2 hedefi, evrensel (arm64 + x86_64) bir Python yorumlayicisi
+    gerektirir. CI'da kurulan Python genellikle tek mimaridir; bu durumda build'i
+    kirmak yerine yerel mimari kullanilir. Zorlamak icin:
+      HIDROSTATIK_TARGET_ARCH=universal2|arm64|x86_64|native
+    """
+    if sys.platform != 'darwin':
+        return None
+
+    override = os.environ.get('HIDROSTATIK_TARGET_ARCH', '').strip().lower()
+    if override:
+        return None if override == 'native' else override
+
+    try:
+        completed = subprocess.run(
+            ['lipo', '-archs', sys.executable],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+
+    archs = set(completed.stdout.split())
+    if {'arm64', 'x86_64'}.issubset(archs):
+        return 'universal2'
+
+    print(
+        '[HidrostatikTest.spec] Python yorumlayicisi evrensel degil (mimari: '
+        f'{sorted(archs) or "bilinmiyor"}); universal2 yerine yerel mimari kullanilacak.'
+    )
+    return None
+
+
+APP_METADATA = _load_app_metadata()
+APP_VERSION = APP_METADATA.APP_VERSION
+BINARY_NAME = APP_METADATA.BINARY_NAME
+APP_DISPLAY_NAME = APP_METADATA.APP_TITLE
+BUNDLE_IDENTIFIER = 'com.hidrostatik.degerlendirme'
+
+# windows_manifest.xml surum alanini build_exe.ps1 build sirasinda gunceller;
+# burada yalnizca mevcut dosya varsa kullanilir (macOS/Linux build'inde etkisiz).
+EXE_KWARGS = {
+    'name': BINARY_NAME,
+    'debug': False,
+    'bootloader_ignore_signals': False,
+    'strip': False,
+    'upx': False,
+    'console': False,
+    'disable_windowed_traceback': False,
+    'argv_emulation': False,
+    'target_arch': _target_arch(),
+    'codesign_identity': None,
+    'entitlements_file': None,
+}
+
+MANIFEST_PATH = PROJECT_ROOT / 'windows_manifest.xml'
+if sys.platform == 'win32' and MANIFEST_PATH.exists():
+    # Windows release build'i build_exe.ps1 uzerinden yapilir; manifest surumu
+    # orada gecici kopyaya yazilir. Burada yalnizca dogrudan spec build'i icin
+    # mevcut manifest kullanilir.
+    EXE_KWARGS['manifest'] = str(MANIFEST_PATH)
 
 a = Analysis(
     ['Hidrostatik_Test_Chat.py'],
@@ -12,7 +99,6 @@ a = Analysis(
         ('hidrostatik_test/data/gail_reference_table_v1.meta.json', 'hidrostatik_test/data'),
         ('hidrostatik_test/data/water_property_table_v1.csv', 'hidrostatik_test/data'),
         ('hidrostatik_test/data/water_property_table_v1.meta.json', 'hidrostatik_test/data'),
-        ('hidrostatik_test/_pyinstaller_hook.py', 'hidrostatik_test'),
     ],
     hiddenimports=[
         'CoolProp.CoolProp',
@@ -42,19 +128,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='HidrostatikTest',
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=False,
-    console=False,
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    version='release\\build-temp\\version_info.txt',
-    manifest='windows_manifest.xml',
+    **EXE_KWARGS,
 )
 coll = COLLECT(
     exe,
@@ -63,25 +137,24 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name='HidrostatikTest',
+    name=BINARY_NAME,
 )
 
-import sys
 if sys.platform == 'darwin':
     app = BUNDLE(
         coll,
-        name='HidrostatikTest.app',
+        name=f'{BINARY_NAME}.app',
         icon=None,
-        bundle_identifier='com.hidrostatik.degerlendirme',
+        bundle_identifier=BUNDLE_IDENTIFIER,
         info_plist={
             'NSPrincipalClass': 'NSApplication',
             'NSAppleScriptEnabled': False,
-            'CFBundleDisplayName': 'Hidrostatik Test Degerlendirme',
-            'CFBundleName': 'HidrostatikTest',
-            'CFBundleShortVersionString': '1.7.0',
-            'CFBundleVersion': '1.7.0',
+            'CFBundleDisplayName': APP_DISPLAY_NAME,
+            'CFBundleName': BINARY_NAME,
+            'CFBundleShortVersionString': APP_VERSION,
+            'CFBundleVersion': APP_VERSION,
             'NSHighResolutionCapable': True,
             'NSSupportsAutomaticGraphicsSwitching': True,
             'NSAppTransportSecurity': {'NSAllowsArbitraryLoads': True},
-        }
+        },
     )

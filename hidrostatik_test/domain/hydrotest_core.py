@@ -1,15 +1,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import pi
+from math import isfinite, pi
 from typing import Final, TypeAlias
 
 from .water_properties import (
     WaterPropertyError,
+)
+from .water_properties import (
     calculate_water_compressibility_a as calculate_water_compressibility_a_with_backend,
+)
+from .water_properties import (
     calculate_water_thermal_expansion_beta as calculate_water_thermal_expansion_beta_with_backend,
-    scale_expansion_coefficient_k_to_micro_per_c,
-    scale_isothermal_compressibility_pa_to_micro_per_bar,
+)
+from .water_properties import (
+    scale_expansion_coefficient_k_to_micro_per_c as scale_expansion_coefficient_k_to_micro_per_c,
+)
+from .water_properties import (
+    scale_isothermal_compressibility_pa_to_micro_per_bar as scale_isothermal_compressibility_pa_to_micro_per_bar,
 )
 
 AIR_CONTENT_ACCEPTANCE_FACTOR: Final[float] = 1.06
@@ -19,10 +27,17 @@ SPEC_AIR_PRESSURE_RISE_TOLERANCE: Final[float] = 1e-9
 SEAMLESS_PIPE_K: Final[float] = 1.00
 WELDED_PIPE_K: Final[float] = 1.02
 FLOAT_TOLERANCE: Final[float] = 1e-9
+NUMERIC_COMPARISON_RELATIVE_TOLERANCE: Final[float] = 1e-9
 
 
 class ValidationError(ValueError):
     """Raised when user data is incomplete or physically inconsistent."""
+
+
+def _require_finite(value: float, label: str) -> float:
+    if not isfinite(value):
+        raise ValidationError(f"{label} sonlu bir sayi olmalidir.")
+    return value
 
 
 @dataclass(frozen=True)
@@ -32,6 +47,9 @@ class PipeSection:
     length_m: float
 
     def __post_init__(self) -> None:
+        _require_finite(self.outside_diameter_mm, "Dis cap")
+        _require_finite(self.wall_thickness_mm, "Et kalinligi")
+        _require_finite(self.length_m, "Hat uzunlugu")
         if self.outside_diameter_mm <= 0:
             raise ValidationError("Dis cap sifirdan buyuk olmalidir.")
         if self.wall_thickness_mm <= 0:
@@ -39,7 +57,9 @@ class PipeSection:
         if self.length_m <= 0:
             raise ValidationError("Hat uzunlugu sifirdan buyuk olmalidir.")
         if self.wall_thickness_mm * 2 >= self.outside_diameter_mm:
-            raise ValidationError("Et kalinligi borunun ic capini sifira dusurecek kadar buyuk olamaz.")
+            raise ValidationError(
+                "Et kalinligi borunun ic capini sifira dusurecek kadar buyuk olamaz."
+            )
 
     @property
     def internal_radius_mm(self) -> float:
@@ -76,22 +96,30 @@ class PipeGeometry:
         total_volume = self.internal_volume_m3
         if total_volume <= FLOAT_TOLERANCE:
             raise ValidationError("Segmentlerden toplam hacim hesaplanamadi.")
-        return sum(
-            section.internal_radius_mm * section.internal_volume_m3 for section in self.sections
-        ) / total_volume
+        return (
+            sum(
+                section.internal_radius_mm * section.internal_volume_m3 for section in self.sections
+            )
+            / total_volume
+        )
 
     @property
     def elasticity_term(self) -> float:
         total_volume = self.internal_volume_m3
         if total_volume <= FLOAT_TOLERANCE:
             raise ValidationError("Segmentlerden toplam hacim hesaplanamadi.")
-        return sum(section.elasticity_term * section.internal_volume_m3 for section in self.sections) / total_volume
+        return (
+            sum(section.elasticity_term * section.internal_volume_m3 for section in self.sections)
+            / total_volume
+        )
 
 
 PipeModel: TypeAlias = PipeSection | PipeGeometry
 
 
-def calculate_water_compressibility_a(temp_c: float, pressure_bar: float, backend: str | None = None) -> float:
+def calculate_water_compressibility_a(
+    temp_c: float, pressure_bar: float, backend: str | None = None
+) -> float:
     try:
         return calculate_water_compressibility_a_with_backend(temp_c, pressure_bar, backend=backend)
     except WaterPropertyError as exc:
@@ -102,22 +130,23 @@ def calculate_water_thermal_expansion_beta(
     temp_c: float, pressure_bar: float, backend: str | None = None
 ) -> float:
     try:
-        return calculate_water_thermal_expansion_beta_with_backend(temp_c, pressure_bar, backend=backend)
+        return calculate_water_thermal_expansion_beta_with_backend(
+            temp_c, pressure_bar, backend=backend
+        )
     except WaterPropertyError as exc:
         raise ValidationError(str(exc)) from exc
 
 
-def calculate_b_coefficient(
-    water_beta_micro_per_c: float, steel_alpha_micro_per_c: float
-) -> float:
-    if water_beta_micro_per_c <= 0:
-        raise ValidationError("Su genlesme katsayisi pozitif olmalidir.")
+def calculate_b_coefficient(water_beta_micro_per_c: float, steel_alpha_micro_per_c: float) -> float:
+    _require_finite(water_beta_micro_per_c, "Su genlesme katsayisi")
+    _require_finite(steel_alpha_micro_per_c, "Celik genlesme katsayisi")
     if steel_alpha_micro_per_c < 0:
         raise ValidationError("Celik genlesme katsayisi negatif olamaz.")
 
+    # 4 degC altinda suyun hacimsel genlesme katsayisi ve dolayisiyla B negatiftir.
     b_micro_per_c = water_beta_micro_per_c - steel_alpha_micro_per_c
-    if b_micro_per_c <= 0:
-        raise ValidationError("Hesaplanan B katsayisi pozitif cikmadi.")
+    if not isfinite(b_micro_per_c):
+        raise ValidationError("Hesaplanan B katsayisi sonlu bir sayi olmalidir.")
     return b_micro_per_c
 
 
@@ -130,12 +159,21 @@ class AirContentInputs:
     actual_added_water_m3: float
 
     def __post_init__(self) -> None:
+        _require_finite(self.a_micro_per_bar, "A degeri")
+        _require_finite(self.pressure_rise_bar, "Basinc artisi P")
+        _require_finite(self.k_factor, "K faktoru")
+        _require_finite(self.actual_added_water_m3, "Fiili ilave su hacmi")
         if self.a_micro_per_bar <= 0:
             raise ValidationError("A degeri sifirdan buyuk olmalidir.")
         if self.pressure_rise_bar <= 0:
             raise ValidationError("Basinc artisi P sifirdan buyuk olmalidir.")
-        if abs(self.pressure_rise_bar - SPEC_AIR_PRESSURE_RISE_BAR) > SPEC_AIR_PRESSURE_RISE_TOLERANCE:
-            raise ValidationError("Hava icerik testi bu sartnameye gore tam 1.0 bar basinc artisi ile yapilmalidir.")
+        if (
+            abs(self.pressure_rise_bar - SPEC_AIR_PRESSURE_RISE_BAR)
+            > SPEC_AIR_PRESSURE_RISE_TOLERANCE
+        ):
+            raise ValidationError(
+                "Hava icerik testi bu sartnameye gore tam 1.0 bar basinc artisi ile yapilmalidir."
+            )
         if self.k_factor <= 0:
             raise ValidationError("K faktoru sifirdan buyuk olmalidir.")
         if self.actual_added_water_m3 < 0:
@@ -163,12 +201,16 @@ def evaluate_air_content_test(inputs: AirContentInputs) -> AirContentResult:
         * inputs.pressure_rise_bar
         * inputs.k_factor
     )
+    if not isfinite(theoretical_added_water_m3):
+        raise ValidationError("Teorik su ilavesi sonlu bir sayi olarak hesaplanamadi.")
     if theoretical_added_water_m3 <= FLOAT_TOLERANCE:
         raise ValidationError("Teorik su ilavesi hesaplanamadi.")
 
     acceptance_limit_m3 = theoretical_added_water_m3 * AIR_CONTENT_ACCEPTANCE_FACTOR
     ratio = inputs.actual_added_water_m3 / theoretical_added_water_m3
-    passed = inputs.actual_added_water_m3 <= acceptance_limit_m3 + FLOAT_TOLERANCE
+    # Sartname "%6 veya daha fazla" ilaveyi reddeder; tam sinir PASS olamaz.
+    strict_acceptance_limit_m3 = acceptance_limit_m3 * (1.0 - NUMERIC_COMPARISON_RELATIVE_TOLERANCE)
+    passed = inputs.actual_added_water_m3 < strict_acceptance_limit_m3
 
     return AirContentResult(
         theoretical_added_water_m3=theoretical_added_water_m3,
@@ -188,10 +230,12 @@ class PressureVariationInputs:
     actual_pressure_change_bar: float
 
     def __post_init__(self) -> None:
+        _require_finite(self.a_micro_per_bar, "A degeri")
+        _require_finite(self.b_micro_per_c, "B degeri")
+        _require_finite(self.delta_t_c, "Sicaklik farki dT")
+        _require_finite(self.actual_pressure_change_bar, "Basinc farki Pa")
         if self.a_micro_per_bar <= 0:
             raise ValidationError("A degeri sifirdan buyuk olmalidir.")
-        if self.b_micro_per_c <= 0:
-            raise ValidationError("B degeri sifirdan buyuk olmalidir.")
 
 
 @dataclass(frozen=True)
@@ -209,10 +253,13 @@ def evaluate_pressure_variation_test(inputs: PressureVariationInputs) -> Pressur
         raise ValidationError("Basinc degisim hesabi icin payda pozitif olmalidir.")
 
     theoretical_pressure_change_bar = (inputs.b_micro_per_c * inputs.delta_t_c) / deformation_term
+    if not isfinite(theoretical_pressure_change_bar):
+        raise ValidationError("Teorik basinc degisimi sonlu bir sayi olarak hesaplanamadi.")
     allowable_upper_pressure_change_bar = (
         theoretical_pressure_change_bar + PRESSURE_VARIATION_ACCEPTANCE_BAR
     )
     margin_bar = inputs.actual_pressure_change_bar - theoretical_pressure_change_bar
+    # Karar, sonuc icinde dondurulen ayni margin degeri uzerinden verilir.
     passed = margin_bar <= PRESSURE_VARIATION_ACCEPTANCE_BAR + FLOAT_TOLERANCE
 
     return PressureVariationResult(

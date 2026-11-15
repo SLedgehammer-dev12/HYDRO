@@ -39,9 +39,10 @@ def get_palette_colors(level: str) -> tuple[str, str]:
 
 
 def format_detail_value(value: str, unit: str = "") -> str:
-    if value == "-" or not unit:
+    clean_unit = unit.strip()
+    if value == "-" or not clean_unit:
         return value
-    return f"{value} {unit}"
+    return f"{value} {clean_unit}"
 
 
 __all__ = [

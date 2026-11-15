@@ -12,37 +12,104 @@ on:
         default: false
         type: boolean
 
+# Varsayilan en dar yetki; yalnizca publish-release job'i yazma alir.
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.13"
 
 jobs:
-  test:
+  version_gate:
+    name: Tag / APP_VERSION dogrulamasi
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
-      - name: Run tests
-        run: |
-          python -m unittest discover -s tests -p "test_*.py"
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      app_version: ${{ steps.metadata.outputs.app_version }}
 
-  build-windows:
-    needs: test
-    runs-on: windows-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Read APP_VERSION from app_metadata
+        id: metadata
+        run: |
+          python3 -c "import pathlib, re; text = pathlib.Path('hidrostatik_test/app_metadata.py').read_text(encoding='utf-8'); print(re.search(r'^APP_VERSION = \"([^\"]+)\"', text, re.M).group(1))" > app_version.txt
+          echo "app_version=$(cat app_version.txt)" >> "$GITHUB_OUTPUT"
+
+      # Surum tek kaynaktan (app_metadata.py) okunur; tag ile uyusmazsa release durur.
+      - name: Verify tag matches APP_VERSION
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          expected="hidrostatik-test-v${{ steps.metadata.outputs.app_version }}"
+          actual="${GITHUB_REF_NAME}"
+          echo "Beklenen tag: $expected"
+          echo "Gercek tag  : $actual"
+          if [ "$expected" != "$actual" ]; then
+            echo "::error::Tag ile APP_VERSION uyusmuyor. app_metadata.py guncellenmeden release alinamaz."
+            exit 1
+          fi
+
+  test:
+    name: Test (Linux + Xvfb)
+    needs: version_gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install Xvfb
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      # UI testleri atlanmasin: Tkinter sanal ekranda calisir.
+      - name: Run tests under Xvfb
+        run: |
+          xvfb-run --auto-servernum python -m coverage run -m unittest discover -s tests -p "test_*.py" -v
+
+      - name: Coverage gate
+        run: |
+          python -m coverage report
+
+  build-windows:
+    name: Windows build
+    needs: [ version_gate, test ]
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
 
       - name: Install dependencies
         run: |
@@ -53,45 +120,83 @@ jobs:
         run: |
           powershell -ExecutionPolicy Bypass -File .\build_exe.ps1
 
+      # Artefakt sozlesmesi: zip + iki checksum adi + release notes.
       - name: Verify build artifacts
         shell: pwsh
         run: |
-          $exe = Get-ChildItem -LiteralPath .\release -Filter '*.exe' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          if (-not $exe) { throw "No .exe file found." }
-          if ($exe.Length -lt 10MB) { throw "Executable too small ($($exe.Length) bytes)." }
-          Write-Host "Artifact verified: $($exe.Name) ($('{0:N0}' -f ($exe.Length / 1MB)) MB)" -ForegroundColor Green
+          $version = "${{ needs.version_gate.outputs.app_version }}"
+          $baseName = "HidrostatikTest-v$version-windows-x64"
+          $zip = Join-Path .\release "$baseName.zip"
+          $sha = Join-Path .\release "$baseName.sha256.txt"
+          $zipSha = Join-Path .\release "$baseName.zip.sha256.txt"
+          $notes = Join-Path .\release "$baseName-RELEASE-NOTES.md"
+          foreach ($path in @($zip, $sha, $zipSha, $notes)) {
+            if (-not (Test-Path -LiteralPath $path)) { throw "Eksik artefakt: $path" }
+          }
+
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            $entry = $archive.Entries | Where-Object { $_.FullName -eq "HidrostatikTest/HidrostatikTest.exe" }
+            if (-not $entry) {
+              throw "Zip icinde HidrostatikTest/HidrostatikTest.exe bulunamadi (updater bu yapiyi bekler)."
+            }
+            if ($entry.Length -lt 10MB) {
+              throw "Zip icindeki exe cok kucuk ($($entry.Length) bytes)."
+            }
+            Write-Host "Zip dogrulandi: $($entry.FullName) ($('{0:N0}' -f ($entry.Length / 1MB)) MB)"
+          } finally {
+            $archive.Dispose()
+          }
+
+          $zipHash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLower()
+          foreach ($shaFile in @($sha, $zipSha)) {
+            $recorded = ((Get-Content -LiteralPath $shaFile -Raw).Trim() -split '\s+')[0].ToLower()
+            if ($recorded -ne $zipHash) {
+              throw "$(Split-Path -Leaf $shaFile) icindeki hash zip ile uyusmuyor."
+            }
+          }
+          Write-Host "SHA256 dogrulandi: $zipHash"
 
       - name: Resolve release assets
         id: assets
         shell: pwsh
         run: |
-          $exe = (Get-ChildItem -LiteralPath .\release -Filter '*.exe' | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
-          $sha = (Get-ChildItem -LiteralPath .\release -Filter '*.sha256.txt' | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
-          $notes = (Get-ChildItem -LiteralPath .\release -Filter '*-RELEASE-NOTES.md' | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
-          "exe=$exe" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          "notes=$notes" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          $version = "${{ needs.version_gate.outputs.app_version }}"
+          $baseName = "HidrostatikTest-v$version-windows-x64"
+          "zip=$(Join-Path .\release "$baseName.zip")" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "sha=$(Join-Path .\release "$baseName.sha256.txt")" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "zip_sha=$(Join-Path .\release "$baseName.zip.sha256.txt")" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "notes=$(Join-Path .\release "$baseName-RELEASE-NOTES.md")" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Upload windows assets
         uses: actions/upload-artifact@v4
         with:
           name: windows-assets
           path: |
-            ${{ steps.assets.outputs.exe }}
+            ${{ steps.assets.outputs.zip }}
             ${{ steps.assets.outputs.sha }}
+            ${{ steps.assets.outputs.zip_sha }}
             ${{ steps.assets.outputs.notes }}
+          retention-days: 7
 
   build-macos:
-    needs: test
+    name: macOS build
+    needs: [ version_gate, test ]
     runs-on: macos-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
 
       - name: Install dependencies
         run: |
@@ -106,22 +211,53 @@ jobs:
       - name: Verify build artifacts
         shell: bash
         run: |
-          dmg=$(ls release/*.dmg 2>/dev/null | head -n 1)
-          if [ -z "$dmg" ]; then echo "ERROR: No .dmg file found."; exit 1; fi
+          set -euo pipefail
+          version="${{ needs.version_gate.outputs.app_version }}"
+          base="HidrostatikTest-v${version}-macos-universal"
+          dmg="release/${base}.dmg"
+          sha="release/${base}.sha256.txt"
+          dmg_sha="release/${base}.dmg.sha256.txt"
+          notes="release/${base}-RELEASE-NOTES.md"
+
+          for path in "$dmg" "$sha" "$dmg_sha" "$notes"; do
+            if [ ! -f "$path" ]; then echo "ERROR: eksik artefakt: $path"; exit 1; fi
+          done
+
+          hdiutil verify "$dmg"
           size=$(du -sm "$dmg" | cut -f1)
-          if [ "$size" -lt 10 ]; then echo "ERROR: DMG too small (${size} MB)."; exit 1; fi
-          echo "Artifact verified: $(basename "$dmg") (${size} MB)"
+          if [ "$size" -lt 10 ]; then echo "ERROR: DMG cok kucuk (${size} MB)."; exit 1; fi
+
+          actual=$(shasum -a 256 "$dmg" | awk '{print $1}')
+          for file in "$sha" "$dmg_sha"; do
+            recorded=$(awk '{print $1}' "$file")
+            if [ "$recorded" != "$actual" ]; then echo "ERROR: $(basename "$file") hash uyusmuyor."; exit 1; fi
+          done
+          echo "DMG ve SHA256 dogrulandi: $(basename "$dmg") (${size} MB)"
+
+      # Imza dogrulamasi build_dmg.sh icinde de yapilir; burada release kapisi olarak tekrarlanir.
+      - name: Verify signature (ad-hoc veya Developer ID)
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="dist/HidrostatikTest.app"
+          if [ ! -d "$app" ]; then echo "ERROR: .app bulunamadi."; exit 1; fi
+          codesign --verify --deep --strict --verbose=2 "$app"
+          echo "codesign dogrulandi."
+          if spctl -a -vv "$app"; then
+            echo "Gatekeeper kabul etti (Developer ID imzasi)."
+          else
+            echo "UYARI: Gatekeeper ad-hoc/unsigned paketi reddediyor; notarization yapilmadi."
+          fi
 
       - name: Resolve release assets
         id: assets
         shell: bash
         run: |
-          dmg=$(ls release/*.dmg | head -n 1)
-          sha=$(ls release/*.sha256.txt | head -n 1)
-          notes=$(ls release/*-RELEASE-NOTES.md | head -n 1)
-          echo "dmg=$dmg" >> $GITHUB_OUTPUT
-          echo "sha=$sha" >> $GITHUB_OUTPUT
-          echo "notes=$notes" >> $GITHUB_OUTPUT
+          base="HidrostatikTest-v${{ needs.version_gate.outputs.app_version }}-macos-universal"
+          echo "dmg=release/${base}.dmg" >> "$GITHUB_OUTPUT"
+          echo "sha=release/${base}.sha256.txt" >> "$GITHUB_OUTPUT"
+          echo "dmg_sha=release/${base}.dmg.sha256.txt" >> "$GITHUB_OUTPUT"
+          echo "notes=release/${base}-RELEASE-NOTES.md" >> "$GITHUB_OUTPUT"
 
       - name: Upload macos assets
         uses: actions/upload-artifact@v4
@@ -130,12 +266,19 @@ jobs:
           path: |
             ${{ steps.assets.outputs.dmg }}
             ${{ steps.assets.outputs.sha }}
+            ${{ steps.assets.outputs.dmg_sha }}
             ${{ steps.assets.outputs.notes }}
+          retention-days: 7
 
   publish-release:
-    needs: [build-windows, build-macos]
+    name: GitHub release yayinla
+    needs: [ version_gate, build-windows, build-macos ]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -152,26 +295,47 @@ jobs:
           name: macos-assets
           path: macos-release
 
+      # Indirilen artefaktlarin bozulmadigini yayin oncesi dogrula.
+      - name: Verify downloaded checksums
+        run: |
+          set -euo pipefail
+          cd windows-release
+          for file in *.zip.sha256.txt *.sha256.txt; do
+            [ -f "$file" ] || continue
+            sha256sum -c "$file"
+          done
+          cd ../macos-release
+          for file in *.dmg.sha256.txt *.sha256.txt; do
+            [ -f "$file" ] || continue
+            sha256sum -c "$file"
+          done
+
       - name: Create unified release notes
         run: |
-          echo "# Hidrostatik Test Degerlendirme Release" > unified-notes.md
-          echo "" >> unified-notes.md
-          echo "## Yenilikler (Changelog)" >> unified-notes.md
-          echo "En güncel yenilikleri ve tüm sürüm geçmişini görmek için [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) dosyasına göz atabilirsiniz." >> unified-notes.md
-          echo "" >> unified-notes.md
-          echo "### Windows Sürümü" >> unified-notes.md
-          cat windows-release/*-RELEASE-NOTES.md | grep -v "#" >> unified-notes.md || true
-          echo "" >> unified-notes.md
-          echo "### macOS Sürümü" >> unified-notes.md
-          cat macos-release/*-RELEASE-NOTES.md | grep -v "#" >> unified-notes.md || true
+          {
+            echo "# Hidrostatik Test Degerlendirme v${{ needs.version_gate.outputs.app_version }}"
+            echo ""
+            echo "## Yenilikler (Changelog)"
+            echo "En guncel yenilikler ve tum surum gecmisi icin [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) dosyasina bakin."
+            echo ""
+            echo "## Windows"
+            echo ""
+            sed -e '1d' windows-release/*-RELEASE-NOTES.md
+            echo ""
+            echo "## macOS"
+            echo ""
+            sed -e '1d' macos-release/*-RELEASE-NOTES.md
+          } > unified-notes.md
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            windows-release/*.exe
+            windows-release/*.zip
             windows-release/*.sha256.txt
+            windows-release/*-RELEASE-NOTES.md
             macos-release/*.dmg
             macos-release/*.sha256.txt
+            macos-release/*-RELEASE-NOTES.md
           body_path: unified-notes.md
           prerelease: ${{ github.event.inputs.pre_release == 'true' }}

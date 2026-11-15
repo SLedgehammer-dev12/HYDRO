@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "table_key": "botas_reference_table_2c_10bar_v1",
+  "table_key": "gail_reference_table_2c_10bar_v1",
   "interpolation_method": "bilinear",
   "temperature_axis": {
     "key": "temp_c",

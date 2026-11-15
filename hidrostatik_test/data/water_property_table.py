@@ -166,7 +166,10 @@ def load_water_property_table(
         raise ValueError(f"Su ozelligi CSV satir sayisi hatali: {row_count} != {expected_rows}")
 
     a_grid = tuple(
-        tuple(_require_value(a_lookup[temperature][pressure], temperature, pressure, "A") for pressure in pressure_points)
+        tuple(
+            _require_value(a_lookup[temperature][pressure], temperature, pressure, "A")
+            for pressure in pressure_points
+        )
         for temperature in temperature_points
     )
     beta_grid = tuple(
@@ -193,7 +196,9 @@ def clear_water_property_table_cache() -> None:
     load_water_property_table.cache_clear()
 
 
-def _require_value(value: float | None, temp_c: float, pressure_bar: float, field_name: str) -> float:
+def _require_value(
+    value: float | None, temp_c: float, pressure_bar: float, field_name: str
+) -> float:
     if value is None:
         raise ValueError(
             f"Su ozelligi CSV noktasinda eksik deger var: {field_name}, T={temp_c}, P={pressure_bar}"

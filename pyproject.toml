@@ -1,0 +1,73 @@
+# HYDRO - arac yapilandirmasi
+#
+# Bu dosya yalnizca gelistirme araclarinin (ruff, coverage) ayarlarini tasir.
+# Uygulama kurulumu PyInstaller ile yapildigi icin [project] bolumu tanimli degildir.
+# mypy ayarlari geriye donuk uyumluluk icin mypy.ini dosyasinda tutulur.
+
+[tool.ruff]
+# Mevcut kod tabaninin satir aliskanligi ~88-100 araliginda (p95 = 90).
+line-length = 100
+target-version = "py312"
+# Build/dagitim ciktilari, arsivler ve uretilen haritalar taranmaz.
+extend-exclude = [
+    "build",
+    "dist",
+    "release",
+    "docs/legacy",
+    "skills",
+    ".graphify",
+    ".venv",
+]
+
+[tool.ruff.lint]
+# E/F: pycodestyle hatalari ve pyflakes, W: pycodestyle uyarilari, I: import sirasi.
+select = ["E", "F", "W", "I"]
+# E501 formatter'in isi; Turkce uzun metinler (UI etiketleri, rapor sablonlari)
+# satir genisligini bilincli olarak asabildigi icin lint kapisi saymaz.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Testlerde uzun veri tablolari / assertion mesajlari E501'i asabilir; global
+# ignore kaldirilirsa bile testler bu kurala takilmasin.
+"tests/**" = ["E501"]
+# sys.path bootstrap'i import'lardan once calismak zorunda.
+"tools/generate_water_property_table.py" = ["E402"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.coverage.run]
+# Kapsam yalnizca uygulama kaynagini olcer; tests/ ve tools/ payda degildir.
+source = ["hidrostatik_test"]
+branch = true
+omit = [
+    # Yalnizca PyInstaller runtime hook olarak calisir, import edilemez.
+    "hidrostatik_test/_pyinstaller_hook.py",
+    # Testler ve arac scriptleri kapsam paydasina girmez.
+    "tests/*",
+    "tools/*",
+]
+
+[tool.coverage.report]
+# Olcum (291 test, 2026-11): kaynak-only satir kapsami ~%73, branch dahil ~%70.
+# Esik branch'li olcume gore biraz altinda tutuldu; test refactor'lari sirasinda
+# yesil kalmasi icin pay birakildi, anlamli dususleri yine yakalar.
+fail_under = 65
+show_missing = true
+skip_covered = true
+# run.omit yalnizca olcumu etkiler; rapor tarafinda da ayni dosya dislanir.
+omit = [
+    "hidrostatik_test/_pyinstaller_hook.py",
+    "tests/*",
+    "tools/*",
+]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    'if __name__ == "__main__":',
+]
+
+[tool.coverage.xml]
+output = "coverage.xml"

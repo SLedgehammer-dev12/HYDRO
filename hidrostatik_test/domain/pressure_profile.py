@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from .hydrotest_core import PipeModel, PipeSection, ValidationError
-from .water_properties import calculate_water_density, WATER_DENSITY_DEFAULT_KG_PER_M3
+from .water_properties import WATER_DENSITY_DEFAULT_KG_PER_M3, calculate_water_density
 
 GRAVITY_M_PER_S2: Final[float] = 9.80665
 PRESSURE_CONVERSION_PASCAL_TO_BAR: Final[float] = 100000.0
@@ -61,7 +61,9 @@ class SectionPressureProfileInputs:
             if elevation < self.lowest_elevation_m or elevation > self.highest_elevation_m:
                 raise ValidationError(f"{label} kotu, min/max kot araligi icinde olmalidir.")
         if self.selected_pump_location not in {START_PUMP_LOCATION, END_PUMP_LOCATION}:
-            raise ValidationError("Pompa konumu kullanici tarafindan baslangic veya bitis noktasi olarak secilmelidir.")
+            raise ValidationError(
+                "Pompa konumu kullanici tarafindan baslangic veya bitis noktasi olarak secilmelidir."
+            )
         if self.monitored_pressure_bar is not None and self.monitored_pressure_bar < 0:
             raise ValidationError("Izlenen basinc negatif olamaz.")
 
@@ -133,13 +135,19 @@ def get_location_class_rule(label: str) -> LocationClassRule:
     raise ValidationError(f"Bilinmeyen Location Class secimi: {label}")
 
 
-def evaluate_section_pressure_profile(inputs: SectionPressureProfileInputs) -> SectionPressureProfileResult:
+def evaluate_section_pressure_profile(
+    inputs: SectionPressureProfileInputs,
+) -> SectionPressureProfileResult:
     required_minimum_pressure_at_high_point_bar = (
         inputs.design_pressure_bar * inputs.location_class.minimum_test_factor
     )
     water_temp_c = 15.0
-    hydraulic_span_bar = _hydraulic_head_bar(inputs.highest_elevation_m - inputs.lowest_elevation_m, water_temp_c)
-    required_pressure_with_span_bar = required_minimum_pressure_at_high_point_bar + hydraulic_span_bar
+    hydraulic_span_bar = _hydraulic_head_bar(
+        inputs.highest_elevation_m - inputs.lowest_elevation_m, water_temp_c
+    )
+    required_pressure_with_span_bar = (
+        required_minimum_pressure_at_high_point_bar + hydraulic_span_bar
+    )
     limiting_pressure_at_100_smys_bar, limiting_pipe_description = _pressure_at_100_smys_bar(
         pipe=inputs.pipe,
         smys_mpa=inputs.smys_mpa,
@@ -148,7 +156,9 @@ def evaluate_section_pressure_profile(inputs: SectionPressureProfileInputs) -> S
     total_internal_volume_m3 = inputs.pipe.internal_volume_m3
     within_length_limit = total_length_m <= MAX_TEST_SECTION_LENGTH_M
     within_volume_limit = total_internal_volume_m3 <= MAX_TEST_SECTION_VOLUME_M3
-    within_100_smys_span_limit = required_pressure_with_span_bar <= limiting_pressure_at_100_smys_bar
+    within_100_smys_span_limit = (
+        required_pressure_with_span_bar <= limiting_pressure_at_100_smys_bar
+    )
     start_window = _build_pressure_window(
         location_label=START_PUMP_LOCATION,
         location_elevation_m=inputs.start_elevation_m,
@@ -167,14 +177,20 @@ def evaluate_section_pressure_profile(inputs: SectionPressureProfileInputs) -> S
         lowest_elevation_m=inputs.lowest_elevation_m,
         water_temp_c=water_temp_c,
     )
-    selected_window = start_window if inputs.selected_pump_location == START_PUMP_LOCATION else end_window
+    selected_window = (
+        start_window if inputs.selected_pump_location == START_PUMP_LOCATION else end_window
+    )
     feasible = within_100_smys_span_limit and within_length_limit and within_volume_limit
 
     monitored_meets_minimum: bool | None = None
     monitored_under_maximum: bool | None = None
     if inputs.monitored_pressure_bar is not None:
-        monitored_meets_minimum = inputs.monitored_pressure_bar >= selected_window.minimum_required_pressure_bar
-        monitored_under_maximum = inputs.monitored_pressure_bar <= selected_window.maximum_allowable_pressure_bar
+        monitored_meets_minimum = (
+            inputs.monitored_pressure_bar >= selected_window.minimum_required_pressure_bar
+        )
+        monitored_under_maximum = (
+            inputs.monitored_pressure_bar <= selected_window.maximum_allowable_pressure_bar
+        )
 
     return SectionPressureProfileResult(
         location_class=inputs.location_class,
@@ -209,15 +225,21 @@ def _build_pressure_window(
     lowest_elevation_m: float,
     water_temp_c: float = 15.0,
 ) -> PressureWindow:
-    hydraulic_head_to_high_point_bar = _hydraulic_head_bar(highest_elevation_m - location_elevation_m, water_temp_c)
-    hydraulic_head_to_low_point_bar = _hydraulic_head_bar(location_elevation_m - lowest_elevation_m, water_temp_c)
+    hydraulic_head_to_high_point_bar = _hydraulic_head_bar(
+        highest_elevation_m - location_elevation_m, water_temp_c
+    )
+    hydraulic_head_to_low_point_bar = _hydraulic_head_bar(
+        location_elevation_m - lowest_elevation_m, water_temp_c
+    )
     return PressureWindow(
         location_label=location_label,
         location_elevation_m=location_elevation_m,
         hydraulic_head_to_high_point_bar=hydraulic_head_to_high_point_bar,
         hydraulic_head_to_low_point_bar=hydraulic_head_to_low_point_bar,
-        minimum_required_pressure_bar=required_minimum_pressure_at_high_point_bar + hydraulic_head_to_high_point_bar,
-        maximum_allowable_pressure_bar=maximum_allowable_pressure_at_low_point_bar - hydraulic_head_to_low_point_bar,
+        minimum_required_pressure_bar=required_minimum_pressure_at_high_point_bar
+        + hydraulic_head_to_high_point_bar,
+        maximum_allowable_pressure_bar=maximum_allowable_pressure_at_low_point_bar
+        - hydraulic_head_to_low_point_bar,
     )
 
 

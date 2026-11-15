@@ -1,15 +1,19 @@
 from __future__ import annotations
 
-from pathlib import Path
 import tempfile
 import tkinter as tk
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
+import hidrostatik_test.ui.app as app_module
+from hidrostatik_test.app_metadata import APP_VERSION, SPEC_DOCUMENT_CODE
 from hidrostatik_test.data import BOTAS_REFERENCE_OPTION_LABEL, GAIL_REFERENCE_OPTION_LABEL
-from hidrostatik_test.ui.app import HydrostaticTestApp
-
 from hidrostatik_test.domain.coefficient_manager import CoefficientState
+from hidrostatik_test.domain.hydrotest_core import ValidationError
+from hidrostatik_test.services.download_manager import DownloadManager
+from hidrostatik_test.ui import constants as ui_constants
+from hidrostatik_test.ui.app import HydrostaticTestApp
 from hidrostatik_test.ui.constants import (
     AUTO_A_MODE,
     AUTO_B_MODE,
@@ -18,7 +22,6 @@ from hidrostatik_test.ui.constants import (
     REFERENCE_A_MODE,
     REFERENCE_B_MODE,
 )
-from hidrostatik_test.app_metadata import APP_VERSION, SPEC_DOCUMENT_CODE
 
 
 class UiWorkflowTests(unittest.TestCase):
@@ -48,7 +51,9 @@ class UiWorkflowTests(unittest.TestCase):
         self.app.air_vars["temperature_c"].set("21")
 
         self.assertEqual(self.app.coefficient_manager.get("air_a"), CoefficientState.COMPUTED)
-        self.assertEqual(self.app.field_message_vars["air.a_micro_per_bar"].get(), "Hazir: Hesap guncel.")
+        self.assertEqual(
+            self.app.field_message_vars["air.a_micro_per_bar"].get(), "Hazir: Hesap guncel."
+        )
 
     def test_pressure_evaluation_auto_calculates_a_and_b(self) -> None:
         self._fill_geometry()
@@ -170,7 +175,9 @@ class UiWorkflowTests(unittest.TestCase):
         self.assertEqual(self.app.pressure_vars["b_micro_per_c"].get(), "64.923000")
         self.assertFalse(self.app.use_b_helper_var.get())
         self.assertEqual(self.app.b_helper_vars["water_beta_micro_per_c"].get(), "")
-        self.assertEqual(str(self.app.entry_widgets["helper.steel_alpha_micro_per_c"].cget("state")), "disabled")
+        self.assertEqual(
+            str(self.app.entry_widgets["helper.steel_alpha_micro_per_c"].cget("state")), "disabled"
+        )
 
     def test_pressure_b_reference_mode_accepts_gail_table_without_helper(self) -> None:
         self.app.pressure_vars["temperature_c"].set("10")
@@ -187,7 +194,9 @@ class UiWorkflowTests(unittest.TestCase):
         self.assertEqual(self.app.b_helper_vars["water_beta_micro_per_c"].get(), "")
 
     def test_material_grade_selection_populates_smys(self) -> None:
-        option = next(option for option in self.app.material_grade_combo["values"] if "X65 / L450" in option)
+        option = next(
+            option for option in self.app.material_grade_combo["values"] if "X65 / L450" in option
+        )
 
         self.app.material_grade_var.set(option)
 
@@ -201,11 +210,17 @@ class UiWorkflowTests(unittest.TestCase):
         self.app.section_profile_vars["end_elevation_m"].set("100")
         self.app.section_profile_vars["design_pressure_bar"].set("20")
         self.app.material_grade_var.set(
-            next(option for option in self.app.material_grade_combo["values"] if "Grade B / L245" in option)
+            next(
+                option
+                for option in self.app.material_grade_combo["values"]
+                if "Grade B / L245" in option
+            )
         )
 
         self.assertEqual(self.app.pump_location_var.get(), "")
-        self.assertIn("Pompa konumu kullanici tarafindan", self.app.section_pressure_summary_var.get())
+        self.assertIn(
+            "Pompa konumu kullanici tarafindan", self.app.section_pressure_summary_var.get()
+        )
 
     def test_pressure_evaluation_accepts_manual_b_mode(self) -> None:
         self._fill_geometry()
@@ -316,7 +331,11 @@ class UiWorkflowTests(unittest.TestCase):
         self.app.section_profile_vars["end_elevation_m"].set("100")
         self.app.section_profile_vars["design_pressure_bar"].set("20")
         self.app.material_grade_var.set(
-            next(option for option in self.app.material_grade_combo["values"] if "Grade B / L245" in option)
+            next(
+                option
+                for option in self.app.material_grade_combo["values"]
+                if "Grade B / L245" in option
+            )
         )
         self.app.location_class_var.set("Class 1 - min 1.25 x dizayn basinci")
         self.app.pump_location_var.set("Baslangic noktasi")
@@ -341,7 +360,11 @@ class UiWorkflowTests(unittest.TestCase):
         self.app.section_profile_vars["end_elevation_m"].set("100")
         self.app.section_profile_vars["design_pressure_bar"].set("20")
         self.app.material_grade_var.set(
-            next(option for option in self.app.material_grade_combo["values"] if "Grade B / L245" in option)
+            next(
+                option
+                for option in self.app.material_grade_combo["values"]
+                if "Grade B / L245" in option
+            )
         )
         self.app.location_class_var.set("Class 1 - min 1.25 x dizayn basinci")
         self.app.pump_location_var.set("Baslangic noktasi")
@@ -349,7 +372,9 @@ class UiWorkflowTests(unittest.TestCase):
 
         self.assertEqual(self.app.section_pressure_status_var.get(), "PENCERE ICINDE")
         self.assertIn("min 34.797844 bar", self.app.section_pressure_window_var.get())
-        self.assertIn("Izlenen basinc = 35.000000 bar", self.app.section_pressure_status_detail_var.get())
+        self.assertIn(
+            "Izlenen basinc = 35.000000 bar", self.app.section_pressure_status_detail_var.get()
+        )
         self.assertEqual(self.app.section_pressure_status_label.cget("bg"), "#E6F4EA")
 
     def test_geometry_pressure_status_reports_section_length_limit_exceedance(self) -> None:
@@ -364,7 +389,11 @@ class UiWorkflowTests(unittest.TestCase):
         self.app.section_profile_vars["end_elevation_m"].set("100")
         self.app.section_profile_vars["design_pressure_bar"].set("20")
         self.app.material_grade_var.set(
-            next(option for option in self.app.material_grade_combo["values"] if "Grade B / L245" in option)
+            next(
+                option
+                for option in self.app.material_grade_combo["values"]
+                if "Grade B / L245" in option
+            )
         )
         self.app.location_class_var.set("Class 1 - min 1.25 x dizayn basinci")
         self.app.pump_location_var.set("Baslangic noktasi")
@@ -417,7 +446,9 @@ class UiWorkflowTests(unittest.TestCase):
         self.assertIn("Pig modu", self.app.workflow_steps_var.get())
 
     def test_notebook_contains_field_control_tab(self) -> None:
-        labels = [self.app.notebook.tab(index, "text") for index in range(self.app.notebook.index("end"))]
+        labels = [
+            self.app.notebook.tab(index, "text") for index in range(self.app.notebook.index("end"))
+        ]
 
         self.assertEqual(labels, ["Hava Icerik Testi", "Basinc Degisim Testi", "Saha Grubu"])
 
@@ -440,7 +471,7 @@ class UiWorkflowTests(unittest.TestCase):
         self.app.control_check_vars["ambient_temp"].set(True)
         self.app.control_check_vars["thermal_balance"].set(True)
 
-        self.assertIn("2 / 10", self.app.check_summary_var.get())
+        self.assertIn("2 / 11", self.app.check_summary_var.get())
         self.assertEqual(self.app.check_progress_var.get(), 2.0)
 
     def test_pig_speed_calculation_updates_status_and_outputs(self) -> None:
@@ -464,10 +495,14 @@ class UiWorkflowTests(unittest.TestCase):
         self.assertFalse(self.app.control_check_vars["ambient_temp"].get())
         self.assertEqual(self.app.field_vars["pig_distance_m"].get(), "")
         self.assertEqual(self.app.field_vars["pig_speed_m_per_s"].get(), "")
-        self.assertIn("0 / 10", self.app.check_summary_var.get())
+        self.assertIn("0 / 11", self.app.check_summary_var.get())
 
     def test_catalog_selection_populates_geometry_fields(self) -> None:
-        size_label = next(option for option in self.app.pipe_size_combo.cget("values") if option.startswith("NPS 16 "))
+        size_label = next(
+            option
+            for option in self.app.pipe_size_combo.cget("values")
+            if option.startswith("NPS 16 ")
+        )
         self.app.geometry_catalog_vars["size_option"].set(size_label)
         self.app._on_pipe_size_selected()
         schedule_label = next(
@@ -524,7 +559,11 @@ class UiWorkflowTests(unittest.TestCase):
         self.app._on_air_a_mode_changed()
         self.app.air_a_reference_var.set(BOTAS_REFERENCE_OPTION_LABEL)
         self.app.material_grade_var.set(
-            next(option for option in self.app.material_grade_combo["values"] if "X65 / L450" in option)
+            next(
+                option
+                for option in self.app.material_grade_combo["values"]
+                if "X65 / L450" in option
+            )
         )
         self.app.control_check_vars["ambient_temp"].set(True)
         self.app.water_backend_var.set("Table Interpolation v1 [table_v1]")
@@ -553,7 +592,10 @@ class UiWorkflowTests(unittest.TestCase):
         self.assertEqual(self.app.decision_status_label.cget("bg"), "#FDE7E9")
 
     def test_side_panel_uses_tabbed_workspace(self) -> None:
-        labels = [self.app.side_notebook.tab(index, "text") for index in range(self.app.side_notebook.index("end"))]
+        labels = [
+            self.app.side_notebook.tab(index, "text")
+            for index in range(self.app.side_notebook.index("end"))
+        ]
 
         self.assertEqual(labels, ["Detay Raporu", "Karar ve Akis", "Kayit"])
 
@@ -576,7 +618,10 @@ class UiWorkflowTests(unittest.TestCase):
         self.app._on_tab_changed()
         self.root.update_idletasks()
 
-        self.assertEqual(self.app.active_input_title_label.cget("text"), "Aktif test girdileri: Basinc Degisim Testi")
+        self.assertEqual(
+            self.app.active_input_title_label.cget("text"),
+            "Aktif test girdileri: Basinc Degisim Testi",
+        )
         self.assertFalse(self.app.active_input_frames["air"].winfo_ismapped())
         self.assertTrue(self.app.active_input_frames["pressure"].winfo_ismapped())
 
@@ -584,7 +629,9 @@ class UiWorkflowTests(unittest.TestCase):
         self.app._on_tab_changed()
         self.root.update_idletasks()
 
-        self.assertEqual(self.app.active_input_title_label.cget("text"), "Aktif test girdileri: Saha Grubu")
+        self.assertEqual(
+            self.app.active_input_title_label.cget("text"), "Aktif test girdileri: Saha Grubu"
+        )
         self.assertTrue(self.app.active_input_frames["field"].winfo_ismapped())
 
     def test_side_panel_can_be_hidden_and_restored(self) -> None:
@@ -676,13 +723,17 @@ class UiWorkflowTests(unittest.TestCase):
 
         self.assertIn("Gecerli bir sayi", self.app.field_message_vars["air.temperature_c"].get())
         self.assertIn("gecersiz", self.app.live_notice_var.get())
-        self.assertEqual(str(self.app.entry_widgets["air.temperature_c"].cget("style")), "Hydro.error.TEntry")
+        self.assertEqual(
+            str(self.app.entry_widgets["air.temperature_c"].cget("style")), "Hydro.error.TEntry"
+        )
 
     def test_semantic_invalid_input_sets_error_style(self) -> None:
         self.app.geometry_vars["outside_diameter_mm"].set("10")
         self.app.geometry_vars["wall_thickness_mm"].set("6")
 
-        self.assertIn("yarisindan kucuk", self.app.field_message_vars["geometry.wall_thickness_mm"].get())
+        self.assertIn(
+            "yarisindan kucuk", self.app.field_message_vars["geometry.wall_thickness_mm"].get()
+        )
         self.assertEqual(
             str(self.app.entry_widgets["geometry.wall_thickness_mm"].cget("style")),
             "Hydro.error.TEntry",
@@ -699,19 +750,29 @@ class UiWorkflowTests(unittest.TestCase):
 
     def test_ambient_temp_below_limit_sets_error_style(self) -> None:
         self.app.air_vars["temperature_c"].set("0")
+        self.app.field_vars["ambient_temperature_c"].set("10")
 
-        self.assertIn("10.1", self.app.field_message_vars["air.temperature_c"].get())
-        self.assertIn("altinda", self.app.field_message_vars["air.temperature_c"].get())
+        self.assertNotIn("10.1", self.app.field_message_vars["air.temperature_c"].get())
+        self.assertNotIn("10.1", self.app.field_message_vars["field.ambient_temperature_c"].get())
+
+        self.app.field_vars["ambient_temperature_c"].set("0")
+
+        self.assertIn("10.1", self.app.field_message_vars["field.ambient_temperature_c"].get())
+        self.assertIn("altinda", self.app.field_message_vars["field.ambient_temperature_c"].get())
         self.assertEqual(
-            str(self.app.entry_widgets["air.temperature_c"].cget("style")),
+            str(self.app.entry_widgets["field.ambient_temperature_c"].cget("style")),
             "Hydro.error.TEntry",
         )
+        # Su sicakligi 10.1 kontrolune tabi degildir; mesaji 10.1 icermez.
+        self.assertNotIn("10.1", self.app.field_message_vars["air.temperature_c"].get())
 
     def test_table_mode_without_reference_highlights_reference_combo(self) -> None:
         self.app.air_a_mode_var.set(REFERENCE_A_MODE)
         self.app._on_air_a_mode_changed()
 
-        self.assertEqual(str(self.app.air_a_reference_combo.cget("style")), "Hydro.warning.TCombobox")
+        self.assertEqual(
+            str(self.app.air_a_reference_combo.cget("style")), "Hydro.warning.TCombobox"
+        )
 
     def test_started_profile_without_pump_location_highlights_combo(self) -> None:
         self.app.section_profile_vars["highest_elevation_m"].set("100")
@@ -728,7 +789,9 @@ class UiWorkflowTests(unittest.TestCase):
         self.app.air_vars["pressure_bar"].set("81")
 
         self.assertEqual(self.app.coefficient_manager.get("air_a"), CoefficientState.COMPUTED)
-        self.assertEqual(self.app.field_message_vars["air.a_micro_per_bar"].get(), "Hazir: Hesap guncel.")
+        self.assertEqual(
+            self.app.field_message_vars["air.a_micro_per_bar"].get(), "Hazir: Hesap guncel."
+        )
         self.assertIn("tutarli gorunuyor", self.app.live_notice_var.get())
 
     def test_backend_change_marks_auto_coefficients_stale(self) -> None:
@@ -753,7 +816,9 @@ class UiWorkflowTests(unittest.TestCase):
         self.assertIn("Hava A karsilastirmasi", self.app.air_backend_comparison_var.get())
         self.assertIn("CoolProp EOS", self.app.air_backend_comparison_var.get())
         self.assertIn("Table Interpolation v1", self.app.air_backend_comparison_var.get())
-        self.assertEqual(self.app.active_backend_comparison_var.get(), self.app.air_backend_comparison_var.get())
+        self.assertEqual(
+            self.app.active_backend_comparison_var.get(), self.app.air_backend_comparison_var.get()
+        )
 
     def test_field_tab_disables_backend_comparison_action(self) -> None:
         self.app.notebook.select(2)
@@ -811,12 +876,13 @@ class UiWorkflowTests(unittest.TestCase):
             def wait(self):
                 return "completed"
 
-        with patch(
-            "hidrostatik_test.ui.download_dialog.DownloadDialog",
-            side_effect=FakeDialog,
-        ), patch.object(
-            self.app, "_perform_update_install_after_download"
-        ) as mock_install:
+        with (
+            patch(
+                "hidrostatik_test.ui.download_dialog.DownloadDialog",
+                side_effect=FakeDialog,
+            ),
+            patch.object(self.app, "_perform_update_install_after_download") as mock_install,
+        ):
             self.app._apply_available_update()
 
         self.assertTrue(dialog_shown)
@@ -850,7 +916,11 @@ class UiWorkflowTests(unittest.TestCase):
         self.app.pressure_vars["temperature_c"].set("20")
         self.app.pressure_vars["pressure_bar"].set("80")
         self.app.material_grade_var.set(
-            next(option for option in self.app.material_grade_combo["values"] if "X65 / L450" in option)
+            next(
+                option
+                for option in self.app.material_grade_combo["values"]
+                if "X65 / L450" in option
+            )
         )
         self.app.b_helper_vars["steel_alpha_micro_per_c"].set("12.0")
         self.app._compare_active_backend()
@@ -880,7 +950,360 @@ class UiWorkflowTests(unittest.TestCase):
         self.assertIn("Pa = Pilk - Pson", report)
         self.assertIn("Operasyon Kontrol Noktalari", report)
         self.assertIn("Pig Hiz Hesabi", report)
-        self.assertIn("[x] Dolum sirasinda hava sicakligi +2 degC limitine gore kontrol edildi (10.1)", report)
+        self.assertIn(
+            "[x] Dolum sirasinda hava sicakligi +2 degC limitine gore kontrol edildi (10.1)", report
+        )
+
+    # --- P0/P1 remediation davranis testleri ---
+
+    def _prepare_air_live_result(self) -> None:
+        self._fill_geometry()
+        self.app.air_vars["temperature_c"].set("20")
+        self.app.air_vars["pressure_bar"].set("80")
+        self.assertTrue(self.app._calculate_air_a(log_result=False))
+        self.app.air_vars["actual_added_water_m3"].set("0.0079")
+
+    def test_save_report_txt_writes_report_without_crash(self) -> None:
+        self._fill_geometry()
+        target = Path(tempfile.mkdtemp()) / "rapor.txt"
+
+        with (
+            patch("hidrostatik_test.ui.app.filedialog.asksaveasfilename", return_value=str(target)),
+            patch("hidrostatik_test.ui.app.messagebox.showinfo") as showinfo,
+            patch("hidrostatik_test.ui.app.messagebox.showerror") as showerror,
+        ):
+            self.app._save_report()
+
+        self.assertTrue(target.exists())
+        self.assertIn("Hidrostatik", target.read_text(encoding="utf-8"))
+        showinfo.assert_called_once()
+        showerror.assert_not_called()
+        self.assertEqual(self.app.banner_level, "success")
+
+    def test_save_report_pdf_uses_exporter(self) -> None:
+        self._fill_geometry()
+        target = Path(tempfile.mkdtemp()) / "rapor.pdf"
+
+        with (
+            patch("hidrostatik_test.ui.app.filedialog.asksaveasfilename", return_value=str(target)),
+            patch("hidrostatik_test.services.report_export.export_pdf_report") as export_pdf,
+            patch("hidrostatik_test.services.report_export.export_excel_report") as export_xlsx,
+            patch("hidrostatik_test.ui.app.messagebox.showinfo"),
+            patch("hidrostatik_test.ui.app.messagebox.showerror"),
+        ):
+            self.app._save_report()
+
+        export_pdf.assert_called_once()
+        export_xlsx.assert_not_called()
+        self.assertEqual(export_pdf.call_args.args[0], target)
+
+    def test_save_report_xlsx_uses_exporter(self) -> None:
+        self._fill_geometry()
+        target = Path(tempfile.mkdtemp()) / "rapor.xlsx"
+
+        with (
+            patch("hidrostatik_test.ui.app.filedialog.asksaveasfilename", return_value=str(target)),
+            patch("hidrostatik_test.services.report_export.export_excel_report") as export_xlsx,
+            patch("hidrostatik_test.ui.app.messagebox.showinfo"),
+            patch("hidrostatik_test.ui.app.messagebox.showerror"),
+        ):
+            self.app._save_report()
+
+        export_xlsx.assert_called_once()
+
+    def test_save_report_cancel_does_not_write(self) -> None:
+        with (
+            patch("hidrostatik_test.ui.app.filedialog.asksaveasfilename", return_value=""),
+            patch("hidrostatik_test.ui.app.messagebox.showinfo") as showinfo,
+        ):
+            self.app._save_report()
+
+        showinfo.assert_not_called()
+        self.assertEqual(self.app.report_entries, [])
+
+    def test_save_report_export_error_is_reported_to_user(self) -> None:
+        target = Path(tempfile.mkdtemp()) / "rapor.pdf"
+
+        with (
+            patch("hidrostatik_test.ui.app.filedialog.asksaveasfilename", return_value=str(target)),
+            patch(
+                "hidrostatik_test.services.report_export.export_pdf_report",
+                side_effect=RuntimeError("export boom"),
+            ),
+            patch("hidrostatik_test.ui.app.messagebox.showinfo"),
+            patch("hidrostatik_test.ui.app.messagebox.showerror") as showerror,
+        ):
+            self.app._save_report()
+
+        showerror.assert_called_once()
+        self.assertEqual(self.app.banner_level, "error")
+        self.assertIn("export boom", self.app.banner_var.get())
+
+    def test_stale_coefficient_blocks_successful_live_decision(self) -> None:
+        self._prepare_air_live_result()
+        self.app._refresh_live_test_decision()
+        self.assertEqual(self.app._decisions["air"]["status"], "BASARILI")
+
+        self.app.air_vars["temperature_c"].set("")
+
+        self.assertEqual(self.app.coefficient_manager.get("air_a"), CoefficientState.STALE)
+        self.assertNotEqual(self.app._decisions["air"]["status"], "BASARILI")
+        self.assertEqual(self.app._decisions["air"]["status"], "KATSAYI GUNCELLENMELI")
+
+    def test_mode_change_clears_old_coefficient_value(self) -> None:
+        self.app.air_vars["temperature_c"].set("20")
+        self.app.air_vars["pressure_bar"].set("80")
+        self.assertTrue(self.app._calculate_air_a(log_result=False))
+        self.assertTrue(self.app.coefficient_manager.is_ready("air_a"))
+
+        self.app.air_a_mode_var.set(MANUAL_A_MODE)
+        self.app._on_air_a_mode_changed()
+
+        self.assertEqual(self.app.air_vars["a_micro_per_bar"].get(), "")
+        self.assertFalse(self.app.coefficient_manager.is_ready("air_a"))
+        self.assertEqual(self.app.coefficient_manager.get("air_a"), CoefficientState.EMPTY)
+
+        self.app.air_vars["a_micro_per_bar"].set("45")
+        self.assertTrue(self.app.coefficient_manager.is_ready("air_a"))
+        self.app._on_air_a_mode_changed()
+        self.assertEqual(self.app.air_vars["a_micro_per_bar"].get(), "45")
+
+    def test_table_mode_requires_reference_after_mode_change(self) -> None:
+        self.app.air_vars["temperature_c"].set("15")
+        self.app.air_vars["pressure_bar"].set("80")
+        self.assertTrue(self.app._calculate_air_a(log_result=False))
+
+        self.app.air_a_mode_var.set(REFERENCE_A_MODE)
+        self.app._on_air_a_mode_changed()
+
+        self.assertEqual(self.app.air_vars["a_micro_per_bar"].get(), "")
+        self.assertEqual(self.app.air_a_reference_var.get(), "")
+        self.assertFalse(self.app.coefficient_manager.is_ready("air_a"))
+
+        self.app.air_a_reference_var.set(GAIL_REFERENCE_OPTION_LABEL)
+        self.app._on_air_a_reference_changed()
+        self.assertTrue(self.app.coefficient_manager.is_ready("air_a"))
+
+    def test_pressure_decision_preserved_when_switching_to_air_tab(self) -> None:
+        self._fill_geometry()
+        self.app.notebook.select(1)
+        self.app._on_tab_changed()
+        self.app.pressure_vars["temperature_c"].set("20")
+        self.app.pressure_vars["pressure_bar"].set("80")
+        self.app.pressure_vars["delta_t_c"].set("0.6")
+        self.app.pressure_vars["actual_pressure_change_bar"].set("2.1")
+        self.app._run_pressure_test()
+        self.assertEqual(self.app._decisions["pressure"]["status"], "BASARILI")
+
+        self.app.notebook.select(0)
+        self.app._on_tab_changed()
+
+        self.assertEqual(self.app._decisions["pressure"]["status"], "BASARILI")
+        report = self.app._build_report_text()
+        self.assertIn("Basinc Degisim Testi durumu: BASARILI", report)
+        self.assertIn("Hava Icerik Testi durumu:", report)
+
+        self.app._clear_active_form()
+
+        self.assertEqual(self.app._decisions["pressure"]["status"], "BASARILI")
+        self.assertEqual(self.app._decisions["air"]["status"], "BEKLIYOR")
+
+    def test_live_result_is_recorded_once_per_input_signature(self) -> None:
+        self._prepare_air_live_result()
+        self.app._refresh_live_test_decision()
+        self.app._flush_pending_live_result()
+
+        self.assertGreaterEqual(len(self.app.report_entries), 1)
+        recorded = len(self.app.report_entries)
+
+        self.app._refresh_live_test_decision()
+        self.app._flush_pending_live_result()
+        self.assertEqual(len(self.app.report_entries), recorded)
+
+        self.app.air_vars["actual_added_water_m3"].set("0.0090")
+        self.app._refresh_live_test_decision()
+        self.app._flush_pending_live_result()
+        self.assertEqual(len(self.app.report_entries), recorded + 1)
+
+    def test_failed_air_evaluation_does_not_show_success_banner(self) -> None:
+        self._prepare_air_live_result()
+        self.app.air_vars["actual_added_water_m3"].set("5")
+
+        self.app._run_air_test()
+
+        self.assertEqual(self.app._decisions["air"]["status"], "BASARISIZ")
+        self.assertNotEqual(self.app.banner_level, "success")
+        self.assertEqual(self.app.banner_level, "error")
+        self.assertIn("BASARISIZ", self.app.header_status_var.get())
+
+    def test_non_finite_and_out_of_range_values_are_rejected(self) -> None:
+        for raw in ("nan", "inf", "-inf", "1e999"):
+            self.assertIsNone(self.app._safe_float(raw))
+
+        with self.assertRaises(ValidationError):
+            self.app._read_float(
+                tk.StringVar(value="nan"), "A degeri", "air", "air.a_micro_per_bar"
+            )
+
+        self.app.air_a_mode_var.set(MANUAL_A_MODE)
+        self.app._on_air_a_mode_changed()
+        self.app.air_vars["a_micro_per_bar"].set("450")
+        with self.assertRaises(ValidationError):
+            self.app._read_float(
+                self.app.air_vars["a_micro_per_bar"],
+                "A degeri",
+                "air",
+                "air.a_micro_per_bar",
+            )
+        self.assertIn("aralik", self.app.field_message_vars["air.a_micro_per_bar"].get())
+
+    def test_field_check_definitions_come_from_single_source(self) -> None:
+        self.assertEqual(
+            tuple(app_module.FIELD_CHECK_DEFINITIONS),
+            tuple(ui_constants.FIELD_CHECK_DEFINITIONS),
+        )
+        self.assertEqual(len(ui_constants.FIELD_CHECK_DEFINITIONS), 11)
+        references = {reference for _key, _label, reference in ui_constants.FIELD_CHECK_DEFINITIONS}
+        for expected in ("10.1", "14.3", "15.1", "16-17", "21"):
+            self.assertIn(expected, references)
+
+    def test_ambient_and_water_temperature_are_separate_fields(self) -> None:
+        self.app.air_vars["temperature_c"].set("0")
+        self.app.field_vars["ambient_temperature_c"].set("10")
+
+        self.assertNotIn("10.1", self.app.field_message_vars["air.temperature_c"].get())
+        self.assertEqual(self.app.field_message_vars["field.ambient_temperature_c"].get(), "")
+
+        self.app.field_vars["ambient_temperature_c"].set("0")
+
+        self.assertIn("10.1", self.app.field_message_vars["field.ambient_temperature_c"].get())
+
+    def test_single_field_edit_is_bounded_and_debounced(self) -> None:
+        self.app.air_vars["temperature_c"].set("20")
+        self.app.air_vars["pressure_bar"].set("80")
+        self.app._flush_pending_session_save()
+
+        refresh_calls: list[str] = []
+        original_refresh = self.app._refresh_live_coefficients
+
+        def counting_refresh() -> None:
+            refresh_calls.append("refresh")
+            original_refresh()
+
+        self.app._refresh_live_coefficients = counting_refresh  # type: ignore[method-assign]
+        session_writes: list[dict[str, object]] = []
+        original_update = self.app.session_manager.update_inputs
+
+        def counting_update(inputs: dict[str, object]) -> None:
+            session_writes.append(inputs)
+            original_update(inputs)
+
+        self.app.session_manager.update_inputs = counting_update  # type: ignore[method-assign]
+
+        self.app.air_vars["pressure_bar"].set("81")
+        self.app._flush_pending_session_save()
+
+        self.assertLessEqual(len(refresh_calls), 2)
+        self.assertLessEqual(len(session_writes), 1)
+
+    def test_apply_available_update_passes_download_manager_instance(self) -> None:
+        self.app.latest_update_info = type(
+            "UpdateInfoLike",
+            (),
+            {
+                "update_available": True,
+                "latest_version": "9.9.9",
+                "asset": type(
+                    "AssetLike",
+                    (),
+                    {
+                        "name": "update.zip",
+                        "download_url": "https://example.com/update.zip",
+                        "size": 1024,
+                    },
+                )(),
+            },
+        )()
+        self.app.update_download_dir_var.set(str(Path(tempfile.mkdtemp())))
+        captured: dict[str, object] = {}
+
+        class FakeDialog:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+            def wait(self):
+                return "cancelled"
+
+        with (
+            patch(
+                "hidrostatik_test.ui.download_dialog.DownloadDialog",
+                side_effect=FakeDialog,
+            ),
+            patch("hidrostatik_test.ui.app.messagebox.showinfo"),
+        ):
+            self.app._apply_available_update()
+
+        manager = captured.get("download_manager")
+        self.assertIsInstance(manager, DownloadManager)
+        self.assertNotIsInstance(manager, type)
+        self.assertIs(manager, self.app.download_manager)
+        self.assertFalse(self.app.update_install_in_progress)
+
+    def test_time_series_record_uses_public_session_api(self) -> None:
+        self.app.ts_pressure_var.set("70")
+        self.app.ts_temp_var.set("18")
+
+        with patch.object(
+            self.app.session_manager,
+            "add_time_series_record",
+            wraps=self.app.session_manager.add_time_series_record,
+        ) as add_record:
+            self.app._add_time_series_record()
+
+        add_record.assert_called_once()
+        session = self.app.session_manager.get_active_session()
+        self.assertIsNotNone(session)
+        assert session is not None
+        self.assertEqual(len(session.time_series.get("records", [])), 1)
+        self.assertEqual(self.app.banner_level, "success")
+        self.assertFalse(self.app.session_manager.has_database)
+
+    def test_negative_b_is_accepted_with_explanation(self) -> None:
+        self._fill_geometry()
+        self.app.notebook.select(1)
+        self.app._on_tab_changed()
+        self.app.pressure_vars["temperature_c"].set("20")
+        self.app.pressure_vars["pressure_bar"].set("80")
+        self.app.pressure_b_mode_var.set(MANUAL_B_MODE)
+        self.app._on_pressure_b_mode_changed()
+        self.app.pressure_vars["b_micro_per_c"].set("-100")
+        self.app.pressure_vars["delta_t_c"].set("0.6")
+        self.app.pressure_vars["actual_pressure_change_bar"].set("-0.9")
+
+        self.app._run_pressure_test()
+
+        self.assertNotEqual(self.app._decisions["pressure"]["status"], "DOGRULANAMADI")
+        self.assertEqual(self.app._decisions["pressure"]["status"], "BASARILI")
+        self.assertIn("Negatif B", self.app.active_detail_report_var.get())
+
+    def test_minsize_fits_small_screens(self) -> None:
+        width, height = self.app.root.minsize()
+
+        self.assertGreaterEqual(width, 1024)
+        self.assertGreaterEqual(height, 700)
+        self.assertLessEqual(width, 1280)
+        self.assertLessEqual(height, 840)
+
+    def test_report_contains_acceptance_rules_and_ambiguous_colors_differ(self) -> None:
+        self.app._update_decision_card("Hava Icerik Testi", "DOGRULANAMADI", "Eksik")
+        ambiguous_bg = self.app.decision_status_label.cget("bg")
+        self.app._update_decision_card("Hava Icerik Testi", "BEKLIYOR", "Bekliyor")
+        waiting_bg = self.app.decision_status_label.cget("bg")
+        self.assertNotEqual(ambiguous_bg, waiting_bg)
+
+        report = self.app._build_report_text()
+        self.assertIn("Vpa < 1.06 x Vp", report)
+        self.assertIn("(Pa - Pt) <= 0.3 bar", report)
 
 
 if __name__ == "__main__":

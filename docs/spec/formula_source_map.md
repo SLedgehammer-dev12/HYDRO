@@ -78,7 +78,9 @@ content check is performed with a `1.0 bar` pressure rise.
 - `B` values have been successfully extracted into a program-usable CSV.
 - `A` values have been converted into an estimated numeric table for the public
   `2,4,...,30 degC` curves over `30-120 barg`.
-- The combined `A/B` set is now exposed to users as `BOTAŞ referans tablosu`.
+- The combined public `A/B` set is exposed to users as the separate
+  `GAIL referans tablosu` option; `BOTAŞ referans tablosu` remains the
+  institutional workbook-derived control table.
 - Extraction method:
   - OCR-assisted axis calibration
   - raster peak tracking on the chart image

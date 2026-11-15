@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 import json
-from pathlib import Path
+import math
 import threading
 import tkinter as tk
+from datetime import UTC, datetime
+from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
@@ -18,8 +19,6 @@ from ..app_metadata import (
 )
 from ..data.ab_control_table import (
     ABControlTableError,
-    describe_ab_control_table_range,
-    lookup_ab_control_point,
 )
 from ..data.botas_reference_table import (
     BOTAS_REFERENCE_OPTION_LABEL,
@@ -35,17 +34,25 @@ from ..data.gail_reference_table import (
     is_gail_reference_option,
     lookup_gail_reference_point,
 )
+from ..data.pipe_catalog import (
+    find_api_5l_psl2_grade,
+    find_pipe_size,
+    find_schedule,
+    get_api_5l_psl2_grade_options,
+    get_pipe_size_options,
+    get_schedule_options,
+)
 from ..domain import (
+    MAX_TEST_SECTION_LENGTH_M,
     evaluate_section_pressure_profile,
     get_available_water_property_backends,
     get_default_water_property_backend,
     get_location_class_options,
     get_location_class_rule,
-    MAX_TEST_SECTION_LENGTH_M,
-    MAX_TEST_SECTION_VOLUME_M3,
     get_pump_location_options,
     get_water_property_backend,
 )
+from ..domain.coefficient_manager import CoefficientManager, CoefficientState
 from ..domain.hydrotest_core import (
     SEAMLESS_PIPE_K,
     WELDED_PIPE_K,
@@ -60,24 +67,26 @@ from ..domain.hydrotest_core import (
     evaluate_air_content_test,
     evaluate_pressure_variation_test,
 )
-from ..domain.pressure_profile import SectionPressureProfileInputs, SectionPressureProfileResult
-from ..domain.operations import evaluate_pig_speed, get_pig_speed_limit, get_pig_speed_limit_options, AMBIENT_TEMP_LIMIT_C
-from ..data.pipe_catalog import (
-    find_api_5l_psl2_grade,
-    find_pipe_size,
-    find_schedule,
-    get_api_5l_psl2_grade_options,
-    get_pipe_size_options,
-    get_schedule_options,
+from ..domain.operations import (
+    AMBIENT_TEMP_LIMIT_C,
+    evaluate_pig_speed,
+    get_pig_speed_limit,
+    get_pig_speed_limit_options,
 )
-from ..services.updater import UpdateError, UpdateInfo, fetch_latest_update_info, install_update, open_release_page
-from .helpers import format_field_message, get_visual_level
-from .validators import safe_float as _safe_float_util
-from .wizard import WizardController
-from ..domain.session_manager import SessionManager, TestSession
-from ..domain.time_series import TimeSeriesStore, THERMAL_BALANCE_THRESHOLD_C, THERMAL_BALANCE_MIN_HOURS
-
-from ..domain.coefficient_manager import CoefficientManager, CoefficientState
+from ..domain.pressure_profile import SectionPressureProfileInputs, SectionPressureProfileResult
+from ..domain.session_manager import SessionManager
+from ..domain.time_series import (
+    THERMAL_BALANCE_MIN_HOURS,
+    THERMAL_BALANCE_THRESHOLD_C,
+    TimeSeriesStore,
+)
+from ..services.updater import (
+    UpdateError,
+    UpdateInfo,
+    fetch_latest_update_info,
+    install_update,
+    open_release_page,
+)
 from .constants import (
     AUTO_A_MODE,
     AUTO_B_MODE,
@@ -85,33 +94,15 @@ from .constants import (
     DEFAULT_DECISION_SUMMARY,
     DEFAULT_DECISION_TITLE,
     FIELD_CHECK_DEFINITIONS,
+    FIELD_VALUE_RANGES,
     MANUAL_A_MODE,
     MANUAL_B_MODE,
     REFERENCE_A_MODE,
     REFERENCE_B_MODE,
-    TABLE_A_MODE,
-    TABLE_B_MODE,
 )
-AUTO_A_MODE = "Otomatik"
-TABLE_A_MODE = "Tablo"
-REFERENCE_A_MODE = TABLE_A_MODE
-MANUAL_A_MODE = "Manuel"
-AUTO_B_MODE = "Otomatik"
-TABLE_B_MODE = "Tablo"
-REFERENCE_B_MODE = TABLE_B_MODE
-MANUAL_B_MODE = "Manuel"
-FIELD_CHECK_DEFINITIONS = (
-    ("ambient_temp", "Dolum sirasinda hava sicakligi +2 degC limitine gore kontrol edildi", "10.1"),
-    ("temp_probes", "Boru ve toprak sicaklik problari uygun yerlere yerlestirildi", "10.4"),
-    ("fill_air_entry", "Su dolumu sirasinda sisteme hava girmesi engellendi", "11.2"),
-    ("fill_records", "Doldurulan su hacmi ve sicakligi saatlik olarak kaydedildi", "11.3-11.4"),
-    ("thermal_balance", "Minimum 24 saat termal dengeleme ve 0.5 degC kosulu kontrol edildi", "12"),
-    ("air_content_limit", "Hava icerik testi %6 kabul sinirina gore teyit edildi", "13"),
-    ("pressurization_volume", "14.2 icin basinc-hacim ve %0.2 ilave su limiti izlendi", "14.2"),
-    ("two_hour_hold", "14.3 icin 2 saat bekleme ve 15 dakikalik okumalar alindi", "14.3"),
-    ("pressure_records", "24 saatlik basinc ve sicaklik kayitlari duzenli tutuldu", "15.1"),
-    ("depressurize_discharge", "Basinc dusurme ve bosaltma islemleri kontrollu ve raporlu yapildi", "16-17"),
-)
+from .helpers import format_field_message, get_visual_level
+from .validators import safe_float as _safe_float_util
+from .wizard import WizardController
 
 
 class HydrostaticTestApp:
@@ -159,6 +150,7 @@ class HydrostaticTestApp:
             "actual_pressure_change_bar": tk.StringVar(),
         }
         self.field_vars = {
+            "ambient_temperature_c": tk.StringVar(),
             "pig_distance_m": tk.StringVar(),
             "pig_travel_time_min": tk.StringVar(),
             "pig_speed_m_per_s": tk.StringVar(),
@@ -268,7 +260,21 @@ class HydrostaticTestApp:
         self.decision_title_var = tk.StringVar(value=DEFAULT_DECISION_TITLE)
         self.decision_status_var = tk.StringVar(value=DEFAULT_DECISION_STATUS)
         self.decision_summary_var = tk.StringVar(value=DEFAULT_DECISION_SUMMARY)
-        self.update_status_var = tk.StringVar(value=f"Surum {APP_VERSION} aktif. Guncelleme henuz kontrol edilmedi.")
+        self._decisions: dict[str, dict[str, str]] = {
+            key: {
+                "title": DEFAULT_DECISION_TITLE,
+                "status": DEFAULT_DECISION_STATUS,
+                "summary": DEFAULT_DECISION_SUMMARY,
+            }
+            for key in ("air", "pressure")
+        }
+        self.header_status_var = tk.StringVar(
+            value=f"Karar durumu: {DEFAULT_DECISION_STATUS} - {DEFAULT_DECISION_TITLE}"
+        )
+        self.banner_level = "info"
+        self.update_status_var = tk.StringVar(
+            value=f"Surum {APP_VERSION} aktif. Guncelleme henuz kontrol edilmedi."
+        )
         self.update_detail_var = tk.StringVar(
             value="Acilista otomatik kontrol yapilir. Isterseniz elle de guncelleme kontrolu baslatabilirsiniz."
         )
@@ -291,6 +297,22 @@ class HydrostaticTestApp:
         self.progress_button_reset_jobs: dict[str, str] = {}
         self.progress_button_busy: set[str] = set()
         self._programmatic_coefficient_updates: set[str] = set()
+        self._coefficient_modes: dict[str, str | None] = {
+            "air_a": None,
+            "pressure_a": None,
+            "pressure_b": None,
+        }
+        self._restoring_snapshot = False
+        self._coefficient_refresh_in_progress = False
+        self._live_field_change_in_progress = False
+        self._append_result_in_progress = False
+        self._recording_live_result = False
+        self._live_update_in_progress = False
+        self._pending_live_results: dict[str, tuple[str, str, str]] = {}
+        self._recorded_live_signatures: dict[str, str] = {}
+        self._pending_live_result_job: str | None = None
+        self._session_save_job: str | None = None
+        self.download_manager = None
         self.entry_widgets: dict[str, ttk.Entry] = {}
         self.input_widgets: dict[str, tk.Widget] = {}
         self.field_meta: dict[str, dict[str, str | bool]] = {}
@@ -334,12 +356,13 @@ class HydrostaticTestApp:
         self._update_pig_limit_hint()
         self._refresh_visual_schema()
         import sys
+
         is_testing = "unittest" in sys.modules or "pytest" in sys.modules
         if is_testing:
             import tempfile
+
             self.session_manager = SessionManager(
-                sessions_dir=Path(tempfile.mkdtemp()),
-                use_db=False
+                sessions_dir=Path(tempfile.mkdtemp()), use_db=False
             )
             self.session_manager.create_session("Test Oturumu")
         else:
@@ -384,13 +407,17 @@ class HydrostaticTestApp:
         menu_bar.add_cascade(label="Rapor", menu=report_menu)
 
         update_menu = tk.Menu(menu_bar, tearoff=False)
-        update_menu.add_command(label="Guncelleme Kontrol Et", command=self._check_for_updates_manually)
+        update_menu.add_command(
+            label="Guncelleme Kontrol Et", command=self._check_for_updates_manually
+        )
         update_menu.add_command(
             label="Guncellemeyi Indir ve Uygula",
             command=self._apply_available_update,
         )
         update_menu.add_separator()
-        update_menu.add_command(label="Indirme Klasoru Sec", command=self._choose_update_download_dir)
+        update_menu.add_command(
+            label="Indirme Klasoru Sec", command=self._choose_update_download_dir
+        )
         update_menu.add_command(label="Release Sayfasini Ac", command=self._open_release_page)
         menu_bar.add_cascade(label="Guncelleme", menu=update_menu)
 
@@ -401,14 +428,19 @@ class HydrostaticTestApp:
         self.root.configure(menu=menu_bar)
 
     def _configure_window_geometry(self) -> None:
-        screen_width = max(self.root.winfo_screenwidth(), 1280)
-        screen_height = max(self.root.winfo_screenheight(), 900)
-        width = min(screen_width - 120, max(1440, int(screen_width * 0.84)))
-        height = min(screen_height - 100, max(920, int(screen_height * 0.86)))
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        width = min(max(screen_width - 40, 1024), max(1440, int(screen_width * 0.84)))
+        height = min(max(screen_height - 80, 700), max(920, int(screen_height * 0.86)))
+        width = min(width, max(screen_width - 40, 1024))
+        height = min(height, max(screen_height - 80, 700))
         x_offset = max((screen_width - width) // 2, 0)
         y_offset = max((screen_height - height) // 2, 0)
         self.root.geometry(f"{width}x{height}+{x_offset}+{y_offset}")
-        self.root.minsize(1280, 840)
+        self.root.minsize(
+            max(1024, min(1280, screen_width - 40)),
+            max(700, min(840, screen_height - 80)),
+        )
 
     def _default_update_download_dir(self) -> Path:
         downloads_dir = Path.home() / "Downloads" / "HidrostatikTestUpdates"
@@ -438,10 +470,17 @@ class HydrostaticTestApp:
                         ("disabled", palettes["readonly"]),
                     ],
                 )
-        self.ui_style.configure("Hydro.readonly.TEntry", fieldbackground=palettes["readonly"], background=palettes["readonly"])
+        self.ui_style.configure(
+            "Hydro.readonly.TEntry",
+            fieldbackground=palettes["readonly"],
+            background=palettes["readonly"],
+        )
         self.ui_style.map(
             "Hydro.readonly.TEntry",
-            fieldbackground=[("readonly", palettes["readonly"]), ("disabled", palettes["readonly"])],
+            fieldbackground=[
+                ("readonly", palettes["readonly"]),
+                ("disabled", palettes["readonly"]),
+            ],
             background=[("readonly", palettes["readonly"]), ("disabled", palettes["readonly"])],
         )
 
@@ -466,9 +505,7 @@ class HydrostaticTestApp:
 
     def _refresh_update_download_summary(self) -> None:
         target_dir = self._resolve_update_download_dir(create=False)
-        self.update_download_summary_var.set(
-            f"Guncelleme indirilecek klasor: {target_dir}"
-        )
+        self.update_download_summary_var.set(f"Guncelleme indirilecek klasor: {target_dir}")
 
     def _bind_mousewheel(self, canvas: tk.Canvas) -> None:
         self._active_scroll_canvas = canvas
@@ -504,14 +541,22 @@ class HydrostaticTestApp:
         window_id = canvas.create_window((0, 0), window=content, anchor="nw")
         content.bind(
             "<Configure>",
-            lambda _event, target_canvas=canvas: target_canvas.configure(scrollregion=target_canvas.bbox("all")),
+            lambda _event, target_canvas=canvas: target_canvas.configure(
+                scrollregion=target_canvas.bbox("all")
+            ),
         )
         canvas.bind(
             "<Configure>",
-            lambda event, target_canvas=canvas, item_id=window_id: target_canvas.itemconfigure(item_id, width=event.width),
+            lambda event, target_canvas=canvas, item_id=window_id: target_canvas.itemconfigure(
+                item_id, width=event.width
+            ),
         )
-        canvas.bind("<Enter>", lambda _event, target_canvas=canvas: self._bind_mousewheel(target_canvas))
-        canvas.bind("<Leave>", lambda _event, target_canvas=canvas: self._unbind_mousewheel(target_canvas))
+        canvas.bind(
+            "<Enter>", lambda _event, target_canvas=canvas: self._bind_mousewheel(target_canvas)
+        )
+        canvas.bind(
+            "<Leave>", lambda _event, target_canvas=canvas: self._unbind_mousewheel(target_canvas)
+        )
         return wrapper, content, canvas
 
     def _create_scrollable_tab(self, title: str) -> ttk.Frame:
@@ -544,7 +589,11 @@ class HydrostaticTestApp:
             self.content_pane.sashpos(1, right_width)
 
     def _apply_side_panel_visibility(self) -> None:
-        if not hasattr(self, "content_pane") or not hasattr(self, "side_panel") or not hasattr(self, "side_panel_toggle_button"):
+        if (
+            not hasattr(self, "content_pane")
+            or not hasattr(self, "side_panel")
+            or not hasattr(self, "side_panel_toggle_button")
+        ):
             return
         visible = self.side_panel_visible_var.get()
         pane_names = {str(pane) for pane in self.content_pane.panes()}
@@ -554,7 +603,9 @@ class HydrostaticTestApp:
             self._position_content_sashes()
         elif not visible and side_name in pane_names:
             self.content_pane.forget(self.side_panel)
-        self.side_panel_toggle_button.configure(text="Detay Panelini Gizle" if visible else "Detay Panelini Goster")
+        self.side_panel_toggle_button.configure(
+            text="Detay Panelini Gizle" if visible else "Detay Panelini Goster"
+        )
 
     def _register_help_note(self, widget: tk.Widget) -> tk.Widget:
         self.help_note_widgets.append(widget)
@@ -574,7 +625,9 @@ class HydrostaticTestApp:
         if not hasattr(self, "help_notes_toggle_button"):
             return
         visible = self.help_notes_visible_var.get()
-        self.help_notes_toggle_button.configure(text="Bilgi Notlarini Gizle" if visible else "Bilgi Notlarini Goster")
+        self.help_notes_toggle_button.configure(
+            text="Bilgi Notlarini Gizle" if visible else "Bilgi Notlarini Goster"
+        )
         for widget in self.help_note_widgets:
             if visible:
                 widget.grid()
@@ -582,13 +635,21 @@ class HydrostaticTestApp:
                 widget.grid_remove()
 
     def _apply_geometry_details_visibility(self) -> None:
-        if not hasattr(self, "geometry_segment_frame") or not hasattr(self, "geometry_toggle_button"):
+        if not hasattr(self, "geometry_segment_frame") or not hasattr(
+            self, "geometry_toggle_button"
+        ):
             return
         visible = self.geometry_details_visible_var.get()
-        self.geometry_toggle_button.configure(text="Detaylari Gizle" if visible else "Detaylari Goster")
+        self.geometry_toggle_button.configure(
+            text="Detaylari Gizle" if visible else "Detaylari Goster"
+        )
         if visible:
-            self.geometry_segment_frame.grid(row=6, column=0, columnspan=6, sticky="ew", pady=(8, 0))
-            self.geometry_segment_summary_label.grid(row=7, column=0, columnspan=6, sticky="w", pady=(6, 0))
+            self.geometry_segment_frame.grid(
+                row=6, column=0, columnspan=6, sticky="ew", pady=(8, 0)
+            )
+            self.geometry_segment_summary_label.grid(
+                row=7, column=0, columnspan=6, sticky="w", pady=(6, 0)
+            )
         else:
             self.geometry_segment_frame.grid_remove()
             self.geometry_segment_summary_label.grid_remove()
@@ -647,9 +708,20 @@ class HydrostaticTestApp:
             fill = "#DDEBFF" if tab_key == active_tab else "#FFFFFF"
             outline = "#4A74A8" if tab_key == active_tab else "#C6D0E0"
             tag = f"schema_nav_{tab_key}"
-            canvas.create_rectangle(left, 16, right, 46, fill=fill, outline=outline, width=1.5, tags=(tag,))
-            canvas.create_text((left + right) / 2, 31, text=label, fill="#16365D", font=("Segoe UI", 9, "bold"), tags=(tag,))
-            canvas.tag_bind(tag, "<Button-1>", lambda _event, key=tab_key: self._select_tab_by_key(key))
+            canvas.create_rectangle(
+                left, 16, right, 46, fill=fill, outline=outline, width=1.5, tags=(tag,)
+            )
+            canvas.create_text(
+                (left + right) / 2,
+                31,
+                text=label,
+                fill="#16365D",
+                font=("Segoe UI", 9, "bold"),
+                tags=(tag,),
+            )
+            canvas.tag_bind(
+                tag, "<Button-1>", lambda _event, key=tab_key: self._select_tab_by_key(key)
+            )
 
         pipe_y = 116
         canvas.create_line(28, pipe_y, width - 28, pipe_y, fill="#B9C4D6", width=4)
@@ -665,7 +737,9 @@ class HydrostaticTestApp:
                 top = pipe_y - (visual_height / 2)
                 bottom = pipe_y + (visual_height / 2)
                 fill = palette[(index - 1) % len(palette)]
-                canvas.create_rectangle(current_x, top, current_x + segment_width, bottom, fill=fill, outline="#35506B")
+                canvas.create_rectangle(
+                    current_x, top, current_x + segment_width, bottom, fill=fill, outline="#35506B"
+                )
                 canvas.create_text(
                     current_x + (segment_width / 2),
                     bottom + 16,
@@ -675,7 +749,9 @@ class HydrostaticTestApp:
                 )
                 current_x += segment_width
         else:
-            canvas.create_rectangle(40, pipe_y - 12, width - 40, pipe_y + 12, outline="#C6D0E0", dash=(4, 2))
+            canvas.create_rectangle(
+                40, pipe_y - 12, width - 40, pipe_y + 12, outline="#C6D0E0", dash=(4, 2)
+            )
             canvas.create_text(
                 width / 2,
                 pipe_y,
@@ -689,7 +765,9 @@ class HydrostaticTestApp:
             air_state = self.coefficient_status_vars["air_a"].get()
             canvas.create_oval(52, 150, 88, 186, fill="#D8EEF9", outline="#4A74A8")
             canvas.create_text(70, 168, text="A", fill="#16365D", font=("Segoe UI", 10, "bold"))
-            canvas.create_text(150, 160, text="P = 1.0 bar", fill="#16365D", font=("Segoe UI", 9, "bold"))
+            canvas.create_text(
+                150, 160, text="P = 1.0 bar", fill="#16365D", font=("Segoe UI", 9, "bold")
+            )
             canvas.create_text(242, 160, text="K", fill="#16365D", font=("Segoe UI", 9, "bold"))
             canvas.create_text(320, 160, text="Vpa", fill="#16365D", font=("Segoe UI", 9, "bold"))
             self.visual_schema_var.set(
@@ -702,15 +780,21 @@ class HydrostaticTestApp:
             pressure_b_state = self.coefficient_status_vars["pressure_b"].get()
             canvas.create_text(68, 166, text="A", fill="#16365D", font=("Segoe UI", 10, "bold"))
             canvas.create_text(130, 166, text="B", fill="#16365D", font=("Segoe UI", 10, "bold"))
-            canvas.create_text(210, 154, text="dT = Tilk - Tson", fill="#16365D", font=("Segoe UI", 9, "bold"))
-            canvas.create_text(316, 178, text="Pa = Pilk - Pson", fill="#16365D", font=("Segoe UI", 9, "bold"))
+            canvas.create_text(
+                210, 154, text="dT = Tilk - Tson", fill="#16365D", font=("Segoe UI", 9, "bold")
+            )
+            canvas.create_text(
+                316, 178, text="Pa = Pilk - Pson", fill="#16365D", font=("Segoe UI", 9, "bold")
+            )
             self.visual_schema_var.set(
                 "Basinc degisim testi akisi gosteriliyor. "
                 f"A ve B hazirlandiktan sonra dT ve Pa okunur. A durumu: {pressure_a_state}; "
                 f"B durumu: {pressure_b_state}. Secili backend: {backend_label}."
             )
         else:
-            checked_count = sum(1 for variable in self.control_check_vars.values() if variable.get())
+            checked_count = sum(
+                1 for variable in self.control_check_vars.values() if variable.get()
+            )
             pig_speed = self.field_vars["pig_speed_m_per_s"].get().strip() or "-"
             canvas.create_oval(52, 150, 88, 186, fill="#FCE5CD", outline="#B45F06")
             canvas.create_text(70, 168, text="PIG", fill="#7F3F00", font=("Segoe UI", 8, "bold"))
@@ -722,7 +806,9 @@ class HydrostaticTestApp:
                 fill="#16365D",
                 font=("Segoe UI", 9, "bold"),
             )
-            canvas.create_text(250, 178, text=f"Anlik hiz: {pig_speed} m/sn", fill="#35506B", font=("Segoe UI", 9))
+            canvas.create_text(
+                250, 178, text=f"Anlik hiz: {pig_speed} m/sn", fill="#35506B", font=("Segoe UI", 9)
+            )
             self.visual_schema_var.set(
                 "Saha kontrol akisi gosteriliyor. "
                 f"Isaretlenen kontrol noktasi: {checked_count}/{len(FIELD_CHECK_DEFINITIONS)}. "
@@ -745,16 +831,18 @@ class HydrostaticTestApp:
         container.rowconfigure(4, weight=1)
         container.rowconfigure(3, weight=0)
 
-        self.intro_label = self._register_help_note(ttk.Label(
-            container,
-            text=(
-                "Calisma alani hesap ve saha dogrulama girdileri icindir. Yardimci paneller sagdaki "
-                "sekmelerde tutulur. Referans akisi "
-                f"{SPEC_DOCUMENT_CODE} {SPEC_DOCUMENT_TITLE} ile hizalanmistir."
-            ),
-            wraplength=1180,
-            justify="left",
-        ))
+        self.intro_label = self._register_help_note(
+            ttk.Label(
+                container,
+                text=(
+                    "Calisma alani hesap ve saha dogrulama girdileri icindir. Yardimci paneller sagdaki "
+                    "sekmelerde tutulur. Referans akisi "
+                    f"{SPEC_DOCUMENT_CODE} {SPEC_DOCUMENT_TITLE} ile hizalanmistir."
+                ),
+                wraplength=1180,
+                justify="left",
+            )
+        )
         self.intro_label.grid(row=0, column=0, sticky="ew", pady=(0, 12))
 
         self.banner_label = tk.Label(
@@ -768,6 +856,20 @@ class HydrostaticTestApp:
             pady=8,
         )
         self.banner_label.grid(row=1, column=0, sticky="ew", pady=(0, 12))
+
+        # Yan panel gizliyken de gorunen karar durumu seridi.
+        self.header_status_label = tk.Label(
+            container,
+            textvariable=self.header_status_var,
+            anchor="w",
+            justify="left",
+            bg="#EEF2FF",
+            fg="#243B73",
+            padx=10,
+            pady=6,
+            font=("Segoe UI", 9, "bold"),
+        )
+        self.header_status_label.grid(row=3, column=0, sticky="ew", pady=(0, 12))
 
         workspace_tools = ttk.Frame(container)
         workspace_tools.grid(row=2, column=0, sticky="ew", pady=(0, 12))
@@ -799,15 +901,11 @@ class HydrostaticTestApp:
         session_frame.pack(side="right", padx=(12, 0))
 
         ttk.Label(session_frame, text="Oturum:").pack(side="left")
-        self.session_combo = ttk.Combobox(
-            session_frame, state="readonly", width=24
-        )
+        self.session_combo = ttk.Combobox(session_frame, state="readonly", width=24)
         self.session_combo.pack(side="left", padx=(4, 0))
         self.session_combo.bind("<<ComboboxSelected>>", self._on_session_selected)
 
-        self.new_session_button = ttk.Button(
-            session_frame, text="Yeni", command=self._new_session
-        )
+        self.new_session_button = ttk.Button(session_frame, text="Yeni", command=self._new_session)
         self.new_session_button.pack(side="left", padx=(4, 0))
 
         self.save_session_button = ttk.Button(
@@ -931,13 +1029,15 @@ class HydrostaticTestApp:
             justify="left",
             foreground="#35506B",
         ).grid(row=1, column=0, sticky="ew", pady=(10, 0))
-        self._register_help_note(ttk.Label(
-            visual_frame,
-            text="Guncelleme islemleri menuden yonetilir. Indirme klasoru da Guncelleme menusu altindan secilir.",
-            wraplength=side_wrap,
-            justify="left",
-            foreground="#35506B",
-        )).grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        self._register_help_note(
+            ttk.Label(
+                visual_frame,
+                text="Guncelleme islemleri menuden yonetilir. Indirme klasoru da Guncelleme menusu altindan secilir.",
+                wraplength=side_wrap,
+                justify="left",
+                foreground="#35506B",
+            )
+        ).grid(row=2, column=0, sticky="ew", pady=(8, 0))
         ttk.Label(
             visual_frame,
             textvariable=self.update_download_summary_var,
@@ -962,16 +1062,18 @@ class HydrostaticTestApp:
             justify="left",
             foreground="#35506B",
         ).grid(row=1, column=0, sticky="ew", pady=(10, 0))
-        self._register_help_note(tk.Label(
-            workflow_frame,
-            textvariable=self.workflow_steps_var,
-            anchor="w",
-            justify="left",
-            bg="#F6F8FC",
-            fg="#16365D",
-            padx=10,
-            pady=8,
-        )).grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        self._register_help_note(
+            tk.Label(
+                workflow_frame,
+                textvariable=self.workflow_steps_var,
+                anchor="w",
+                justify="left",
+                bg="#F6F8FC",
+                fg="#16365D",
+                padx=10,
+                pady=8,
+            )
+        ).grid(row=2, column=0, sticky="ew", pady=(10, 0))
         workflow_actions = ttk.Frame(workflow_frame)
         workflow_actions.grid(row=3, column=0, sticky="ew", pady=(12, 0))
         self.run_selected_button = self._create_progress_button(
@@ -1011,7 +1113,9 @@ class HydrostaticTestApp:
             registry=self.coefficient_source_badges,
         )
         self.coefficient_source_badges["air_a"].grid(row=0, column=2, sticky="e", padx=(8, 0))
-        ttk.Label(coefficient_frame, text="Basinc testi A").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(coefficient_frame, text="Basinc testi A").grid(
+            row=1, column=0, sticky="w", pady=(6, 0)
+        )
         ttk.Label(
             coefficient_frame,
             textvariable=self.coefficient_status_vars["pressure_a"],
@@ -1022,8 +1126,12 @@ class HydrostaticTestApp:
             key="pressure_a",
             registry=self.coefficient_source_badges,
         )
-        self.coefficient_source_badges["pressure_a"].grid(row=1, column=2, sticky="e", padx=(8, 0), pady=(6, 0))
-        ttk.Label(coefficient_frame, text="Basinc testi B").grid(row=2, column=0, sticky="w", pady=(6, 0))
+        self.coefficient_source_badges["pressure_a"].grid(
+            row=1, column=2, sticky="e", padx=(8, 0), pady=(6, 0)
+        )
+        ttk.Label(coefficient_frame, text="Basinc testi B").grid(
+            row=2, column=0, sticky="w", pady=(6, 0)
+        )
         ttk.Label(
             coefficient_frame,
             textvariable=self.coefficient_status_vars["pressure_b"],
@@ -1034,7 +1142,9 @@ class HydrostaticTestApp:
             key="pressure_b",
             registry=self.coefficient_source_badges,
         )
-        self.coefficient_source_badges["pressure_b"].grid(row=2, column=2, sticky="e", padx=(8, 0), pady=(6, 0))
+        self.coefficient_source_badges["pressure_b"].grid(
+            row=2, column=2, sticky="e", padx=(8, 0), pady=(6, 0)
+        )
         ttk.Label(
             coefficient_frame,
             textvariable=self.helper_mode_summary_var,
@@ -1091,7 +1201,9 @@ class HydrostaticTestApp:
 
         results_actions = ttk.Frame(results_frame)
         results_actions.grid(row=1, column=0, sticky="ew", pady=(10, 0))
-        ttk.Button(results_actions, text="Raporu Kaydet", command=self._save_report).pack(side="left")
+        ttk.Button(results_actions, text="Raporu Kaydet", command=self._save_report).pack(
+            side="left"
+        )
         ttk.Button(results_actions, text="Sonuclari Temizle", command=self._clear_results).pack(
             side="left", padx=(8, 0)
         )
@@ -1120,8 +1232,12 @@ class HydrostaticTestApp:
         ts_actions = ttk.Frame(time_series_frame)
         ts_actions.grid(row=1, column=0, columnspan=6, sticky="ew", pady=(10, 0))
         ttk.Button(ts_actions, text="Ekle", command=self._add_time_series_record).pack(side="left")
-        ttk.Button(ts_actions, text="Son 24 Saat", command=self._show_time_series_24h).pack(side="left", padx=(8, 0))
-        ttk.Button(ts_actions, text="Termal Denge Kontrolu", command=self._check_thermal_balance_ui).pack(side="left", padx=(8, 0))
+        ttk.Button(ts_actions, text="Son 24 Saat", command=self._show_time_series_24h).pack(
+            side="left", padx=(8, 0)
+        )
+        ttk.Button(
+            ts_actions, text="Termal Denge Kontrolu", command=self._check_thermal_balance_ui
+        ).pack(side="left", padx=(8, 0))
 
         self._show_active_input_panel()
         self._position_content_sashes()
@@ -1146,16 +1262,18 @@ class HydrostaticTestApp:
             justify="left",
             foreground="#35506B",
         ).grid(row=1, column=0, sticky="ew", pady=(6, 0))
-        self._register_help_note(ttk.Label(
-            sidebar_header,
-            text=(
-                "Tum kullanici girisleri bu panelde toplanir. Orta bolmede sadece secili testin "
-                "is akisi, sonuc ozetleri ve calisma kartlari gosterilir."
-            ),
-            wraplength=self.input_wraplength,
-            justify="left",
-            foreground="#35506B",
-        )).grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        self._register_help_note(
+            ttk.Label(
+                sidebar_header,
+                text=(
+                    "Tum kullanici girisleri bu panelde toplanir. Orta bolmede sadece secili testin "
+                    "is akisi, sonuc ozetleri ve calisma kartlari gosterilir."
+                ),
+                wraplength=self.input_wraplength,
+                justify="left",
+                foreground="#35506B",
+            )
+        ).grid(row=2, column=0, sticky="ew", pady=(8, 0))
 
         geometry_shell = ttk.Frame(content)
         geometry_shell.grid(row=1, column=0, sticky="ew", pady=(12, 0))
@@ -1217,7 +1335,9 @@ class HydrostaticTestApp:
         self.pipe_size_combo.grid(row=0, column=1, sticky="ew", padx=(0, 12), pady=6)
         self.pipe_size_combo.bind("<<ComboboxSelected>>", self._on_pipe_size_selected)
 
-        ttk.Label(geometry_frame, text="Schedule / Et kalinligi").grid(row=0, column=2, sticky="w", pady=6)
+        ttk.Label(geometry_frame, text="Schedule / Et kalinligi").grid(
+            row=0, column=2, sticky="w", pady=6
+        )
         self.pipe_schedule_combo = ttk.Combobox(
             geometry_frame,
             textvariable=self.geometry_catalog_vars["schedule_option"],
@@ -1226,9 +1346,9 @@ class HydrostaticTestApp:
             width=18,
         )
         self.pipe_schedule_combo.grid(row=0, column=3, sticky="ew", padx=(0, 12), pady=6)
-        ttk.Button(geometry_frame, text="Listeden Doldur", command=self._apply_catalog_selection).grid(
-            row=0, column=4, sticky="w", pady=6
-        )
+        ttk.Button(
+            geometry_frame, text="Listeden Doldur", command=self._apply_catalog_selection
+        ).grid(row=0, column=4, sticky="w", pady=6)
         self.geometry_toggle_button = ttk.Button(
             geometry_frame,
             text="Detaylari Goster",
@@ -1260,7 +1380,9 @@ class HydrostaticTestApp:
             column=4,
         )
 
-        profile_frame = ttk.LabelFrame(geometry_frame, text="Test Bolumu Profili ve Basinc Penceresi", padding=8)
+        profile_frame = ttk.LabelFrame(
+            geometry_frame, text="Test Bolumu Profili ve Basinc Penceresi", padding=8
+        )
         profile_frame.grid(row=2, column=0, columnspan=6, sticky="ew", pady=(6, 4))
         profile_frame.columnconfigure(1, weight=1)
         profile_frame.columnconfigure(3, weight=1)
@@ -1302,7 +1424,9 @@ class HydrostaticTestApp:
             variable=self.section_profile_vars["design_pressure_bar"],
             field_key="geometry.design_pressure_bar",
         )
-        ttk.Label(profile_frame, text="Boru malzeme kalitesi").grid(row=2, column=2, sticky="w", pady=6)
+        ttk.Label(profile_frame, text="Boru malzeme kalitesi").grid(
+            row=2, column=2, sticky="w", pady=6
+        )
         material_grade_container = ttk.Frame(profile_frame)
         material_grade_container.grid(row=2, column=3, sticky="ew", padx=(0, 12), pady=6)
         material_grade_container.columnconfigure(0, weight=1)
@@ -1373,7 +1497,9 @@ class HydrostaticTestApp:
             required=True,
         )
         profile_visual_frame = ttk.LabelFrame(profile_frame, text="Kot Semasi", padding=6)
-        profile_visual_frame.grid(row=0, column=4, rowspan=5, sticky="nsew", padx=(6, 0), pady=(0, 6))
+        profile_visual_frame.grid(
+            row=0, column=4, rowspan=5, sticky="nsew", padx=(6, 0), pady=(0, 6)
+        )
         profile_visual_frame.columnconfigure(0, weight=1)
         profile_visual_frame.rowconfigure(0, weight=1)
         self.section_profile_canvas = tk.Canvas(
@@ -1434,13 +1560,15 @@ class HydrostaticTestApp:
 
         segment_actions = ttk.Frame(geometry_frame)
         segment_actions.grid(row=3, column=0, columnspan=6, sticky="w", pady=(2, 6))
-        ttk.Button(segment_actions, text="Segment Ekle", command=self._add_geometry_segment).pack(side="left")
-        ttk.Button(segment_actions, text="Secili Segmenti Sil", command=self._remove_selected_segment).pack(
-            side="left", padx=(8, 0)
+        ttk.Button(segment_actions, text="Segment Ekle", command=self._add_geometry_segment).pack(
+            side="left"
         )
-        ttk.Button(segment_actions, text="Segmentleri Temizle", command=self._clear_geometry_segments).pack(
-            side="left", padx=(8, 0)
-        )
+        ttk.Button(
+            segment_actions, text="Secili Segmenti Sil", command=self._remove_selected_segment
+        ).pack(side="left", padx=(8, 0))
+        ttk.Button(
+            segment_actions, text="Segmentleri Temizle", command=self._clear_geometry_segments
+        ).pack(side="left", padx=(8, 0))
 
         self.geometry_segment_frame = ttk.Frame(geometry_frame)
         self.geometry_segment_frame.columnconfigure(0, weight=1)
@@ -1463,7 +1591,9 @@ class HydrostaticTestApp:
         self.segment_tree.column("wt", width=80, anchor="e")
         self.segment_tree.column("length", width=90, anchor="e")
         self.segment_tree.grid(row=0, column=0, sticky="ew")
-        segment_scroll = ttk.Scrollbar(self.geometry_segment_frame, orient="vertical", command=self.segment_tree.yview)
+        segment_scroll = ttk.Scrollbar(
+            self.geometry_segment_frame, orient="vertical", command=self.segment_tree.yview
+        )
         segment_scroll.grid(row=0, column=1, sticky="ns")
         self.segment_tree.configure(yscrollcommand=segment_scroll.set)
 
@@ -1541,7 +1671,9 @@ class HydrostaticTestApp:
         )
         air_a_mode_combo.grid(row=2, column=1, sticky="ew", padx=(0, 12), pady=6)
         air_a_mode_combo.bind("<<ComboboxSelected>>", self._on_air_a_mode_changed)
-        ttk.Label(conditions_frame, text="A referans tablosu").grid(row=2, column=2, sticky="w", pady=6)
+        ttk.Label(conditions_frame, text="A referans tablosu").grid(
+            row=2, column=2, sticky="w", pady=6
+        )
         self.air_a_reference_combo = ttk.Combobox(
             conditions_frame,
             textvariable=self.air_a_reference_var,
@@ -1557,6 +1689,14 @@ class HydrostaticTestApp:
             widget=self.air_a_reference_combo,
             section="air",
             label="A referans tablosu",
+            required=False,
+        )
+        self._add_entry(
+            conditions_frame,
+            3,
+            "Ortam hava sicakligi (10.1) [degC]",
+            self.field_vars["ambient_temperature_c"],
+            field_key="field.ambient_temperature_c",
             required=False,
         )
 
@@ -1579,7 +1719,9 @@ class HydrostaticTestApp:
             field_key="air.actual_added_water_m3",
             column=2,
         )
-        ttk.Label(measurements_frame, text="K faktor preset").grid(row=1, column=0, sticky="w", pady=6)
+        ttk.Label(measurements_frame, text="K faktor preset").grid(
+            row=1, column=0, sticky="w", pady=6
+        )
         k_preset = ttk.Combobox(
             measurements_frame,
             textvariable=self.k_preset_var,
@@ -1641,7 +1783,9 @@ class HydrostaticTestApp:
             key="pressure_a",
             registry=self.inline_coefficient_source_badges,
         )
-        self.inline_coefficient_source_badges["pressure_a"].grid(row=2, column=0, sticky="w", pady=(0, 6))
+        self.inline_coefficient_source_badges["pressure_a"].grid(
+            row=2, column=0, sticky="w", pady=(0, 6)
+        )
         ttk.Label(
             conditions_frame,
             textvariable=self.coefficient_status_vars["pressure_a"],
@@ -1652,7 +1796,9 @@ class HydrostaticTestApp:
             key="pressure_b",
             registry=self.inline_coefficient_source_badges,
         )
-        self.inline_coefficient_source_badges["pressure_b"].grid(row=2, column=2, sticky="w", pady=(0, 6))
+        self.inline_coefficient_source_badges["pressure_b"].grid(
+            row=2, column=2, sticky="w", pady=(0, 6)
+        )
         ttk.Label(
             conditions_frame,
             textvariable=self.coefficient_status_vars["pressure_b"],
@@ -1678,7 +1824,9 @@ class HydrostaticTestApp:
         )
         pressure_b_mode_combo.grid(row=3, column=3, sticky="ew", padx=(0, 12), pady=6)
         pressure_b_mode_combo.bind("<<ComboboxSelected>>", self._on_pressure_b_mode_changed)
-        ttk.Label(conditions_frame, text="A referans tablosu").grid(row=4, column=0, sticky="w", pady=6)
+        ttk.Label(conditions_frame, text="A referans tablosu").grid(
+            row=4, column=0, sticky="w", pady=6
+        )
         self.pressure_a_reference_combo = ttk.Combobox(
             conditions_frame,
             textvariable=self.pressure_a_reference_var,
@@ -1688,7 +1836,9 @@ class HydrostaticTestApp:
             width=24,
         )
         self.pressure_a_reference_combo.grid(row=4, column=1, sticky="ew", padx=(0, 12), pady=6)
-        self.pressure_a_reference_combo.bind("<<ComboboxSelected>>", self._on_pressure_a_reference_changed)
+        self.pressure_a_reference_combo.bind(
+            "<<ComboboxSelected>>", self._on_pressure_a_reference_changed
+        )
         self._register_choice_widget(
             field_key="pressure.a_reference_table",
             widget=self.pressure_a_reference_combo,
@@ -1696,7 +1846,9 @@ class HydrostaticTestApp:
             label="A referans tablosu",
             required=False,
         )
-        ttk.Label(conditions_frame, text="B referans tablosu").grid(row=4, column=2, sticky="w", pady=6)
+        ttk.Label(conditions_frame, text="B referans tablosu").grid(
+            row=4, column=2, sticky="w", pady=6
+        )
         self.pressure_b_reference_combo = ttk.Combobox(
             conditions_frame,
             textvariable=self.pressure_b_reference_var,
@@ -1706,7 +1858,9 @@ class HydrostaticTestApp:
             width=24,
         )
         self.pressure_b_reference_combo.grid(row=4, column=3, sticky="ew", padx=(0, 12), pady=6)
-        self.pressure_b_reference_combo.bind("<<ComboboxSelected>>", self._on_pressure_b_reference_changed)
+        self.pressure_b_reference_combo.bind(
+            "<<ComboboxSelected>>", self._on_pressure_b_reference_changed
+        )
         self._register_choice_widget(
             field_key="pressure.b_reference_table",
             widget=self.pressure_b_reference_combo,
@@ -1715,7 +1869,9 @@ class HydrostaticTestApp:
             required=False,
         )
 
-        measurements_frame = ttk.LabelFrame(frame, text="Basinc Testi - Olculen Degerler", padding=12)
+        measurements_frame = ttk.LabelFrame(
+            frame, text="Basinc Testi - Olculen Degerler", padding=12
+        )
         measurements_frame.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
         measurements_frame.columnconfigure(1, weight=1)
         measurements_frame.columnconfigure(3, weight=1)
@@ -1773,7 +1929,9 @@ class HydrostaticTestApp:
         checklist_frame = ttk.LabelFrame(frame, text="Saha Kontrol Girdileri", padding=12)
         checklist_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
         checklist_frame.columnconfigure(1, weight=1)
-        ttk.Label(checklist_frame, text="Durum", font=("Segoe UI", 9, "bold")).grid(row=0, column=0, sticky="w")
+        ttk.Label(checklist_frame, text="Durum", font=("Segoe UI", 9, "bold")).grid(
+            row=0, column=0, sticky="w"
+        )
         ttk.Label(checklist_frame, text="Kontrol noktasi", font=("Segoe UI", 9, "bold")).grid(
             row=0, column=1, sticky="w"
         )
@@ -1781,9 +1939,12 @@ class HydrostaticTestApp:
             ttk.Checkbutton(checklist_frame, variable=self.control_check_vars[key]).grid(
                 row=row_index, column=0, sticky="w", padx=(0, 8), pady=4
             )
-            ttk.Label(checklist_frame, text=label, wraplength=self.input_subframe_wraplength, justify="left").grid(
-                row=row_index, column=1, sticky="w", pady=4
-            )
+            ttk.Label(
+                checklist_frame,
+                text=label,
+                wraplength=self.input_subframe_wraplength,
+                justify="left",
+            ).grid(row=row_index, column=1, sticky="w", pady=4)
             ttk.Label(checklist_frame, text=reference, foreground="#35506B").grid(
                 row=row_index, column=2, sticky="w", pady=4, padx=(8, 0)
             )
@@ -1854,7 +2015,9 @@ class HydrostaticTestApp:
         self.input_panel_title_var.set(
             "Sol paneldeki tum giris kutulari aktif sekme ile eslesir. Geometri ve test bolumu profili her zaman ustte tutulur."
         )
-        self.active_input_title_label.configure(text=title_map.get(active_tab, "Aktif test girdileri"))
+        self.active_input_title_label.configure(
+            text=title_map.get(active_tab, "Aktif test girdileri")
+        )
         for key, frame in self.active_input_frames.items():
             if key == active_tab:
                 frame.grid()
@@ -1922,15 +2085,17 @@ class HydrostaticTestApp:
         reference_frame = ttk.LabelFrame(frame, text="Katsayi ve Referans Ozeti", padding=12)
         reference_frame.grid(row=2, column=0, sticky="ew", pady=(14, 0))
         reference_frame.columnconfigure(0, weight=1)
-        self._register_help_note(ttk.Label(
-            reference_frame,
-            text=(
-                "Hava icerik testinde kullanici girdileri solda toplanir. Bu merkez panel, "
-                "A katsayisinin durumu ile karar dayanaklarini toplu gosterir."
-            ),
-            wraplength=self.workspace_wraplength,
-            justify="left",
-        )).grid(row=0, column=0, sticky="ew")
+        self._register_help_note(
+            ttk.Label(
+                reference_frame,
+                text=(
+                    "Hava icerik testinde kullanici girdileri solda toplanir. Bu merkez panel, "
+                    "A katsayisinin durumu ile karar dayanaklarini toplu gosterir."
+                ),
+                wraplength=self.workspace_wraplength,
+                justify="left",
+            )
+        ).grid(row=0, column=0, sticky="ew")
         ttk.Label(
             reference_frame,
             textvariable=self.air_backend_comparison_var,
@@ -1996,18 +2161,14 @@ class HydrostaticTestApp:
             text="A Hesapla",
             command=self._on_pressure_a_calculate_button,
         )
-        self.pressure_a_calculate_button.grid(
-            row=2, column=0, sticky="w", pady=6
-        )
+        self.pressure_a_calculate_button.grid(row=2, column=0, sticky="w", pady=6)
         self.b_helper_calculate_button = self._create_progress_button(
             helper_frame,
             key="pressure_b_calculate",
             text="B Hesapla",
             command=self._on_b_helper_calculate_button,
         )
-        self.b_helper_calculate_button.grid(
-            row=2, column=1, sticky="w", pady=6
-        )
+        self.b_helper_calculate_button.grid(row=2, column=1, sticky="w", pady=6)
         self.pressure_test_button = self._create_progress_button(
             helper_frame,
             key="pressure_test",
@@ -2015,15 +2176,17 @@ class HydrostaticTestApp:
             command=self._on_pressure_test_button,
         )
         self.pressure_test_button.grid(row=2, column=2, sticky="w", pady=6)
-        self._register_help_note(ttk.Label(
-            helper_frame,
-            text=(
-                "Basinc degisim testinde soldaki girdilerle A/B katsayilari burada hazirlanir ve karar "
-                "kurali tek merkezden izlenir."
-            ),
-            wraplength=self.workspace_wraplength,
-            justify="left",
-        )).grid(row=3, column=0, columnspan=4, sticky="w", pady=(10, 0))
+        self._register_help_note(
+            ttk.Label(
+                helper_frame,
+                text=(
+                    "Basinc degisim testinde soldaki girdilerle A/B katsayilari burada hazirlanir ve karar "
+                    "kurali tek merkezden izlenir."
+                ),
+                wraplength=self.workspace_wraplength,
+                justify="left",
+            )
+        ).grid(row=3, column=0, columnspan=4, sticky="w", pady=(10, 0))
 
         reference_frame = ttk.LabelFrame(frame, text="Referans ve Kontrol Ozeti", padding=12)
         reference_frame.grid(row=2, column=0, sticky="ew", pady=(14, 0))
@@ -2080,15 +2243,17 @@ class HydrostaticTestApp:
         pig_frame = ttk.LabelFrame(frame, text="Saha Hesaplari ve Yontemler", padding=12)
         pig_frame.grid(row=1, column=0, sticky="ew", pady=(14, 0))
         pig_frame.columnconfigure(0, weight=1)
-        self._register_help_note(ttk.Label(
-            pig_frame,
-            text=(
-                "Soldaki checklist ve pig girisleri saha uygulama notlari ile birlikte bu merkez "
-                "panelden izlenir."
-            ),
-            wraplength=self.workspace_wraplength,
-            justify="left",
-        )).grid(row=0, column=0, sticky="ew")
+        self._register_help_note(
+            ttk.Label(
+                pig_frame,
+                text=(
+                    "Soldaki checklist ve pig girisleri saha uygulama notlari ile birlikte bu merkez "
+                    "panelden izlenir."
+                ),
+                wraplength=self.workspace_wraplength,
+                justify="left",
+            )
+        ).grid(row=0, column=0, sticky="ew")
         self.pig_calculate_button = self._create_progress_button(
             pig_frame,
             key="pig_calculate",
@@ -2111,21 +2276,23 @@ class HydrostaticTestApp:
 
         methods_frame = ttk.LabelFrame(frame, text="A ve B Tespit Yontemleri", padding=12)
         methods_frame.grid(row=2, column=0, sticky="ew", pady=(14, 0))
-        self._register_help_note(ttk.Label(
-            methods_frame,
-            text=(
-                "Programda su an 4 tespit yolu vardir.\n"
-                "A icin: 1) otomatik backend hesabi (CoolProp EOS veya Table Interpolation v1), "
-                "2) BOTA\u015e veya GAIL referans tablosu, 3) manuel/prosedur tablosu girisi.\n"
-                "B icin: 1) otomatik backend hesabi (su beta - celik alpha), 2) BOTA\u015e veya GAIL referans tablosu, "
-                "3) manuel/prosedur tablosu girisi.\n"
-                "Table Interpolation v1 dagitima uygun ikinci runtime backend olarak 0-40 degC ve 1-150 bar "
-                "araliginda 1x1 grid ile calisir. Secili backend sag panelden degistirilebilir ve burada "
-                "karsilastirma ozeti alinabilir."
-            ),
-            wraplength=self.workspace_wraplength,
-            justify="left",
-        )).grid(row=0, column=0, sticky="w")
+        self._register_help_note(
+            ttk.Label(
+                methods_frame,
+                text=(
+                    "Programda su an 4 tespit yolu vardir.\n"
+                    "A icin: 1) otomatik backend hesabi (CoolProp EOS veya Table Interpolation v1), "
+                    "2) BOTA\u015e veya GAIL referans tablosu, 3) manuel/prosedur tablosu girisi.\n"
+                    "B icin: 1) otomatik backend hesabi (su beta - celik alpha), 2) BOTA\u015e veya GAIL referans tablosu, "
+                    "3) manuel/prosedur tablosu girisi.\n"
+                    "Table Interpolation v1 dagitima uygun ikinci runtime backend olarak 0-40 degC ve 1-150 bar "
+                    "araliginda 1x1 grid ile calisir. Secili backend sag panelden degistirilebilir ve burada "
+                    "karsilastirma ozeti alinabilir."
+                ),
+                wraplength=self.workspace_wraplength,
+                justify="left",
+            )
+        ).grid(row=0, column=0, sticky="w")
 
         ttk.Label(
             frame,
@@ -2144,9 +2311,11 @@ class HydrostaticTestApp:
         column: int = 0,
         field_key: str | None = None,
         readonly: bool = False,
+        required: bool | None = None,
     ) -> None:
         section = "general"
-        required = not readonly
+        if required is None:
+            required = not readonly
         if field_key is not None:
             prefix = field_key.split(".", 1)[0]
             section = "pressure" if prefix == "helper" else prefix
@@ -2244,6 +2413,7 @@ class HydrostaticTestApp:
             "pressure.actual_pressure_change_bar",
             "helper.steel_alpha_micro_per_c",
             "helper.water_beta_micro_per_c",
+            "field.ambient_temperature_c",
             "field.pig_distance_m",
             "field.pig_travel_time_min",
             "field.pig_speed_m_per_s",
@@ -2274,7 +2444,9 @@ class HydrostaticTestApp:
         return None
 
     def _apply_field_visual_state(self, field_key: str, level: str) -> None:
-        normalized_level = level if level in {"neutral", "success", "warning", "error"} else "neutral"
+        normalized_level = (
+            level if level in {"neutral", "success", "warning", "error"} else "neutral"
+        )
         self.field_validation_levels[field_key] = normalized_level
         style_name = self._widget_style_for_field(field_key, normalized_level)
         widget = self.input_widgets.get(field_key)
@@ -2296,7 +2468,9 @@ class HydrostaticTestApp:
         for variable in self.section_profile_vars.values():
             variable.trace_add("write", lambda *_: self._refresh_geometry_summary())
         self.material_grade_var.trace_add("write", lambda *_: self._on_material_grade_changed())
-        self.material_grade_var.trace_add("write", lambda *_: self._refresh_choice_validation_states())
+        self.material_grade_var.trace_add(
+            "write", lambda *_: self._refresh_choice_validation_states()
+        )
         for field_key, variable in (
             [(f"geometry.{key}", variable) for key, variable in self.geometry_vars.items()]
             + [(f"geometry.{key}", variable) for key, variable in self.section_profile_vars.items()]
@@ -2306,39 +2480,58 @@ class HydrostaticTestApp:
             + [(f"helper.{key}", variable) for key, variable in self.b_helper_vars.items()]
         ):
             if field_key in self.field_meta:
-                variable.trace_add("write", lambda *_args, key=field_key, var=variable: self._on_live_field_change(key, var))
+                variable.trace_add(
+                    "write",
+                    lambda *_args, key=field_key, var=variable: self._on_live_field_change(
+                        key, var
+                    ),
+                )
         self.location_class_var.trace_add("write", lambda *_: self._refresh_geometry_summary())
-        self.location_class_var.trace_add("write", lambda *_: self._refresh_choice_validation_states())
+        self.location_class_var.trace_add(
+            "write", lambda *_: self._refresh_choice_validation_states()
+        )
         self.pump_location_var.trace_add("write", lambda *_: self._refresh_geometry_summary())
-        self.pump_location_var.trace_add("write", lambda *_: self._refresh_choice_validation_states())
-        self.air_a_reference_var.trace_add("write", lambda *_: self._refresh_choice_validation_states())
-        self.pressure_a_reference_var.trace_add("write", lambda *_: self._refresh_choice_validation_states())
-        self.pressure_b_reference_var.trace_add("write", lambda *_: self._refresh_choice_validation_states())
-        self.air_vars["temperature_c"].trace_add("write", lambda *_: self._mark_dependencies_changed(("air_a",)))
-        self.air_vars["pressure_bar"].trace_add("write", lambda *_: self._mark_dependencies_changed(("air_a",)))
-        self.air_vars["pressure_bar"].trace_add("write", lambda *_: self._refresh_geometry_summary())
-        self.pressure_vars["temperature_c"].trace_add(
-            "write", lambda *_: self._mark_dependencies_changed(("pressure_a", "pressure_b"))
+        self.pump_location_var.trace_add(
+            "write", lambda *_: self._refresh_choice_validation_states()
+        )
+        self.air_a_reference_var.trace_add(
+            "write", lambda *_: self._refresh_choice_validation_states()
+        )
+        self.pressure_a_reference_var.trace_add(
+            "write", lambda *_: self._refresh_choice_validation_states()
+        )
+        self.pressure_b_reference_var.trace_add(
+            "write", lambda *_: self._refresh_choice_validation_states()
+        )
+        self.air_vars["pressure_bar"].trace_add(
+            "write", lambda *_: self._refresh_geometry_summary()
         )
         self.pressure_vars["pressure_bar"].trace_add(
-            "write", lambda *_: self._mark_dependencies_changed(("pressure_a", "pressure_b"))
-        )
-        self.pressure_vars["pressure_bar"].trace_add("write", lambda *_: self._refresh_geometry_summary())
-        self.b_helper_vars["steel_alpha_micro_per_c"].trace_add(
-            "write", lambda *_: self._mark_dependencies_changed(("pressure_b",))
+            "write", lambda *_: self._refresh_geometry_summary()
         )
         for variable in self.control_check_vars.values():
             variable.trace_add("write", lambda *_: self._update_check_summary())
         self.pig_mode_var.trace_add("write", lambda *_: self._update_pig_limit_hint())
-        self.update_download_dir_var.trace_add("write", lambda *_: self._refresh_update_download_summary())
+        self.update_download_dir_var.trace_add(
+            "write", lambda *_: self._refresh_update_download_summary()
+        )
         self.air_vars["a_micro_per_bar"].trace_add(
-            "write", lambda *_: self._on_coefficient_field_changed("air_a", self.air_vars["a_micro_per_bar"])
+            "write",
+            lambda *_: self._on_coefficient_field_changed(
+                "air_a", self.air_vars["a_micro_per_bar"]
+            ),
         )
         self.pressure_vars["a_micro_per_bar"].trace_add(
-            "write", lambda *_: self._on_coefficient_field_changed("pressure_a", self.pressure_vars["a_micro_per_bar"])
+            "write",
+            lambda *_: self._on_coefficient_field_changed(
+                "pressure_a", self.pressure_vars["a_micro_per_bar"]
+            ),
         )
         self.pressure_vars["b_micro_per_c"].trace_add(
-            "write", lambda *_: self._on_coefficient_field_changed("pressure_b", self.pressure_vars["b_micro_per_c"])
+            "write",
+            lambda *_: self._on_coefficient_field_changed(
+                "pressure_b", self.pressure_vars["b_micro_per_c"]
+            ),
         )
 
         for variable in (
@@ -2398,7 +2591,11 @@ class HydrostaticTestApp:
         self.update_check_in_progress = False
         self.latest_update_info = update_info
         if update_info.update_available:
-            asset_name = update_info.asset.name if update_info.asset is not None else "uygun zip asset bulunamadi"
+            asset_name = (
+                update_info.asset.name
+                if update_info.asset is not None
+                else "uygun zip asset bulunamadi"
+            )
             self.update_status_var.set(
                 f"Yeni surum bulundu: {update_info.latest_version} ({update_info.tag_name})"
             )
@@ -2454,35 +2651,44 @@ class HydrostaticTestApp:
             f"Guncelleme indiriliyor: {self.latest_update_info.latest_version}",
             "info",
         )
+        if self.download_manager is None:
+            # Uygulama omru boyunca tek indirme yoneticisi kullanilir; dialog'a
+            # sinif degil gercek bir ornek gecirilir.
+            self.download_manager = DownloadManager()
 
-        dialog = DownloadDialog(
-            parent=self.root,
-            download_manager=DownloadManager,
-            file_url=self.latest_update_info.asset.download_url,
-            file_name=self.latest_update_info.asset.name,
-            dest_path=Path(
-                self._resolve_update_download_dir(create=True)
-            ) / self.latest_update_info.asset.name,
-            total_bytes=self.latest_update_info.asset.size,
-            title=f"Guncelleme: {self.latest_update_info.latest_version}",
-        )
-        result = dialog.wait()
-
-        if result == "completed":
-            self._perform_update_install_after_download()
-        elif result == "cancelled":
+        try:
+            dialog = DownloadDialog(
+                parent=self.root,
+                download_manager=self.download_manager,
+                file_url=self.latest_update_info.asset.download_url,
+                file_name=self.latest_update_info.asset.name,
+                dest_path=Path(self._resolve_update_download_dir(create=True))
+                / self.latest_update_info.asset.name,
+                total_bytes=self.latest_update_info.asset.size,
+                title=f"Guncelleme: {self.latest_update_info.latest_version}",
+            )
+            result = dialog.wait()
+            if result == "completed":
+                self._perform_update_install_after_download()
+            elif result == "cancelled":
+                self._set_banner("Guncelleme kullanici tarafindan iptal edildi.", "info")
+            else:
+                message = "Guncelleme indirilemedi. Indirme penceresindeki hatayi kontrol edin."
+                self._set_banner(message, "error")
+                messagebox.showerror("Guncelleme", message)
+        except Exception as exc:  # noqa: BLE001 - kullaniciya gosterilip akis surdurulur
+            message = f"Guncelleme baslatilamadi: {exc}"
+            self._set_banner(message, "error")
+            messagebox.showerror("Guncelleme", message)
+        finally:
             self.update_install_in_progress = False
-            self._set_banner("Guncelleme kullanici tarafindan iptal edildi.", "info")
-        else:
-            self.update_install_in_progress = False
-            self._set_banner("Guncelleme indirilemedi.", "error")
 
     def _perform_update_install_after_download(self) -> None:
         import tempfile
+
         if self.latest_update_info is None:
             self._handle_update_install_error("Guncel release bilgisi bulunamadi.")
             return
-        from ..services.updater import install_update
         try:
             install_mode = install_update(
                 self.latest_update_info,
@@ -2507,7 +2713,10 @@ class HydrostaticTestApp:
             self.update_detail_var.set(
                 "Bu ortam kendini otomatik guncelleyemiyor. Release sayfasi tarayicida acildi."
             )
-            self._set_banner("Release sayfasi acildi. Guncel paketi indirip mevcut klasorun yerine koyabilirsiniz.", "warning")
+            self._set_banner(
+                "Release sayfasi acildi. Guncel paketi indirip mevcut klasorun yerine koyabilirsiniz.",
+                "warning",
+            )
             messagebox.showinfo(
                 "Guncelleme",
                 "Bu calisma ortami kendini otomatik guncelleyemiyor. Release sayfasi acildi.",
@@ -2519,8 +2728,12 @@ class HydrostaticTestApp:
             messagebox.showinfo("Guncelleme", "Kurulacak yeni bir surum bulunmuyor.")
             return
         self.update_status_var.set("Guncelleme baslatildi. Uygulama yeniden acilacak.")
-        self.update_detail_var.set("Indirme tamamlandi. Uygulama kapanirken yeni surum uygulanacak.")
-        self._set_banner("Guncelleme indirildi. Uygulama kapatilip yeni surumle yeniden baslatilacak.", "success")
+        self.update_detail_var.set(
+            "Indirme tamamlandi. Uygulama kapanirken yeni surum uygulanacak."
+        )
+        self._set_banner(
+            "Guncelleme indirildi. Uygulama kapatilip yeni surumle yeniden baslatilacak.", "success"
+        )
         messagebox.showinfo(
             "Guncelleme",
             "Indirme tamamlandi. Uygulama kapanacak ve guncelleme uygulanacaktir.",
@@ -2539,29 +2752,42 @@ class HydrostaticTestApp:
         self._update_workflow_hint()
 
     def _refresh_live_coefficients(self) -> None:
-        air_ready = (
-            self._safe_float(self.air_vars["temperature_c"].get()) is not None
-            and self._safe_float(self.air_vars["pressure_bar"].get()) is not None
-        )
-        pressure_ready = (
-            self._safe_float(self.pressure_vars["temperature_c"].get()) is not None
-            and self._safe_float(self.pressure_vars["pressure_bar"].get()) is not None
-        )
-        if air_ready:
-            if self._air_a_is_auto():
-                self._calculate_air_a(log_result=False, silent=True)
-            elif self._air_a_is_reference() and self.air_a_reference_var.get().strip():
-                self._apply_air_a_reference(log_result=False, silent=True)
-        if pressure_ready:
-            if self._pressure_a_is_auto():
-                self._calculate_pressure_a(log_result=False, silent=True)
-            elif self._pressure_a_is_reference() and self.pressure_a_reference_var.get().strip():
-                self._apply_pressure_a_reference(log_result=False, silent=True)
-            if self._pressure_b_is_auto():
-                if self._safe_float(self.b_helper_vars["steel_alpha_micro_per_c"].get()) is not None:
-                    self._calculate_b_helper(log_result=False, silent=True)
-            elif self._pressure_b_is_reference() and self.pressure_b_reference_var.get().strip():
-                self._apply_pressure_b_reference(log_result=False, silent=True)
+        if self._coefficient_refresh_in_progress:
+            return
+        self._coefficient_refresh_in_progress = True
+        try:
+            air_ready = (
+                self._safe_float(self.air_vars["temperature_c"].get()) is not None
+                and self._safe_float(self.air_vars["pressure_bar"].get()) is not None
+            )
+            pressure_ready = (
+                self._safe_float(self.pressure_vars["temperature_c"].get()) is not None
+                and self._safe_float(self.pressure_vars["pressure_bar"].get()) is not None
+            )
+            if air_ready:
+                if self._air_a_is_auto():
+                    self._calculate_air_a(log_result=False, silent=True)
+                elif self._air_a_is_reference() and self.air_a_reference_var.get().strip():
+                    self._apply_air_a_reference(log_result=False, silent=True)
+            if pressure_ready:
+                if self._pressure_a_is_auto():
+                    self._calculate_pressure_a(log_result=False, silent=True)
+                elif (
+                    self._pressure_a_is_reference() and self.pressure_a_reference_var.get().strip()
+                ):
+                    self._apply_pressure_a_reference(log_result=False, silent=True)
+                if self._pressure_b_is_auto():
+                    if (
+                        self._safe_float(self.b_helper_vars["steel_alpha_micro_per_c"].get())
+                        is not None
+                    ):
+                        self._calculate_b_helper(log_result=False, silent=True)
+                elif (
+                    self._pressure_b_is_reference() and self.pressure_b_reference_var.get().strip()
+                ):
+                    self._apply_pressure_b_reference(log_result=False, silent=True)
+        finally:
+            self._coefficient_refresh_in_progress = False
         self._update_live_notice()
 
     def _refresh_live_test_decision(self) -> None:
@@ -2571,24 +2797,97 @@ class HydrostaticTestApp:
         elif active_tab == "pressure":
             self._refresh_live_pressure_decision()
 
+    def _live_air_values_present(self) -> bool:
+        pipe, pipe_error = self._detail_pipe_snapshot()
+        if pipe_error is not None or pipe is None:
+            return False
+        required_values = (
+            self._safe_float(self.air_vars["pressure_rise_bar"].get()),
+            self._safe_float(self.air_vars["k_factor"].get()),
+            self._safe_float(self.air_vars["actual_added_water_m3"].get()),
+        )
+        return all(value is not None for value in required_values)
+
+    def _live_pressure_values_present(self) -> bool:
+        pipe, pipe_error = self._detail_pipe_snapshot()
+        if pipe_error is not None or pipe is None:
+            return False
+        required_values = (
+            self._safe_float(self.pressure_vars["delta_t_c"].get()),
+            self._safe_float(self.pressure_vars["actual_pressure_change_bar"].get()),
+        )
+        return all(value is not None for value in required_values)
+
+    def _value_out_of_range(self, field_key: str, value: float | None) -> bool:
+        if value is None:
+            return True
+        limits = FIELD_VALUE_RANGES.get(field_key)
+        if limits is None:
+            return False
+        return not (limits[0] <= value <= limits[1])
+
+    def _out_of_range_message(self, field_key: str) -> str:
+        limits = FIELD_VALUE_RANGES.get(field_key, (0.0, 0.0))
+        label = str(self.field_meta.get(field_key, {}).get("label", "Deger"))
+        return f"{label} icin izin verilen aralik {limits[0]:g} - {limits[1]:g}."
+
     def _refresh_live_air_decision(self) -> None:
-        if not self._ensure_live_air_inputs_ready():
+        state = self.coefficient_manager.get("air_a")
+        if state == CoefficientState.STALE:
+            self._update_decision_card(
+                "Hava Icerik Testi",
+                "KATSAYI GUNCELLENMELI",
+                (
+                    "A katsayisi guncellenmeli. Su sicakligi/basinci veya backend degistigi icin "
+                    "once A Hesapla ile katsayiyi yenileyin; eski degerle karar uretilmez."
+                ),
+            )
+            return
+        if not self._live_air_values_present():
             self._update_decision_card(
                 "Hava Icerik Testi",
                 "BEKLIYOR",
-                "Canli degerlendirme icin geometri, A, P, K ve Vpa tamamlanmali.",
+                "Canli degerlendirme icin geometri, P, K ve Vpa tamamlanmali.",
             )
             return
+        if not self._ensure_live_air_inputs_ready():
+            self._update_decision_card(
+                "Hava Icerik Testi",
+                "DOGRULANAMADI",
+                (
+                    "A katsayisi hazir degil. Otomatik modda A Hesapla, tablo modda referans secimi, "
+                    "manuel modda dogrulanmis A girisi gerekir."
+                ),
+            )
+            return
+        for field_key, label in (
+            ("air.a_micro_per_bar", "A degeri"),
+            ("air.k_factor", "K faktor"),
+        ):
+            value = self._safe_float(self._field_raw_value(field_key))
+            if self._value_out_of_range(field_key, value):
+                self._update_decision_card(
+                    "Hava Icerik Testi",
+                    "DOGRULANAMADI",
+                    f"{label} izin verilen araligin disinda: {self._out_of_range_message(field_key)}",
+                )
+                return
         try:
             pipe = self._detail_pipe_snapshot()[0]
             assert pipe is not None
             result = evaluate_air_content_test(
                 AirContentInputs(
                     pipe=pipe,
-                    a_micro_per_bar=float(self.air_vars["a_micro_per_bar"].get().strip().replace(",", ".")),
-                    pressure_rise_bar=float(self.air_vars["pressure_rise_bar"].get().strip().replace(",", ".")),
+                    a_micro_per_bar=float(
+                        self.air_vars["a_micro_per_bar"].get().strip().replace(",", ".")
+                    ),
+                    pressure_rise_bar=float(
+                        self.air_vars["pressure_rise_bar"].get().strip().replace(",", ".")
+                    ),
                     k_factor=float(self.air_vars["k_factor"].get().strip().replace(",", ".")),
-                    actual_added_water_m3=float(self.air_vars["actual_added_water_m3"].get().strip().replace(",", ".")),
+                    actual_added_water_m3=float(
+                        self.air_vars["actual_added_water_m3"].get().strip().replace(",", ".")
+                    ),
                 )
             )
         except (AssertionError, ValidationError, ValueError):
@@ -2599,35 +2898,101 @@ class HydrostaticTestApp:
             )
             return
         status = "BASARILI" if result.passed else "BASARISIZ"
-        self._update_decision_card(
-            "Hava Icerik Testi",
+        margin_m3 = result.acceptance_limit_m3 - result.actual_added_water_m3
+        summary = (
+            f"Canli sonuc: Vp = {result.theoretical_added_water_m3:.6f} m3, "
+            f"limit = {result.acceptance_limit_m3:.6f} m3, "
+            f"Vpa = {result.actual_added_water_m3:.6f} m3, oran = {result.ratio:.6f}. "
+            f"Kural: Vpa < 1.06 x Vp; marj = {margin_m3:.6f} m3."
+        )
+        self._update_decision_card("Hava Icerik Testi", status, summary)
+        self._schedule_live_result(
+            "air",
             status,
+            f"{status}|{summary}",
+            "Hava Icerik Testi (canli)",
             (
-                f"Canli sonuc: Vp = {result.theoretical_added_water_m3:.6f} m3, "
-                f"limit = {result.acceptance_limit_m3:.6f} m3, "
-                f"Vpa = {result.actual_added_water_m3:.6f} m3, oran = {result.ratio:.6f}"
+                f"Durum: {status}\n"
+                f"A: {self.air_vars['a_micro_per_bar'].get().strip()} (10^-6 / bar)\n"
+                f"P: {self.air_vars['pressure_rise_bar'].get().strip()} bar\n"
+                f"K faktor: {self.air_vars['k_factor'].get().strip()}\n"
+                f"Vt: {pipe.internal_volume_m3:.6f} m3\n"
+                f"Vp: {result.theoretical_added_water_m3:.6f} m3\n"
+                f"Kabul limiti (1.06 x Vp): {result.acceptance_limit_m3:.6f} m3\n"
+                f"Vpa: {result.actual_added_water_m3:.6f} m3\n"
+                f"Vpa / Vp: {result.ratio:.6f}\n"
+                f"Kural: Vpa < 1.06 x Vp; marj = {margin_m3:.6f} m3\n"
+                "Kaynak: canli degerlendirme"
             ),
         )
 
     def _refresh_live_pressure_decision(self) -> None:
-        if not self._ensure_live_pressure_inputs_ready():
+        stale_keys = [
+            key
+            for key in ("pressure_a", "pressure_b")
+            if self.coefficient_manager.get(key) == CoefficientState.STALE
+        ]
+        if stale_keys:
+            self._update_decision_card(
+                "Basinc Degisim Testi",
+                "KATSAYI GUNCELLENMELI",
+                (
+                    "A/B katsayisi guncellenmeli. Su sicakligi/basinci veya backend degistigi icin "
+                    "katsayilari yenileyin; eski degerlerle karar uretilmez."
+                ),
+            )
+            return
+        if not self._live_pressure_values_present():
             self._update_decision_card(
                 "Basinc Degisim Testi",
                 "BEKLIYOR",
-                "Canli degerlendirme icin geometri, A, B, dT ve Pa tamamlanmali.",
+                "Canli degerlendirme icin geometri, dT ve Pa tamamlanmali.",
             )
             return
+        if not self._ensure_live_pressure_inputs_ready():
+            self._update_decision_card(
+                "Basinc Degisim Testi",
+                "DOGRULANAMADI",
+                (
+                    "A veya B katsayisi hazir degil. Otomatik modda hesaplayin, tablo modda referans "
+                    "secin veya manuel dogrulanmis deger girin."
+                ),
+            )
+            return
+        for field_key, label in (
+            ("pressure.a_micro_per_bar", "A degeri"),
+            ("pressure.b_micro_per_c", "B degeri"),
+            ("pressure.delta_t_c", "dT"),
+            ("pressure.actual_pressure_change_bar", "Pa"),
+        ):
+            value = self._safe_float(self._field_raw_value(field_key))
+            if self._value_out_of_range(field_key, value):
+                self._update_decision_card(
+                    "Basinc Degisim Testi",
+                    "DOGRULANAMADI",
+                    f"{label} izin verilen araligin disinda: {self._out_of_range_message(field_key)}",
+                )
+                return
         try:
             pipe = self._detail_pipe_snapshot()[0]
             assert pipe is not None
             result = evaluate_pressure_variation_test(
                 PressureVariationInputs(
                     pipe=pipe,
-                    a_micro_per_bar=float(self.pressure_vars["a_micro_per_bar"].get().strip().replace(",", ".")),
-                    b_micro_per_c=float(self.pressure_vars["b_micro_per_c"].get().strip().replace(",", ".")),
-                    delta_t_c=float(self.pressure_vars["delta_t_c"].get().strip().replace(",", ".")),
+                    a_micro_per_bar=float(
+                        self.pressure_vars["a_micro_per_bar"].get().strip().replace(",", ".")
+                    ),
+                    b_micro_per_c=float(
+                        self.pressure_vars["b_micro_per_c"].get().strip().replace(",", ".")
+                    ),
+                    delta_t_c=float(
+                        self.pressure_vars["delta_t_c"].get().strip().replace(",", ".")
+                    ),
                     actual_pressure_change_bar=float(
-                        self.pressure_vars["actual_pressure_change_bar"].get().strip().replace(",", ".")
+                        self.pressure_vars["actual_pressure_change_bar"]
+                        .get()
+                        .strip()
+                        .replace(",", ".")
                     ),
                 )
             )
@@ -2639,19 +3004,37 @@ class HydrostaticTestApp:
             )
             return
         status = "BASARILI" if result.passed else "BASARISIZ"
-        self._update_decision_card(
-            "Basinc Degisim Testi",
+        summary = (
+            f"Canli sonuc: Pt = {result.theoretical_pressure_change_bar:.6f} bar, "
+            f"ust sinir = {result.allowable_upper_pressure_change_bar:.6f} bar, "
+            f"Pa = {result.actual_pressure_change_bar:.6f} bar, fark = {result.margin_bar:.6f} bar. "
+            f"Kural: (Pa - Pt) <= 0.3 bar; marj = {result.margin_bar:.6f} bar."
+        )
+        self._update_decision_card("Basinc Degisim Testi", status, summary)
+        self._schedule_live_result(
+            "pressure",
             status,
+            f"{status}|{summary}",
+            "Basinc Degisim Testi (canli)",
             (
-                f"Canli sonuc: Pt = {result.theoretical_pressure_change_bar:.6f} bar, "
-                f"ust sinir = {result.allowable_upper_pressure_change_bar:.6f} bar, "
-                f"Pa = {result.actual_pressure_change_bar:.6f} bar, fark = {result.margin_bar:.6f} bar"
+                f"Durum: {status}\n"
+                f"A: {self.pressure_vars['a_micro_per_bar'].get().strip()} (10^-6 / bar)\n"
+                f"B: {self.pressure_vars['b_micro_per_c'].get().strip()} (10^-6 / degC)\n"
+                f"dT = Tilk - Tson: {self.pressure_vars['delta_t_c'].get().strip()} degC\n"
+                f"Pa = Pilk - Pson: {self.pressure_vars['actual_pressure_change_bar'].get().strip()} bar\n"
+                f"Pt: {result.theoretical_pressure_change_bar:.6f} bar\n"
+                f"Ust kabul siniri (Pt + 0.3): {result.allowable_upper_pressure_change_bar:.6f} bar\n"
+                f"Fark (Pa - Pt): {result.margin_bar:.6f} bar\n"
+                "Kural: (Pa - Pt) <= 0.3 bar\n"
+                "Kaynak: canli degerlendirme"
             ),
         )
 
     def _ensure_live_air_inputs_ready(self) -> bool:
         pipe, pipe_error = self._detail_pipe_snapshot()
         if pipe_error is not None or pipe is None:
+            return False
+        if not self.coefficient_manager.is_ready("air_a"):
             return False
         required_values = (
             self._safe_float(self.air_vars["a_micro_per_bar"].get()),
@@ -2665,6 +3048,10 @@ class HydrostaticTestApp:
         pipe, pipe_error = self._detail_pipe_snapshot()
         if pipe_error is not None or pipe is None:
             return False
+        if not self.coefficient_manager.is_ready("pressure_a"):
+            return False
+        if not self.coefficient_manager.is_ready("pressure_b"):
+            return False
         required_values = (
             self._safe_float(self.pressure_vars["a_micro_per_bar"].get()),
             self._safe_float(self.pressure_vars["b_micro_per_c"].get()),
@@ -2673,8 +3060,62 @@ class HydrostaticTestApp:
         )
         return all(value is not None for value in required_values)
 
+    def _schedule_live_result(
+        self,
+        test_key: str,
+        status: str,
+        signature: str,
+        title: str,
+        content: str,
+    ) -> None:
+        if status not in {"BASARILI", "BASARISIZ"} or self._recording_live_result:
+            return
+        if self._recorded_live_signatures.get(test_key) == signature:
+            return
+        pending = self._pending_live_results.get(test_key)
+        if pending is not None and pending[0] == signature:
+            return
+        self._pending_live_results[test_key] = (signature, title, content)
+        if self._pending_live_result_job is not None:
+            try:
+                self.root.after_cancel(self._pending_live_result_job)
+            except tk.TclError:
+                pass
+        self._pending_live_result_job = self.root.after(650, self._flush_pending_live_result)
+
+    def _flush_pending_live_result(self) -> None:
+        """Bekleyen canli sonucu hemen kaydeder (testler ve kapanis icin)."""
+        self._pending_live_result_job = None
+        if self._recording_live_result or not self._pending_live_results:
+            return
+        pending = self._pending_live_results
+        self._pending_live_results = {}
+        self._recording_live_result = True
+        try:
+            for test_key, (signature, title, content) in pending.items():
+                if self._recorded_live_signatures.get(test_key) == signature:
+                    continue
+                self._recorded_live_signatures[test_key] = signature
+                self._append_result(title, content)
+        finally:
+            self._recording_live_result = False
+
+    def _suppress_pending_live_result(self, test_key: str) -> None:
+        pending = self._pending_live_results.pop(test_key, None)
+        if pending is not None:
+            self._recorded_live_signatures[test_key] = pending[0]
+        if not self._pending_live_results and self._pending_live_result_job is not None:
+            try:
+                self.root.after_cancel(self._pending_live_result_job)
+            except tk.TclError:
+                pass
+            self._pending_live_result_job = None
+
     def _safe_float(self, value: str) -> float | None:
-        return _safe_float_util(value)
+        parsed = _safe_float_util(value)
+        if parsed is None or not math.isfinite(parsed):
+            return None
+        return parsed
 
     def _set_field_message(self, field_key: str, message: str, level: str = "info") -> None:
         var = self.field_message_vars.get(field_key)
@@ -2723,7 +3164,9 @@ class HydrostaticTestApp:
         if field_key == "helper.water_beta_micro_per_c" and self.use_b_helper_var.get():
             if self._pressure_b_is_reference():
                 return "Tablo modda su beta alani kullanilmaz; B dogrudan referans tablodan gelir."
-            return f"B hesaplandiginda {backend_label} backend'inden gelen su beta burada gosterilir."
+            return (
+                f"B hesaplandiginda {backend_label} backend'inden gelen su beta burada gosterilir."
+            )
         if field_key == "geometry.highest_elevation_m":
             return "Test bolumundeki en yuksek kot noktasini metre cinsinden girin."
         if field_key == "geometry.lowest_elevation_m":
@@ -2768,7 +3211,11 @@ class HydrostaticTestApp:
                         invalid_count += 1
                     elif level == "warning":
                         warning_count += 1
-            elif meta.get("value_type") == "numeric" and normalized and self._safe_float(value) is None:
+            elif (
+                meta.get("value_type") == "numeric"
+                and normalized
+                and self._safe_float(value) is None
+            ):
                 invalid_count += 1
             elif normalized:
                 semantic = self._semantic_field_feedback(field_key)
@@ -2830,6 +3277,10 @@ class HydrostaticTestApp:
         value = self._field_raw_value(field_key).strip()
         numeric_value = self._safe_float(value)
 
+        if numeric_value is not None and field_key in FIELD_VALUE_RANGES:
+            if self._value_out_of_range(field_key, numeric_value):
+                return (self._out_of_range_message(field_key), "error")
+
         if field_key == "geometry.outside_diameter_mm" and numeric_value is not None:
             if numeric_value <= 0:
                 return ("Dis cap sifirdan buyuk olmalidir.", "error")
@@ -2847,17 +3298,31 @@ class HydrostaticTestApp:
                 return ("Hat uzunlugu sifirdan buyuk olmalidir.", "error")
             if numeric_value > MAX_TEST_SECTION_LENGTH_M:
                 return ("Tek kesit uzunlugu 5007 limitine gore 20 km ustunde.", "warning")
-        if field_key in {"geometry.highest_elevation_m", "geometry.lowest_elevation_m"} and numeric_value is not None:
+        if (
+            field_key in {"geometry.highest_elevation_m", "geometry.lowest_elevation_m"}
+            and numeric_value is not None
+        ):
             highest = self._safe_float(self.section_profile_vars["highest_elevation_m"].get())
             lowest = self._safe_float(self.section_profile_vars["lowest_elevation_m"].get())
             if highest is not None and lowest is not None and highest < lowest:
                 return ("En yuksek nokta kotu, en dusuk noktadan kucuk olamaz.", "error")
-        if field_key in {"geometry.start_elevation_m", "geometry.end_elevation_m"} and numeric_value is not None:
+        if (
+            field_key in {"geometry.start_elevation_m", "geometry.end_elevation_m"}
+            and numeric_value is not None
+        ):
             highest = self._safe_float(self.section_profile_vars["highest_elevation_m"].get())
             lowest = self._safe_float(self.section_profile_vars["lowest_elevation_m"].get())
-            if highest is not None and lowest is not None and (numeric_value < lowest or numeric_value > highest):
+            if (
+                highest is not None
+                and lowest is not None
+                and (numeric_value < lowest or numeric_value > highest)
+            ):
                 return ("Bu kot degeri min-max kot araliginda olmalidir.", "error")
-        if field_key == "geometry.design_pressure_bar" and numeric_value is not None and numeric_value <= 0:
+        if (
+            field_key == "geometry.design_pressure_bar"
+            and numeric_value is not None
+            and numeric_value <= 0
+        ):
             return ("Dizayn basinci sifirdan buyuk olmalidir.", "error")
         if field_key == "geometry.smys_mpa" and numeric_value is not None and numeric_value <= 0:
             return ("SMYS sifirdan buyuk olmalidir.", "error")
@@ -2868,34 +3333,59 @@ class HydrostaticTestApp:
                 return ("5007'ye gore hava icerik testi icin P tam 1.0 bar olmalidir.", "warning")
         if field_key == "air.k_factor" and numeric_value is not None and numeric_value <= 0:
             return ("K faktoru sifirdan buyuk olmalidir.", "error")
-        if field_key == "air.actual_added_water_m3" and numeric_value is not None and numeric_value < 0:
+        if (
+            field_key == "air.actual_added_water_m3"
+            and numeric_value is not None
+            and numeric_value < 0
+        ):
             return ("Fiili ilave su negatif olamaz.", "error")
-        if field_key in {"air.temperature_c", "pressure.temperature_c"} and numeric_value is not None:
+        if (
+            field_key in {"air.temperature_c", "pressure.temperature_c"}
+            and numeric_value is not None
+        ):
             if numeric_value < -5 or numeric_value > 60:
                 return ("Girilmis sicaklik tipik saha araliginin disinda gorunuyor.", "warning")
-        if field_key == "air.temperature_c" and numeric_value is not None:
+        if field_key == "field.ambient_temperature_c" and numeric_value is not None:
             if numeric_value < AMBIENT_TEMP_LIMIT_C:
                 return (
-                    f"NGTL 5007 Madde 10.1: Dolum sirasinda hava sicakligi +{AMBIENT_TEMP_LIMIT_C:.0f}°C altinda. "
-                    f"Dolum yapilmamali veya ek onlem alinmali.",
+                    f"NGTL 5007 Madde 10.1: Dolum sirasinda ortam hava sicakligi "
+                    f"+{AMBIENT_TEMP_LIMIT_C:.0f}°C altinda. Dolum yapilmamali veya ek onlem alinmali.",
                     "error",
                 )
+            if numeric_value < -50 or numeric_value > 60:
+                return ("Ortam hava sicakligi tipik saha araliginin disinda gorunuyor.", "warning")
         if field_key == "pressure.temperature_c" and numeric_value is not None:
             if 0 <= numeric_value < 4:
                 return (
-                    "0-4°C araliginda su genlesme katsayisi (beta) negatiftir. "
-                    "B katsayisi hesaplanamaz. Lutfen 5°C ustu sicaklik bekleyin veya manuel B girin.",
-                    "warning",
+                    "0-4°C araliginda su buzulme bolgesindedir; B negatif cikar ve dP isareti ters doner. "
+                    "Bu durum gecerlidir, B'yi manuel/tablo ile de dogrulayabilirsiniz.",
+                    "info",
                 )
-        if field_key in {"air.pressure_bar", "pressure.pressure_bar"} and numeric_value is not None and numeric_value <= 0:
+        if (
+            field_key in {"air.pressure_bar", "pressure.pressure_bar"}
+            and numeric_value is not None
+            and numeric_value <= 0
+        ):
             return ("Su basinci sifirdan buyuk olmalidir.", "error")
-        if field_key == "pressure.actual_pressure_change_bar" and numeric_value is not None and numeric_value < 0:
+        if (
+            field_key == "pressure.actual_pressure_change_bar"
+            and numeric_value is not None
+            and numeric_value < 0
+        ):
             return ("Pa = Pilk - Pson negatif olmamalidir.", "warning")
-        if field_key == "helper.steel_alpha_micro_per_c" and numeric_value is not None and numeric_value <= 0:
+        if (
+            field_key == "helper.steel_alpha_micro_per_c"
+            and numeric_value is not None
+            and numeric_value <= 0
+        ):
             return ("Celik alpha sifirdan buyuk olmalidir.", "error")
         if field_key == "field.pig_distance_m" and numeric_value is not None and numeric_value <= 0:
             return ("Pig mesafesi sifirdan buyuk olmalidir.", "error")
-        if field_key == "field.pig_travel_time_min" and numeric_value is not None and numeric_value <= 0:
+        if (
+            field_key == "field.pig_travel_time_min"
+            and numeric_value is not None
+            and numeric_value <= 0
+        ):
             return ("Pig suresi sifirdan buyuk olmalidir.", "error")
         if field_key == "geometry.material_grade" and not value:
             if any(var.get().strip() for var in self.section_profile_vars.values()):
@@ -2907,9 +3397,17 @@ class HydrostaticTestApp:
             return None
         if field_key == "air.a_reference_table" and self._air_a_is_reference() and not value:
             return ("Tablo modda A icin referans tablo secin.", "warning")
-        if field_key == "pressure.a_reference_table" and self._pressure_a_is_reference() and not value:
+        if (
+            field_key == "pressure.a_reference_table"
+            and self._pressure_a_is_reference()
+            and not value
+        ):
             return ("Tablo modda A icin referans tablo secin.", "warning")
-        if field_key == "pressure.b_reference_table" and self._pressure_b_is_reference() and not value:
+        if (
+            field_key == "pressure.b_reference_table"
+            and self._pressure_b_is_reference()
+            and not value
+        ):
             return ("Tablo modda B icin referans tablo secin.", "warning")
         return None
 
@@ -2918,48 +3416,75 @@ class HydrostaticTestApp:
         meta = self.field_meta.get(field_key)
         if meta is None:
             return
-        normalized = variable.get().strip().replace(",", ".")
-        if not normalized:
-            hint = self._auto_field_hint(field_key)
-            if hint:
-                self._set_field_message(field_key, hint, "info")
-            elif meta.get("required"):
-                self._set_field_message(field_key, "Bu alan gerekli.", "warning")
+        if self._live_field_change_in_progress:
+            return
+        coefficient_key = {
+            "air.a_micro_per_bar": "air_a",
+            "pressure.a_micro_per_bar": "pressure_a",
+            "pressure.b_micro_per_c": "pressure_b",
+        }.get(field_key)
+        if (
+            coefficient_key is not None
+            and coefficient_key in self._programmatic_coefficient_updates
+        ):
+            return
+        self._live_field_change_in_progress = True
+        try:
+            dependency_keys = {
+                "air.temperature_c": ("air_a",),
+                "air.pressure_bar": ("air_a",),
+                "pressure.temperature_c": ("pressure_a", "pressure_b"),
+                "pressure.pressure_bar": ("pressure_a", "pressure_b"),
+                "helper.steel_alpha_micro_per_c": ("pressure_b",),
+            }.get(field_key)
+            if dependency_keys is not None:
+                # Bagimlilik, canli hesaptan once isaretlenir; bayat katsayi ile
+                # BASARILI karar uretilmez.
+                self._mark_dependencies_changed(dependency_keys)
+            normalized = variable.get().strip().replace(",", ".")
+            if not normalized:
+                hint = self._auto_field_hint(field_key)
+                if hint:
+                    self._set_field_message(field_key, hint, "info")
+                elif meta.get("required"):
+                    self._set_field_message(field_key, "Bu alan gerekli.", "warning")
+                else:
+                    self._clear_field_message(field_key)
+                self._refresh_control_table_summaries()
+                self._update_live_notice()
+                self._refresh_visual_schema()
+                self._refresh_live_coefficients()
+                self._refresh_live_test_decision()
+                return
+            if self._safe_float(variable.get()) is None:
+                self._set_field_message(field_key, "Gecerli bir sayi girin (sonlu deger).", "error")
+                self._refresh_control_table_summaries()
+                self._update_live_notice()
+                self._refresh_visual_schema()
+                self._refresh_live_test_decision()
+                return
+            if field_key == "pressure.b_micro_per_c" and self.use_b_helper_var.get():
+                self._set_field_message(field_key, "Helper modu bu degeri yonetiyor.", "info")
+                self._refresh_control_table_summaries()
+                self._update_live_notice()
+                self._refresh_visual_schema()
+                self._refresh_live_coefficients()
+                self._refresh_live_test_decision()
+                return
+            semantic_feedback = self._semantic_field_feedback(field_key)
+            if semantic_feedback is not None:
+                message, level = semantic_feedback
+                self._set_field_message(field_key, message, level)
             else:
                 self._clear_field_message(field_key)
             self._refresh_control_table_summaries()
+            self._refresh_choice_validation_states()
             self._update_live_notice()
             self._refresh_visual_schema()
             self._refresh_live_coefficients()
             self._refresh_live_test_decision()
-            return
-        if self._safe_float(variable.get()) is None:
-            self._set_field_message(field_key, "Gecerli bir sayi girin.", "error")
-            self._refresh_control_table_summaries()
-            self._update_live_notice()
-            self._refresh_visual_schema()
-            self._refresh_live_test_decision()
-            return
-        if field_key == "pressure.b_micro_per_c" and self.use_b_helper_var.get():
-            self._set_field_message(field_key, "Helper modu bu degeri yonetiyor.", "info")
-            self._refresh_control_table_summaries()
-            self._update_live_notice()
-            self._refresh_visual_schema()
-            self._refresh_live_coefficients()
-            self._refresh_live_test_decision()
-            return
-        semantic_feedback = self._semantic_field_feedback(field_key)
-        if semantic_feedback is not None:
-            message, level = semantic_feedback
-            self._set_field_message(field_key, message, level)
-        else:
-            self._clear_field_message(field_key)
-        self._refresh_control_table_summaries()
-        self._refresh_choice_validation_states()
-        self._update_live_notice()
-        self._refresh_visual_schema()
-        self._refresh_live_coefficients()
-        self._refresh_live_test_decision()
+        finally:
+            self._live_field_change_in_progress = False
 
     def _refresh_choice_validation_states(self) -> None:
         for field_key in (
@@ -3125,7 +3650,9 @@ class HydrostaticTestApp:
             state = self.coefficient_manager.get(coefficient_key)
             existing_message = self.field_message_vars.get(field_key)
             if state == CoefficientState.STALE:
-                self._set_field_message(field_key, "Kosullar degisti, yeniden hesaplayin.", "warning")
+                self._set_field_message(
+                    field_key, "Kosullar degisti, yeniden hesaplayin.", "warning"
+                )
             elif state == CoefficientState.COMPUTED:
                 self._set_field_message(field_key, "Hesap guncel.", "success")
             elif state == CoefficientState.REFERENCE:
@@ -3145,7 +3672,11 @@ class HydrostaticTestApp:
         self.section_feedback_vars[section].set("")
         for field_key, meta in self.field_meta.items():
             if meta.get("section") == section:
-                if field_key in {"air.a_micro_per_bar", "pressure.a_micro_per_bar", "pressure.b_micro_per_c"}:
+                if field_key in {
+                    "air.a_micro_per_bar",
+                    "pressure.a_micro_per_bar",
+                    "pressure.b_micro_per_c",
+                }:
                     continue
                 hint = self._auto_field_hint(field_key)
                 if hint:
@@ -3167,6 +3698,7 @@ class HydrostaticTestApp:
             "error": ("#FDEAEA", "#8B1E1E"),
         }
         bg, fg = colors.get(level, colors["info"])
+        self.banner_level = level if level in colors else "info"
         self.banner_var.set(message)
         self.banner_label.configure(bg=bg, fg=fg)
 
@@ -3208,12 +3740,16 @@ class HydrostaticTestApp:
             if meta.get("section") == section:
                 self.touched_fields.discard(field_key)
 
-    def _reset_decision_card(self) -> None:
-        self._update_decision_card(
-            DEFAULT_DECISION_TITLE,
-            DEFAULT_DECISION_STATUS,
-            DEFAULT_DECISION_SUMMARY,
-        )
+    def _reset_decision_card(self, test_key: str | None = None) -> None:
+        keys = (test_key,) if test_key is not None else ("air", "pressure")
+        for key in keys:
+            self._decisions[key] = {
+                "title": DEFAULT_DECISION_TITLE,
+                "status": DEFAULT_DECISION_STATUS,
+                "summary": DEFAULT_DECISION_SUMMARY,
+            }
+        active = "pressure" if self._active_tab_key() == "pressure" else "air"
+        self._render_decision_card(active)
 
     def _default_k_factor(self) -> str:
         selected = self.k_preset_var.get()
@@ -3291,7 +3827,9 @@ class HydrostaticTestApp:
             if button is not None:
                 button.configure(text=text)
 
-    def _apply_progress_button_appearance(self, key: str, state: str, text: str | None = None) -> None:
+    def _apply_progress_button_appearance(
+        self, key: str, state: str, text: str | None = None
+    ) -> None:
         button = self.progress_buttons.get(key)
         if button is None:
             return
@@ -3304,7 +3842,11 @@ class HydrostaticTestApp:
             "info": ("#EAF2FF", "#1E4E8C"),
         }
         bg, fg = palette.get(state, palette["idle"])
-        target_text = text if text is not None else self.progress_button_idle_texts.get(key, button.cget("text"))
+        target_text = (
+            text
+            if text is not None
+            else self.progress_button_idle_texts.get(key, button.cget("text"))
+        )
         button.configure(
             text=target_text,
             bg=bg,
@@ -3334,7 +3876,9 @@ class HydrostaticTestApp:
         existing_job = self.progress_button_reset_jobs.pop(key, None)
         if existing_job is not None:
             self.root.after_cancel(existing_job)
-        self.progress_button_reset_jobs[key] = self.root.after(1400, lambda: self._reset_progress_button(key))
+        self.progress_button_reset_jobs[key] = self.root.after(
+            1400, lambda: self._reset_progress_button(key)
+        )
 
     def _execute_progress_button_action(
         self,
@@ -3440,7 +3984,9 @@ class HydrostaticTestApp:
         try:
             return lookup_botas_reference_point(temp_c=temp_c, pressure_bar=pressure_bar)
         except (ABControlTableError, FileNotFoundError, ValueError) as exc:
-            raise ValidationError(f"{BOTAS_REFERENCE_TABLE_LABEL} bu nokta icin kullanilamaz: {exc}") from exc
+            raise ValidationError(
+                f"{BOTAS_REFERENCE_TABLE_LABEL} bu nokta icin kullanilamaz: {exc}"
+            ) from exc
 
     def _lookup_gail_reference_for_section(self, section: str):
         if section == "air":
@@ -3456,7 +4002,9 @@ class HydrostaticTestApp:
         try:
             return lookup_gail_reference_point(temp_c=temp_c, pressure_bar=pressure_bar)
         except (ABControlTableError, FileNotFoundError, ValueError) as exc:
-            raise ValidationError(f"{GAIL_REFERENCE_TABLE_LABEL} bu nokta icin kullanilamaz: {exc}") from exc
+            raise ValidationError(
+                f"{GAIL_REFERENCE_TABLE_LABEL} bu nokta icin kullanilamaz: {exc}"
+            ) from exc
 
     def _lookup_selected_table_reference(self, section: str, selected_label: str):
         if self._is_botas_reference_selection(selected_label):
@@ -3518,7 +4066,9 @@ class HydrostaticTestApp:
             try:
                 return (
                     PipeGeometry(
-                        sections=tuple(segment_info["pipe"] for segment_info in self.geometry_segments)  # type: ignore[arg-type]
+                        sections=tuple(
+                            segment_info["pipe"] for segment_info in self.geometry_segments
+                        )  # type: ignore[arg-type]
                     ),
                     None,
                 )
@@ -3554,7 +4104,9 @@ class HydrostaticTestApp:
         except ValidationError as exc:
             return None, str(exc)
 
-    def _section_pressure_profile_result(self) -> tuple[SectionPressureProfileResult | None, str | None]:
+    def _section_pressure_profile_result(
+        self,
+    ) -> tuple[SectionPressureProfileResult | None, str | None]:
         pipe, pipe_error = self._detail_pipe_snapshot()
         if pipe_error is not None:
             return None, pipe_error
@@ -3674,7 +4226,9 @@ class HydrostaticTestApp:
             else:
                 status_bits.append("kritik maksimum asildi")
             parts.append(
-                f"Aktif sekme su basinci = {monitored_pressure:.6f} bar -> " + ", ".join(status_bits) + "."
+                f"Aktif sekme su basinci = {monitored_pressure:.6f} bar -> "
+                + ", ".join(status_bits)
+                + "."
             )
         return " ".join(parts)
 
@@ -3733,10 +4287,14 @@ class HydrostaticTestApp:
             if not result.within_length_limit:
                 issues.append(f"uzunluk {result.total_length_m:.3f} m ile 20 km limitini asiyor")
             if not result.within_volume_limit:
-                issues.append(f"hacim {result.total_internal_volume_m3:.6f} m3 ile 12.500 m3 limitini asiyor")
+                issues.append(
+                    f"hacim {result.total_internal_volume_m3:.6f} m3 ile 12.500 m3 limitini asiyor"
+                )
             self.section_pressure_status_var.set("KESIT LIMIT ASIMI")
             self.section_pressure_status_detail_var.set(
-                "Test bolumu 5007 sartnamesindeki kesit sinirlarini saglamiyor: " + ", ".join(issues) + "."
+                "Test bolumu 5007 sartnamesindeki kesit sinirlarini saglamiyor: "
+                + ", ".join(issues)
+                + "."
             )
             self.section_pressure_status_label.configure(bg="#FFF6E5", fg="#8A5B00")
             return
@@ -3760,7 +4318,8 @@ class HydrostaticTestApp:
         if meets_min and under_max:
             self.section_pressure_status_var.set("PENCERE ICINDE")
             self.section_pressure_status_detail_var.set(
-                monitored_text + " Test bolumu secili pompa noktasinda izin verilen pencere icinde gorunuyor."
+                monitored_text
+                + " Test bolumu secili pompa noktasinda izin verilen pencere icinde gorunuyor."
             )
             self.section_pressure_status_label.configure(bg="#E6F4EA", fg="#1E6F43")
         elif not meets_min and under_max:
@@ -3778,7 +4337,8 @@ class HydrostaticTestApp:
         else:
             self.section_pressure_status_var.set("PENCERE DISINDA")
             self.section_pressure_status_detail_var.set(
-                monitored_text + " Hem minimum gereksinim saglanmiyor hem de maksimum limit asiliyor."
+                monitored_text
+                + " Hem minimum gereksinim saglanmiyor hem de maksimum limit asiliyor."
             )
             self.section_pressure_status_label.configure(bg="#FDE7E9", fg="#A4262C")
 
@@ -3833,14 +4393,38 @@ class HydrostaticTestApp:
         low_y = map_y(lowest)
 
         canvas.create_line(left_x, top_y, left_x, bottom_y, fill="#D0D7E2", width=2)
-        canvas.create_text(left_x - 10, high_y, text=f"{highest:.1f} m", anchor="e", fill="#35506B", font=("Segoe UI", 8))
-        canvas.create_text(left_x - 10, low_y, text=f"{lowest:.1f} m", anchor="e", fill="#35506B", font=("Segoe UI", 8))
-        canvas.create_line(left_x + 22, start_y, right_x - 22, end_y, fill="#4A74A8", width=4, smooth=True)
+        canvas.create_text(
+            left_x - 10,
+            high_y,
+            text=f"{highest:.1f} m",
+            anchor="e",
+            fill="#35506B",
+            font=("Segoe UI", 8),
+        )
+        canvas.create_text(
+            left_x - 10,
+            low_y,
+            text=f"{lowest:.1f} m",
+            anchor="e",
+            fill="#35506B",
+            font=("Segoe UI", 8),
+        )
+        canvas.create_line(
+            left_x + 22, start_y, right_x - 22, end_y, fill="#4A74A8", width=4, smooth=True
+        )
 
-        canvas.create_oval(left_x + 12, start_y - 6, left_x + 24, start_y + 6, fill="#6FA8DC", outline="#35506B")
-        canvas.create_text(left_x + 18, start_y - 14, text="Start", fill="#16365D", font=("Segoe UI", 8, "bold"))
-        canvas.create_oval(right_x - 24, end_y - 6, right_x - 12, end_y + 6, fill="#93C47D", outline="#35506B")
-        canvas.create_text(right_x - 18, end_y - 14, text="Bitis", fill="#16365D", font=("Segoe UI", 8, "bold"))
+        canvas.create_oval(
+            left_x + 12, start_y - 6, left_x + 24, start_y + 6, fill="#6FA8DC", outline="#35506B"
+        )
+        canvas.create_text(
+            left_x + 18, start_y - 14, text="Start", fill="#16365D", font=("Segoe UI", 8, "bold")
+        )
+        canvas.create_oval(
+            right_x - 24, end_y - 6, right_x - 12, end_y + 6, fill="#93C47D", outline="#35506B"
+        )
+        canvas.create_text(
+            right_x - 18, end_y - 14, text="Bitis", fill="#16365D", font=("Segoe UI", 8, "bold")
+        )
 
         canvas.create_polygon(
             middle_x,
@@ -3854,15 +4438,30 @@ class HydrostaticTestApp:
             fill="#F6B26B",
             outline="#A65D00",
         )
-        canvas.create_text(middle_x + 18, high_y - 2, text="En yuksek", anchor="w", fill="#16365D", font=("Segoe UI", 8))
-        canvas.create_rectangle(middle_x - 8, low_y - 8, middle_x + 8, low_y + 8, fill="#D9EAD3", outline="#38761D")
-        canvas.create_text(middle_x + 18, low_y, text="En dusuk", anchor="w", fill="#16365D", font=("Segoe UI", 8))
+        canvas.create_text(
+            middle_x + 18,
+            high_y - 2,
+            text="En yuksek",
+            anchor="w",
+            fill="#16365D",
+            font=("Segoe UI", 8),
+        )
+        canvas.create_rectangle(
+            middle_x - 8, low_y - 8, middle_x + 8, low_y + 8, fill="#D9EAD3", outline="#38761D"
+        )
+        canvas.create_text(
+            middle_x + 18, low_y, text="En dusuk", anchor="w", fill="#16365D", font=("Segoe UI", 8)
+        )
 
         selected_location = self.pump_location_var.get().strip()
         if selected_location == "Baslangic noktasi":
-            canvas.create_oval(left_x + 6, start_y - 12, left_x + 30, start_y + 12, outline="#C00000", width=2)
+            canvas.create_oval(
+                left_x + 6, start_y - 12, left_x + 30, start_y + 12, outline="#C00000", width=2
+            )
         elif selected_location == "Bitis noktasi":
-            canvas.create_oval(right_x - 30, end_y - 12, right_x - 6, end_y + 12, outline="#C00000", width=2)
+            canvas.create_oval(
+                right_x - 30, end_y - 12, right_x - 6, end_y + 12, outline="#C00000", width=2
+            )
 
         canvas.create_text(
             width / 2,
@@ -3925,11 +4524,17 @@ class HydrostaticTestApp:
     def _sync_detail_report_summary(self) -> None:
         active_tab = self._active_tab_key()
         if active_tab == "air":
-            detail_text = self.air_detail_report_var.get() or self._default_detail_report_text("air")
+            detail_text = self.air_detail_report_var.get() or self._default_detail_report_text(
+                "air"
+            )
         elif active_tab == "pressure":
-            detail_text = self.pressure_detail_report_var.get() or self._default_detail_report_text("pressure")
+            detail_text = self.pressure_detail_report_var.get() or self._default_detail_report_text(
+                "pressure"
+            )
         else:
-            detail_text = self.field_detail_report_var.get() or self._default_detail_report_text("field")
+            detail_text = self.field_detail_report_var.get() or self._default_detail_report_text(
+                "field"
+            )
         self.active_detail_report_var.set(detail_text)
         self._render_active_detail_report()
 
@@ -3993,7 +4598,9 @@ class HydrostaticTestApp:
                 self._detail_numeric_issue(self.air_vars["a_micro_per_bar"], "A degeri"),
                 self._detail_numeric_issue(self.air_vars["pressure_rise_bar"], "Basinc artisi P"),
                 self._detail_numeric_issue(self.air_vars["k_factor"], "K faktor"),
-                self._detail_numeric_issue(self.air_vars["actual_added_water_m3"], "Fiili ilave su Vpa"),
+                self._detail_numeric_issue(
+                    self.air_vars["actual_added_water_m3"], "Fiili ilave su Vpa"
+                ),
             )
             if issue is not None
         ]
@@ -4077,6 +4684,13 @@ class HydrostaticTestApp:
         if self.geometry_segments:
             lines.append(f"Segment ozeti: {self.segment_summary_var.get()}")
 
+        b_value_raw = self._safe_float(self.pressure_vars["b_micro_per_c"].get())
+        if b_value_raw is not None and b_value_raw < 0:
+            lines.append(
+                "B yorumu: Negatif B su buzulme bolgesini gosterir; dP isareti ters doner "
+                "ve bu durum gecerlidir."
+            )
+
         lines.extend(
             [
                 "",
@@ -4110,13 +4724,10 @@ class HydrostaticTestApp:
         a_value = self._safe_float(self.pressure_vars["a_micro_per_bar"].get())
         b_value = self._safe_float(self.pressure_vars["b_micro_per_c"].get())
         delta_t = self._safe_float(self.pressure_vars["delta_t_c"].get())
-        actual_pressure_change = self._safe_float(self.pressure_vars["actual_pressure_change_bar"].get())
-        if (
-            a_value is None
-            or b_value is None
-            or delta_t is None
-            or actual_pressure_change is None
-        ):
+        actual_pressure_change = self._safe_float(
+            self.pressure_vars["actual_pressure_change_bar"].get()
+        )
+        if a_value is None or b_value is None or delta_t is None or actual_pressure_change is None:
             lines.append("Degerlendirme hazir degil: sayisal girdiler tamamlanmadi.")
             return "\n".join(lines)
 
@@ -4251,11 +4862,17 @@ class HydrostaticTestApp:
         parts: list[str] = []
         try:
             point = lookup_botas_reference_point(temp_c=temp_c, pressure_bar=pressure_bar)
-            internal = [f"{BOTAS_REFERENCE_TABLE_LABEL} A = {point.a_micro_per_bar:.6f}, B = {point.b_micro_per_c:.6f}."]
+            internal = [
+                f"{BOTAS_REFERENCE_TABLE_LABEL} A = {point.a_micro_per_bar:.6f}, B = {point.b_micro_per_c:.6f}."
+            ]
             if current_a is not None:
-                internal.append(f"A farki = {self._format_control_table_delta(current_a, point.a_micro_per_bar)}.")
+                internal.append(
+                    f"A farki = {self._format_control_table_delta(current_a, point.a_micro_per_bar)}."
+                )
             if current_b is not None:
-                internal.append(f"B farki = {self._format_control_table_delta(current_b, point.b_micro_per_c)}.")
+                internal.append(
+                    f"B farki = {self._format_control_table_delta(current_b, point.b_micro_per_c)}."
+                )
             parts.append(" ".join(internal))
         except (ABControlTableError, FileNotFoundError, ValueError) as exc:
             parts.append(f"{BOTAS_REFERENCE_TABLE_LABEL} kullanilamadi ({exc}).")
@@ -4334,10 +4951,16 @@ class HydrostaticTestApp:
     def _build_manual_pipe_section(self, section: str) -> PipeSection:
         return PipeSection(
             outside_diameter_mm=self._read_float(
-                self.geometry_vars["outside_diameter_mm"], "Dis cap", section, "geometry.outside_diameter_mm"
+                self.geometry_vars["outside_diameter_mm"],
+                "Dis cap",
+                section,
+                "geometry.outside_diameter_mm",
             ),
             wall_thickness_mm=self._read_float(
-                self.geometry_vars["wall_thickness_mm"], "Et kalinligi", section, "geometry.wall_thickness_mm"
+                self.geometry_vars["wall_thickness_mm"],
+                "Et kalinligi",
+                section,
+                "geometry.wall_thickness_mm",
             ),
             length_m=self._read_float(
                 self.geometry_vars["length_m"], "Hat uzunlugu", section, "geometry.length_m"
@@ -4382,7 +5005,10 @@ class HydrostaticTestApp:
         self.geometry_segments.clear()
         self._refresh_segment_tree()
         self._refresh_geometry_summary()
-        self._set_banner("Segment listesi temizlendi. Ustteki geometri alanlari tekrar aktif referans oldu.", "info")
+        self._set_banner(
+            "Segment listesi temizlendi. Ustteki geometri alanlari tekrar aktif referans oldu.",
+            "info",
+        )
 
     def _refresh_segment_tree(self) -> None:
         if not hasattr(self, "segment_tree"):
@@ -4472,10 +5098,7 @@ class HydrostaticTestApp:
             )
             self.workflow_hint_var.set(
                 "Aktif test: Basinc Degisim Testi. Onerilen akis: geometriyi kontrol edin, A ve B'yi hazirlayin, "
-                "dT = Tilk - Tson ve Pa = Pilk - Pson girip degerlendirin. "
-                + a_mode
-                + " "
-                + b_mode
+                "dT = Tilk - Tson ve Pa = Pilk - Pson girip degerlendirin. " + a_mode + " " + b_mode
             )
         else:
             self.workflow_steps_var.set(
@@ -4532,7 +5155,9 @@ class HydrostaticTestApp:
             self._refresh_visual_schema()
             return
         if limit.max_speed_m_per_s is None:
-            self.pig_limit_var.set(f"Secili mod: {limit.label}. Bu secenekte limit karsilastirmasi yapilmaz.")
+            self.pig_limit_var.set(
+                f"Secili mod: {limit.label}. Bu secenekte limit karsilastirmasi yapilmaz."
+            )
             self._refresh_visual_schema()
             return
         self.pig_limit_var.set(
@@ -4555,7 +5180,7 @@ class HydrostaticTestApp:
             "Backend secimi degisti. Basinc testi icin tekrar karsilastirin."
         )
         self._sync_backend_comparison_summary()
-        
+
         info = self._selected_water_backend_info()
         if not getattr(info, "distribution_ready", True):
             self._set_banner(
@@ -4568,7 +5193,7 @@ class HydrostaticTestApp:
                 f"Su ozelligi backend'i {info.label} olarak secildi.",
                 "info",
             )
-            
+
         self._refresh_live_test_decision()
         self._update_live_notice()
         self._refresh_visual_schema()
@@ -4576,12 +5201,12 @@ class HydrostaticTestApp:
 
     def _on_dev_mode_changed(self) -> None:
         from ..domain.water_properties import get_available_water_property_backends
+
         all_infos = get_available_water_property_backends(
             include_dev_backends=self.dev_mode_var.get()
         )
         self.water_backend_option_map = {
-            self._format_backend_option_label(info): info.key
-            for info in all_infos
+            self._format_backend_option_label(info): info.key for info in all_infos
         }
         # Rebuild backend menu
         self._refresh_backend_menu()
@@ -4672,7 +5297,9 @@ class HydrostaticTestApp:
         if isinstance(selected_a, float):
             parts.append(f"Secili backend {selected_info.label}: A = {selected_a:.6f}.")
         else:
-            parts.append(f"Secili backend {selected_info.label}: hesaplanamadi ({selected_row['error']}).")
+            parts.append(
+                f"Secili backend {selected_info.label}: hesaplanamadi ({selected_row['error']})."
+            )
         for row in rows:
             info = row["info"]
             if getattr(info, "key", "") == selected_key:
@@ -4700,7 +5327,10 @@ class HydrostaticTestApp:
 
     def _build_pressure_backend_comparison(self) -> str:
         temp_c = self._read_float(
-            self.pressure_vars["temperature_c"], "Su sicakligi", "pressure", "pressure.temperature_c"
+            self.pressure_vars["temperature_c"],
+            "Su sicakligi",
+            "pressure",
+            "pressure.temperature_c",
         )
         pressure_bar = self._read_float(
             self.pressure_vars["pressure_bar"], "Su basinci", "pressure", "pressure.pressure_bar"
@@ -4709,7 +5339,9 @@ class HydrostaticTestApp:
         steel_alpha = self._safe_float(steel_alpha_text)
         if steel_alpha is None and steel_alpha_text:
             self._set_feedback("pressure", "Celik alpha icin gecerli bir sayi girin.")
-            self._set_field_message("helper.steel_alpha_micro_per_c", "Gecerli bir sayi girin.", "error")
+            self._set_field_message(
+                "helper.steel_alpha_micro_per_c", "Gecerli bir sayi girin.", "error"
+            )
             self._focus_field("helper.steel_alpha_micro_per_c")
             raise ValidationError("Celik alpha icin gecerli bir sayi girin.")
         b_enabled = steel_alpha is not None
@@ -4775,7 +5407,9 @@ class HydrostaticTestApp:
                 f"Secili backend {selected_info.label}: A = {selected_a:.6f}, beta = {selected_beta:.6f}, B = {self._format_backend_b_value(selected_b, selected_row['b_error'])}."
             )
         else:
-            parts.append(f"Secili backend {selected_info.label}: hesaplanamadi ({selected_row['error']}).")
+            parts.append(
+                f"Secili backend {selected_info.label}: hesaplanamadi ({selected_row['error']})."
+            )
         for row in rows:
             info = row["info"]
             if getattr(info, "key", "") == selected_key:
@@ -4919,7 +5553,10 @@ class HydrostaticTestApp:
                 return self._calculate_b_helper()
             return True
         self._update_check_summary()
-        if self.field_vars["pig_distance_m"].get().strip() and self.field_vars["pig_travel_time_min"].get().strip():
+        if (
+            self.field_vars["pig_distance_m"].get().strip()
+            and self.field_vars["pig_travel_time_min"].get().strip()
+        ):
             return self._calculate_pig_speed(log_result=False)
         return True
 
@@ -4952,7 +5589,26 @@ class HydrostaticTestApp:
                 self._set_field_message(field_key, "Gecerli bir sayi girin.", "error")
             self._focus_field(field_key)
             raise ValidationError(message) from exc
-        if field_key is not None and field_key not in {"air.a_micro_per_bar", "pressure.a_micro_per_bar", "pressure.b_micro_per_c"}:
+        if not math.isfinite(value):
+            message = f"{field_name} sonlu bir sayi olmalidir."
+            self._set_feedback(section, message)
+            if field_key is not None:
+                self._set_field_message(field_key, "Sonlu bir sayi girin.", "error")
+            self._focus_field(field_key)
+            raise ValidationError(message)
+        if field_key is not None:
+            limits = FIELD_VALUE_RANGES.get(field_key)
+            if limits is not None and not (limits[0] <= value <= limits[1]):
+                message = self._out_of_range_message(field_key)
+                self._set_feedback(section, message)
+                self._set_field_message(field_key, message, "error")
+                self._focus_field(field_key)
+                raise ValidationError(message)
+        if field_key is not None and field_key not in {
+            "air.a_micro_per_bar",
+            "pressure.a_micro_per_bar",
+            "pressure.b_micro_per_c",
+        }:
             self._clear_field_message(field_key)
         return value
 
@@ -4992,13 +5648,34 @@ class HydrostaticTestApp:
         if reference_combo is not None:
             reference_combo.configure(state="readonly" if mode == REFERENCE_A_MODE else "disabled")
         if field_key == "air.a_micro_per_bar" and hasattr(self, "air_a_calculate_button"):
-            self.air_a_calculate_button.configure(state="normal" if mode == AUTO_A_MODE else "disabled")
+            self.air_a_calculate_button.configure(
+                state="normal" if mode == AUTO_A_MODE else "disabled"
+            )
         if field_key == "pressure.a_micro_per_bar" and hasattr(self, "pressure_a_calculate_button"):
-            self.pressure_a_calculate_button.configure(state="normal" if mode == AUTO_A_MODE else "disabled")
+            self.pressure_a_calculate_button.configure(
+                state="normal" if mode == AUTO_A_MODE else "disabled"
+            )
         meta = self.field_meta.get(field_key)
         if meta is not None:
             meta["required"] = mode == MANUAL_A_MODE
             meta["readonly"] = mode != MANUAL_A_MODE
+        previous_mode = self._coefficient_modes.get(key)
+        mode_changed = previous_mode is not None and previous_mode != mode
+        self._coefficient_modes[key] = mode
+        if mode_changed and not self._restoring_snapshot:
+            # Mod gercekten degistiyse eski deger yeni modun degeri gibi
+            # etiketlenmemeli; alan temizlenir ve yeniden hesaplama/secim
+            # zorunlu hale gelir.
+            self._programmatic_coefficient_updates.add(key)
+            try:
+                variable.set("")
+                if field_key == "air.a_micro_per_bar":
+                    self.air_a_reference_var.set("")
+                elif field_key == "pressure.a_micro_per_bar":
+                    self.pressure_a_reference_var.set("")
+            finally:
+                self._programmatic_coefficient_updates.discard(key)
+            self.coefficient_manager.set(key, CoefficientState.EMPTY)
         if mode == AUTO_A_MODE:
             self.coefficient_manager.set(
                 key,
@@ -5082,9 +5759,22 @@ class HydrostaticTestApp:
         auto_mode = self._pressure_b_is_auto()
         reference_mode = self._pressure_b_is_reference()
         helper_active = auto_mode
+        previous_mode = self._coefficient_modes.get("pressure_b")
+        mode_changed = previous_mode is not None and previous_mode != self.pressure_b_mode_var.get()
+        self._coefficient_modes["pressure_b"] = self.pressure_b_mode_var.get()
+        if mode_changed and not self._restoring_snapshot:
+            self._programmatic_coefficient_updates.add("pressure_b")
+            try:
+                self.pressure_vars["b_micro_per_c"].set("")
+                self.pressure_b_reference_var.set("")
+            finally:
+                self._programmatic_coefficient_updates.discard("pressure_b")
+            self.coefficient_manager.set("pressure_b", CoefficientState.EMPTY)
         self.use_b_helper_var.set(helper_active)
         if hasattr(self, "pressure_b_reference_combo"):
-            self.pressure_b_reference_combo.configure(state="readonly" if reference_mode else "disabled")
+            self.pressure_b_reference_combo.configure(
+                state="readonly" if reference_mode else "disabled"
+            )
         if auto_mode or reference_mode:
             b_entry.configure(state="readonly")
             if steel_entry is not None:
@@ -5094,7 +5784,9 @@ class HydrostaticTestApp:
             if hasattr(self, "steel_preset_combo"):
                 self.steel_preset_combo.configure(state="readonly" if helper_active else "disabled")
             if hasattr(self, "b_helper_calculate_button"):
-                self.b_helper_calculate_button.configure(state="normal" if auto_mode else "disabled")
+                self.b_helper_calculate_button.configure(
+                    state="normal" if auto_mode else "disabled"
+                )
             self.field_meta["pressure.b_micro_per_c"]["required"] = False
             self.field_meta["pressure.b_micro_per_c"]["readonly"] = True
             self.field_meta["helper.steel_alpha_micro_per_c"]["required"] = helper_active
@@ -5104,7 +5796,9 @@ class HydrostaticTestApp:
             if auto_mode:
                 self.coefficient_manager.set(
                     "pressure_b",
-                    CoefficientState.STALE if self.pressure_vars["b_micro_per_c"].get().strip() else CoefficientState.EMPTY,
+                    CoefficientState.STALE
+                    if self.pressure_vars["b_micro_per_c"].get().strip()
+                    else CoefficientState.EMPTY,
                 )
                 self.helper_mode_summary_var.set(
                     "B secenegi otomatik. B alani kilitlidir; helper su beta ve celik alpha ile hesaplar."
@@ -5116,7 +5810,9 @@ class HydrostaticTestApp:
             else:
                 self.coefficient_manager.set(
                     "pressure_b",
-                    CoefficientState.REFERENCE if self.pressure_vars["b_micro_per_c"].get().strip() else CoefficientState.EMPTY,
+                    CoefficientState.REFERENCE
+                    if self.pressure_vars["b_micro_per_c"].get().strip()
+                    else CoefficientState.EMPTY,
                 )
                 self.b_helper_vars["water_beta_micro_per_c"].set("")
                 self.helper_mode_summary_var.set(
@@ -5146,7 +5842,9 @@ class HydrostaticTestApp:
             self.b_helper_vars["water_beta_micro_per_c"].set("")
             self.coefficient_manager.set(
                 "pressure_b",
-                CoefficientState.MANUAL if self.pressure_vars["b_micro_per_c"].get().strip() else CoefficientState.EMPTY,
+                CoefficientState.MANUAL
+                if self.pressure_vars["b_micro_per_c"].get().strip()
+                else CoefficientState.EMPTY,
             )
             self.helper_mode_summary_var.set(
                 "B secenegi manuel. B degerini tabloda veya prosedurde dogrulanan haliyle dogrudan girin."
@@ -5178,7 +5876,12 @@ class HydrostaticTestApp:
                 self._focus_field("air.a_micro_per_bar")
             return False
         table_label = self._selected_reference_table_label(selected_label)
-        self._set_coefficient_value("air_a", self.air_vars["a_micro_per_bar"], point.a_micro_per_bar, state=CoefficientState.REFERENCE)
+        self._set_coefficient_value(
+            "air_a",
+            self.air_vars["a_micro_per_bar"],
+            point.a_micro_per_bar,
+            state=CoefficientState.REFERENCE,
+        )
         if log_result:
             self._append_result(
                 "Hava Icerik Testi - A referansi",
@@ -5189,7 +5892,9 @@ class HydrostaticTestApp:
                 ),
             )
         if not silent:
-            self._set_banner(f"Hava icerik testi icin A {table_label} uzerinden yuklendi.", "success")
+            self._set_banner(
+                f"Hava icerik testi icin A {table_label} uzerinden yuklendi.", "success"
+            )
         self._refresh_control_table_summaries()
         return True
 
@@ -5208,7 +5913,12 @@ class HydrostaticTestApp:
                 self._focus_field("pressure.a_micro_per_bar")
             return False
         table_label = self._selected_reference_table_label(selected_label)
-        self._set_coefficient_value("pressure_a", self.pressure_vars["a_micro_per_bar"], point.a_micro_per_bar, state=CoefficientState.REFERENCE)
+        self._set_coefficient_value(
+            "pressure_a",
+            self.pressure_vars["a_micro_per_bar"],
+            point.a_micro_per_bar,
+            state=CoefficientState.REFERENCE,
+        )
         if log_result:
             self._append_result(
                 "Basinc Degisim Testi - A referansi",
@@ -5239,7 +5949,12 @@ class HydrostaticTestApp:
             return False
         table_label = self._selected_reference_table_label(selected_label)
         self.b_helper_vars["water_beta_micro_per_c"].set("")
-        self._set_coefficient_value("pressure_b", self.pressure_vars["b_micro_per_c"], point.b_micro_per_c, state=CoefficientState.REFERENCE)
+        self._set_coefficient_value(
+            "pressure_b",
+            self.pressure_vars["b_micro_per_c"],
+            point.b_micro_per_c,
+            state=CoefficientState.REFERENCE,
+        )
         if log_result:
             self._append_result(
                 "Basinc Degisim Testi - B referansi",
@@ -5269,16 +5984,46 @@ class HydrostaticTestApp:
         self.coefficient_manager.set(key, state)
         self._refresh_coefficient_statuses()
 
+    def _decision_key_for_title(self, title: str) -> str:
+        if "Hava" in title:
+            return "air"
+        if "Basinc" in title:
+            return "pressure"
+        active = self._active_tab_key()
+        return "pressure" if active == "pressure" else "air"
+
+    def _style_decision_status_label(self, status: str) -> None:
+        palette = {
+            "BASARILI": ("#E6F4EA", "#1E6F43"),
+            "BASARISIZ": ("#FDE7E9", "#A4262C"),
+            "KATSAYI GUNCELLENMELI": ("#FFF6E5", "#8A5B00"),
+            "DOGRULANAMADI": ("#FFF6E5", "#8A5B00"),
+            "BEKLIYOR": ("#EEF2FF", "#243B73"),
+        }
+        bg, fg = palette.get(status, ("#EEF2FF", "#243B73"))
+        self.decision_status_label.configure(bg=bg, fg=fg)
+        self.header_status_label.configure(bg=bg, fg=fg)
+
+    def _render_decision_card(self, test_key: str) -> None:
+        decision = self._decisions.get(test_key)
+        if decision is None:
+            return
+        self.decision_title_var.set(decision["title"])
+        self.decision_status_var.set(decision["status"])
+        self.decision_summary_var.set(decision["summary"])
+        self.header_status_var.set(f"{decision['status']} - {decision['title']}")
+        self._style_decision_status_label(decision["status"])
+
     def _update_decision_card(self, title: str, status: str, summary: str) -> None:
-        self.decision_title_var.set(title)
-        self.decision_status_var.set(status)
-        self.decision_summary_var.set(summary)
-        if status == "BASARILI":
-            self.decision_status_label.configure(bg="#E6F4EA", fg="#1E6F43")
-        elif status == "BASARISIZ":
-            self.decision_status_label.configure(bg="#FDE7E9", fg="#A4262C")
-        else:
-            self.decision_status_label.configure(bg="#EEF2FF", fg="#243B73")
+        test_key = self._decision_key_for_title(title)
+        self._decisions[test_key] = {
+            "title": title,
+            "status": status,
+            "summary": summary,
+        }
+        # Geriye uyum: wizard ve diger kod tek bir ana durum degiskeni okumaya
+        # devam eder; bu degisken en son gosterilen karari yansitir.
+        self._render_decision_card(test_key)
 
     def _on_k_preset_changed(self, _: tk.Event) -> None:
         self.air_vars["k_factor"].set(self._default_k_factor())
@@ -5336,10 +6081,16 @@ class HydrostaticTestApp:
         try:
             a_value = calculate_water_compressibility_a(
                 temp_c=self._read_float(
-                    self.pressure_vars["temperature_c"], "Su sicakligi", "pressure", "pressure.temperature_c"
+                    self.pressure_vars["temperature_c"],
+                    "Su sicakligi",
+                    "pressure",
+                    "pressure.temperature_c",
                 ),
                 pressure_bar=self._read_float(
-                    self.pressure_vars["pressure_bar"], "Su basinci", "pressure", "pressure.pressure_bar"
+                    self.pressure_vars["pressure_bar"],
+                    "Su basinci",
+                    "pressure",
+                    "pressure.pressure_bar",
                 ),
                 backend=backend_info.key,
             )
@@ -5369,15 +6120,24 @@ class HydrostaticTestApp:
         try:
             water_beta = calculate_water_thermal_expansion_beta(
                 temp_c=self._read_float(
-                    self.pressure_vars["temperature_c"], "Su sicakligi", "pressure", "pressure.temperature_c"
+                    self.pressure_vars["temperature_c"],
+                    "Su sicakligi",
+                    "pressure",
+                    "pressure.temperature_c",
                 ),
                 pressure_bar=self._read_float(
-                    self.pressure_vars["pressure_bar"], "Su basinci", "pressure", "pressure.pressure_bar"
+                    self.pressure_vars["pressure_bar"],
+                    "Su basinci",
+                    "pressure",
+                    "pressure.pressure_bar",
                 ),
                 backend=backend_info.key,
             )
             steel_alpha = self._read_float(
-                self.b_helper_vars["steel_alpha_micro_per_c"], "Celik alpha", "pressure", "helper.steel_alpha_micro_per_c"
+                self.b_helper_vars["steel_alpha_micro_per_c"],
+                "Celik alpha",
+                "pressure",
+                "helper.steel_alpha_micro_per_c",
             )
             b_value = calculate_b_coefficient(water_beta, steel_alpha)
         except ValidationError as exc:
@@ -5401,7 +6161,9 @@ class HydrostaticTestApp:
                 ),
             )
         if not silent:
-            self._set_banner("Basinc degisim testi icin B katsayisi helper ile guncellendi.", "success")
+            self._set_banner(
+                "Basinc degisim testi icin B katsayisi helper ile guncellendi.", "success"
+            )
         return True
 
     def coefficient_value_present(self, key: str) -> bool:
@@ -5422,17 +6184,23 @@ class HydrostaticTestApp:
             self._set_feedback("air", "A degeri manuel secenekte tablo/prosedurdan girilmelidir.")
             self._focus_field("air.a_micro_per_bar")
             self._set_banner("Hava testi icin A degeri manuel olarak girilmelidir.", "warning")
-            self._update_decision_card("Hava Icerik Testi", "DOGRULANAMADI", "Gerekli A katsayisi hazir degil.")
+            self._update_decision_card(
+                "Hava Icerik Testi", "DOGRULANAMADI", "Gerekli A katsayisi hazir degil."
+            )
             return False
         if key == "pressure_a":
             if self._pressure_a_is_auto():
                 return self._calculate_pressure_a(log_result=False)
             if self._pressure_a_is_reference():
                 return self._apply_pressure_a_reference(log_result=False)
-            self._set_feedback("pressure", "A degeri manuel secenekte tablo/prosedurdan girilmelidir.")
+            self._set_feedback(
+                "pressure", "A degeri manuel secenekte tablo/prosedurdan girilmelidir."
+            )
             self._focus_field("pressure.a_micro_per_bar")
             self._set_banner("Basinc testi icin A degeri manuel olarak girilmelidir.", "warning")
-            self._update_decision_card("Basinc Degisim Testi", "DOGRULANAMADI", "Gerekli A katsayisi hazir degil.")
+            self._update_decision_card(
+                "Basinc Degisim Testi", "DOGRULANAMADI", "Gerekli A katsayisi hazir degil."
+            )
             return False
         if key == "pressure_b":
             if self._pressure_b_is_reference():
@@ -5442,7 +6210,9 @@ class HydrostaticTestApp:
         self._set_feedback("pressure", "B degeri manuel girilmeli veya yardimci ile hesaplanmali.")
         self._focus_field("pressure.b_micro_per_c")
         self._set_banner("Basinc testi icin B degeri hazir degil.", "warning")
-        self._update_decision_card("Basinc Degisim Testi", "DOGRULANAMADI", "Gerekli katsayi hazir degil.")
+        self._update_decision_card(
+            "Basinc Degisim Testi", "DOGRULANAMADI", "Gerekli katsayi hazir degil."
+        )
         return False
 
     def _run_air_test(self) -> None:
@@ -5457,29 +6227,40 @@ class HydrostaticTestApp:
                     self.air_vars["a_micro_per_bar"], "A degeri", "air", "air.a_micro_per_bar"
                 ),
                 pressure_rise_bar=self._read_float(
-                    self.air_vars["pressure_rise_bar"], "Basinc artisi P", "air", "air.pressure_rise_bar"
+                    self.air_vars["pressure_rise_bar"],
+                    "Basinc artisi P",
+                    "air",
+                    "air.pressure_rise_bar",
                 ),
-                k_factor=self._read_float(self.air_vars["k_factor"], "K faktor", "air", "air.k_factor"),
+                k_factor=self._read_float(
+                    self.air_vars["k_factor"], "K faktor", "air", "air.k_factor"
+                ),
                 actual_added_water_m3=self._read_float(
-                    self.air_vars["actual_added_water_m3"], "Fiili ilave su Vpa", "air", "air.actual_added_water_m3"
+                    self.air_vars["actual_added_water_m3"],
+                    "Fiili ilave su Vpa",
+                    "air",
+                    "air.actual_added_water_m3",
                 ),
             )
             result = evaluate_air_content_test(inputs)
         except ValidationError as exc:
-            self._set_banner(str(exc), "error")
+            self._set_banner(str(exc), "warning")
             self._update_decision_card("Hava Icerik Testi", "DOGRULANAMADI", str(exc))
             return
 
         status = "BASARILI" if result.passed else "BASARISIZ"
+        margin_m3 = result.acceptance_limit_m3 - result.actual_added_water_m3
         self._refresh_control_table_summaries()
         self._update_decision_card(
             "Hava Icerik Testi",
             status,
             (
                 f"Vp = {result.theoretical_added_water_m3:.6f} m3, limit = {result.acceptance_limit_m3:.6f} m3, "
-                f"Vpa = {result.actual_added_water_m3:.6f} m3, oran = {result.ratio:.6f}"
+                f"Vpa = {result.actual_added_water_m3:.6f} m3, oran = {result.ratio:.6f}. "
+                f"Kural: Vpa < 1.06 x Vp; marj = {margin_m3:.6f} m3."
             ),
         )
+        self._suppress_pending_live_result("air")
         self._append_result(
             "Hava Icerik Testi",
             (
@@ -5498,7 +6279,8 @@ class HydrostaticTestApp:
                 f"Kontrol tablosu: {self.air_control_table_var.get()}"
             ),
         )
-        self._set_banner("Hava icerik testi degerlendirmesi tamamlandi.", "success")
+        banner_level = "success" if status == "BASARILI" else "error"
+        self._set_banner(f"Hava icerik testi degerlendirmesi: {status}.", banner_level)
 
     def _run_pressure_test(self) -> None:
         self._clear_all_feedback()
@@ -5511,13 +6293,22 @@ class HydrostaticTestApp:
             inputs = PressureVariationInputs(
                 pipe=pipe,
                 a_micro_per_bar=self._read_float(
-                    self.pressure_vars["a_micro_per_bar"], "A degeri", "pressure", "pressure.a_micro_per_bar"
+                    self.pressure_vars["a_micro_per_bar"],
+                    "A degeri",
+                    "pressure",
+                    "pressure.a_micro_per_bar",
                 ),
                 b_micro_per_c=self._read_float(
-                    self.pressure_vars["b_micro_per_c"], "B degeri", "pressure", "pressure.b_micro_per_c"
+                    self.pressure_vars["b_micro_per_c"],
+                    "B degeri",
+                    "pressure",
+                    "pressure.b_micro_per_c",
                 ),
                 delta_t_c=self._read_float(
-                    self.pressure_vars["delta_t_c"], "Su sicaklik degisimi dT", "pressure", "pressure.delta_t_c"
+                    self.pressure_vars["delta_t_c"],
+                    "Su sicaklik degisimi dT",
+                    "pressure",
+                    "pressure.delta_t_c",
                 ),
                 actual_pressure_change_bar=self._read_float(
                     self.pressure_vars["actual_pressure_change_bar"],
@@ -5528,21 +6319,29 @@ class HydrostaticTestApp:
             )
             result = evaluate_pressure_variation_test(inputs)
         except ValidationError as exc:
-            self._set_banner(str(exc), "error")
+            self._set_banner(str(exc), "warning")
             self._update_decision_card("Basinc Degisim Testi", "DOGRULANAMADI", str(exc))
             return
 
         status = "BASARILI" if result.passed else "BASARISIZ"
         self._refresh_control_table_summaries()
+        b_value = self._safe_float(self.pressure_vars["b_micro_per_c"].get())
+        negative_b_note = (
+            "B yorumu: B negatif (su buzulme bolgesi); dP isareti ters doner ve bu durum gecerlidir."
+            if b_value is not None and b_value < 0
+            else ""
+        )
         self._update_decision_card(
             "Basinc Degisim Testi",
             status,
             (
                 f"Pt = {result.theoretical_pressure_change_bar:.6f} bar, ust sinir = "
                 f"{result.allowable_upper_pressure_change_bar:.6f} bar, Pa = "
-                f"{result.actual_pressure_change_bar:.6f} bar, fark = {result.margin_bar:.6f} bar"
+                f"{result.actual_pressure_change_bar:.6f} bar, fark = {result.margin_bar:.6f} bar. "
+                f"Kural: (Pa - Pt) <= 0.3 bar; marj = {result.margin_bar:.6f} bar."
             ),
         )
+        self._suppress_pending_live_result("pressure")
         self._append_result(
             "Basinc Degisim Testi",
             (
@@ -5561,10 +6360,12 @@ class HydrostaticTestApp:
                 f"Ust kabul siniri (Pt + 0.3): {result.allowable_upper_pressure_change_bar:.6f} bar\n"
                 f"Fiili basinc degisimi Pa: {result.actual_pressure_change_bar:.6f} bar\n"
                 f"Fark (Pa - Pt): {result.margin_bar:.6f} bar\n"
-                f"Kontrol tablosu: {self.pressure_control_table_var.get()}"
+                + (f"{negative_b_note}\n" if negative_b_note else "")
+                + f"Kontrol tablosu: {self.pressure_control_table_var.get()}"
             ),
         )
-        self._set_banner("Basinc degisim testi degerlendirmesi tamamlandi.", "success")
+        banner_level = "success" if status == "BASARILI" else "error"
+        self._set_banner(f"Basinc degisim testi degerlendirmesi: {status}.", banner_level)
 
     def _calculate_pig_speed(self, log_result: bool = True) -> bool:
         self._clear_feedback("field")
@@ -5572,7 +6373,10 @@ class HydrostaticTestApp:
             limit = get_pig_speed_limit(self.pig_mode_var.get())
             result = evaluate_pig_speed(
                 distance_m=self._read_float(
-                    self.field_vars["pig_distance_m"], "Pig mesafesi", "field", "field.pig_distance_m"
+                    self.field_vars["pig_distance_m"],
+                    "Pig mesafesi",
+                    "field",
+                    "field.pig_distance_m",
                 ),
                 travel_time_min=self._read_float(
                     self.field_vars["pig_travel_time_min"],
@@ -5636,36 +6440,41 @@ class HydrostaticTestApp:
         return True
 
     def _append_result(self, title: str, content: str) -> None:
-        stamped_entry = (
-            f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {title}\n{content}"
-        )
-        self.report_entries.append(stamped_entry)
-        self.results_text.configure(state="normal")
-        self.results_text.insert("end", f"\n{stamped_entry}\n")
-        self.results_text.see("end")
-        self.results_text.configure(state="disabled")
+        if self._append_result_in_progress:
+            return
+        self._append_result_in_progress = True
+        try:
+            stamped_entry = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {title}\n{content}"
+            self.report_entries.append(stamped_entry)
+            self.results_text.configure(state="normal")
+            self.results_text.insert("end", f"\n{stamped_entry}\n")
+            self.results_text.see("end")
+            self.results_text.configure(state="disabled")
 
-        if hasattr(self, "session_manager") and self.session_manager:
-            session = self.session_manager.get_active_session()
-            if session:
-                self.session_manager.add_result({"title": title, "content": content})
-                
-                if hasattr(self.session_manager, "_db") and self.session_manager._db:
-                    test_type = "field"
-                    if "Hava" in title:
-                        test_type = "air"
-                    elif "Basinc" in title:
-                        test_type = "pressure"
-                    
-                    self.session_manager._db.add_test_entry(
-                        session_id=session.id,
-                        test_type=test_type,
-                        inputs=self._build_input_snapshot(),
-                        result={"title": title, "content": content},
-                        decision_status=self.decision_status_var.get(),
-                        decision_title=self.decision_title_var.get(),
-                        decision_summary=self.decision_summary_var.get(),
-                    )
+            if hasattr(self, "session_manager") and self.session_manager:
+                session = self.session_manager.get_active_session()
+                if session:
+                    self.session_manager.add_result({"title": title, "content": content})
+                    if self.session_manager.has_database:
+                        test_type = "field"
+                        if "Hava" in title:
+                            test_type = "air"
+                        elif "Basinc" in title:
+                            test_type = "pressure"
+                        decision = self._decisions.get(
+                            "air" if test_type == "air" else "pressure",
+                            self._decisions["air"],
+                        )
+                        self.session_manager.add_test_entry(
+                            test_type=test_type,
+                            inputs=self._build_input_snapshot(),
+                            result={"title": title, "content": content},
+                            decision_status=decision["status"],
+                            decision_title=decision["title"],
+                            decision_summary=decision["summary"],
+                        )
+        finally:
+            self._append_result_in_progress = False
 
     def _clear_air_form(self) -> None:
         for key, variable in self.air_vars.items():
@@ -5682,7 +6491,7 @@ class HydrostaticTestApp:
         self._refresh_coefficient_statuses()
         self._sync_backend_comparison_summary()
         self._sync_control_table_summary()
-        self._reset_decision_card()
+        self._reset_decision_card("air")
         self._set_banner("Hava icerik testi formu temizlendi.", "info")
         self._refresh_visual_schema()
 
@@ -5700,7 +6509,7 @@ class HydrostaticTestApp:
         self._refresh_coefficient_statuses()
         self._sync_backend_comparison_summary()
         self._sync_control_table_summary()
-        self._reset_decision_card()
+        self._reset_decision_card("pressure")
         self._set_banner("Basinc degisim testi formu temizlendi.", "info")
         self._refresh_visual_schema()
 
@@ -5777,6 +6586,7 @@ class HydrostaticTestApp:
                 "Hava Icerik Testi Girdileri",
                 f"Su sicakligi (degC): {self._format_var_value(self.air_vars['temperature_c'])}",
                 f"Su basinci (bar): {self._format_var_value(self.air_vars['pressure_bar'])}",
+                f"Ortam hava sicakligi (10.1) (degC): {self._format_var_value(self.field_vars['ambient_temperature_c'])}",
                 f"A secenegi: {self.air_a_mode_var.get().strip()}",
                 f"Su backend'i: {self._selected_water_backend_info().label}",
                 f"Backend ozeti: {self.water_backend_summary_var.get()}",
@@ -5797,6 +6607,7 @@ class HydrostaticTestApp:
                 f"B secenegi: {self.pressure_b_mode_var.get().strip()}",
                 f"B referans tablosu: {self.pressure_b_reference_var.get().strip() or '-'}",
                 f"B (10^-6 / degC): {self._format_var_value(self.pressure_vars['b_micro_per_c'])}",
+                "B yorumu: negatif B su buzulme bolgesi demektir; dP isareti ters doner ve gecerlidir.",
                 f"Basinc backend karsilastirmasi: {self.pressure_backend_comparison_var.get()}",
                 f"Basinc kontrol tablosu: {self.pressure_control_table_var.get()}",
                 f"Su sicaklik degisimi dT = Tilk - Tson (degC): {self._format_var_value(self.pressure_vars['delta_t_c'])}",
@@ -5822,9 +6633,14 @@ class HydrostaticTestApp:
                 f"Pig hiz durumu: {self.pig_status_var.get()}",
                 "",
                 "Nihai Karar",
-                f"Baslik: {self.decision_title_var.get()}",
-                f"Durum: {self.decision_status_var.get()}",
-                f"Ozet: {self.decision_summary_var.get()}",
+                "Kabul kurali (hava): Vpa < 1.06 x Vp",
+                "Kabul kurali (basinc): (Pa - Pt) <= 0.3 bar",
+                f"Hava Icerik Testi durumu: {self._decisions['air']['status']}",
+                f"Hava Icerik Testi basligi: {self._decisions['air']['title']}",
+                f"Hava Icerik Testi ozeti: {self._decisions['air']['summary']}",
+                f"Basinc Degisim Testi durumu: {self._decisions['pressure']['status']}",
+                f"Basinc Degisim Testi basligi: {self._decisions['pressure']['title']}",
+                f"Basinc Degisim Testi ozeti: {self._decisions['pressure']['summary']}",
                 "",
                 "Oturum Sonuclari",
             ]
@@ -5851,8 +6667,12 @@ class HydrostaticTestApp:
             "active_tab": self._active_tab_key(),
             "water_backend_option": self.water_backend_var.get(),
             "geometry": {key: variable.get() for key, variable in self.geometry_vars.items()},
-            "section_profile": {key: variable.get() for key, variable in self.section_profile_vars.items()},
-            "geometry_catalog": {key: variable.get() for key, variable in self.geometry_catalog_vars.items()},
+            "section_profile": {
+                key: variable.get() for key, variable in self.section_profile_vars.items()
+            },
+            "geometry_catalog": {
+                key: variable.get() for key, variable in self.geometry_catalog_vars.items()
+            },
             "material_grade": self.material_grade_var.get(),
             "location_class": self.location_class_var.get(),
             "pump_location": self.pump_location_var.get(),
@@ -5900,7 +6720,9 @@ class HydrostaticTestApp:
                 variable.set(str(geometry_catalog.get(key, "")))
 
         self.material_grade_var.set(str(payload.get("material_grade", "")))
-        self.location_class_var.set(str(payload.get("location_class", self.location_class_var.get())))
+        self.location_class_var.set(
+            str(payload.get("location_class", self.location_class_var.get()))
+        )
         self.pump_location_var.set(str(payload.get("pump_location", "")))
 
         air = payload.get("air", {})
@@ -5923,8 +6745,17 @@ class HydrostaticTestApp:
         modes = payload.get("modes", {})
         if isinstance(modes, dict):
             self.air_a_mode_var.set(str(modes.get("air_a_mode", self.air_a_mode_var.get())))
-            self.pressure_a_mode_var.set(str(modes.get("pressure_a_mode", self.pressure_a_mode_var.get())))
-            self.pressure_b_mode_var.set(str(modes.get("pressure_b_mode", self.pressure_b_mode_var.get())))
+            self.pressure_a_mode_var.set(
+                str(modes.get("pressure_a_mode", self.pressure_a_mode_var.get()))
+            )
+            self.pressure_b_mode_var.set(
+                str(modes.get("pressure_b_mode", self.pressure_b_mode_var.get()))
+            )
+            # Snapshot geri yuklenirken mod gecisi gibi davranip kaydedilmis
+            # katsayi degerlerini silmeyiz.
+            self._coefficient_modes["air_a"] = self.air_a_mode_var.get()
+            self._coefficient_modes["pressure_a"] = self.pressure_a_mode_var.get()
+            self._coefficient_modes["pressure_b"] = self.pressure_b_mode_var.get()
             self.air_a_reference_var.set(str(modes.get("air_a_reference", "")))
             self.pressure_a_reference_var.set(str(modes.get("pressure_a_reference", "")))
             self.pressure_b_reference_var.set(str(modes.get("pressure_b_reference", "")))
@@ -5937,7 +6768,9 @@ class HydrostaticTestApp:
             for key, variable in self.control_check_vars.items():
                 variable.set(bool(checks.get(key, False)))
 
-        self.water_backend_var.set(str(payload.get("water_backend_option", self._default_water_backend_option_label())))
+        self.water_backend_var.set(
+            str(payload.get("water_backend_option", self._default_water_backend_option_label()))
+        )
 
         self.geometry_segments.clear()
         geometry_segments = payload.get("geometry_segments", [])
@@ -5961,9 +6794,13 @@ class HydrostaticTestApp:
                     }
                 )
 
-        self._on_air_a_mode_changed()
-        self._on_pressure_a_mode_changed()
-        self._apply_b_helper_mode()
+        self._restoring_snapshot = True
+        try:
+            self._on_air_a_mode_changed()
+            self._on_pressure_a_mode_changed()
+            self._apply_b_helper_mode()
+        finally:
+            self._restoring_snapshot = False
         self._on_water_backend_changed()
         self._refresh_segment_tree()
         self._refresh_geometry_summary()
@@ -6047,7 +6884,7 @@ class HydrostaticTestApp:
                 ("Text Files", "*.txt"),
                 ("PDF Files", "*.pdf"),
                 ("Excel Files", "*.xlsx"),
-                ("All Files", "*.*")
+                ("All Files", "*.*"),
             ],
             initialfile=initial_name,
         )
@@ -6055,70 +6892,105 @@ class HydrostaticTestApp:
             return
 
         ext = Path(file_path).suffix.lower()
-        if ext in [".pdf", ".xlsx"]:
-            from ..services.report_export import export_pdf_report, export_excel_report
-            title = f"{APP_NAME} Raporu"
-            metadata = {
-                "Surum": APP_VERSION,
-                "Referans sartname": f"{SPEC_DOCUMENT_CODE} - {SPEC_DOCUMENT_TITLE}",
-                "Olusturma zamani": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                "Su backend'i": self._selected_water_backend_info().label,
-                "Backend ozeti": self.water_backend_summary_var.get(),
-            }
-            geometry_data = {
-                "Dis cap (mm)": self._format_var_value(self.geometry_vars['outside_diameter_mm']),
-                "Et kalinligi (mm)": self._format_var_value(self.geometry_vars['wall_thickness_mm']),
-                "Hat uzunlugu (m)": self._format_var_value(self.geometry_vars['length_m']),
-                "Liste secimi": self.geometry_catalog_vars['size_option'].get().strip() or '-',
-                "Schedule secimi": self.geometry_catalog_vars['schedule_option'].get().strip() or '-',
-                "En yuksek nokta kotu (m)": self._format_var_value(self.section_profile_vars['highest_elevation_m']),
-                "En dusuk nokta kotu (m)": self._format_var_value(self.section_profile_vars['lowest_elevation_m']),
-                "Baslangic noktasi kotu (m)": self._format_var_value(self.section_profile_vars['start_elevation_m']),
-                "Bitis noktasi kotu (m)": self._format_var_value(self.section_profile_vars['end_elevation_m']),
-                "Dizayn basinci (bar)": self._format_var_value(self.section_profile_vars['design_pressure_bar']),
-                "Boru malzeme kalitesi": self.material_grade_var.get().strip() or '-',
-                "SMYS (MPa)": self._format_var_value(self.section_profile_vars['smys_mpa']),
-                "Location Class": self.location_class_var.get().strip() or '-',
-                "Pompa konumu": self.pump_location_var.get().strip() or '-',
-            }
-            test_results = {
-                "Hava Su derecesi (degC)": self._format_var_value(self.air_vars['temperature_c']),
-                "Hava Su basinci (bar)": self._format_var_value(self.air_vars['pressure_bar']),
-                "A (Hava)": self._format_var_value(self.air_vars['a_micro_per_bar']),
-                "Vpa (Hava)": self._format_var_value(self.air_vars['actual_added_water_m3']),
-                "Basinc Su derecesi (degC)": self._format_var_value(self.pressure_vars['temperature_c']),
-                "Basinc Su basinci (bar)": self._format_var_value(self.pressure_bar),
-                "A (Basinc)": self._format_var_value(self.pressure_vars['a_micro_per_bar']),
-                "B (Basinc)": self._format_var_value(self.pressure_vars['b_micro_per_c']),
-                "dT": self._format_var_value(self.pressure_vars['delta_t_c']),
-                "Pa": self._format_var_value(self.pressure_vars['actual_pressure_change_bar']),
-                "Karar": self.decision_status_var.get(),
-                "Karar Ozeti": self.decision_summary_var.get(),
-            }
-            checklist_data = []
-            for key, label, reference in FIELD_CHECK_DEFINITIONS:
-                checklist_data.append({
-                    "checked": self.control_check_vars[key].get(),
-                    "label": label,
-                    "ref": reference
-                })
+        try:
+            if ext in [".pdf", ".xlsx"]:
+                from ..services.report_export import export_excel_report, export_pdf_report
 
-            try:
+                title = f"{APP_NAME} Raporu"
+                metadata = {
+                    "Surum": APP_VERSION,
+                    "Referans sartname": f"{SPEC_DOCUMENT_CODE} - {SPEC_DOCUMENT_TITLE}",
+                    "Olusturma zamani": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "Su backend'i": self._selected_water_backend_info().label,
+                    "Backend ozeti": self.water_backend_summary_var.get(),
+                }
+                geometry_data = {
+                    "Dis cap (mm)": self._format_var_value(
+                        self.geometry_vars["outside_diameter_mm"]
+                    ),
+                    "Et kalinligi (mm)": self._format_var_value(
+                        self.geometry_vars["wall_thickness_mm"]
+                    ),
+                    "Hat uzunlugu (m)": self._format_var_value(self.geometry_vars["length_m"]),
+                    "Liste secimi": self.geometry_catalog_vars["size_option"].get().strip() or "-",
+                    "Schedule secimi": self.geometry_catalog_vars["schedule_option"].get().strip()
+                    or "-",
+                    "En yuksek nokta kotu (m)": self._format_var_value(
+                        self.section_profile_vars["highest_elevation_m"]
+                    ),
+                    "En dusuk nokta kotu (m)": self._format_var_value(
+                        self.section_profile_vars["lowest_elevation_m"]
+                    ),
+                    "Baslangic noktasi kotu (m)": self._format_var_value(
+                        self.section_profile_vars["start_elevation_m"]
+                    ),
+                    "Bitis noktasi kotu (m)": self._format_var_value(
+                        self.section_profile_vars["end_elevation_m"]
+                    ),
+                    "Dizayn basinci (bar)": self._format_var_value(
+                        self.section_profile_vars["design_pressure_bar"]
+                    ),
+                    "Boru malzeme kalitesi": self.material_grade_var.get().strip() or "-",
+                    "SMYS (MPa)": self._format_var_value(self.section_profile_vars["smys_mpa"]),
+                    "Location Class": self.location_class_var.get().strip() or "-",
+                    "Pompa konumu": self.pump_location_var.get().strip() or "-",
+                }
+                test_results = {
+                    "Hava Su derecesi (degC)": self._format_var_value(
+                        self.air_vars["temperature_c"]
+                    ),
+                    "Hava Su basinci (bar)": self._format_var_value(self.air_vars["pressure_bar"]),
+                    "A (Hava)": self._format_var_value(self.air_vars["a_micro_per_bar"]),
+                    "Vpa (Hava)": self._format_var_value(self.air_vars["actual_added_water_m3"]),
+                    "Basinc Su derecesi (degC)": self._format_var_value(
+                        self.pressure_vars["temperature_c"]
+                    ),
+                    "Basinc Su basinci (bar)": self._format_var_value(
+                        self.pressure_vars["pressure_bar"]
+                    ),
+                    "A (Basinc)": self._format_var_value(self.pressure_vars["a_micro_per_bar"]),
+                    "B (Basinc)": self._format_var_value(self.pressure_vars["b_micro_per_c"]),
+                    "dT": self._format_var_value(self.pressure_vars["delta_t_c"]),
+                    "Pa": self._format_var_value(self.pressure_vars["actual_pressure_change_bar"]),
+                    "Hava Karar": self._decisions["air"]["status"],
+                    "Hava Karar Ozeti": self._decisions["air"]["summary"],
+                    "Basinc Karar": self._decisions["pressure"]["status"],
+                    "Basinc Karar Ozeti": self._decisions["pressure"]["summary"],
+                }
+                checklist_data = []
+                for key, label, reference in FIELD_CHECK_DEFINITIONS:
+                    checklist_data.append(
+                        {
+                            "checked": self.control_check_vars[key].get(),
+                            "label": label,
+                            "ref": reference,
+                        }
+                    )
                 if ext == ".pdf":
-                    export_pdf_report(Path(file_path), title, metadata, geometry_data, test_results, checklist_data)
+                    export_pdf_report(
+                        Path(file_path),
+                        title,
+                        metadata,
+                        geometry_data,
+                        test_results,
+                        checklist_data,
+                    )
                 else:
-                    export_excel_report(Path(file_path), title, metadata, geometry_data, test_results, checklist_data)
-            except Exception as exc:
-                self._set_banner(f"Rapor kaydedilemedi: {exc}", "error")
-                messagebox.showerror("Hata", f"Rapor kaydedilemedi: {exc}")
-                return
-        else:
-            try:
+                    export_excel_report(
+                        Path(file_path),
+                        title,
+                        metadata,
+                        geometry_data,
+                        test_results,
+                        checklist_data,
+                    )
+            else:
                 Path(file_path).write_text(self._build_report_text(), encoding="utf-8")
-            except OSError as exc:
-                self._set_banner(f"Rapor kaydedilemedi: {exc}", "error")
-                messagebox.showerror("Hata", f"Rapor kaydedilemedi: {exc}")
-                return
+        except Exception as exc:  # noqa: BLE001 - Tk callback'indan kacmamali
+            message = f"Rapor kaydedilemedi: {exc}"
+            self._set_banner(message, "error")
+            messagebox.showerror("Hata", message)
+            return
 
         self._set_banner("Rapor basariyla kaydedildi.", "success")
         messagebox.showinfo("Kaydedildi", f"Rapor kaydedildi:\n{file_path}")
@@ -6136,7 +7008,6 @@ class HydrostaticTestApp:
                 "ve farkli et kalinliklarina sahip segmentler birlikte modellenebilir."
             ),
         )
-
 
     def _refresh_session_list(self) -> None:
         if not hasattr(self, "session_manager") or not hasattr(self, "session_combo"):
@@ -6180,7 +7051,7 @@ class HydrostaticTestApp:
             return
         if session.inputs:
             self._apply_input_snapshot(session.inputs)
-            
+
         # Restore wizard if wizard controller is active
         if hasattr(self, "wizard") and self.wizard:
             if session.wizard_state:
@@ -6206,17 +7077,30 @@ class HydrostaticTestApp:
         self.pump_location_var.set("")
         self._remove_touched_fields("geometry")
         self._clear_feedback("geometry")
-        
+
         self._clear_air_form()
         self._clear_pressure_form()
         self._clear_field_form()
         self._clear_results()
-        
+
         self.geometry_segments.clear()
         self._refresh_segment_tree()
         self._refresh_geometry_summary()
 
     def _session_auto_save_check(self) -> None:
+        if not hasattr(self, "session_manager"):
+            return
+        if self._session_save_job is not None:
+            try:
+                self.root.after_cancel(self._session_save_job)
+            except tk.TclError:
+                pass
+        # Yazma firtinasini onlemek icin kisa debounce; testler
+        # _flush_pending_session_save() ile deterministik davranabilir.
+        self._session_save_job = self.root.after(500, self._flush_pending_session_save)
+
+    def _flush_pending_session_save(self) -> None:
+        self._session_save_job = None
         if hasattr(self, "session_manager"):
             self._capture_ui_to_session()
 
@@ -6226,35 +7110,19 @@ class HydrostaticTestApp:
             temperature = self._safe_float(self.ts_temp_var.get())
             volume_str = self.ts_volume_var.get().strip()
             volume = self._safe_float(volume_str) if volume_str else None
-            
+
             if pressure is None or temperature is None:
                 self._set_banner("Basinc ve sicaklik degerlerini girin.", "warning")
                 return
             session = self.session_manager.get_active_session()
             if session:
-                # TimeSeriesStore session'a bağlı
-                tss = TimeSeriesStore.from_dict(session.time_series)
-                tss.add_record(
+                self.session_manager.add_time_series_record(
                     pressure_bar=pressure,
                     temperature_c=temperature,
                     volume_m3=volume,
                     notes="Manuel kayit",
                 )
-                session.time_series = tss.to_dict()
-                
-                # Also save to SQLite DB if active
-                if hasattr(self.session_manager, "_db") and self.session_manager._db:
-                    self.session_manager._db.add_time_series_record(
-                        session_id=session.id,
-                        pressure_bar=pressure,
-                        temperature_c=temperature,
-                        volume_m3=volume,
-                        notes="Manuel kayit",
-                    )
-                
-                # Auto save active session
-                self.session_manager._save_active_session()
-                
+                tss = TimeSeriesStore.from_dict(session.time_series)
                 self._set_banner(f"Kayit eklendi: {len(tss.records)} kayit.", "success")
                 self.ts_pressure_var.set("")
                 self.ts_temp_var.set("")
@@ -6271,15 +7139,15 @@ class HydrostaticTestApp:
         if not tss.records:
             messagebox.showinfo("Zaman Serisi Kayitlari", "Henuz hic kayit bulunmuyor.")
             return
-        
+
         lines = ["Zaman | Basinc (bar) | Sicaklik (°C) | Hacim (m3)"]
         lines.append("-" * 50)
-        for r in tss.records[-20:]: # show last 20 records
+        for r in tss.records[-20:]:  # show last 20 records
             vol_str = f"{r.volume_m3:.4f}" if r.volume_m3 is not None else "-"
             lines.append(
                 f"{r.timestamp.strftime('%H:%M:%S')} | {r.pressure_bar:.2f} bar | {r.temperature_c:.2f} °C | {vol_str}"
             )
-        
+
         messagebox.showinfo("Son Kayitlar (En son 20)", "\n".join(lines))
 
     def _check_thermal_balance_ui(self) -> None:
@@ -6289,7 +7157,7 @@ class HydrostaticTestApp:
             return
         tss = TimeSeriesStore.from_dict(session.time_series)
         is_balanced, temp_diff = tss.check_thermal_balance()
-        
+
         if is_balanced:
             msg = f"Termal Denge Saglandi!\nSicaklik degisimi: {temp_diff:.3f} °C (Limit <= {THERMAL_BALANCE_THRESHOLD_C} °C)\nSure: {tss.get_duration_hours():.1f} saat (Limit >= {THERMAL_BALANCE_MIN_HOURS} saat)"
             messagebox.showinfo("Termal Denge Kontrolu", msg)
@@ -6301,7 +7169,6 @@ class HydrostaticTestApp:
                 msg = f"Termal denge saglanamadi.\nSicaklik degisimi limit disi: {temp_diff:.3f} °C (Limit <= {THERMAL_BALANCE_THRESHOLD_C} °C)\nSure: {tss.get_duration_hours():.1f} saat."
             messagebox.showwarning("Termal Denge Kontrolu", msg)
             self._set_banner("Termal denge saglanamadi.", "warning")
-
 
     def _open_session_browser(self) -> None:
         browser = tk.Toplevel(self.root)
@@ -6324,37 +7191,44 @@ class HydrostaticTestApp:
         tree.column("updated", width=180, anchor="center")
 
         for s in self.session_manager.list_sessions():
-            entries = self.session_manager._db.get_session_entries(s["id"]) if (hasattr(self.session_manager, '_db') and self.session_manager._db) else []
-            tree.insert("", "end", values=(
-                s["id"][:8],
-                s["name"],
-                len(entries),
-                s["created_at"][:19].replace("T", " "),
-                s["updated_at"][:19].replace("T", " "),
-            ))
+            entries = self.session_manager.get_session_entries(s["id"])
+            tree.insert(
+                "",
+                "end",
+                values=(
+                    s["id"][:8],
+                    s["name"],
+                    len(entries),
+                    s["created_at"][:19].replace("T", " "),
+                    s["updated_at"][:19].replace("T", " "),
+                ),
+            )
 
         tree.pack(fill="both", expand=True, padx=10, pady=10)
 
         # Ac/Yenile/Kapat butonlari
         button_frame = ttk.Frame(browser)
         button_frame.pack(fill="x", padx=10, pady=(0, 10))
-        ttk.Button(button_frame, text="Secili Oturumu Ac",
-                   command=lambda: [self._load_browser_session(tree), browser.destroy()]).pack(side="left")
-        ttk.Button(button_frame, text="Istatistikler",
-                   command=self._show_db_statistics).pack(side="left", padx=(8, 0))
-        ttk.Button(button_frame, text="Kapat",
-                   command=browser.destroy).pack(side="right")
+        ttk.Button(
+            button_frame,
+            text="Secili Oturumu Ac",
+            command=lambda: [self._load_browser_session(tree), browser.destroy()],
+        ).pack(side="left")
+        ttk.Button(button_frame, text="Istatistikler", command=self._show_db_statistics).pack(
+            side="left", padx=(8, 0)
+        )
+        ttk.Button(button_frame, text="Kapat", command=browser.destroy).pack(side="right")
 
     def _show_db_statistics(self) -> None:
-        if not hasattr(self.session_manager, '_db') or not self.session_manager._db:
+        if not self.session_manager.has_database:
             self._set_banner("Istatistikler sadece SQLite modunda kullanilabilir.", "warning")
             return
-        stats = self.session_manager._db.get_statistics()
+        stats = self.session_manager.get_statistics()
         status_lines = []
         for status, count in stats.get("by_status", {}).items():
             status_lines.append(f"  - {status}: {count}")
         status_str = "\n".join(status_lines) if status_lines else "  - Yok"
-        
+
         type_lines = []
         for t, count in stats.get("by_type", {}).items():
             type_lines.append(f"  - {t}: {count}")
@@ -6382,7 +7256,7 @@ class HydrostaticTestApp:
             if s["id"][:8] == prefix:
                 target_id = s["id"]
                 break
-        
+
         if target_id:
             self.session_manager.switch_session(target_id)
             self._apply_session_to_ui()

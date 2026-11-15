@@ -57,7 +57,9 @@ def get_pig_speed_limit(option_label: str) -> PigSpeedLimit:
     raise ValidationError("Gecerli bir pig modu secin.")
 
 
-def evaluate_pig_speed(distance_m: float, travel_time_min: float, limit: PigSpeedLimit) -> PigSpeedResult:
+def evaluate_pig_speed(
+    distance_m: float, travel_time_min: float, limit: PigSpeedLimit
+) -> PigSpeedResult:
     if distance_m <= 0:
         raise ValidationError("Pig mesafesi sifirdan buyuk olmalidir.")
     if travel_time_min <= 0:

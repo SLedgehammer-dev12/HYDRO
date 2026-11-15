@@ -12,7 +12,11 @@ class CoefficientState(str, Enum):
     STALE = "stale"
 
     def is_usable(self) -> bool:
-        return self in {CoefficientState.COMPUTED, CoefficientState.REFERENCE, CoefficientState.MANUAL}
+        return self in {
+            CoefficientState.COMPUTED,
+            CoefficientState.REFERENCE,
+            CoefficientState.MANUAL,
+        }
 
     def is_auto_updateable(self) -> bool:
         return self in {CoefficientState.COMPUTED, CoefficientState.REFERENCE}

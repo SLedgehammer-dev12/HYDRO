@@ -1,5 +1,4 @@
 from .app import HydrostaticTestApp, main
-
 from .constants import (
     AUTO_A_MODE,
     AUTO_B_MODE,

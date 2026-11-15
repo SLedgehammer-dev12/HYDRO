@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 import unittest
-from math import isclose
+from math import isclose, isfinite
 from unittest.mock import patch
 
 from hidrostatik_test.domain import (
+    ValidationError,
     WaterPropertyBackendInfo,
     WaterPropertyError,
-    ValidationError,
     calculate_water_compressibility_a,
     calculate_water_thermal_expansion_beta,
-    calculate_water_density,
     get_available_water_property_backends,
     get_default_water_property_backend,
     get_water_property_backend,
@@ -21,8 +20,8 @@ from hidrostatik_test.domain.water_properties import (
     _axis_bounds,
     _bilinear_interpolate,
     _linear_interpolate,
-    scale_isothermal_compressibility_pa_to_micro_per_bar,
     scale_expansion_coefficient_k_to_micro_per_c,
+    scale_isothermal_compressibility_pa_to_micro_per_bar,
 )
 
 
@@ -63,15 +62,21 @@ class WaterPropertyBackendTests(unittest.TestCase):
         with self.assertRaises(WaterPropertyError):
             get_water_property_backend("missing-backend")
 
-    def test_unknown_backend_key_is_converted_to_validation_error_in_public_calculator(self) -> None:
+    def test_unknown_backend_key_is_converted_to_validation_error_in_public_calculator(
+        self,
+    ) -> None:
         with self.assertRaises(ValidationError):
             calculate_water_compressibility_a(10.0, 50.0, backend="missing-backend")
 
     def test_custom_backend_can_be_injected_for_a_calculation(self) -> None:
         backend = FakeWaterPropertyBackend()
 
-        self.assertTrue(isclose(calculate_water_compressibility_a(10.0, 50.0, backend=backend), 60.0))
-        self.assertTrue(isclose(calculate_water_thermal_expansion_beta(10.0, 50.0, backend=backend), 150.0))
+        self.assertTrue(
+            isclose(calculate_water_compressibility_a(10.0, 50.0, backend=backend), 60.0)
+        )
+        self.assertTrue(
+            isclose(calculate_water_thermal_expansion_beta(10.0, 50.0, backend=backend), 150.0)
+        )
 
 
 class ValidationAndEdgeTests(unittest.TestCase):
@@ -86,6 +91,14 @@ class ValidationAndEdgeTests(unittest.TestCase):
             calculate_water_compressibility_a(20.0, 0.0)
         with self.assertRaises(ValidationError):
             calculate_water_compressibility_a(20.0, -1.0)
+
+    def test_validate_inputs_non_finite(self) -> None:
+        with self.assertRaises(ValidationError):
+            calculate_water_compressibility_a(float("nan"), 50.0)
+        with self.assertRaises(ValidationError):
+            calculate_water_compressibility_a(20.0, float("inf"))
+        with self.assertRaises(ValidationError):
+            calculate_water_thermal_expansion_beta(20.0, 1e999)
 
     def test_scale_compressibility_non_positive(self) -> None:
         with self.assertRaises(WaterPropertyError):
@@ -152,16 +165,19 @@ class ValidationAndEdgeTests(unittest.TestCase):
 
     def test_resolve_backend_default(self) -> None:
         from hidrostatik_test.domain.water_properties import resolve_water_property_backend
+
         backend = resolve_water_property_backend()
         self.assertIsNotNone(backend)
 
     def test_resolve_backend_none_returns_default(self) -> None:
         from hidrostatik_test.domain.water_properties import resolve_water_property_backend
+
         backend = resolve_water_property_backend(None)
         self.assertIsNotNone(backend)
 
     def test_resolve_backend_str_returns_specific(self) -> None:
         from hidrostatik_test.domain.water_properties import resolve_water_property_backend
+
         backend = resolve_water_property_backend("table_v1")
         self.assertEqual(backend.info.key, "table_v1")
 
@@ -176,8 +192,46 @@ class ValidationAndEdgeTests(unittest.TestCase):
         self.assertEqual(backend.info.key, "table_v1")
 
 
+class BicubicTableBackendRangeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        from hidrostatik_test.domain.water_properties import (
+            TABLE_INTERPOLATION_BICUBIC_WATER_PROPERTY_BACKEND,
+        )
+
+        if TABLE_INTERPOLATION_BICUBIC_WATER_PROPERTY_BACKEND is None:
+            self.skipTest("numpy/scipy kurulu degil")
+        self.backend = TABLE_INTERPOLATION_BICUBIC_WATER_PROPERTY_BACKEND
+
+    def test_above_temperature_range_raises_instead_of_extrapolating(self) -> None:
+        with self.assertRaises(WaterPropertyError):
+            self.backend.calculate_water_compressibility_a(45.0, 50.0)
+
+    def test_above_pressure_range_raises_instead_of_extrapolating(self) -> None:
+        with self.assertRaises(WaterPropertyError):
+            self.backend.calculate_water_compressibility_a(20.0, 200.0)
+
+    def test_combined_out_of_range_point_raises(self) -> None:
+        with self.assertRaises(WaterPropertyError):
+            self.backend.calculate_water_thermal_expansion_beta(45.0, 200.0)
+
+    def test_below_temperature_range_raises(self) -> None:
+        with self.assertRaises(WaterPropertyError):
+            self.backend.calculate_water_thermal_expansion_beta(-10.0, 50.0)
+
+    def test_interior_points_return_finite_values(self) -> None:
+        for temp_c, pressure_bar in ((0.0, 1.0), (20.0, 50.0), (40.0, 150.0)):
+            with self.subTest(temp_c=temp_c, pressure_bar=pressure_bar):
+                a_value = self.backend.calculate_water_compressibility_a(temp_c, pressure_bar)
+                beta_value = self.backend.calculate_water_thermal_expansion_beta(
+                    temp_c, pressure_bar
+                )
+                self.assertTrue(isfinite(a_value))
+                self.assertTrue(isfinite(beta_value))
+
+
 try:
     from hidrostatik_test.domain.water_properties import IAPWS95WaterPropertyBackend
+
     HAS_IAPWS95 = True
 except ImportError:
     HAS_IAPWS95 = False

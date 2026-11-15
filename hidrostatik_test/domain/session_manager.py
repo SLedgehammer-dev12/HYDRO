@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Timer
 from typing import Any
 
 from .time_series import TimeSeriesStore
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -31,14 +34,19 @@ class TestSession:
         now = datetime.now(timezone.utc).isoformat()
         if not self.created_at:
             self.created_at = now
-        self.updated_at = now
+        # Diskten/DB'den yuklenen oturumlarin zaman damgasi korunur; yalnizca
+        # bos ise simdiki zaman atanir.
+        if not self.updated_at:
+            self.updated_at = now
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> TestSession:
-        cleaned_data: dict[str, object] = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
+        cleaned_data: dict[str, object] = {
+            k: v for k, v in data.items() if k in cls.__dataclass_fields__
+        }
         return cls(**cleaned_data)  # type: ignore[arg-type]
 
 
@@ -57,15 +65,17 @@ class SessionManager:
         self.sessions_dir = sessions_dir or SESSIONS_DIR
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
         self.index_file = self.sessions_dir / "index.json"
-        
+
         self.use_db = use_db
         self._db: Any | None = None
         self._sessions: dict[str, TestSession] = {}
         self._active_session_id: str | None = None
         self._auto_save_timer: Timer | None = None
+        self._auto_save_enabled = False
 
         if use_db:
             from ..services.database import DatabaseManager
+
             self._db = DatabaseManager(db_path=db_path)
 
         if self._db:
@@ -89,12 +99,12 @@ class SessionManager:
     def switch_session(self, session_id: str) -> TestSession:
         if self._active_session_id and self._active_session_id != session_id:
             self._save_active_session()
-        
+
         if self._db:
             session = self._load_session_from_db(session_id)
         else:
             session = self._load_session_from_disk(session_id)
-            
+
         self._sessions[session_id] = session
         self._active_session_id = session_id
         self._start_auto_save()
@@ -122,24 +132,28 @@ class SessionManager:
             db_sessions = self._db.list_sessions()
             sessions = []
             for s in db_sessions:
-                sessions.append({
-                    "id": s["id"],
-                    "name": s["name"],
-                    "created_at": s["created_at"],
-                    "updated_at": s["updated_at"],
-                    "is_active": s["id"] == self._active_session_id,
-                })
+                sessions.append(
+                    {
+                        "id": s["id"],
+                        "name": s["name"],
+                        "created_at": s["created_at"],
+                        "updated_at": s["updated_at"],
+                        "is_active": s["id"] == self._active_session_id,
+                    }
+                )
             return sorted(sessions, key=lambda s: s["updated_at"], reverse=True)
-            
+
         sessions = []
         for sid, session in self._sessions.items():
-            sessions.append({
-                "id": sid,
-                "name": session.name,
-                "created_at": session.created_at,
-                "updated_at": session.updated_at,
-                "is_active": sid == self._active_session_id,
-            })
+            sessions.append(
+                {
+                    "id": sid,
+                    "name": session.name,
+                    "created_at": session.created_at,
+                    "updated_at": session.updated_at,
+                    "is_active": sid == self._active_session_id,
+                }
+            )
         return sorted(sessions, key=lambda s: s["updated_at"], reverse=True)
 
     # --- Data Access ---
@@ -173,6 +187,99 @@ class SessionManager:
             session.wizard_state = state
             session.updated_at = datetime.now(timezone.utc).isoformat()
             self._save_active_session()
+
+    # --- Public intent-based API (UI bu metotlari kullanir) ---
+
+    @property
+    def has_database(self) -> bool:
+        """Kalici SQLite deposunun etkin olup olmadigini bildirir."""
+        return self._db is not None
+
+    def add_test_entry(
+        self,
+        test_type: str,
+        inputs: dict[str, Any],
+        result: dict[str, Any],
+        decision_status: str = "BEKLIYOR",
+        decision_title: str = "",
+        decision_summary: str = "",
+    ) -> int | None:
+        """Aktif oturuma test kaydi ekler.
+
+        SQLite etkin degilse veya aktif oturum yoksa ``None`` doner. Boylece UI
+        ``_db`` alanina dogrudan erismek zorunda kalmaz.
+        """
+        session = self.get_active_session()
+        if session is None or self._db is None:
+            return None
+        entry_id = self._db.add_test_entry(
+            session_id=session.id,
+            test_type=test_type,
+            inputs=inputs,
+            result=result,
+            decision_status=decision_status,
+            decision_title=decision_title,
+            decision_summary=decision_summary,
+        )
+        session.updated_at = datetime.now(timezone.utc).isoformat()
+        self._save_active_session()
+        return entry_id
+
+    def add_time_series_record(
+        self,
+        pressure_bar: float,
+        temperature_c: float,
+        volume_m3: float | None = None,
+        notes: str = "",
+    ) -> int | None:
+        """Aktif oturuma zaman serisi kaydi ekler (bellek + varsa SQLite)."""
+        session = self.get_active_session()
+        if session is None:
+            return None
+        store = TimeSeriesStore.from_dict(session.time_series)
+        store.add_record(
+            pressure_bar=pressure_bar,
+            temperature_c=temperature_c,
+            volume_m3=volume_m3,
+            notes=notes,
+        )
+        session.time_series = store.to_dict()
+        session.updated_at = datetime.now(timezone.utc).isoformat()
+        record_id: int | None = None
+        if self._db is not None:
+            record_id = self._db.add_time_series_record(
+                session.id,
+                pressure_bar,
+                temperature_c,
+                volume_m3,
+                notes,
+            )
+        self._save_active_session()
+        return record_id
+
+    def get_session_entries(self, session_id: str) -> list[dict[str, Any]]:
+        """Oturumun test kayitlarini dondurur (SQLite yoksa bos liste)."""
+        if self._db is None:
+            return []
+        entries = self._db.get_session_entries(session_id)
+        return list(entries)
+
+    def get_statistics(self) -> dict[str, Any]:
+        """SQLite varsa veritabani istatistikleri, yoksa bellek ozeti."""
+        if self._db is not None:
+            return dict(self._db.get_statistics())
+        stats: dict[str, Any] = {
+            "total_tests": 0,
+            "by_status": {},
+            "by_type": {},
+            "total_sessions": len(self._sessions),
+            "time_series_records": 0,
+        }
+        for session in self._sessions.values():
+            stats["total_tests"] += len(session.results)
+            store = TimeSeriesStore.from_dict(session.time_series)
+            stats["time_series_records"] += len(store.records)
+        return stats
 
     # --- Persistence ---
 
@@ -214,12 +321,14 @@ class SessionManager:
             return
         index = []
         for session in self._sessions.values():
-            index.append({
-                "id": session.id,
-                "name": session.name,
-                "created_at": session.created_at,
-                "updated_at": session.updated_at,
-            })
+            index.append(
+                {
+                    "id": session.id,
+                    "name": session.name,
+                    "created_at": session.created_at,
+                    "updated_at": session.updated_at,
+                }
+            )
         self.index_file.write_text(
             json.dumps(index, indent=2, ensure_ascii=False),
             encoding="utf-8",
@@ -257,7 +366,7 @@ class SessionManager:
         s_row = self._db.get_session(session_id)
         if not s_row:
             raise FileNotFoundError(f"Session not found in DB: {session_id}")
-        
+
         # Parse inputs and wizard state
         inputs = {}
         if s_row.get("inputs_json"):
@@ -265,7 +374,7 @@ class SessionManager:
                 inputs = json.loads(s_row["inputs_json"])
             except Exception:
                 pass
-                
+
         wizard_state = None
         if s_row.get("wizard_state_json"):
             try:
@@ -274,17 +383,19 @@ class SessionManager:
                 pass
 
         # Load time series
-        time_series_data: dict[str, object] = {"records": []}
+        time_series_records: list[dict[str, object]] = []
         try:
             records = self._db.get_time_series(session_id)
             for r in records:
-                time_series_data["records"].append({
-                    "timestamp": r["timestamp"],
-                    "pressure_bar": r["pressure_bar"],
-                    "temperature_c": r["temperature_c"],
-                    "volume_m3": r["volume_m3"],
-                    "notes": r["notes"]
-                })
+                time_series_records.append(
+                    {
+                        "timestamp": r["timestamp"],
+                        "pressure_bar": r["pressure_bar"],
+                        "temperature_c": r["temperature_c"],
+                        "volume_m3": r["volume_m3"],
+                        "notes": r["notes"],
+                    }
+                )
         except Exception:
             pass
 
@@ -306,25 +417,34 @@ class SessionManager:
             inputs=inputs,
             wizard_state=wizard_state,
             results=results,
-            time_series=time_series_data,
+            time_series={"records": time_series_records},
         )
 
     # --- Auto-save ---
 
     def _start_auto_save(self) -> None:
         self._stop_auto_save()
+        self._auto_save_enabled = True
         self._auto_save_timer = Timer(AUTO_SAVE_INTERVAL_S, self._auto_save_tick)
         self._auto_save_timer.daemon = True
         self._auto_save_timer.start()
 
     def _stop_auto_save(self) -> None:
+        self._auto_save_enabled = False
         if self._auto_save_timer:
             self._auto_save_timer.cancel()
             self._auto_save_timer = None
 
     def _auto_save_tick(self) -> None:
-        self._save_active_session()
-        self._start_auto_save()
+        try:
+            self._save_active_session()
+        except Exception:
+            # Otomatik kaydetme hatasi uygulamayi durdurmaz; hata loglanir ve
+            # zamanlayici yeniden kurulur ki sonraki turda tekrar denenebilsin.
+            logger.exception("Otomatik oturum kaydi basarisiz oldu.")
+        finally:
+            if self._auto_save_enabled:
+                self._start_auto_save()
 
     # --- Startup ---
 

@@ -1,12 +1,36 @@
+# Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.pytest_cache/
 
+# Test / arac ciktilari
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+junit*.xml
+.mypy_cache/
+.ruff_cache/
+
+# Uygulama verisi (yerel SQLite / oturum dosyalari)
+*.db
+*.db-wal
+*.db-shm
+
+# Build / dagitim artefact'lari
 build/
 dist/
 release/
 
+# Graphify harita ciktilari
+.graphify/
+
+# Log ve gecici dosyalar
 *.log
 *.tmp
+
+# Isletim sistemi dosyalari
+.DS_Store
+Thumbs.db

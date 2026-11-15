@@ -6,8 +6,8 @@ from math import isclose
 from hidrostatik_test.domain import (
     MAX_TEST_SECTION_LENGTH_M,
     MAX_TEST_SECTION_VOLUME_M3,
-    PipeSection,
     START_PUMP_LOCATION,
+    PipeSection,
     SectionPressureProfileInputs,
     ValidationError,
     evaluate_section_pressure_profile,
@@ -19,7 +19,9 @@ class PressureProfileTests(unittest.TestCase):
     def test_start_pump_window_uses_location_class_and_hydraulic_head(self) -> None:
         result = evaluate_section_pressure_profile(
             SectionPressureProfileInputs(
-                pipe=PipeSection(outside_diameter_mm=406.4, wall_thickness_mm=8.74, length_m=1000.0),
+                pipe=PipeSection(
+                    outside_diameter_mm=406.4, wall_thickness_mm=8.74, length_m=1000.0
+                ),
                 design_pressure_bar=20.0,
                 smys_mpa=100.0,
                 location_class=get_location_class_rule("Class 1 - min 1.25 x dizayn basinci"),
@@ -32,11 +34,17 @@ class PressureProfileTests(unittest.TestCase):
             )
         )
 
-        self.assertTrue(isclose(result.required_minimum_pressure_at_high_point_bar, 25.0, rel_tol=1e-12))
+        self.assertTrue(
+            isclose(result.required_minimum_pressure_at_high_point_bar, 25.0, rel_tol=1e-12)
+        )
         self.assertTrue(isclose(result.hydraulic_span_bar, 9.797844, rel_tol=1e-6))
         self.assertTrue(isclose(result.required_pressure_with_span_bar, 34.797844, rel_tol=1e-6))
-        self.assertTrue(isclose(result.start_window.minimum_required_pressure_bar, 34.797844, rel_tol=1e-6))
-        self.assertTrue(isclose(result.start_window.maximum_allowable_pressure_bar, 43.011811, rel_tol=1e-6))
+        self.assertTrue(
+            isclose(result.start_window.minimum_required_pressure_bar, 34.797844, rel_tol=1e-6)
+        )
+        self.assertTrue(
+            isclose(result.start_window.maximum_allowable_pressure_bar, 43.011811, rel_tol=1e-6)
+        )
         self.assertTrue(result.within_100_smys_span_limit)
         self.assertTrue(result.within_length_limit)
         self.assertTrue(result.within_volume_limit)
@@ -47,7 +55,9 @@ class PressureProfileTests(unittest.TestCase):
     def test_high_class_can_make_section_window_infeasible(self) -> None:
         result = evaluate_section_pressure_profile(
             SectionPressureProfileInputs(
-                pipe=PipeSection(outside_diameter_mm=406.4, wall_thickness_mm=8.74, length_m=1000.0),
+                pipe=PipeSection(
+                    outside_diameter_mm=406.4, wall_thickness_mm=8.74, length_m=1000.0
+                ),
                 design_pressure_bar=40.0,
                 smys_mpa=100.0,
                 location_class=get_location_class_rule("Class 3 - min 1.50 x dizayn basinci"),
@@ -61,13 +71,17 @@ class PressureProfileTests(unittest.TestCase):
 
         self.assertFalse(result.feasible)
         self.assertFalse(result.within_100_smys_span_limit)
-        self.assertGreater(result.required_pressure_with_span_bar, result.limiting_pressure_at_100_smys_bar)
+        self.assertGreater(
+            result.required_pressure_with_span_bar, result.limiting_pressure_at_100_smys_bar
+        )
 
     def test_invalid_elevation_order_is_rejected(self) -> None:
         with self.assertRaises(ValidationError):
             evaluate_section_pressure_profile(
                 SectionPressureProfileInputs(
-                    pipe=PipeSection(outside_diameter_mm=406.4, wall_thickness_mm=8.74, length_m=1000.0),
+                    pipe=PipeSection(
+                        outside_diameter_mm=406.4, wall_thickness_mm=8.74, length_m=1000.0
+                    ),
                     design_pressure_bar=20.0,
                     smys_mpa=100.0,
                     location_class=get_location_class_rule("Class 2 - min 1.25 x dizayn basinci"),

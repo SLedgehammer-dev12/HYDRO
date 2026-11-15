@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
 from datetime import datetime, timedelta
+from math import isclose
 from pathlib import Path
-import tempfile
 
 from hidrostatik_test.domain.time_series import (
-    THERMAL_BALANCE_MIN_HOURS,
     THERMAL_BALANCE_THRESHOLD_C,
     TimeSeriesRecord,
     TimeSeriesStore,
@@ -140,6 +140,54 @@ class TimeSeriesStoreEdgeTests(unittest.TestCase):
         self.assertFalse(is_balanced)
         self.assertGreater(diff, THERMAL_BALANCE_THRESHOLD_C)
 
+    def _fill_hourly(
+        self, end: datetime, hours: int, previous_temp: float, recent_temp: float
+    ) -> None:
+        start = end - timedelta(hours=hours)
+        recent_start = end - timedelta(hours=4)
+        for i in range(hours + 1):
+            timestamp = start + timedelta(hours=i)
+            temp = recent_temp if timestamp >= recent_start else previous_temp
+            self.store.add_record(50.0, temp, timestamp=timestamp)
+
+    def test_check_thermal_balance_within_half_degree_passes(self) -> None:
+        end = datetime(2026, 1, 8, 12, 0, 0)
+        self._fill_hourly(end, hours=24, previous_temp=15.0, recent_temp=15.4)
+
+        is_balanced, diff = self.store.check_thermal_balance()
+
+        self.assertTrue(is_balanced)
+        self.assertTrue(isclose(diff, 0.4, abs_tol=1e-9))
+
+    def test_check_thermal_balance_nine_tenths_degree_fails(self) -> None:
+        end = datetime(2026, 1, 8, 12, 0, 0)
+        self._fill_hourly(end, hours=24, previous_temp=15.0, recent_temp=15.9)
+
+        is_balanced, diff = self.store.check_thermal_balance()
+
+        self.assertFalse(is_balanced)
+        self.assertTrue(isclose(diff, 0.9, abs_tol=1e-9))
+
+    def test_check_thermal_balance_uses_last_record_as_reference_for_archive(self) -> None:
+        end = datetime.now() - timedelta(days=7)
+        self._fill_hourly(end, hours=48, previous_temp=18.0, recent_temp=18.0)
+
+        is_balanced, diff = self.store.check_thermal_balance()
+
+        self.assertTrue(is_balanced)
+        self.assertLessEqual(diff, THERMAL_BALANCE_THRESHOLD_C)
+
+    def test_average_temperature_accepts_archive_reference_time(self) -> None:
+        end = datetime(2025, 6, 1, 8, 0, 0)
+        self.store.add_record(50.0, 10.0, timestamp=end - timedelta(hours=5))
+        self.store.add_record(50.0, 20.0, timestamp=end - timedelta(hours=1))
+        self.store.add_record(50.0, 30.0, timestamp=end)
+
+        avg = self.store.get_average_temperature(last_n_hours=2.0, reference_time=end)
+
+        self.assertIsNotNone(avg)
+        self.assertAlmostEqual(avg, 25.0, places=9)
+
     def test_average_temperature_empty(self) -> None:
         self.assertIsNone(self.store.get_average_temperature())
 
@@ -190,6 +238,7 @@ class TimeSeriesStoreEdgeTests(unittest.TestCase):
             json_file = Path(tmp_dir) / "meta.json"
             self.store.to_json(json_file)
             import json as json_mod
+
             data = json_mod.loads(json_file.read_text(encoding="utf-8"))
             self.assertIn("metadata", data)
             self.assertEqual(data["metadata"]["record_count"], 1)
@@ -226,7 +275,7 @@ class TimeSeriesTests(unittest.TestCase):
 
     def test_store_operations(self) -> None:
         self.assertEqual(len(self.store.get_records()), 0)
-        
+
         self.store.add_record(50.0, 15.0, timestamp=self.now)
         self.store.add_record(51.0, 15.2, timestamp=self.now + timedelta(hours=1))
 
@@ -234,7 +283,7 @@ class TimeSeriesTests(unittest.TestCase):
         self.assertEqual(len(records), 2)
         self.assertEqual(records[0].pressure_bar, 50.0)
         self.assertEqual(records[1].pressure_bar, 51.0)
-        
+
         duration = self.store.get_duration_hours()
         self.assertAlmostEqual(duration, 1.0, places=4)
 

@@ -1,10 +1,13 @@
-import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from hidrostatik_test.domain.session_manager import SessionManager, TestSession
+from hidrostatik_test.domain.session_manager import (
+    AUTO_SAVE_INTERVAL_S,
+    SessionManager,
+    TestSession,
+)
 
 
 class TestTestSession(unittest.TestCase):
@@ -21,6 +24,20 @@ class TestTestSession(unittest.TestCase):
         self.assertEqual(s1.id, s2.id)
         self.assertEqual(s1.inputs, s2.inputs)
 
+    def test_updated_at_is_not_overwritten_when_present(self):
+        loaded = TestSession(updated_at="2024-01-02T03:04:05+00:00")
+        self.assertEqual(loaded.updated_at, "2024-01-02T03:04:05+00:00")
+
+    def test_updated_at_is_filled_when_empty(self):
+        fresh = TestSession(updated_at="")
+        self.assertTrue(fresh.updated_at)
+
+    def test_from_dict_preserves_disk_timestamp(self):
+        original = TestSession(name="Disk", updated_at="2023-09-09T09:09:09+00:00")
+        restored = TestSession.from_dict(original.to_dict())
+        self.assertEqual(restored.updated_at, "2023-09-09T09:09:09+00:00")
+        self.assertEqual(restored.created_at, original.created_at)
+
 
 class TestSessionManager(unittest.TestCase):
     def setUp(self):
@@ -29,13 +46,74 @@ class TestSessionManager(unittest.TestCase):
         self.manager = SessionManager(sessions_dir=self.temp_dir, use_db=False)
 
     def tearDown(self):
+        self.manager._stop_auto_save()
         import shutil
+
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_create_session(self):
         s = self.manager.create_session("Test 1")
         self.assertEqual(s.name, "Test 1")
         self.assertEqual(self.manager.get_active_session().id, s.id)
+
+    def test_updated_at_survives_disk_roundtrip(self):
+        session = self.manager.create_session("Zaman")
+        session.updated_at = "2024-01-02T03:04:05+00:00"
+        self.manager._save_active_session()
+
+        reloaded_manager = SessionManager(sessions_dir=self.temp_dir, use_db=False)
+        try:
+            loaded = reloaded_manager.switch_session(session.id)
+        finally:
+            reloaded_manager._stop_auto_save()
+
+        self.assertEqual(loaded.updated_at, "2024-01-02T03:04:05+00:00")
+        self.assertNotEqual(loaded.updated_at, session.created_at)
+
+    def test_auto_save_tick_rearms_timer_when_save_fails(self):
+        self.manager.create_session("Zamanlayici")
+        self.manager._auto_save_timer.cancel()
+        captured: dict[str, object] = {}
+
+        class FakeTimer:
+            def __init__(self, interval, function):
+                captured["interval"] = interval
+                captured["function"] = function
+                self.daemon = False
+
+            def start(self):
+                captured["started"] = True
+
+            def cancel(self):
+                captured["cancelled"] = True
+
+        with (
+            patch("hidrostatik_test.domain.session_manager.Timer", FakeTimer),
+            patch.object(
+                self.manager,
+                "_save_active_session",
+                side_effect=RuntimeError("disk yazilamadi"),
+            ),
+            self.assertLogs(
+                "hidrostatik_test.domain.session_manager", level="ERROR"
+            ) as captured_logs,
+        ):
+            self.manager._auto_save_tick()
+
+        self.assertTrue(any("Otomatik oturum" in message for message in captured_logs.output))
+        self.assertIsInstance(self.manager._auto_save_timer, FakeTimer)
+        self.assertTrue(captured["started"])
+        self.assertEqual(captured["interval"], AUTO_SAVE_INTERVAL_S)
+        rearm_function = captured["function"]
+        self.assertIs(rearm_function.__self__, self.manager)
+        self.assertIs(rearm_function.__func__, SessionManager._auto_save_tick)
+
+    def test_auto_save_tick_does_not_rearm_after_stop(self):
+        self.manager.create_session("Durdurulan")
+        self.manager._stop_auto_save()
+        with patch("hidrostatik_test.domain.session_manager.Timer") as mocked_timer:
+            self.manager._auto_save_tick()
+        mocked_timer.assert_not_called()
 
     def test_switch_session_preserves_data(self):
         s1 = self.manager.create_session("Oturum 1")
@@ -61,6 +139,7 @@ class TestSessionManager(unittest.TestCase):
     def test_restore_last_session(self):
         self.manager.create_session("Ilk")
         import time
+
         time.sleep(0.01)
         self.manager.create_session("Son")
         restored = self.manager.restore_last_session()
@@ -83,6 +162,7 @@ class SessionManagerDBTests(unittest.TestCase):
     def tearDown(self):
         self.db_patcher.stop()
         import shutil
+
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_db_init_creates_manager_and_loads_sessions(self):
@@ -101,7 +181,12 @@ class SessionManagerDBTests(unittest.TestCase):
 
     def test_db_switch_session_loads_from_db(self):
         self.mock_db.list_sessions.return_value = [
-            {"id": "sess1", "name": "DB Oturum", "created_at": "2026-01-01", "updated_at": "2026-01-02"}
+            {
+                "id": "sess1",
+                "name": "DB Oturum",
+                "created_at": "2026-01-01",
+                "updated_at": "2026-01-02",
+            }
         ]
         self.mock_db.get_session.return_value = {
             "id": "sess1",
@@ -125,7 +210,12 @@ class SessionManagerDBTests(unittest.TestCase):
 
     def test_db_switch_session_handles_broken_json_gracefully(self):
         self.mock_db.list_sessions.return_value = [
-            {"id": "broken", "name": "Bozuk", "created_at": "2026-01-01", "updated_at": "2026-01-02"}
+            {
+                "id": "broken",
+                "name": "Bozuk",
+                "created_at": "2026-01-01",
+                "updated_at": "2026-01-02",
+            }
         ]
         self.mock_db.get_session.return_value = {
             "id": "broken",
@@ -179,8 +269,18 @@ class SessionManagerDBTests(unittest.TestCase):
 
     def test_restore_last_session_returns_most_recent(self):
         self.mock_db.list_sessions.return_value = [
-            {"id": "old", "name": "Eski", "created_at": "2026-01-01", "updated_at": "2026-01-01T00:00:00"},
-            {"id": "new", "name": "Yeni", "created_at": "2026-01-02", "updated_at": "2026-01-02T00:00:00"},
+            {
+                "id": "old",
+                "name": "Eski",
+                "created_at": "2026-01-01",
+                "updated_at": "2026-01-01T00:00:00",
+            },
+            {
+                "id": "new",
+                "name": "Yeni",
+                "created_at": "2026-01-02",
+                "updated_at": "2026-01-02T00:00:00",
+            },
         ]
         self.mock_db.get_session.return_value = {
             "id": "new",
@@ -198,6 +298,77 @@ class SessionManagerDBTests(unittest.TestCase):
         session = manager.restore_last_session()
         self.assertEqual(session.id, "new")
         self.assertEqual(session.name, "Yeni")
+
+
+class SessionManagerIntentApiTests(unittest.TestCase):
+    """UI'nin ``_db`` alanina dokunmadan kullanacagi public API testleri."""
+
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp())
+        self.manager = SessionManager(
+            sessions_dir=self.temp_dir,
+            use_db=True,
+            db_path=self.temp_dir / "intent.db",
+        )
+        self.session = self.manager.create_session("Niyet API")
+
+    def tearDown(self):
+        self.manager._stop_auto_save()
+        if self.manager._db is not None:
+            self.manager._db.close()
+        import shutil
+
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_has_database_reports_sqlite_mode(self):
+        self.assertTrue(self.manager.has_database)
+        memory_manager = SessionManager(sessions_dir=self.temp_dir, use_db=False)
+        try:
+            self.assertFalse(memory_manager.has_database)
+        finally:
+            memory_manager._stop_auto_save()
+
+    def test_add_test_entry_persists_and_is_readable(self):
+        entry_id = self.manager.add_test_entry(
+            "air",
+            {"temperature_c": 12.0},
+            {"passed": True},
+            decision_status="BASARILI",
+            decision_title="Hava testi",
+            decision_summary="Uygun",
+        )
+        self.assertIsInstance(entry_id, int)
+        self.assertGreater(entry_id, 0)
+
+        entries = self.manager.get_session_entries(self.session.id)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["test_type"], "air")
+        self.assertEqual(entries[0]["decision_status"], "BASARILI")
+
+        stats = self.manager.get_statistics()
+        self.assertEqual(stats["total_tests"], 1)
+        self.assertEqual(stats["by_type"], {"air": 1})
+
+    def test_add_time_series_record_updates_memory_and_database(self):
+        record_id = self.manager.add_time_series_record(
+            pressure_bar=50.0, temperature_c=15.5, notes="Saha"
+        )
+        self.assertIsInstance(record_id, int)
+
+        active = self.manager.get_active_session()
+        self.assertEqual(len(active.time_series["records"]), 1)
+        self.assertEqual(active.time_series["records"][0]["pressure_bar"], 50.0)
+        self.assertEqual(self.manager.get_statistics()["time_series_records"], 1)
+
+    def test_get_entries_returns_empty_list_without_database(self):
+        memory_manager = SessionManager(sessions_dir=self.temp_dir, use_db=False)
+        try:
+            memory_manager.create_session("Bellek")
+            self.assertEqual(memory_manager.get_session_entries("yok"), [])
+            self.assertIsNone(memory_manager.add_test_entry("air", {}, {"passed": True}))
+            self.assertEqual(memory_manager.get_statistics()["total_sessions"], 1)
+        finally:
+            memory_manager._stop_auto_save()
 
 
 if __name__ == "__main__":

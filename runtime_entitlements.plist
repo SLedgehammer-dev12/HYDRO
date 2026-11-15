@@ -2,13 +2,17 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <!--
+      PyInstaller paketi numpy/scipy gibi imzalanmamis .dylib dosyalari tasir.
+      Hardened Runtime acikken bu kutuphanelerin yuklenebilmesi icin kutuphane
+      dogrulamasi kapatilir. Bunun disinda yetki verilmez:
+      - com.apple.security.inherit: yalnizca XPC/child process icin gerekir, kullanilmiyor.
+      - com.apple.security.cs.allow-dyld-environment-variables: DYLD_* enjeksiyonuna
+        kapi actigi icin kaldirildi.
+    -->
     <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
     <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
-    <true/>
-    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
-    <true/>
-    <key>com.apple.security.inherit</key>
     <true/>
 </dict>
 </plist>

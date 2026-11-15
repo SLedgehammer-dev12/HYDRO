@@ -1,6 +1,10 @@
+# Runtime bagimliliklari.
+# Ust sinirlar, ayni ana surum hattinda kalip kirilma riskini azaltmak icin konuldu.
 CoolProp==7.0.0
-scipy>=1.11.0
-numpy>=1.24.0
-pint>=0.22.0
-openpyxl>=3.1.5
-reportlab>=4.5.1
+scipy>=1.11.0,<2
+numpy>=1.24.0,<3
+pint>=0.22.0,<1
+openpyxl>=3.1.5,<4
+reportlab>=4.5.1,<5
+# Opsiyonel guncelleme imza dogrulamasi (HYDRO_UPDATE_PUBKEY ile etkinlesir).
+cryptography>=42,<46

@@ -3,7 +3,11 @@ from __future__ import annotations
 import unittest
 
 from hidrostatik_test.domain import ValidationError
-from hidrostatik_test.domain.operations import evaluate_pig_speed, get_pig_speed_limit, get_pig_speed_limit_options
+from hidrostatik_test.domain.operations import (
+    evaluate_pig_speed,
+    get_pig_speed_limit,
+    get_pig_speed_limit_options,
+)
 
 
 class PigSpeedOperationTests(unittest.TestCase):

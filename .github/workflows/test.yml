@@ -12,14 +12,24 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.12", "3.13"]
-
+    name: py${{ matrix.python-version }} / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
+        python-version: [ "3.12", "3.13" ]
 
     steps:
       - uses: actions/checkout@v4
@@ -30,7 +40,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
 
-      - name: Install system dependencies (Linux)
+      - name: Install Xvfb (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
@@ -39,30 +49,32 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
+          python -m pip install -r requirements-dev.txt
 
-      - name: Run tests with coverage
+      # Tkinter tabanli UI testleri Linux'ta sanal ekran ister.
+      - name: Run tests under Xvfb (Linux)
+        if: runner.os == 'Linux'
         run: |
-          if [[ "${{ runner.os }}" == "Linux" ]]; then
-            xvfb-run python -m coverage run -m unittest discover -s tests -p "test_*.py" -v
-          else
-            python -m coverage run -m unittest discover -s tests -p "test_*.py" -v
-          fi
+          xvfb-run --auto-servernum python -m coverage run -m unittest discover -s tests -p "test_*.py" -v
 
-      - name: Report coverage
+      - name: Run tests (macOS / Windows)
+        if: runner.os != 'Linux'
         run: |
-          python -m coverage report --fail-under=70 --skip-covered --show-missing
+          python -m coverage run -m unittest discover -s tests -p "test_*.py" -v
 
-      - name: Run mypy on domain layer
-        continue-on-error: true
+      - name: Coverage report and XML
         run: |
-          python -m mypy hidrostatik_test/domain/ hidrostatik_test/ui/constants.py
+          python -m coverage xml
+          python -m coverage report
 
-      - name: Upload test results (on failure)
-        if: failure()
+      # Tip kapisi lint.yml icinde (domain bloklayici, tam paket bilgilendirici) calisir;
+      # matriste tekrarlanmaz.
+
+      - name: Upload coverage report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ matrix.os }}-py${{ matrix.python-version }}
-          path: |
-            __pycache__/
+          name: coverage-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: coverage.xml
+          if-no-files-found: warn
           retention-days: 7

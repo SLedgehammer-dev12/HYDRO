@@ -99,7 +99,9 @@ class DefaultWaterPropertyTableTests(unittest.TestCase):
         a_value = calculate_water_compressibility_a(10.0, 50.0, backend="table_v1")
         beta_value = calculate_water_thermal_expansion_beta(10.0, 50.0, backend="table_v1")
 
-        self.assertTrue(isclose(a_value, calculate_water_compressibility_a(10.0, 50.0), rel_tol=1e-9))
+        self.assertTrue(
+            isclose(a_value, calculate_water_compressibility_a(10.0, 50.0), rel_tol=1e-9)
+        )
         self.assertTrue(
             isclose(
                 beta_value,

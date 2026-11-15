@@ -2,10 +2,16 @@
 
 ## Scope
 
-This note records the source basis for the `BOTAŞ referans tablosu` option used
-in the UI. The table is derived from public-source `A/B` coefficient charts used
-in pipeline hydrostatic testing and compared against the local workbook-derived
-table `ab_control_table_v1.csv`.
+This note records the source basis for the two reference-table options exposed in
+the UI:
+
+- `BOTAŞ referans tablosu`: the institutional workbook-derived A/B control table
+  (`hidrostatik_test/data/ab_control_table_v1.csv`). It has no separate BOTAŞ CSV.
+- `GAIL referans tablosu`: the public GAIL document extraction
+  (`hidrostatik_test/data/gail_reference_table_v1.csv`).
+
+The public-source `A/B` coefficient charts are compared against the local
+workbook-derived table `ab_control_table_v1.csv`.
 
 ## Downloaded Public Sources
 
@@ -104,11 +110,11 @@ origin.
 ## Practical Result
 
 - Public sources can be used to validate the `A` trend, `B` trend and
-  terminology behind the `BOTAŞ referans tablosu`.
+  terminology behind the public `GAIL referans tablosu` option.
 - Public `A` extraction now supports a high-confidence trend comparison against
   the workbook table.
 - Public `B` extraction remains exact at the published `10 bar` nodes and still
   shows a systematic offset relative to the workbook table.
-- The local workbook remains the better operational source for runtime use,
-  while the public GAIL extraction is now a useful provenance and validation
-  layer.
+- The local workbook (`BOTAŞ referans tablosu`) remains the operational source
+  for runtime use, while the public GAIL extraction is a separate provenance and
+  validation source.

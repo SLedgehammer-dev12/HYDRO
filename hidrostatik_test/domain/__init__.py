@@ -22,12 +22,6 @@ from .operations import (
     get_pig_speed_limit,
     get_pig_speed_limit_options,
 )
-from .pressurization import (
-    PRESSURIZATION_VOLUME_DEVIATION_LIMIT_PERCENT,
-    PressurizationInputs,
-    PressurizationResult,
-    evaluate_pressurization,
-)
 from .pressure_profile import (
     END_PUMP_LOCATION,
     MAX_TEST_SECTION_LENGTH_M,
@@ -41,6 +35,12 @@ from .pressure_profile import (
     get_location_class_options,
     get_location_class_rule,
     get_pump_location_options,
+)
+from .pressurization import (
+    PRESSURIZATION_VOLUME_DEVIATION_LIMIT_PERCENT,
+    PressurizationInputs,
+    PressurizationResult,
+    evaluate_pressurization,
 )
 from .water_properties import (
     WaterPropertyBackend,

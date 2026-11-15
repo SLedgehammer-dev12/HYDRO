@@ -20,6 +20,7 @@ _HAS_COOLPROP: bool
 
 try:
     import numpy as np
+
     _HAS_NUMPY = True
 except ImportError:
     np = None  # type: ignore[assignment]
@@ -27,16 +28,18 @@ except ImportError:
 
 try:
     from scipy.interpolate import RegularGridInterpolator
+
     _HAS_SCIPY = True
 except ImportError:
-    RegularGridInterpolator = None  # type: ignore[assignment]
+    RegularGridInterpolator = None
     _HAS_SCIPY = False
 
 try:
     from CoolProp.CoolProp import PropsSI
+
     _HAS_COOLPROP = True
 except ImportError:
-    PropsSI = None  # type: ignore[assignment]
+    PropsSI = None
     _HAS_COOLPROP = False
 
 MICRO_BAR_INVERSE_PER_PA_INVERSE: Final[float] = 1e11
@@ -58,22 +61,24 @@ class WaterPropertyBackendInfo:
 
 
 class WaterPropertyBackend(Protocol):
-    info: WaterPropertyBackendInfo
+    @property
+    def info(self) -> WaterPropertyBackendInfo: ...
 
-    def calculate_water_compressibility_a(self, temp_c: float, pressure_bar: float) -> float:
-        ...
+    def calculate_water_compressibility_a(self, temp_c: float, pressure_bar: float) -> float: ...
 
-    def calculate_water_thermal_expansion_beta(self, temp_c: float, pressure_bar: float) -> float:
-        ...
+    def calculate_water_thermal_expansion_beta(
+        self, temp_c: float, pressure_bar: float
+    ) -> float: ...
 
-    def calculate_water_density(self, temp_c: float, pressure_bar: float) -> float:
-        ...
+    def calculate_water_density(self, temp_c: float, pressure_bar: float) -> float: ...
 
 
 BackendSpecifier = str | WaterPropertyBackend | None
 
 
 def scale_isothermal_compressibility_pa_to_micro_per_bar(value_pa_inverse: float) -> float:
+    if not isfinite(value_pa_inverse):
+        raise WaterPropertyError("Izotermal sikistirilabilirlik sonlu bir sayi olmalidir.")
     if value_pa_inverse <= 0:
         raise WaterPropertyError("Izotermal sikistirilabilirlik pozitif olmalidir.")
     return value_pa_inverse * MICRO_BAR_INVERSE_PER_PA_INVERSE
@@ -86,6 +91,10 @@ def scale_expansion_coefficient_k_to_micro_per_c(value_k_inverse: float) -> floa
 
 
 def _validate_state_inputs(temp_c: float, pressure_bar: float) -> tuple[float, float]:
+    if not isfinite(temp_c):
+        raise WaterPropertyError("Sicaklik sonlu bir sayi olmalidir.")
+    if not isfinite(pressure_bar):
+        raise WaterPropertyError("Basinc sonlu bir sayi olmalidir.")
     if temp_c <= ABSOLUTE_ZERO_C:
         raise WaterPropertyError("Sicaklik mutlak sifirin altinda olamaz.")
     if pressure_bar <= 0:
@@ -164,6 +173,7 @@ class CoolPropWaterPropertyBackend:
             raise WaterPropertyError("Yoğunluk pozitif olmalidir.")
         return density_kg_per_m3
 
+
 class IAPWS95WaterPropertyBackend:
     """IAPWS-95 based backend via the 'iapws' library (GPLv3).
 
@@ -180,9 +190,7 @@ class IAPWS95WaterPropertyBackend:
         )
         self._iapws = _import_iapws()
 
-    def calculate_water_compressibility_a(
-        self, temp_c: float, pressure_bar: float
-    ) -> float:
+    def calculate_water_compressibility_a(self, temp_c: float, pressure_bar: float) -> float:
         kelvin, _ = _validate_state_inputs(temp_c, pressure_bar)
         try:
             steam = self._iapws.IAPWS95(T=kelvin, P=pressure_bar * 0.1)
@@ -191,11 +199,12 @@ class IAPWS95WaterPropertyBackend:
             raise WaterPropertyError(
                 f"IAPWS-95 compressibility failed at T={temp_c}C, P={pressure_bar}bar: {exc}"
             ) from exc
-        return kappa * 1e5
+        micro_per_bar = kappa * 1e5
+        if not isfinite(micro_per_bar):
+            raise WaterPropertyError("IAPWS-95 A degeri sonlu bir sayi olarak hesaplanamadi.")
+        return micro_per_bar
 
-    def calculate_water_thermal_expansion_beta(
-        self, temp_c: float, pressure_bar: float
-    ) -> float:
+    def calculate_water_thermal_expansion_beta(self, temp_c: float, pressure_bar: float) -> float:
         kelvin, _ = _validate_state_inputs(temp_c, pressure_bar)
         try:
             steam = self._iapws.IAPWS95(T=kelvin, P=pressure_bar * 0.1)
@@ -204,11 +213,12 @@ class IAPWS95WaterPropertyBackend:
             raise WaterPropertyError(
                 f"IAPWS-95 thermal expansion failed at T={temp_c}C, P={pressure_bar}bar: {exc}"
             ) from exc
-        return alpha * 1e6
+        micro_per_c = alpha * 1e6
+        if not isfinite(micro_per_c):
+            raise WaterPropertyError("IAPWS-95 beta degeri sonlu bir sayi olarak hesaplanamadi.")
+        return micro_per_c
 
-    def calculate_water_density(
-        self, temp_c: float, pressure_bar: float
-    ) -> float:
+    def calculate_water_density(self, temp_c: float, pressure_bar: float) -> float:
         kelvin, _ = _validate_state_inputs(temp_c, pressure_bar)
         try:
             steam = self._iapws.IAPWS95(T=kelvin, P=pressure_bar * 0.1)
@@ -256,45 +266,55 @@ class TableInterpolationWaterPropertyBackend:
         temperature_points = grid.temperature_points
         pressure_points = grid.pressure_points
         source_grid = grid.beta_grid if use_beta else grid.a_grid
-        
+
+        # Bicubic yol da dahil olmak uzere izgara disina sessizce ekstrapole etme.
+        temperature_bounds = _axis_bounds(temp_c, temperature_points, "sicaklik")
+        pressure_bounds = _axis_bounds(pressure_bar, pressure_points, "basinc")
+
         if self.interpolation_method == "bicubic":
             if _HAS_NUMPY and _HAS_SCIPY:
                 import numpy as np
                 from scipy.interpolate import RegularGridInterpolator
+
                 temp_array = np.array(temperature_points)
                 pressure_array = np.array(pressure_points)
                 values_array = np.array(source_grid)
-                
+
                 interpolator = RegularGridInterpolator(
                     (temp_array, pressure_array),
                     values_array,
                     method="cubic",
-                    bounds_error=False,
-                    fill_value=None,
+                    bounds_error=True,
                 )
-                result = interpolator([[temp_c, pressure_bar]])[0]
-                return float(result)
-            return _bilinear_interpolate_table(temperature_points, pressure_points, source_grid, temp_c, pressure_bar)
-        
-        temperature_bounds = _axis_bounds(temp_c, temperature_points, "sicaklik")
-        pressure_bounds = _axis_bounds(pressure_bar, pressure_points, "basinc")
+                result = float(interpolator([[temp_c, pressure_bar]])[0])
+            else:
+                result = _bilinear_interpolate_table(
+                    temperature_points, pressure_points, source_grid, temp_c, pressure_bar
+                )
+        else:
+            t0_index, t1_index = temperature_bounds
+            p0_index, p1_index = pressure_bounds
+            t0 = temperature_points[t0_index]
+            t1 = temperature_points[t1_index]
+            p0 = pressure_points[p0_index]
+            p1 = pressure_points[p1_index]
 
-        t0_index, t1_index = temperature_bounds
-        p0_index, p1_index = pressure_bounds
-        t0 = temperature_points[t0_index]
-        t1 = temperature_points[t1_index]
-        p0 = pressure_points[p0_index]
-        p1 = pressure_points[p1_index]
+            q11 = source_grid[t0_index][p0_index]
+            q21 = source_grid[t1_index][p0_index]
+            q12 = source_grid[t0_index][p1_index]
+            q22 = source_grid[t1_index][p1_index]
 
-        q11 = source_grid[t0_index][p0_index]
-        q21 = source_grid[t1_index][p0_index]
-        q12 = source_grid[t0_index][p1_index]
-        q22 = source_grid[t1_index][p1_index]
+            result = _bilinear_interpolate(temp_c, pressure_bar, t0, t1, p0, p1, q11, q21, q12, q22)
 
-        return _bilinear_interpolate(temp_c, pressure_bar, t0, t1, p0, p1, q11, q21, q12, q22)
+        if not isfinite(result):
+            label = "beta" if use_beta else "A"
+            raise WaterPropertyError(
+                f"Table backend {label} degeri sonlu bir sayi olarak hesaplanamadi."
+            )
+        return result
 
     def _interpolate_density(self, temp_c: float, pressure_bar: float) -> float:
-        if _HAS_COOLPROP:
+        if COOLPROP_WATER_PROPERTY_BACKEND is not None:
             try:
                 return COOLPROP_WATER_PROPERTY_BACKEND.calculate_water_density(temp_c, pressure_bar)
             except WaterPropertyError:
@@ -343,7 +363,9 @@ def _bilinear_interpolate(
     return low + (high - low) * p_ratio
 
 
-def _linear_interpolate(value: float, lower_x: float, upper_x: float, lower_y: float, upper_y: float) -> float:
+def _linear_interpolate(
+    value: float, lower_x: float, upper_x: float, lower_y: float, upper_y: float
+) -> float:
     if lower_x == upper_x:
         return lower_y
     ratio = (value - lower_x) / (upper_x - lower_x)
@@ -372,6 +394,7 @@ def _import_iapws():
     """Try to import iapws; return None if not available."""
     try:
         import iapws
+
         return iapws
     except ImportError:
         return None
@@ -385,34 +408,40 @@ def _build_iapws95_backend() -> IAPWS95WaterPropertyBackend | None:
 
 
 if _HAS_COOLPROP:
-    COOLPROP_WATER_PROPERTY_BACKEND = CoolPropWaterPropertyBackend()
+    COOLPROP_WATER_PROPERTY_BACKEND: WaterPropertyBackend | None = CoolPropWaterPropertyBackend()
 else:
-    COOLPROP_WATER_PROPERTY_BACKEND = None  # type: ignore[assignment]
+    COOLPROP_WATER_PROPERTY_BACKEND = None
 
 TABLE_INTERPOLATION_WATER_PROPERTY_BACKEND = TableInterpolationWaterPropertyBackend()
 
 if _HAS_NUMPY and _HAS_SCIPY:
-    TABLE_INTERPOLATION_BICUBIC_WATER_PROPERTY_BACKEND = TableInterpolationWaterPropertyBackend(
-        interpolation_method="bicubic",
-        info=WaterPropertyBackendInfo(
-            key="table_v1_bicubic",
-            label="Table Interpolation v1 (Bicubic)",
-            distribution_ready=True,
-            note="Bicubic interpolasyon ile daha yuksek dogruluk (scipy).",
-        ),
+    TABLE_INTERPOLATION_BICUBIC_WATER_PROPERTY_BACKEND: WaterPropertyBackend | None = (
+        TableInterpolationWaterPropertyBackend(
+            interpolation_method="bicubic",
+            info=WaterPropertyBackendInfo(
+                key="table_v1_bicubic",
+                label="Table Interpolation v1 (Bicubic)",
+                distribution_ready=True,
+                note="Bicubic interpolasyon ile daha yuksek dogruluk (scipy).",
+            ),
+        )
     )
 else:
-    TABLE_INTERPOLATION_BICUBIC_WATER_PROPERTY_BACKEND = None  # type: ignore[assignment]
+    TABLE_INTERPOLATION_BICUBIC_WATER_PROPERTY_BACKEND = None
 
 _WATER_PROPERTY_BACKENDS: dict[str, WaterPropertyBackend] = {
     TABLE_INTERPOLATION_WATER_PROPERTY_BACKEND.info.key: TABLE_INTERPOLATION_WATER_PROPERTY_BACKEND,
 }
 
-if _HAS_COOLPROP:
-    _WATER_PROPERTY_BACKENDS[COOLPROP_WATER_PROPERTY_BACKEND.info.key] = COOLPROP_WATER_PROPERTY_BACKEND  # type: ignore[union-attr]
+if COOLPROP_WATER_PROPERTY_BACKEND is not None:
+    _WATER_PROPERTY_BACKENDS[COOLPROP_WATER_PROPERTY_BACKEND.info.key] = (
+        COOLPROP_WATER_PROPERTY_BACKEND
+    )
 
 if TABLE_INTERPOLATION_BICUBIC_WATER_PROPERTY_BACKEND is not None:
-    _WATER_PROPERTY_BACKENDS[TABLE_INTERPOLATION_BICUBIC_WATER_PROPERTY_BACKEND.info.key] = TABLE_INTERPOLATION_BICUBIC_WATER_PROPERTY_BACKEND
+    _WATER_PROPERTY_BACKENDS[TABLE_INTERPOLATION_BICUBIC_WATER_PROPERTY_BACKEND.info.key] = (
+        TABLE_INTERPOLATION_BICUBIC_WATER_PROPERTY_BACKEND
+    )
 
 _iapws95_backend = _build_iapws95_backend()
 if _iapws95_backend is not None:
@@ -429,10 +458,9 @@ def get_available_water_property_backends(
     return tuple(backends)
 
 
-
 def get_default_water_property_backend() -> WaterPropertyBackend:
-    if _HAS_COOLPROP:
-        return COOLPROP_WATER_PROPERTY_BACKEND  # type: ignore[return-value]
+    if COOLPROP_WATER_PROPERTY_BACKEND is not None:
+        return COOLPROP_WATER_PROPERTY_BACKEND
     return TABLE_INTERPOLATION_WATER_PROPERTY_BACKEND
 
 
@@ -455,13 +483,17 @@ def resolve_water_property_backend(backend: BackendSpecifier = None) -> WaterPro
 def calculate_water_compressibility_a(
     temp_c: float, pressure_bar: float, backend: BackendSpecifier = None
 ) -> float:
-    return resolve_water_property_backend(backend).calculate_water_compressibility_a(temp_c, pressure_bar)
+    return resolve_water_property_backend(backend).calculate_water_compressibility_a(
+        temp_c, pressure_bar
+    )
 
 
 def calculate_water_thermal_expansion_beta(
     temp_c: float, pressure_bar: float, backend: BackendSpecifier = None
 ) -> float:
-    return resolve_water_property_backend(backend).calculate_water_thermal_expansion_beta(temp_c, pressure_bar)
+    return resolve_water_property_backend(backend).calculate_water_thermal_expansion_beta(
+        temp_c, pressure_bar
+    )
 
 
 def calculate_water_density(

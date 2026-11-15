@@ -1,5 +1,4 @@
 from hidrostatik_test.ui.app import HydrostaticTestApp, main
-
 from hidrostatik_test.ui.constants import (
     AUTO_A_MODE,
     AUTO_B_MODE,

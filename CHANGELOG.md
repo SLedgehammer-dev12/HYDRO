@@ -1,5 +1,50 @@
 # Changelog
 
+## Unreleased - 2026-11-15
+
+- **Kapsamli denetim remedasyonu (audit remediation)**:
+  - Domain: negatif B kabulu, `nan/inf` dogrulamasi, tam `%6` sinirinda FAIL,
+    termal denge icin ardışık 4 saatlik pencereler, tek tarafli `%0.2` kontrolu,
+    bicubic ekstrapolasyonun kapatilmasi.
+  - Veri: BOTAŞ = kurum ici workbook semantigi netlestirildi; olu
+    `botas_reference_table_v1.*` dosyalari kaldirildi; A/B tablosu icin
+    monotonluk/sureklilik denetimi ve 7 °C anomalisini yakalayan test eklendi.
+  - Servisler: `DownloadManager` resume tek thread, katı artefakt/checksum
+    sozlesmesi, guvenli zip cikarma, yedek + atomik kurulum + rollback + log,
+    SQLite thread guvenligi ve UTC zaman damgalari, PDF/Excel escaping ve
+    atomik yazma.
+  - UI: rapor cokmesi giderildi; bayat katsayi kapisi, mod provenance temizligi,
+    test bazli karar modeli, canli sonuc kaydi, banner durumu, alan araligi
+    dogrulamasi, tek checklist kaynagi, ayri 10.1 ortam sicakligi alani,
+    yenileme firsatlarinin azaltilmasi, gercek `DownloadManager` instance'i.
+  - Paketleme/CI: `.zip` + cift checksum sozlesmesi, runtime hook, surum tek
+    kaynagi, tag↔surum kapisi, Windows matrisi duzeltmesi, Xvfb'li release
+    testi, ruff/mypy yapilandirmasi.
+- **Graphify**: `skills/graphify/` ve `docs/codebase_map.md` eklendi
+  (981 dugum, 7.795 kenar).
+- **Test**: 495 otomatik test; kaynak-only branch kapsami **%79**.
+- **E2E**: geometri -> A/B -> hava + basinc -> karar -> txt/pdf/xlsx rapor ->
+  SQLite oturum kaliciligi -> updater asset sozlesmesi akisi eklendi.
+
+## 1.7.3 - 2026-06-08
+
+- **Surum Tek Kaynaktan Yonetiliyor (Version Automation)**:
+  - `HidrostatikTest.spec` artik surumu `hidrostatik_test/app_metadata.py` icindeki `APP_VERSION` degerinden okur; spec dosyasindaki sabit `1.7.0` kaldirildi.
+  - `build_dmg.sh` spec dosyasini `sed` ile yamalamayi birakti; macOS `BUNDLE` icindeki `CFBundleShortVersionString` / `CFBundleVersion` degerleri ayni kaynaktan uretiliyor.
+  - macOS icin `target_arch='universal2'` denemesi eklendi; evrensel olmayan Python'da yerel mimariye guvenli dusus yapiliyor.
+- **Test ve CI Genisletmesi**:
+  - Otomatik test paketi 291 teste cikarildi (domain, servis, veritabani ve UI akislari).
+  - CI'a kaynak-only kapsam olcumu ve bloklayici domain mypy adimi eklendi.
+  - Updater'a SHA-256 artefakt dogrulamasi eklendi.
+
+## 1.7.2 - 2026-06-08
+
+- **Refactor (davranis korunarak)**:
+  - UI sabitleri `hidrostatik_test/ui/constants.py` altinda tek kaynakta toplandi.
+  - A/B katsayi secim ve dogrulama mantigi `hidrostatik_test/domain/coefficient_manager.py` modulune tasindi.
+  - Enum/string karsilastirmalarindaki tutarsizliklar ve birkac UI hatasi giderildi.
+- Otomatik test paketi genisletilerek kapsam artirildi.
+
 ## 1.7.1 - 2026-06-08
 
 - **PyInstaller Derleme Düzeltmeleri (Build & Packaging Fixes)**:

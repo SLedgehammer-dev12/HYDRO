@@ -31,28 +31,36 @@ if ($LASTEXITCODE -ne 0) {
 
 # Step 4: Verify artifacts
 Write-Host "`n[4/5] Verifying build artifacts..." -ForegroundColor Yellow
+$zipFiles = Get-ChildItem -Path $releaseDir -Filter "*.zip" | Sort-Object LastWriteTime -Descending
 $exeFiles = Get-ChildItem -Path $releaseDir -Filter "*.exe" | Sort-Object LastWriteTime -Descending
-if (-not $exeFiles) {
-    throw "No .exe file found in release directory."
+if ($zipFiles) {
+    $artifact = $zipFiles[0]
+    Write-Host "Found release archive: $($artifact.Name)" -ForegroundColor Green
+} elseif ($exeFiles) {
+    $artifact = $exeFiles[0]
+    Write-Host "Found executable: $($artifact.Name)" -ForegroundColor Green
+} else {
+    throw "No .zip or .exe file found in release directory."
 }
-$exe = $exeFiles[0]
-Write-Host "Found executable: $($exe.Name)" -ForegroundColor Green
-Write-Host "Size: $('{0:N0}' -f ($exe.Length / 1MB)) MB"
+Write-Host "Size: $('{0:N0}' -f ($artifact.Length / 1MB)) MB"
 
-if ($exe.Length -lt 10MB) {
-    throw "Executable too small ($($exe.Length) bytes). Expected at least 10 MB."
+if ($artifact.Length -lt 10MB) {
+    throw "Artifact too small ($($artifact.Length) bytes). Expected at least 10 MB."
 }
 
 # Step 5: Verify related artifacts
 Write-Host "`n[5/5] Verifying release artifacts..." -ForegroundColor Yellow
 $shaFiles = Get-ChildItem -Path $releaseDir -Filter "*.sha256.txt"
 if (-not $shaFiles) {
-    Write-Host "WARNING: No SHA-256 file found." -ForegroundColor Magenta
+    throw "No SHA-256 file found."
 } else {
-    $expectedHash = (Get-Content $shaFiles[0].FullName).Trim()
-    $actualHash = (Get-FileHash -Path $exe.FullName -Algorithm SHA256).Hash.ToLower()
+    # Prefer <artifact>.sha256.txt, fall back to the release-stem checksum.
+    $preferred = Join-Path $releaseDir "$($artifact.Name).sha256.txt"
+    $shaPath = if (Test-Path $preferred) { $preferred } else { $shaFiles[0].FullName }
+    $expectedHash = ((Get-Content $shaPath -Raw) -split '\s+')[0].Trim().ToLower()
+    $actualHash = (Get-FileHash -Path $artifact.FullName -Algorithm SHA256).Hash.ToLower()
     if ($expectedHash -ne $actualHash) {
-        throw "SHA-256 mismatch!"
+        throw "SHA-256 mismatch! Expected $expectedHash, got $actualHash"
     }
     Write-Host "SHA-256 verified: $expectedHash" -ForegroundColor Green
 }

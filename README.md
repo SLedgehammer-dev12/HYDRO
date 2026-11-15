@@ -2,25 +2,38 @@
 
 [![Test](https://github.com/SLedgehammer-dev12/HYDRO/actions/workflows/test.yml/badge.svg)](https://github.com/SLedgehammer-dev12/HYDRO/actions/workflows/test.yml)
 [![Lint](https://github.com/SLedgehammer-dev12/HYDRO/actions/workflows/lint.yml/badge.svg)](https://github.com/SLedgehammer-dev12/HYDRO/actions/workflows/lint.yml)
-[![Windows Release](https://github.com/SLedgehammer-dev12/HYDRO/actions/workflows/windows-release.yml/badge.svg)](https://github.com/SLedgehammer-dev12/HYDRO/actions/workflows/windows-release.yml)
+[![Release](https://github.com/SLedgehammer-dev12/HYDRO/actions/workflows/release.yml/badge.svg)](https://github.com/SLedgehammer-dev12/HYDRO/actions/workflows/release.yml)
 
 Bu proje, `4-NGTL 0-GN-P-002-5007 R4 Hidrostatik Test ve Icten Denetleme Sartnamesi`
 ile hizalanan bir masaustu hidrostatik test degerlendirme uygulamasidir.
-Kod tabani artik build artefact'larindan ayrilmistir; kaynak kod, testler,
+Kod tabani build artefact'larindan ayrilmistir; kaynak kod, testler,
 dokumantasyon, agent rolleri ve skill dosyalari ayri klasorlerde tutulur.
 
 ## Hizli Baslangic
 
 - Uygulamayi calistir: `python Hidrostatik_Test_Chat.py`
+- Gelistirme bagimliliklari: `python -m pip install -r requirements-dev.txt`
 - Testleri calistir: `python -m unittest discover -s tests -p "test_*.py"`
+- Kapsam raporu: `python -m coverage run --branch -m unittest discover -s tests -p "test_*.py"` ardindan `python -m coverage report`
+- Lint / format: `ruff check hidrostatik_test tests` ve `ruff format --check hidrostatik_test tests`
+- Tip kontrolu (domain, bloklayici): `mypy hidrostatik_test/domain/`
 - Su ozelligi gridini uret: `python tools/generate_water_property_table.py`
 - Windows release build al: `powershell -ExecutionPolicy Bypass -File .\build_exe.ps1`
+- macOS release build al: `./build_dmg.sh`
 
 ## Klasor Yapisi
 
 ```text
-Hidrostatik_Test/
+HYDRO/
 |-- Hidrostatik_Test_Chat.py
+|-- HidrostatikTest.spec
+|-- build_exe.ps1
+|-- build_dmg.sh
+|-- windows_manifest.xml
+|-- runtime_entitlements.plist
+|-- pyproject.toml
+|-- requirements.txt
+|-- requirements-dev.txt
 |-- hidrostatik_test/
 |   |-- app_metadata.py
 |   |-- data/
@@ -30,24 +43,40 @@ Hidrostatik_Test/
 |-- tests/
 |-- docs/
 |   |-- project_structure.md
+|   |-- release.md
+|   |-- testing.md
+|   |-- codebase_map.md
 |   |-- ui_ergonomics.md
 |   `-- spec/
 |-- agents/
 |-- skills/
 |-- tasks/
-`-- dist/
+|-- build/          (PyInstaller calisma dizini, git'e girmez)
+|-- dist/           (PyInstaller cikti dizini, git'e girmez)
+`-- release/        (paketlenmis artefaktlar, git'e girmez)
 ```
+
+`dist/` ve `release/` yerel build ciktilaridir: `dist/` PyInstaller'in ham
+cikitisini (`dist/HidrostatikTest/` onedir, `dist/HidrostatikTest.app` macOS
+bundle), `release/` ise yayina hazir `.zip`/`.dmg`, `.sha256.txt` ve release
+notes dosyalarini tutar.
 
 ## Ana Bilesenler
 
 - `hidrostatik_test/domain/`: hesap motoru, veri siniflari, kabul kriterleri
-- `hidrostatik_test/domain/water_properties.py`: A/B icin su ozelligi backend katmani; varsayilan CoolProp kullanilir
+  - `hydrotest_core.py`: A/B katsayilari, hava icerik ve basinc testi degerlendirmesi
+  - `water_properties.py`: A/B icin su ozelligi backend katmani; varsayilan CoolProp
+  - `pressure_profile.py`, `pressurization.py`, `time_series.py`: basinc profili, %0.2 ilave su ve zaman serisi modelleri
+  - `session_manager.py`, `coefficient_manager.py`, `units.py`: oturum, katsayi ve birim yonetimi
 - `hidrostatik_test/data/`: ASME B36.10 katalogu, katsayi referans noktalari ve uretilmis su ozelligi grid dosyalari
-- `hidrostatik_test/services/`: updater ve servis islemleri
-- `hidrostatik_test/services/updater.py`: birincil `HYDRO` repo kaynagini, gecis doneminde ise `Programlar` legacy release kaynagini tarayabilir
-- `hidrostatik_test/ui/`: Tkinter arayuzu
+- `hidrostatik_test/services/`: updater, indirme yoneticisi, SQLite veritabani ve rapor disa aktarma
+  - `updater.py`: birincil `HYDRO` repo kaynagini, gecis doneminde ise `Programlar` legacy release kaynagini tarayabilir
+  - `download_manager.py`: chunked indirme, duraklat/devam, SHA-256 dogrulama
+  - `database.py`: SQLite (WAL) oturum ve zaman serisi kaliciligi
+  - `report_export.py`: PDF (reportlab) ve Excel (openpyxl) rapor ciktilari
+- `hidrostatik_test/ui/`: Tkinter arayuzu, wizard, dogrulama ve indirme dialogu
 - `tools/generate_water_property_table.py`: 0-40 degC ve 1-150 bar grid uretici arac
-- `tests/`: cekirdek, katalog, arayuz ve updater regresyon testleri
+- `tests/`: cekirdek, katalog, servis, veritabani ve arayuz regresyon testleri
 - `docs/spec/`: sartname analizi, ham PDF extract'i ve dogrulama notlari
 - `agents/`: proje icin onerilen agent rolleri
 - `skills/`: bu repo icin hazirlanan Codex skill paketleri
@@ -57,6 +86,9 @@ Hidrostatik_Test/
 - `docs/spec/ngtl_5007_hydrostatic_analysis.md`: PDF hidrostatik test kisimlarinin derin analiz ve gap matrisi
 - `docs/ui_ergonomics.md`: operator akisina yonelik ergonomi bulgulari ve oneriler
 - `docs/project_structure.md`: neden bu klasor yapisinin secildigi
+- `docs/release.md`: build, artefakt ve GitHub release sozlesmesi
+- `docs/testing.md`: test protokolu, CI ve Xvfb notlari
+- `docs/codebase_map.md`: uretilen sembol/bagimlilik/test haritasi
 - `docs/spec/ab_backend_research.md`: A/B ikinci dogrulama motoru arastirmasi ve dagitim karari
 - `docs/spec/water_property_table_schema.md`: CSV semasi ve table/interpolation backend akisi
 - `tasks/todo.md`: aktif teknik backlog ve dogrulama kaydi
@@ -78,16 +110,17 @@ Mevcut kod:
 - Segmentli geometri modelini destekler
 - API 5L PSL2 malzeme secimi ile SMYS degerini otomatik atar ve basinc penceresini buna gore hesaplar
 - Canli basinc kontrolu, kot semasi ve 5007 tek kesit limit uyari mantigina sahiptir
-- Windows self-update akisina sahiptir
+- Oturumlari SQLite ve JSON olarak kaydedip geri yukleyebilir; PDF/Excel rapor uretir
+- Windows `.zip` ve macOS `.dmg` paketleri icin SHA-256 dogrulamali self-update akisina sahiptir
 - `HYDRO` repo ayrisma gecisi icin legacy `Programlar` release kaynagina fallback destekler
-- 120 otomatik test ile dogrulanir
+- 508 otomatik test ile dogrulanir
 
 Mevcut kod henuz sunlari tam modellememektedir:
 
-- 24 saatlik saha kayitlarinin zaman serisi olarak tutulmasi
-- 14.2'deki basinc-hacim izleme ve `%0.2` esigi
+- 14.2 basinc-hacim izlemesinin arayuz akisina tam baglanmasi (domain hesabi `pressurization.py` icinde var)
 - 16-17. bolum bosaltma ve basinc dusurme operasyonlarinin sayisal/surecsel akisi
-- 21. bolum form bazli saha rapor seti
+- 21. bolum form bazli saha rapor setinin sartnamedeki formlarla birebir eslesmesi
+- Kurum ici A/B tablosundaki 7 degC / 90-98 bar anomalisinin resmi duzeltmesi
 
 ## Muhendislik Notu
 

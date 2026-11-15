@@ -35,7 +35,7 @@
   "notes": [
     "A values are estimated from the raster Fig.1 chart using OCR-assisted axis calibration and peak tracking.",
     "B values are exact text extraction from Table-1.",
-    "This combined dataset is exposed in the UI as the BOTAŞ referans tablosu option.",
+    "This combined dataset is the public GAIL extraction and is exposed in the UI as the GAIL referans tablosu option; BOTAS referans tablosu uses the institutional workbook-derived ab_control_table_v1.csv.",
     "Use as reference/provenance data, not as a replacement for the workbook-derived table without engineering signoff."
   ],
   "row_count": 150

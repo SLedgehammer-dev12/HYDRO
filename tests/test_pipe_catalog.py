@@ -21,8 +21,12 @@ class PipeCatalogTests(unittest.TestCase):
         self.assertTrue(any("NPS 80" in option for option in options))
 
     def test_schedule_lookup_returns_wall_thickness(self) -> None:
-        size_label = next(option for option in get_pipe_size_options() if option.startswith("NPS 16 "))
-        schedule_label = next(option for option in get_schedule_options(size_label) if "40 / XS" in option)
+        size_label = next(
+            option for option in get_pipe_size_options() if option.startswith("NPS 16 ")
+        )
+        schedule_label = next(
+            option for option in get_schedule_options(size_label) if "40 / XS" in option
+        )
 
         pipe_size = find_pipe_size(size_label)
         schedule = find_schedule(size_label, schedule_label)
@@ -33,7 +37,9 @@ class PipeCatalogTests(unittest.TestCase):
         self.assertEqual(schedule["wall_thickness_mm"], 12.7)
 
     def test_large_diameter_catalog_exposes_unlabeled_b3610_wall_thickness_rows(self) -> None:
-        size_label = next(option for option in get_pipe_size_options() if option.startswith("NPS 48 "))
+        size_label = next(
+            option for option in get_pipe_size_options() if option.startswith("NPS 48 ")
+        )
         options = get_schedule_options(size_label)
 
         self.assertIn("WT 8.74 mm (B36.10)", options)
@@ -41,7 +47,9 @@ class PipeCatalogTests(unittest.TestCase):
         self.assertIn("Sch XS - 12.70 mm", options)
 
     def test_api_5l_psl2_grade_lookup_returns_smys(self) -> None:
-        option = next(option for option in get_api_5l_psl2_grade_options() if "X65 / L450" in option)
+        option = next(
+            option for option in get_api_5l_psl2_grade_options() if "X65 / L450" in option
+        )
         grade = find_api_5l_psl2_grade(option)
 
         self.assertIsNotNone(grade)

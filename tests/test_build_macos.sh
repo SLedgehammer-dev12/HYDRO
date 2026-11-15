@@ -33,11 +33,17 @@ if [ "$SIZE_MB" -lt 10 ]; then
 fi
 
 echo -e "\n[5/5] Verifying release artifacts..."
-SHA_FILES=("$RELEASE_DIR"/*.sha256.txt)
-if [ ${#SHA_FILES[@]} -eq 0 ]; then
-    echo "WARNING: No SHA-256 file found."
+PREFERRED_SHA="$DMG.sha256.txt"
+if [ -f "$PREFERRED_SHA" ]; then
+    SHA_FILE="$PREFERRED_SHA"
 else
-    EXPECTED=$(cat "${SHA_FILES[-1]}" | tr -d '\n\r')
+    SHA_FILE=$(ls "$RELEASE_DIR"/*.sha256.txt 2>/dev/null | head -n 1 || true)
+fi
+if [ -z "${SHA_FILE:-}" ]; then
+    echo "ERROR: No SHA-256 file found."
+    exit 1
+else
+    EXPECTED=$(awk '{print $1}' "$SHA_FILE" | tr -d '\n\r')
     ACTUAL=$(shasum -a 256 "$DMG" | cut -d' ' -f1)
     if [ "$EXPECTED" != "$ACTUAL" ]; then
         echo "ERROR: SHA-256 mismatch!"

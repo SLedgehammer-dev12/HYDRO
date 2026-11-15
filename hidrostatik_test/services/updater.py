@@ -1,19 +1,24 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import base64
 import hashlib
 import json
+import logging
 import os
-from pathlib import Path
+import re
+import shutil
+import stat
 import subprocess
 import sys
 import tempfile
-import time
+import webbrowser
+import zipfile
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-import webbrowser
-import zipfile
 
 from ..app_metadata import (
     APP_VERSION,
@@ -21,16 +26,40 @@ from ..app_metadata import (
     GITHUB_OWNER,
     GITHUB_REPO,
     LEGACY_GITHUB_REPOS,
-    RELEASES_API_URL,
-    RELEASES_PAGE_URL,
     RELEASE_ASSET_TEMPLATE,
     RELEASE_ASSET_TEMPLATE_MACOS,
     RELEASE_TAG_PREFIX,
+    RELEASES_PAGE_URL,
 )
 from .download_manager import DownloadManager, ProgressCallback
 
 DEFAULT_TIMEOUT_SECONDS = 10
 POWERSHELL_JSON_DEPTH = 32
+
+# Windows icin iki artefakt bicimi yayinlanabilir: arsiv (.zip) veya tek dosya
+# calistirilabilir (.exe). MacOS yalnizca .dmg kullanir.
+WINDOWS_EXE_TEMPLATE = f"{BINARY_NAME}-v{{version}}-windows-x64.exe"
+WINDOWS_EXTENSIONS = (".zip", ".exe")
+MACOS_EXTENSIONS = (".dmg",)
+WINDOWS_SINGLE_EXE_NAME = f"{BINARY_NAME}.exe"
+
+# Guvenli zip cikarma limitleri. Bir guncelleme paketi bunlari asarsa paket
+# reddedilir (zip bomb / kaynak tuketimi korumasi).
+MAX_EXTRACTED_BYTES = 512 * 1024 * 1024
+MAX_EXTRACTED_FILES = 5000
+MAX_COMPRESSION_RATIO = 200
+
+SIGNATURE_ENV_PUBKEY = "HYDRO_UPDATE_PUBKEY"
+SIGNATURE_ENV_REQUIRED = "HYDRO_REQUIRE_SIGNATURE"
+# NOT: Ed25519 imza dogrulama altyapisi hazirdir ancak varsayilan olarak
+# kapalidir (mevcut davranis degismez). Yayin anahtari uretilip
+# HYDRO_UPDATE_PUBKEY olarak dagitildiginda HYDRO_REQUIRE_SIGNATURE=1 ile
+# zorunlu hale getirilebilir; o zamana kadar SHA-256 dogrulamasi zorunludur.
+SIGNATURE_URL_SUFFIXES = (".sig", ".minisig")
+SIGNATURE_ALGORITHM_MINISIGN = (b"Ed", b"ED")
+UPDATE_LOG_NAME = "apply_update.log"
+
+logger = logging.getLogger(__name__)
 
 
 class UpdateError(RuntimeError):
@@ -90,43 +119,92 @@ def _matches_project_release(release: dict[str, Any]) -> bool:
     if tag_name.startswith(RELEASE_TAG_PREFIX):
         return True
     asset_template_prefix = RELEASE_ASSET_TEMPLATE.split("{version}", 1)[0]
+    exe_template_prefix = WINDOWS_EXE_TEMPLATE.split("{version}", 1)[0]
     macos_template_prefix = RELEASE_ASSET_TEMPLATE_MACOS.split("{version}", 1)[0]
     for asset in release.get("assets", []):
         asset_name = str(asset.get("name", ""))
-        if asset_name.startswith(asset_template_prefix) and asset_name.endswith(".zip"):
+        lowered = asset_name.lower()
+        if asset_name.startswith(asset_template_prefix) and lowered.endswith(".zip"):
             return True
-        if asset_name.startswith(macos_template_prefix) and asset_name.endswith(".dmg"):
+        if asset_name.startswith(exe_template_prefix) and lowered.endswith(".exe"):
+            return True
+        if asset_name.startswith(macos_template_prefix) and lowered.endswith(".dmg"):
             return True
     return False
 
 
-def _extract_asset(release: dict[str, Any], version: str) -> ReleaseAsset | None:
-    expected_win = RELEASE_ASSET_TEMPLATE.format(version=version)
-    expected_mac = RELEASE_ASSET_TEMPLATE_MACOS.format(version=version)
-    fallback_asset: ReleaseAsset | None = None
-    platform = sys.platform
+def _platform_extensions(platform: str) -> tuple[str, ...]:
+    if platform.startswith("darwin"):
+        return MACOS_EXTENSIONS
+    return WINDOWS_EXTENSIONS
 
+
+def _expected_asset_names(version: str, platform: str) -> tuple[str, ...]:
+    if platform.startswith("darwin"):
+        return (RELEASE_ASSET_TEMPLATE_MACOS.format(version=version),)
+    return (
+        RELEASE_ASSET_TEMPLATE.format(version=version),
+        WINDOWS_EXE_TEMPLATE.format(version=version),
+    )
+
+
+def _asset_name_mentions_version(asset_name: str, version: str) -> bool:
+    """Asset adinda istenen surumun tam bir surum belirteci olarak gecmesini arar.
+
+    ``1.7.2`` aramasi ``1.7.20`` veya ``11.7.2`` icinde eslesmemelidir.
+    """
+    pattern = rf"(?<![\d.])v?{re.escape(version)}(?![\d.])"
+    return re.search(pattern, asset_name, flags=re.IGNORECASE) is not None
+
+
+def _extract_asset(
+    release: dict[str, Any],
+    version: str,
+    platform: str | None = None,
+) -> ReleaseAsset | None:
+    """Release icinden bu platforma uygun artefakti secer.
+
+    Sirasiyla:
+    1. Platformun beklenen tam adi (ornegin ``...-windows-x64.zip``).
+    2. Baska bir platformun beklenen tam adi (meta veri/raporlama icin).
+
+    Cozumleyici (fallback) yalnizca dosya adinda istenen surum geciyorsa kabul
+    edilir; boylece 1.7.2 aranirken 1.7.0 paketi kurulmaz.
+    """
+    current_platform = platform or sys.platform
+    assets: list[ReleaseAsset] = []
     for asset in release.get("assets", []):
-        asset_name = str(asset.get("name", ""))
-        release_asset = ReleaseAsset(
-            name=asset_name,
-            download_url=str(asset.get("browser_download_url", "")),
-            size=int(asset.get("size", 0) or 0),
+        assets.append(
+            ReleaseAsset(
+                name=str(asset.get("name", "")),
+                download_url=str(asset.get("browser_download_url", "")),
+                size=int(asset.get("size", 0) or 0),
+            )
         )
+    if not assets:
+        return None
 
-        if platform.startswith("darwin") and asset_name.lower().endswith(".dmg"):
-            if asset_name == expected_mac:
-                return release_asset
-            if fallback_asset is None:
-                fallback_asset = release_asset
+    expected_names = [name.casefold() for name in _expected_asset_names(version, current_platform)]
+    for expected_name in expected_names:
+        for asset in assets:
+            if asset.name.casefold() == expected_name:
+                return asset
 
-        if asset_name.lower().endswith(".zip"):
-            if asset_name == expected_win:
-                return release_asset
-            if fallback_asset is None:
-                fallback_asset = release_asset
+    other_platform = "windows" if current_platform.startswith("darwin") else "darwin"
+    other_names = [name.casefold() for name in _expected_asset_names(version, other_platform)]
+    for expected_name in other_names:
+        for asset in assets:
+            if asset.name.casefold() == expected_name:
+                return asset
 
-    return fallback_asset
+    allowed_extensions = _platform_extensions(current_platform)
+    for asset in assets:
+        lowered = asset.name.lower()
+        if not lowered.endswith(allowed_extensions):
+            continue
+        if _asset_name_mentions_version(asset.name, version):
+            return asset
+    return None
 
 
 def _select_latest_release(releases: list[dict[str, Any]], repo_name: str) -> dict[str, Any]:
@@ -138,9 +216,7 @@ def _select_latest_release(releases: list[dict[str, Any]], repo_name: str) -> di
         and _matches_project_release(release)
     ]
     if not matching_releases:
-        raise UpdateError(
-            f"{GITHUB_OWNER}/{repo_name} icinde bu uygulamaya ait yayin bulunamadi."
-        )
+        raise UpdateError(f"{GITHUB_OWNER}/{repo_name} icinde bu uygulamaya ait yayin bulunamadi.")
     matching_releases.sort(
         key=lambda release: _version_key(_version_from_tag(str(release.get("tag_name", "")))),
         reverse=True,
@@ -176,9 +252,7 @@ def _powershell_literal(value: str) -> str:
 def _powershell_headers_block(headers: dict[str, str]) -> str:
     lines = ["$headers = @{}"]
     for key, value in headers.items():
-        lines.append(
-            f"$headers['{_powershell_literal(key)}'] = '{_powershell_literal(value)}'"
-        )
+        lines.append(f"$headers['{_powershell_literal(key)}'] = '{_powershell_literal(value)}'")
     return "\n".join(lines)
 
 
@@ -205,9 +279,15 @@ def _run_powershell(script: str, timeout_seconds: int) -> str:
         raise UpdateError("PowerShell bu sistemde bulunamadi.") from exc
     except subprocess.TimeoutExpired as exc:
         raise UpdateError("PowerShell ag cagrisi zaman asimina ugradi.") from exc
+    except OSError as exc:
+        raise UpdateError(f"PowerShell calistirilamadi: {exc}") from exc
 
     if completed.returncode != 0:
-        message = completed.stderr.strip() or completed.stdout.strip() or "PowerShell komutu basarisiz oldu."
+        message = (
+            completed.stderr.strip()
+            or completed.stdout.strip()
+            or "PowerShell komutu basarisiz oldu."
+        )
         raise UpdateError(message)
     return completed.stdout
 
@@ -339,29 +419,77 @@ def open_release_page(url: str | None = None) -> None:
     webbrowser.open(url or RELEASES_PAGE_URL)
 
 
+# --- Checksum ---------------------------------------------------------------
+
+
 def _checksum_url(asset_download_url: str) -> str:
+    """Birincil checksum adresi: ``<asset_url>.sha256.txt``."""
     return f"{asset_download_url}.sha256.txt"
+
+
+def _checksum_candidate_urls(asset_download_url: str) -> list[str]:
+    """Yayinlanmis olabilecek checksum adlarini oncelik sirasiyla dondurur.
+
+    Build zinciri checksum dosyasini ``<stem>.sha256.txt`` olarak yayinlar
+    (ornegin ``HidrostatikTest-v1.7.3-windows-x64.sha256.txt``); eski
+    artefaktlarda ise ``<asset_url>.sha256.txt`` bicimi bulunur. Her iki ad ve
+    uzantisi tamamen cikarilmis varyant denenir.
+    """
+    candidates: list[str] = []
+
+    def add(url: str) -> None:
+        if url and url not in candidates:
+            candidates.append(url)
+
+    add(_checksum_url(asset_download_url))
+    base_url = asset_download_url.split("?", 1)[0]
+    directory, _, filename = base_url.rpartition("/")
+    prefix = f"{directory}/" if directory else ""
+    stem = filename
+    for extension in (".exe", ".zip", ".dmg", ".tar.gz", ".tgz"):
+        if stem.lower().endswith(extension):
+            stem = stem[: -len(extension)]
+            break
+    add(f"{prefix}{stem}.sha256.txt")
+    extensionless = stem
+    while "." in extensionless:
+        extensionless = extensionless.rsplit(".", 1)[0]
+    if extensionless and extensionless != stem:
+        add(f"{prefix}{extensionless}.sha256.txt")
+    return candidates
 
 
 def _download_checksum(
     asset_download_url: str,
     timeout_seconds: int,
 ) -> str:
-    checksum_url = _checksum_url(asset_download_url)
-    request = Request(checksum_url, headers=_build_headers("text/plain"))
-    try:
-        with urlopen(request, timeout=timeout_seconds) as response:
-            content = response.read().decode("utf-8").strip()
-    except HTTPError as exc:
-        if exc.code == 404:
+    candidates = _checksum_candidate_urls(asset_download_url)
+    last_not_found: HTTPError | None = None
+    for checksum_url in candidates:
+        request = Request(checksum_url, headers=_build_headers("text/plain"))
+        try:
+            with urlopen(request, timeout=timeout_seconds) as response:
+                content = response.read().decode("utf-8").strip()
+        except HTTPError as exc:
+            if exc.code == 404:
+                last_not_found = exc
+                continue
+            raise UpdateError(f"SHA-256 dosyasi indirilemedi: HTTP {exc.code}") from exc
+        except URLError as exc:
             raise UpdateError(
-                "SHA-256 dogrulama dosyasi GitHub release'de bulunamadi. Guvenlik riski nedeniyle guncelleme iptal edildi."
+                "SHA-256 dogrulama dosyasina ulasilamadi. Guvenlik riski nedeniyle guncelleme iptal edildi."
             ) from exc
-        raise UpdateError(f"SHA-256 dosyasi indirilemedi: HTTP {exc.code}") from exc
-    parts = content.replace("\t", " ").split()
-    if not parts:
-        raise UpdateError("SHA-256 dosyasi bos.")
-    return parts[0].lower()
+        parts = content.replace("\t", " ").split()
+        if not parts:
+            raise UpdateError("SHA-256 dosyasi bos.")
+        checksum = parts[0].lower()
+        if re.fullmatch(r"[0-9a-f]{64}", checksum) is None:
+            raise UpdateError("SHA-256 dogrulama dosyasi gecersiz formatta.")
+        return checksum
+
+    raise UpdateError(
+        "SHA-256 dogrulama dosyasi GitHub release'de bulunamadi. Guvenlik riski nedeniyle guncelleme iptal edildi."
+    ) from last_not_found
 
 
 def _verify_sha256(file_path: Path, expected_hex: str) -> None:
@@ -379,14 +507,174 @@ def _verify_sha256(file_path: Path, expected_hex: str) -> None:
         )
 
 
+# --- Optional Ed25519 signature hook ---------------------------------------
+
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _decode_public_key(material: str) -> bytes:
+    """``HYDRO_UPDATE_PUBKEY`` degerini 32 baytlik Ed25519 anahtarina cevirir.
+
+    Deger ya base64/hex kodlanmis anahtar ya da anahtari iceren bir dosya yolu
+    olabilir.
+    """
+    candidate_path = Path(material)
+    try:
+        if candidate_path.is_file():
+            material = candidate_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        pass
+    compact = "".join(material.split())
+    if re.fullmatch(r"[0-9a-fA-F]{64}", compact):
+        return bytes.fromhex(compact)
+    try:
+        key = base64.b64decode(compact, validate=True)
+    except (ValueError, TypeError) as exc:
+        raise UpdateError("HYDRO_UPDATE_PUBKEY base64 veya hex kodlu olmali.") from exc
+    if len(key) != 32:
+        raise UpdateError("HYDRO_UPDATE_PUBKEY 32 baytlik bir Ed25519 anahtari olmali.")
+    return key
+
+
+def _signature_candidate_urls(asset_download_url: str) -> list[str]:
+    return [f"{asset_download_url}{suffix}" for suffix in SIGNATURE_URL_SUFFIXES]
+
+
+def _decode_signature_blob(data: bytes) -> bytes:
+    if not data:
+        raise UpdateError("Imza dosyasi bos.")
+    # Ham Ed25519 imzasi ikili veridir; metin normalizasyonu (strip/base64)
+    # uygulanmaz. Aksi halde rastgele bir imzanin son bayti kirpilabilir.
+    if len(data) == 64:
+        return data
+    blob = data.strip()
+    if not blob:
+        raise UpdateError("Imza dosyasi bos.")
+    if blob.startswith(b"untrusted comment"):
+        lines = [line.strip() for line in blob.splitlines() if line.strip()]
+        if len(lines) < 2:
+            raise UpdateError("Imza dosyasi minisign formatinda okunamadi.")
+        try:
+            blob = base64.b64decode(lines[1], validate=True)
+        except (ValueError, TypeError) as exc:
+            raise UpdateError("Imza dosyasi base64 olarak okunamadi.") from exc
+    else:
+        try:
+            blob = base64.b64decode(blob, validate=True)
+        except (ValueError, TypeError) as exc:
+            raise UpdateError("Imza dosyasi base64 olarak okunamadi.") from exc
+    if len(blob) == 74 and blob[:2] in SIGNATURE_ALGORITHM_MINISIGN:
+        blob = blob[10:]
+    if len(blob) != 64:
+        raise UpdateError("Imza formati desteklenmiyor (64 baytlik Ed25519 imzasi bekleniyor).")
+    return blob
+
+
+def _download_signature(
+    asset_download_url: str,
+    timeout_seconds: int,
+) -> bytes | None:
+    """``<asset>.sig`` / ``<asset>.minisig`` adaylarini dener; yoksa ``None``.
+
+    404 disindaki HTTP hatalari ve ag hatalari ``UpdateError`` olarak yukselir.
+    """
+    for signature_url in _signature_candidate_urls(asset_download_url):
+        request = Request(signature_url, headers=_build_headers("application/octet-stream"))
+        try:
+            with urlopen(request, timeout=timeout_seconds) as response:
+                data = response.read()
+        except HTTPError as exc:
+            if exc.code == 404:
+                continue
+            raise UpdateError(f"Imza dosyasi indirilemedi: HTTP {exc.code}") from exc
+        except URLError as exc:
+            raise UpdateError("Imza dosyasina ulasilamadi.") from exc
+        if data.strip():
+            return data
+    return None
+
+
+def _verify_ed25519_signature(file_path: Path, signature: bytes, public_key: bytes) -> None:
+    """Dosyanin tamami uzerinde Ed25519 detached imza dogrular."""
+    try:
+        from cryptography.exceptions import InvalidSignature
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    except ImportError as exc:  # pragma: no cover - runtime bagimliligi
+        raise UpdateError(
+            "Imza dogrulamasi icin 'cryptography' paketi gerekli. "
+            "Paket yoksa HYDRO_REQUIRE_SIGNATURE kapatilmalidir."
+        ) from exc
+
+    if len(public_key) != 32:
+        raise UpdateError("Ed25519 acik anahtari 32 bayt olmali.")
+    if len(signature) != 64:
+        raise UpdateError("Ed25519 imzasi 64 bayt olmali.")
+
+    key = Ed25519PublicKey.from_public_bytes(public_key)
+    payload = file_path.read_bytes()
+    try:
+        key.verify(signature, payload)
+    except InvalidSignature as exc:
+        raise UpdateError("Guncelleme paketinin dijital imzasi gecersiz.") from exc
+
+
+def verify_asset_signature(
+    asset_path: Path,
+    asset_download_url: str,
+    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+) -> bool:
+    """Opsiyonel imza dogrulama kancasi.
+
+    - Ne ``HYDRO_UPDATE_PUBKEY`` ne de ``HYDRO_REQUIRE_SIGNATURE`` tanimliysa
+      hicbir sey yapmaz (varsayilan davranis degismez) ve ``False`` doner.
+    - ``HYDRO_REQUIRE_SIGNATURE`` etkinse imza ve anahtar zorunludur; eksikligi
+      ``UpdateError`` ile guncellemeyi durdurur.
+    - Yalnizca ``HYDRO_UPDATE_PUBKEY`` tanimliysa imza varsa dogrulanir, yoksa
+      uyari loglanir.
+
+    Basarili dogrulamada ``True`` doner.
+    """
+    required = _env_flag(SIGNATURE_ENV_REQUIRED)
+    key_material = os.environ.get(SIGNATURE_ENV_PUBKEY, "").strip()
+    if not required and not key_material:
+        return False
+    if not key_material:
+        raise UpdateError(
+            "HYDRO_REQUIRE_SIGNATURE etkin ancak HYDRO_UPDATE_PUBKEY tanimli degil. "
+            "Guncelleme guvenlik nedeniyle iptal edildi."
+        )
+
+    public_key = _decode_public_key(key_material)
+    signature_blob = _download_signature(asset_download_url, timeout_seconds)
+    if signature_blob is None:
+        if required:
+            raise UpdateError(
+                "Guncelleme imzasi (.sig/.minisig) bulunamadi. "
+                "Guvenlik nedeniyle guncelleme iptal edildi."
+            )
+        logger.warning(
+            "HYDRO_UPDATE_PUBKEY tanimli ancak %s icin imza dosyasi bulunamadi.",
+            asset_path.name,
+        )
+        return False
+
+    signature = _decode_signature_blob(signature_blob)
+    _verify_ed25519_signature(asset_path, signature, public_key)
+    logger.info("Guncelleme imzasi dogrulandi: %s", asset_path.name)
+    return True
+
+
+# --- Download / install -----------------------------------------------------
+
+
 def _download_asset(
     asset: ReleaseAsset,
     target_path: Path,
     timeout_seconds: int,
     progress_callback: ProgressCallback | None = None,
 ) -> None:
-    from .download_manager import DownloadManager
-
     dm = DownloadManager()
     dm.download_file(
         asset.download_url,
@@ -396,73 +684,167 @@ def _download_asset(
 
     expected_sha = _download_checksum(asset.download_url, timeout_seconds)
     _verify_sha256(target_path, expected_sha)
+    verify_asset_signature(target_path, asset.download_url, timeout_seconds)
 
 
-def _find_extracted_app_dir(extract_root: Path) -> Path:
-    expected_dir = extract_root / BINARY_NAME
-    if expected_dir.exists():
-        return expected_dir
-    directories = [path for path in extract_root.iterdir() if path.is_dir()]
-    if len(directories) == 1:
-        return directories[0]
-    raise UpdateError("Indirilen paket beklenen uygulama klasorunu icermiyor.")
-
-
-def _install_macos_update(asset_path: Path, app_name: str = BINARY_NAME) -> None:
-    import subprocess
-    import tempfile
-
-    mount_point = Path(f"/Volumes/{app_name}")
+def _append_update_log(log_path: Path | None, message: str) -> None:
+    if log_path is None:
+        return
+    timestamp = datetime.now(timezone.utc).isoformat()
     try:
-        subprocess.run(
-            ["hdiutil", "attach", str(asset_path), "-noautoopen", "-quiet"],
-            check=True,
-            timeout=60,
-        )
-    except subprocess.CalledProcessError as exc:
-        raise UpdateError(f"DMG mount edilemedi: {exc}") from exc
+        with log_path.open("a", encoding="utf-8") as log_file:
+            log_file.write(f"{timestamp} {message}\n")
+    except OSError:
+        logger.warning("Guncelleme logu yazilamadi: %s", message)
 
+
+def _normalized_member_name(name: str) -> str | None:
+    """Zip uye adini guvenli goreli yola cevirir; guvensizse ``None``.
+
+    Windows PowerShell ``Compress-Archive`` ters bolu kullanabilir; bu yuzden
+    ``\\`` ayirici olarak normalize edilir. Mutlak yollar, surucu harfleri ve
+    ``..`` bilesenleri reddedilir.
+    """
+    normalized = name.replace("\\", "/").strip()
+    if not normalized:
+        return None
+    if normalized.startswith("/") or re.match(r"^[A-Za-z]:", normalized):
+        return None
+    parts = [part for part in normalized.split("/") if part not in ("", ".")]
+    if not parts or ".." in parts:
+        return None
+    return "/".join(parts)
+
+
+def _is_zip_symlink(info: zipfile.ZipInfo) -> bool:
+    return stat.S_ISLNK(info.external_attr >> 16)
+
+
+def _safe_extract_zip(archive_path: Path, extract_root: Path) -> Path:
+    """Zip'i dogrulayarak cikarir ve beklenen uygulama klasorunu dondurur.
+
+    Kurallar:
+    - her uye goreli ve ``..`` icermeyen bir yol olmali (path traversal yok),
+    - sembolik baglanti reddedilir,
+    - dosya sayisi ve toplam acilmis boyut sinirlidir,
+    - sonuc ``HidrostatikTest/HidrostatikTest.exe`` yapisini icermelidir.
+    """
+    extract_root.mkdir(parents=True, exist_ok=True)
     try:
-        dmg_app = mount_point / f"{app_name}.app"
-        if not dmg_app.exists():
-            alt = list(mount_point.glob("*.app"))
-            if alt:
-                dmg_app = alt[0]
-            else:
-                raise UpdateError("DMG icinde .app bulunamadi.")
+        archive = zipfile.ZipFile(archive_path, "r")
+    except zipfile.BadZipFile as exc:
+        raise UpdateError("Indirilen guncelleme paketi gecerli bir zip degil.") from exc
 
-        apps_dir = Path("/Applications")
-        apps_dir.mkdir(parents=True, exist_ok=True)
-        target_app = apps_dir / dmg_app.name
-
-        time.sleep(1)
-        subprocess.run(
-            ["ditto", str(dmg_app), str(target_app)],
-            check=True,
-            timeout=120,
-        )
-
-        subprocess.run(
-            ["xattr", "-cr", str(target_app)],
-            check=False,
-            timeout=30,
-        )
-
-    finally:
-        try:
-            subprocess.run(
-                ["hdiutil", "detach", str(mount_point), "-quiet"],
-                check=False,
-                timeout=30,
+    with archive:
+        members = archive.infolist()
+        if not members:
+            raise UpdateError("Indirilen guncelleme paketi bos.")
+        if len(members) > MAX_EXTRACTED_FILES:
+            raise UpdateError(
+                f"Guncelleme paketi cok fazla dosya iceriyor ({len(members)} > {MAX_EXTRACTED_FILES})."
             )
-        except Exception:
-            pass
 
-    subprocess.Popen(
-        ["open", str(target_app)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+        written_total = 0
+        for info in members:
+            normalized = _normalized_member_name(info.filename)
+            if normalized is None:
+                raise UpdateError(
+                    f"Guncelleme paketi guvenli olmayan bir yol iceriyor: {info.filename!r}"
+                )
+            target_path = extract_root / normalized
+            try:
+                target_path.resolve().relative_to(extract_root.resolve())
+            except ValueError as exc:
+                raise UpdateError(
+                    f"Guncelleme paketi hedef klasor disina yazmaya calisiyor: {info.filename!r}"
+                ) from exc
+
+            if info.is_dir() or normalized.endswith("/"):
+                target_path.mkdir(parents=True, exist_ok=True)
+                continue
+            if _is_zip_symlink(info):
+                raise UpdateError(
+                    f"Guncelleme paketi sembolik baglanti iceriyor: {info.filename!r}"
+                )
+            if info.compress_size > 0 and (
+                info.file_size / info.compress_size > MAX_COMPRESSION_RATIO
+            ):
+                raise UpdateError(
+                    f"Guncelleme paketi supheli sikistirma oranina sahip: {info.filename!r}"
+                )
+
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(info) as source, target_path.open("wb") as destination:
+                while True:
+                    chunk = source.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    written_total += len(chunk)
+                    if written_total > MAX_EXTRACTED_BYTES:
+                        raise UpdateError(
+                            "Guncelleme paketi acildiginda boyut siniri asildi "
+                            f"({MAX_EXTRACTED_BYTES} bayt)."
+                        )
+                    destination.write(chunk)
+
+    app_dir = extract_root / BINARY_NAME
+    executable = app_dir / WINDOWS_SINGLE_EXE_NAME
+    if not executable.is_file():
+        raise UpdateError(
+            "Guncelleme paketi beklenen yapiyi icermiyor "
+            f"({BINARY_NAME}/{WINDOWS_SINGLE_EXE_NAME})."
+        )
+    return app_dir
+
+
+def _ensure_pe_executable(file_path: Path) -> None:
+    """Tek dosya .exe artefaktinin PE basligi tasidigini dogrular."""
+    try:
+        with file_path.open("rb") as executable_file:
+            header = executable_file.read(2)
+            if header != b"MZ":
+                raise UpdateError(
+                    "Indirilen .exe dosyasi gecerli bir Windows calistirilabilir dosyasi degil."
+                )
+            executable_file.seek(0x3C)
+            offset_bytes = executable_file.read(4)
+    except OSError as exc:
+        raise UpdateError(f"Indirilen .exe dosyasi okunamadi: {exc}") from exc
+    if len(offset_bytes) != 4:
+        raise UpdateError("Indirilen .exe dosyasi eksik veya bozuk.")
+    pe_offset = int.from_bytes(offset_bytes, "little")
+    try:
+        with file_path.open("rb") as executable_file:
+            executable_file.seek(pe_offset)
+            signature = executable_file.read(4)
+    except OSError as exc:
+        raise UpdateError(f"Indirilen .exe dosyasi okunamadi: {exc}") from exc
+    if signature != b"PE\0\0":
+        raise UpdateError("Indirilen .exe dosyasi gecerli bir PE basligi tasimiyor.")
+
+
+def _prepare_staged_app(asset_path: Path, working_root: Path) -> Path:
+    """Yeni surumu calisan dizinin disindaki bir sahne klasorune hazirlar."""
+    stage_root = working_root / "stage"
+    stage_app_dir = stage_root / BINARY_NAME
+    if stage_app_dir.exists():
+        raise UpdateError("Gecici update klasoru beklenmedik sekilde dolu.")
+    stage_root.mkdir(parents=True, exist_ok=True)
+
+    if asset_path.suffix.lower() == ".exe":
+        _ensure_pe_executable(asset_path)
+        stage_app_dir.mkdir(parents=True)
+        shutil.copy2(asset_path, stage_app_dir / WINDOWS_SINGLE_EXE_NAME)
+        return stage_app_dir
+
+    extracted_app_dir = _safe_extract_zip(asset_path, working_root / "extract")
+    shutil.move(str(extracted_app_dir), str(stage_app_dir))
+    return stage_app_dir
+
+
+def _safe_path_component(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]", "_", value.strip())
+    return cleaned or "previous"
 
 
 def _write_update_script(
@@ -471,8 +853,22 @@ def _write_update_script(
     install_dir: Path,
     executable_path: Path,
     current_pid: int,
+    version: str = "",
+    backup_dir: Path | None = None,
+    log_path: Path | None = None,
+    new_dir: Path | None = None,
 ) -> Path:
+    """Uygulama kapandiktan sonra calisacak yedekli/takasli kurulum betigi.
+
+    Betik once canli dizinin ``backup-<version>`` kopyasini alir, yeni icerigi
+    yan dizine cikarir, takas eder ve herhangi bir hata durumunda yedegi geri
+    yukler. Tum adimlar ``apply_update.log`` dosyasina yazilir.
+    """
     script_path = working_root / "apply_update.ps1"
+    safe_version = _safe_path_component(version or "previous")
+    backup_path = backup_dir or install_dir.with_name(f"{install_dir.name}-backup-{safe_version}")
+    new_path = new_dir or install_dir.with_name(f"{install_dir.name}-new-{current_pid}")
+    log_path = log_path or (working_root / UPDATE_LOG_NAME)
     script = "\n".join(
         [
             "$ErrorActionPreference = 'Stop'",
@@ -480,25 +876,214 @@ def _write_update_script(
             f"$StageDir = '{_powershell_literal(str(stage_dir))}'",
             f"$TargetDir = '{_powershell_literal(str(install_dir))}'",
             f"$ExePath = '{_powershell_literal(str(executable_path))}'",
+            f"$BackupDir = '{_powershell_literal(str(backup_path))}'",
+            f"$NewDir = '{_powershell_literal(str(new_path))}'",
+            f"$LogPath = '{_powershell_literal(str(log_path))}'",
             f"$SourceDir = Join-Path $StageDir '{BINARY_NAME}'",
+            "function Write-UpdateLog([string]$Message) {",
+            "    $line = ('{0} {1}' -f (Get-Date).ToString('s'), $Message)",
+            "    Add-Content -LiteralPath $LogPath -Value $line -Encoding UTF8",
+            "}",
+            f"Write-UpdateLog 'Guncelleme basladi (surum: {_powershell_literal(safe_version)}).'",
             "$deadline = (Get-Date).AddSeconds(120)",
             "while ((Get-Process -Id $AppPid -ErrorAction SilentlyContinue) -and ((Get-Date) -lt $deadline)) {",
             "    Start-Sleep -Seconds 1",
             "}",
             "if (-not (Test-Path -LiteralPath $SourceDir)) {",
+            "    Write-UpdateLog 'HATA: Guncelleme klasoru bulunamadi.'",
             "    throw 'Guncelleme klasoru bulunamadi.'",
             "}",
-            "New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null",
-            "Get-ChildItem -LiteralPath $SourceDir -Force | ForEach-Object {",
-            "    Copy-Item -LiteralPath $_.FullName -Destination $TargetDir -Recurse -Force",
+            "$swapped = $false",
+            "try {",
+            "    if (Test-Path -LiteralPath $BackupDir) {",
+            "        Remove-Item -LiteralPath $BackupDir -Recurse -Force",
+            "    }",
+            "    if (Test-Path -LiteralPath $TargetDir) {",
+            "        Write-UpdateLog ('Yedek aliniyor: ' + $BackupDir)",
+            "        Copy-Item -LiteralPath $TargetDir -Destination $BackupDir -Recurse -Force",
+            "    }",
+            "    if (Test-Path -LiteralPath $NewDir) {",
+            "        Remove-Item -LiteralPath $NewDir -Recurse -Force",
+            "    }",
+            "    New-Item -ItemType Directory -Path $NewDir -Force | Out-Null",
+            "    Get-ChildItem -LiteralPath $SourceDir -Force | ForEach-Object {",
+            "        Copy-Item -LiteralPath $_.FullName -Destination $NewDir -Recurse -Force",
+            "    }",
+            "    Write-UpdateLog ('Yeni icerik yan dizine cikarildi: ' + $NewDir)",
+            "    if (Test-Path -LiteralPath $TargetDir) {",
+            "        Remove-Item -LiteralPath $TargetDir -Recurse -Force",
+            "    }",
+            "    Move-Item -LiteralPath $NewDir -Destination $TargetDir -Force",
+            "    $swapped = $true",
+            "    Write-UpdateLog 'Yeni surum yerlestirildi.'",
+            "} catch {",
+            "    Write-UpdateLog ('HATA: ' + $_.Exception.Message)",
+            "    if (-not $swapped) {",
+            "        try {",
+            "            if (Test-Path -LiteralPath $TargetDir) {",
+            "                Remove-Item -LiteralPath $TargetDir -Recurse -Force",
+            "            }",
+            "            if (Test-Path -LiteralPath $BackupDir) {",
+            "                Move-Item -LiteralPath $BackupDir -Destination $TargetDir -Force",
+            "                Write-UpdateLog 'Geri alma tamamlandi.'",
+            "            }",
+            "        } catch {",
+            "            Write-UpdateLog ('Geri alma basarisiz: ' + $_.Exception.Message)",
+            "        }",
+            "    }",
+            "    throw",
             "}",
-            "Start-Process -FilePath $ExePath",
+            "try {",
+            "    Start-Process -FilePath $ExePath",
+            "    Write-UpdateLog 'Uygulama yeniden baslatildi.'",
+            "} catch {",
+            "    Write-UpdateLog ('UYARI: Uygulama baslatilamadi: ' + $_.Exception.Message)",
+            "}",
             "Remove-Item -LiteralPath $StageDir -Recurse -Force -ErrorAction SilentlyContinue",
         ]
     )
     # Windows PowerShell, UTF-8 BOM ile kaydedilen script dosyalarini Unicode yol adlariyla daha guvenli okur.
     script_path.write_text(script, encoding="utf-8-sig", newline="\r\n")
     return script_path
+
+
+def _run_macos_command(arguments: list[str], error_message: str, timeout: int = 120) -> None:
+    try:
+        subprocess.run(arguments, check=True, timeout=timeout)
+    except FileNotFoundError as exc:
+        raise UpdateError(f"{error_message}: gerekli arac bulunamadi ({arguments[0]}).") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise UpdateError(f"{error_message}: islem zaman asimina ugradi.") from exc
+    except subprocess.CalledProcessError as exc:
+        raise UpdateError(f"{error_message}: {exc}") from exc
+    except OSError as exc:
+        raise UpdateError(f"{error_message}: {exc}") from exc
+
+
+def _verify_macos_code_signature(app_path: Path, log_path: Path | None) -> bool:
+    """``codesign --verify`` dener. Basarisizlik uyaridir; hash zorunludur."""
+    try:
+        completed = subprocess.run(
+            ["codesign", "--verify", "--deep", "--strict", str(app_path)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        _append_update_log(log_path, f"UYARI: codesign calistirilamadi: {exc}")
+        return False
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        _append_update_log(log_path, f"UYARI: kod imzasi dogrulanamadi: {detail}")
+        logger.warning("Kod imzasi dogrulanamadi: %s", detail)
+        return False
+    _append_update_log(log_path, "Kod imzasi dogrulandi (codesign).")
+    return True
+
+
+def _install_macos_update(
+    asset_path: Path,
+    app_name: str = BINARY_NAME,
+    version: str = "",
+    apps_dir: Path | None = None,
+    log_path: Path | None = None,
+) -> None:
+    """DMG'yi gecici bir mount noktasina baglar ve .app'i geri alinabilir kurar."""
+    apps_root = apps_dir or Path("/Applications")
+    mount_parent = Path(tempfile.mkdtemp(prefix="hidrostatik-dmg-"))
+    mount_point = mount_parent / "mount"
+    mount_point.mkdir(parents=True, exist_ok=True)
+    attached = False
+    try:
+        _run_macos_command(
+            [
+                "hdiutil",
+                "attach",
+                str(asset_path),
+                "-mountpoint",
+                str(mount_point),
+                "-readonly",
+                "-nobrowse",
+                "-noautoopen",
+                "-quiet",
+            ],
+            "DMG mount edilemedi",
+            timeout=60,
+        )
+        attached = True
+
+        dmg_app = mount_point / f"{app_name}.app"
+        if not dmg_app.exists():
+            alternatives = sorted(mount_point.glob("*.app"))
+            if not alternatives:
+                raise UpdateError("DMG icinde .app bulunamadi.")
+            dmg_app = alternatives[0]
+
+        _verify_macos_code_signature(dmg_app, log_path)
+
+        apps_root.mkdir(parents=True, exist_ok=True)
+        target_app = apps_root / dmg_app.name
+        backup_app = apps_root / (
+            f"{dmg_app.name}-backup-{_safe_path_component(version or 'previous')}"
+        )
+
+        installed = False
+        try:
+            if target_app.exists():
+                if backup_app.exists():
+                    shutil.rmtree(backup_app, ignore_errors=True)
+                _run_macos_command(
+                    ["ditto", str(target_app), str(backup_app)],
+                    "Mevcut uygulama yedeklenemedi",
+                )
+                _append_update_log(log_path, f"Yedek alindi: {backup_app}")
+                try:
+                    shutil.rmtree(target_app)
+                except OSError as exc:
+                    raise UpdateError(f"Mevcut uygulama kaldirilamadi: {exc}") from exc
+            _run_macos_command(
+                ["ditto", str(dmg_app), str(target_app)],
+                "Guncelleme uygulanamadi",
+            )
+            installed = True
+            _append_update_log(log_path, f"Yeni surum kuruldu: {target_app}")
+        except UpdateError:
+            if backup_app.exists():
+                try:
+                    if target_app.exists():
+                        shutil.rmtree(target_app, ignore_errors=True)
+                    _run_macos_command(
+                        ["ditto", str(backup_app), str(target_app)],
+                        "Geri alma basarisiz",
+                    )
+                    _append_update_log(log_path, "Geri alma tamamlandi.")
+                except UpdateError as rollback_exc:
+                    _append_update_log(log_path, f"HATA: {rollback_exc}")
+            raise
+        finally:
+            if not installed:
+                _append_update_log(log_path, "Kurulum tamamlanmadi.")
+
+        try:
+            subprocess.Popen(
+                ["open", str(target_app)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError as exc:
+            raise UpdateError(f"Uygulama yeniden baslatilamadi: {exc}") from exc
+    finally:
+        if attached:
+            try:
+                subprocess.run(
+                    ["hdiutil", "detach", str(mount_point), "-quiet"],
+                    check=False,
+                    timeout=30,
+                )
+            except (OSError, subprocess.SubprocessError):
+                pass
+        shutil.rmtree(mount_parent, ignore_errors=True)
 
 
 def install_update(
@@ -525,6 +1110,9 @@ def install_update(
     else:
         working_root = Path(tempfile.mkdtemp(prefix="hidrostatik-update-"))
 
+    log_path = working_root / UPDATE_LOG_NAME
+    _append_update_log(log_path, f"Guncelleme hazirlaniyor: {update_info.asset.name}")
+
     asset_path = working_root / update_info.asset.name
 
     _download_asset(
@@ -534,44 +1122,54 @@ def install_update(
         progress_callback=progress_callback,
     )
 
-    if sys.platform.startswith("darwin") and update_info.asset.name.endswith(".dmg"):
-        _install_macos_update(asset_path, BINARY_NAME)
+    if asset_path.suffix.lower() == ".dmg":
+        if not sys.platform.startswith("darwin"):
+            raise UpdateError("DMG paketi yalnizca macOS uzerinde kurulabilir.")
+        _install_macos_update(
+            asset_path,
+            BINARY_NAME,
+            version=update_info.latest_version,
+            log_path=log_path,
+        )
         return "self_update"
 
-    zip_path = asset_path
-    extract_root = working_root / "extract"
-    extract_root.mkdir(parents=True, exist_ok=True)
+    if runtime.executable_path.suffix.lower() != ".exe":
+        # Windows disi bir calistirilabilir ile Windows paketi kurulmaz.
+        open_release_page(update_info.html_url)
+        return "browser"
 
-    with zipfile.ZipFile(zip_path, "r") as archive:
-        archive.extractall(extract_root)
-
-    extracted_app_dir = _find_extracted_app_dir(extract_root)
+    _prepare_staged_app(asset_path, working_root)
     stage_root = working_root / "stage"
-    stage_root.mkdir(parents=True, exist_ok=True)
-    staged_app_dir = stage_root / BINARY_NAME
-    if staged_app_dir.exists():
-        raise UpdateError("Gecici update klasoru beklenmedik sekilde dolu.")
-    extracted_app_dir.rename(staged_app_dir)
-
+    safe_version = _safe_path_component(update_info.latest_version)
+    backup_dir = runtime.install_dir.with_name(f"{runtime.install_dir.name}-backup-{safe_version}")
+    new_dir = runtime.install_dir.with_name(f"{runtime.install_dir.name}-new-{os.getpid()}")
     script_path = _write_update_script(
         working_root=working_root,
         stage_dir=stage_root,
         install_dir=runtime.install_dir,
         executable_path=runtime.executable_path,
         current_pid=os.getpid(),
+        version=update_info.latest_version,
+        backup_dir=backup_dir,
+        log_path=log_path,
+        new_dir=new_dir,
     )
-    subprocess.Popen(
-        [
-            "powershell",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-WindowStyle",
-            "Hidden",
-            "-File",
-            str(script_path),
-        ],
-        close_fds=True,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-    )
+    try:
+        subprocess.Popen(
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-WindowStyle",
+                "Hidden",
+                "-File",
+                str(script_path),
+            ],
+            close_fds=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except OSError as exc:
+        _append_update_log(log_path, f"HATA: kurulum betigi baslatilamadi: {exc}")
+        raise UpdateError(f"Guncelleme kurulum betigi baslatilamadi: {exc}") from exc
     return "self_update"
