@@ -1,0 +1,30 @@
+# Opsiyonel OCR / rapor okuma bagimliliklari.
+#
+# Bu dosya uygulamanin zorunlu calisma bagimliligi degildir. Kurulmadiginda
+# `hidrostatik_test.services.report_ocr` yalnizca PDF metin katmani ile
+# calisir; taranmis PDF/gorsel yuklendiginde anlasilir bir `ReportOcrError`
+# uretir. Kurulum:
+#
+#   python3 -m pip install -r requirements-ocr.txt
+#
+# Not: `pytesseract` yalnizca bir sarmalayicidir. Tesseract binary'si ve
+# Turkce dil paketi (`tur.traineddata`) ayrica kurulmalidir:
+#   macOS : brew install tesseract tesseract-lang
+#   Windows: UB Mannheim Tesseract kurulumu + PATH
+
+# PDF metin katmani (birincil)
+pypdf>=5,<7
+
+# PDF metin/tablo cikarimi (yedek; pypdf yoksa veya tablo gerekirse)
+pdfplumber>=0.11,<1
+
+# Goruntu OCR (Tesseract sarmalayicisi)
+pytesseract>=0.3.13,<1
+Pillow>=10,<13
+
+# Opsiyonel: taranmis PDF sayfalarini goruntuye cevirmek icin.
+# PyMuPDF AGPL-3.0 lisanslidir; ticari dagitimda uyum kontrolu yapin.
+# PyMuPDF>=1.24,<2
+#
+# Alternatif: pdf2image (Poppler binary'si gerektirir).
+# pdf2image>=1.17,<2

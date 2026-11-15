@@ -33,6 +33,31 @@ class UiConstantsTests(unittest.TestCase):
         self.assertTrue(constants.DEFAULT_DECISION_TITLE)
         self.assertTrue(constants.DEFAULT_DECISION_SUMMARY)
 
+    def test_acceptance_rules_are_single_source_of_truth(self) -> None:
+        self.assertEqual(constants.AIR_ACCEPTANCE_RULE, "Vpa < 1.06 x Vp")
+        self.assertEqual(constants.PRESSURE_ACCEPTANCE_RULE, "(Pa - Pt) <= 0.3 bar")
+
+    def test_required_field_sets_start_with_geometry_and_have_labels(self) -> None:
+        for fields in (
+            constants.AIR_REQUIRED_FIELDS,
+            constants.PRESSURE_REQUIRED_FIELDS,
+        ):
+            self.assertEqual(
+                tuple(fields[: len(constants.GEOMETRY_REQUIRED_FIELDS)]),
+                constants.GEOMETRY_REQUIRED_FIELDS,
+            )
+        self.assertIn("air.actual_added_water_m3", constants.AIR_REQUIRED_FIELDS)
+        self.assertIn("pressure.delta_t_c", constants.PRESSURE_REQUIRED_FIELDS)
+        self.assertEqual(constants.REQUIRED_FIELD_LABELS["air.a_micro_per_bar"], "A")
+        self.assertEqual(constants.REQUIRED_FIELD_LABELS["air.actual_added_water_m3"], "Vpa")
+        for field_key in (
+            *constants.AIR_REQUIRED_FIELDS,
+            *constants.PRESSURE_REQUIRED_FIELDS,
+            *constants.PIG_REQUIRED_FIELDS,
+        ):
+            self.assertIn(field_key, constants.REQUIRED_FIELD_LABELS)
+        self.assertEqual(constants.REQUIRED_FIELD_HINT, "* = zorunlu")
+
 
 if __name__ == "__main__":
     unittest.main()

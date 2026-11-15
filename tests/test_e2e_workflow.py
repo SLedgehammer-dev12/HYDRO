@@ -73,6 +73,28 @@ class EndToEndWorkflowTests(unittest.TestCase):
         theoretical = (b_value * 0.6) / (pipe.elasticity_term + a_value)
         self.app.pressure_vars["actual_pressure_change_bar"].set(f"{theoretical + 0.1:.9f}")
 
+    def test_gated_evaluation_enables_and_runs_after_required_fields(self) -> None:
+        self.app._select_tab_by_key("air")
+        self.assertEqual(str(self.app.air_test_button.cget("state")), "disabled")
+        self.assertIn("Eksik:", self.app.gate_labels["air"].cget("text"))
+
+        self._prepare_air_pass()
+
+        self.assertEqual(str(self.app.air_test_button.cget("state")), "normal")
+        self.app._run_selected_test()
+        self.assertEqual(self.app._decisions["air"]["status"], "BASARILI")
+        self.assertIn("Vpa < 1.06 x Vp", self.app.header_rule_var.get())
+
+        self.app._select_tab_by_key("pressure")
+        self.assertEqual(str(self.app.pressure_test_button.cget("state")), "disabled")
+
+        self._prepare_pressure_pass()
+
+        self.assertEqual(str(self.app.pressure_test_button.cget("state")), "normal")
+        self.app._run_selected_test()
+        self.assertEqual(self.app._decisions["pressure"]["status"], "BASARILI")
+        self.assertIn("(Pa - Pt) <= 0.3 bar", self.app.header_rule_var.get())
+
     def test_full_operator_workflow_air_pressure_report(self) -> None:
         self._prepare_air_pass()
         self.app._run_air_test()

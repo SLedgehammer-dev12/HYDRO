@@ -36,8 +36,17 @@
     `HYDRO_UPDATE_PRIVATE_KEY`; imzasiz/bozuk paket kurulmuyor.
 - **Dokumantasyon**: A/B yontem ve birim arastirmasi, imza runbook'u,
   remediation raporu ve guncel test sayilari.
+- **UI ergonomisi (Faz 2)**: her zaman gorunur karar seridi (kural + limit +
+  marj), zorunlu alan kapisi ve gerekcesi, dinamik `*`, `Enter`/`Shift+Enter`/
+  `Ctrl+Enter`/`F5`, hatali alana odak + kaydirma, panel bazli mousewheel,
+  birim/terminoloji standardi (`°C`, `m³`, `m/s`, `10^-6/bar`), varsayilan
+  gorunur akis listesi, kucuk ekranda otomatik detay paneli gizleme.
+- **OCR rapor kontrolu**: PDF metin katmani + opsiyonel Tesseract, rapor semasi,
+  alan/guven cikarimi, hesaplanan degerlerle toleransli karsilastirma, CLI
+  (`tools/ocr_report.py`) ve `Rapor > Test Raporu Kontrol (OCR)...` arayuzu
+  (ozet/alan/uyusmazlik/uyari sekmeleri, JSON kaydetme, insan onayi).
 - **Graphify**: `skills/graphify/` ve `docs/codebase_map.md`
-  (1.400+ dugum, 11.000+ kenar).
+  (1.700+ dugum, 15.000+ kenar).
 - **Test ve E2E**: 550+ otomatik test; kaynak-only branch kapsami ~%79;
   geometri -> A/B -> hava + basinc -> karar -> txt/pdf/xlsx rapor -> SQLite
   oturum kaliciligi -> updater asset/imza sozlesmesi e2e akisi.

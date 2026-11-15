@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import tkinter as tk
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import hidrostatik_test.ui.app as app_module
@@ -11,7 +13,7 @@ from hidrostatik_test.app_metadata import APP_VERSION, SPEC_DOCUMENT_CODE
 from hidrostatik_test.data import BOTAS_REFERENCE_OPTION_LABEL, GAIL_REFERENCE_OPTION_LABEL
 from hidrostatik_test.domain import BSource
 from hidrostatik_test.domain.coefficient_manager import CoefficientState
-from hidrostatik_test.domain.hydrotest_core import STEEL_MODELS, ValidationError
+from hidrostatik_test.domain.hydrotest_core import STEEL_MODELS, PipeSection, ValidationError
 from hidrostatik_test.services.download_manager import DownloadManager
 from hidrostatik_test.ui import constants as ui_constants
 from hidrostatik_test.ui.app import HydrostaticTestApp
@@ -25,6 +27,7 @@ from hidrostatik_test.ui.constants import (
     MANUAL_B_MODE,
     REFERENCE_A_MODE,
     REFERENCE_B_MODE,
+    REQUIRED_FIELD_HINT,
     STEEL_MODEL_LINEAR_LABEL,
     STEEL_MODEL_VOLUMETRIC_LABEL,
     TABLE_B_MODE,
@@ -115,7 +118,7 @@ class UiWorkflowTests(unittest.TestCase):
         self.assertIn("Hava Icerik Testi - Detay Raporu", detail)
         self.assertIn("A durum: Hazir: manuel giris", detail)
         self.assertIn("A kaynagi: Kullanici girdisi / manuel tablo-prosedur.", detail)
-        self.assertIn("A degeri: 45.0 (10^-6 / bar)", detail)
+        self.assertIn("A degeri: 45.0 (10^-6/bar)", detail)
 
     def test_coefficient_source_badges_reflect_manual_and_computed_states(self) -> None:
         self.app.air_a_mode_var.set(MANUAL_A_MODE)
@@ -620,7 +623,7 @@ class UiWorkflowTests(unittest.TestCase):
             self.app.notebook.tab(index, "text") for index in range(self.app.notebook.index("end"))
         ]
 
-        self.assertEqual(labels, ["Hava Icerik Testi", "Basinc Degisim Testi", "Saha Grubu"])
+        self.assertEqual(labels, ["Hava Icerik Testi", "Basinc Degisim Testi", "Saha Kontrol"])
 
     def test_default_water_backend_is_coolprop(self) -> None:
         self.assertEqual(self.app.water_backend_var.get(), "CoolProp EOS [coolprop]")
@@ -721,6 +724,142 @@ class UiWorkflowTests(unittest.TestCase):
 
         self.assertEqual(labels, ["Dosya", "Hesap", "Rapor", "Guncelleme", "Hakkinda"])
 
+    def test_ocr_report_menu_entry_and_toolbar_button_are_available(self) -> None:
+        menu = self.app.report_menu
+        labels = [
+            menu.entrycget(index, "label")
+            for index in range(menu.index("end") + 1)
+            if menu.type(index) == "command"
+        ]
+
+        self.assertIn("Test Raporu Kontrol (OCR)...", labels)
+        self.assertEqual(self.app.ocr_report_button.cget("text"), "Rapor Kontrol (OCR)...")
+        self.assertTrue(self.app.ocr_report_button.winfo_manager())
+
+    def _fill_ocr_calculated_inputs(self) -> None:
+        self._fill_geometry()
+        self.app.air_vars["a_micro_per_bar"].set("45")
+        self.app.air_vars["actual_added_water_m3"].set("0.0079")
+        self.app.pressure_vars["pressure_bar"].set("80")
+        self.app.pressure_vars["delta_t_c"].set("0.6")
+        self.app.pressure_vars["actual_pressure_change_bar"].set("0.4")
+        self.app.pressure_vars["a_micro_per_bar"].set("45")
+        self.app.pressure_vars["b_micro_per_c"].set("188.661")
+
+    def test_ocr_calculated_payload_uses_geometry_tests_and_decisions(self) -> None:
+        self._fill_ocr_calculated_inputs()
+        self.app._update_decision_card("Hava Icerik Testi", "BASARILI", "Hava testi gecti")
+        self.app._update_decision_card("Basinc Degisim Testi", "BASARILI", "Basinc testi gecti")
+
+        payload = self.app._build_ocr_calculated_payload()
+
+        self.assertEqual(payload["pipe_od_mm"], 406.4)
+        self.assertEqual(payload["wall_mm"], 8.74)
+        self.assertEqual(payload["length_m"], 1000.0)
+        self.assertEqual(payload["test_pressure_bar"], 80.0)
+        self.assertEqual(payload["result"], "PASS")
+
+        air_test = payload["air_test"]
+        self.assertEqual(air_test["vpa_m3"], 0.0079)
+        self.assertEqual(air_test["a_micro_per_bar"], 45.0)
+        pipe = self.app._build_pipe_section("air")
+        expected_vp = (pipe.elasticity_term + 45.0) * 1e-6 * pipe.internal_volume_m3 * 1.0 * 1.02
+        self.assertAlmostEqual(air_test["vp_m3"], expected_vp, places=12)
+
+        pressure_test = payload["pressure_test"]
+        self.assertEqual(
+            pressure_test,
+            {
+                "delta_t_c": 0.6,
+                "pa_bar": 0.4,
+                "a_micro_per_bar": 45.0,
+                "b_micro_per_c": 188.661,
+            },
+        )
+
+    def test_ocr_calculated_payload_skips_missing_and_non_finite_values(self) -> None:
+        self.assertEqual(self.app._build_ocr_calculated_payload(), {})
+
+        self.app.geometry_vars["outside_diameter_mm"].set("nan")
+        self.app.geometry_vars["wall_thickness_mm"].set("8.74")
+        self.app.geometry_vars["length_m"].set("abc")
+        self.app.pressure_vars["pressure_bar"].set("inf")
+        self.app.pressure_vars["delta_t_c"].set("nan")
+        self.app.pressure_vars["actual_pressure_change_bar"].set("inf")
+        self.app.pressure_vars["a_micro_per_bar"].set("nan")
+        self.app.pressure_vars["b_micro_per_c"].set("inf")
+        self.app.air_vars["a_micro_per_bar"].set("nan")
+        self.app.air_vars["actual_added_water_m3"].set("inf")
+
+        payload = self.app._build_ocr_calculated_payload()
+
+        self.assertEqual(payload, {})
+        # nan/inf JSON'a sizmamali.
+        self.assertEqual(json.loads(json.dumps(payload, allow_nan=False)), {})
+
+    def test_ocr_calculated_payload_sums_segments_and_skips_mixed_diameters(self) -> None:
+        self.app.geometry_segments = [
+            {
+                "pipe": PipeSection(406.4, 8.74, 400.0),
+                "nps_label": "NPS 16",
+                "schedule_label": "STD",
+            },
+            {
+                "pipe": PipeSection(406.4, 8.74, 600.0),
+                "nps_label": "NPS 16",
+                "schedule_label": "STD",
+            },
+        ]
+
+        payload = self.app._build_ocr_calculated_payload()
+
+        self.assertEqual(payload["length_m"], 1000.0)
+        self.assertEqual(payload["pipe_od_mm"], 406.4)
+        self.assertEqual(payload["wall_mm"], 8.74)
+
+        self.app.geometry_segments[1]["pipe"] = PipeSection(323.9, 6.35, 600.0)
+        mixed_payload = self.app._build_ocr_calculated_payload()
+
+        self.assertEqual(mixed_payload["length_m"], 1000.0)
+        self.assertNotIn("pipe_od_mm", mixed_payload)
+        self.assertNotIn("wall_mm", mixed_payload)
+
+    def test_ocr_calculated_payload_maps_decisions_to_result(self) -> None:
+        self.app._update_decision_card("Hava Icerik Testi", "BASARISIZ", "Kaldi")
+        self.assertEqual(self.app._build_ocr_calculated_payload()["result"], "FAIL")
+
+        self.app._update_decision_card("Hava Icerik Testi", "DOGRULANAMADI", "Eksik")
+        self.assertEqual(self.app._build_ocr_calculated_payload()["result"], "UNKNOWN")
+
+        self.app._reset_decision_card()
+        self.assertNotIn("result", self.app._build_ocr_calculated_payload())
+
+    def test_open_ocr_report_dialog_passes_calculated_payload(self) -> None:
+        self._fill_ocr_calculated_inputs()
+
+        with patch("hidrostatik_test.ui.report_ocr_dialog.ReportOcrDialog") as dialog_cls:
+            self.app._open_ocr_report_dialog()
+
+        dialog_cls.assert_called_once()
+        args, kwargs = dialog_cls.call_args
+        self.assertEqual(args[0], self.app.root)
+        self.assertEqual(kwargs["calculated_payload"], self.app._build_ocr_calculated_payload())
+        self.assertIs(self.app._ocr_report_dialog, dialog_cls.return_value)
+
+    def test_open_ocr_report_dialog_reports_startup_failure(self) -> None:
+        with (
+            patch(
+                "hidrostatik_test.ui.report_ocr_dialog.ReportOcrDialog",
+                side_effect=RuntimeError("tk baslatilamadi"),
+            ),
+            patch("hidrostatik_test.ui.app.messagebox.showerror") as showerror,
+        ):
+            self.app._open_ocr_report_dialog()
+
+        showerror.assert_called_once()
+        self.assertIn("tk baslatilamadi", showerror.call_args.args[1])
+        self.assertEqual(self.app.banner_level, "error")
+
     def test_input_snapshot_roundtrip_restores_state(self) -> None:
         self._fill_geometry()
         self.app.air_vars["temperature_c"].set("18")
@@ -800,7 +939,7 @@ class UiWorkflowTests(unittest.TestCase):
         self.root.update_idletasks()
 
         self.assertEqual(
-            self.app.active_input_title_label.cget("text"), "Aktif test girdileri: Saha Grubu"
+            self.app.active_input_title_label.cget("text"), "Aktif test girdileri: Saha Kontrol"
         )
         self.assertTrue(self.app.active_input_frames["field"].winfo_ismapped())
 
@@ -1123,7 +1262,7 @@ class UiWorkflowTests(unittest.TestCase):
         self.assertIn("Operasyon Kontrol Noktalari", report)
         self.assertIn("Pig Hiz Hesabi", report)
         self.assertIn(
-            "[x] Dolum sirasinda hava sicakligi +2 degC limitine gore kontrol edildi (10.1)", report
+            "[x] Dolum sirasinda hava sicakligi +2 °C limitine gore kontrol edildi (10.1)", report
         )
 
     # --- P0/P1 remediation davranis testleri ---
@@ -1483,6 +1622,307 @@ class UiWorkflowTests(unittest.TestCase):
         report = self.app._build_report_text()
         self.assertIn("Vpa < 1.06 x Vp", report)
         self.assertIn("(Pa - Pt) <= 0.3 bar", report)
+
+    # --- Ergonomi fazi: karar seridi, kapi, klavye, kaydirma, birimler ---
+
+    def test_decision_strip_shows_status_rule_and_margin_after_air_result(self) -> None:
+        self._prepare_air_live_result()
+
+        self.app._run_air_test()
+
+        self.assertEqual(self.app._decisions["air"]["status"], "BASARILI")
+        self.assertIn("BASARILI", self.app.header_status_var.get())
+        self.assertIn("Hava Icerik Testi", self.app.header_status_var.get())
+        self.assertIn("Vpa < 1.06 x Vp", self.app.header_rule_var.get())
+        self.assertIn("Vp=", self.app.header_rule_var.get())
+        self.assertIn("Vpa=", self.app.header_rule_var.get())
+        self.assertIn("marj=", self.app.header_rule_var.get())
+        self.assertEqual(self.app.decision_status_label.cget("bg"), "#E6F4EA")
+
+    def test_decision_strip_follows_active_tab_and_preserves_decisions(self) -> None:
+        self._prepare_air_live_result()
+        self.app._run_air_test()
+        self.assertEqual(self.app._decisions["air"]["status"], "BASARILI")
+
+        self.app._select_tab_by_key("pressure")
+
+        self.assertIn("Basinc Degisim Testi", self.app.header_status_var.get())
+        self.assertIn("(Pa - Pt) <= 0.3 bar", self.app.header_rule_var.get())
+        self.assertEqual(self.app._decisions["air"]["status"], "BASARILI")
+
+        self.app._select_tab_by_key("air")
+
+        self.assertIn("BASARILI", self.app.header_status_var.get())
+        self.assertIn("Vpa < 1.06 x Vp", self.app.header_rule_var.get())
+
+    def test_decision_card_rule_and_long_summary_are_displayed_safely(self) -> None:
+        long_summary = ("Uzun karar dayanagi " * 40).strip()
+        self.app._update_decision_card("Basinc Degisim Testi", "DOGRULANAMADI", long_summary)
+
+        self.assertIn("Kural: (Pa - Pt) <= 0.3 bar", self.app.decision_rule_var.get())
+        self.assertIn("Pt=", self.app.decision_rule_var.get())
+        self.assertIn("fark=", self.app.decision_rule_var.get())
+        self.assertLessEqual(len(self.app.decision_summary_var.get()), 240)
+        self.assertTrue(self.app.decision_summary_var.get().endswith("..."))
+        self.assertEqual(self.app._decisions["pressure"]["summary"], long_summary)
+        self.assertIn(long_summary, self.app._build_report_text())
+        self.app._select_tab_by_key("pressure")
+        self.assertIn(long_summary, self.app.active_detail_report_var.get())
+        self.assertNotIn(long_summary, self.app.decision_summary_var.get())
+
+    def test_decision_colors_separate_ambiguous_waiting_and_stale(self) -> None:
+        palettes: dict[str, str] = {}
+        for status in ("DOGRULANAMADI", "BEKLIYOR", "KATSAYI GUNCELLENMELI", "BASARILI"):
+            self.app._update_decision_card("Hava Icerik Testi", status, "Durum")
+            palettes[status] = self.app.decision_status_label.cget("bg")
+
+        self.assertEqual(palettes["BEKLIYOR"], "#F1F3F5")
+        self.assertNotEqual(palettes["DOGRULANAMADI"], palettes["BEKLIYOR"])
+        self.assertNotEqual(palettes["KATSAYI GUNCELLENMELI"], palettes["BEKLIYOR"])
+        self.assertEqual(palettes["BASARILI"], "#E6F4EA")
+
+    def test_required_field_gate_blocks_evaluation_with_reason(self) -> None:
+        self.app._select_tab_by_key("air")
+
+        self.assertEqual(str(self.app.air_test_button.cget("state")), "disabled")
+        gate_text = self.app.gate_labels["air"].cget("text")
+        self.assertIn("Eksik:", gate_text)
+        self.assertIn("geometri", gate_text)
+
+        self._prepare_air_live_result()
+
+        self.assertEqual(str(self.app.air_test_button.cget("state")), "normal")
+        self.assertEqual(self.app.gate_labels["air"].cget("text"), "")
+
+        self.app.air_vars["actual_added_water_m3"].set("")
+
+        self.assertEqual(str(self.app.air_test_button.cget("state")), "disabled")
+        self.assertIn("Vpa", self.app.gate_labels["air"].cget("text"))
+
+    def test_gate_explains_missing_coefficient_and_blocks_pressure_test(self) -> None:
+        self._fill_geometry()
+        self.app.pressure_vars["delta_t_c"].set("0.6")
+        self.app.pressure_vars["actual_pressure_change_bar"].set("0.9")
+
+        self.assertEqual(str(self.app.pressure_test_button.cget("state")), "disabled")
+        gate_text = self.app.gate_labels["pressure"].cget("text")
+        self.assertIn("su sicakligi", gate_text)
+        self.assertIn("A", gate_text)
+
+    def test_required_markers_follow_mode_changes_immediately(self) -> None:
+        auto_label = self.app.field_label_widgets["air.a_micro_per_bar"].cget("text")
+        self.assertFalse(auto_label.endswith("*"))
+
+        self.app.air_a_mode_var.set(MANUAL_A_MODE)
+        self.app._on_air_a_mode_changed()
+
+        manual_label = self.app.field_label_widgets["air.a_micro_per_bar"].cget("text")
+        self.assertTrue(manual_label.endswith("*"))
+
+        self.app.air_a_mode_var.set(AUTO_A_MODE)
+        self.app._on_air_a_mode_changed()
+
+        self.assertFalse(
+            self.app.field_label_widgets["air.a_micro_per_bar"].cget("text").endswith("*")
+        )
+
+        table_b_label = self.app.field_label_widgets["pressure.b_micro_per_c"].cget("text")
+        self.assertFalse(table_b_label.endswith("*"))
+
+        self.app.pressure_b_mode_var.set(MANUAL_B_MODE)
+        self.app._on_pressure_b_mode_changed()
+
+        self.assertTrue(
+            self.app.field_label_widgets["pressure.b_micro_per_c"].cget("text").endswith("*")
+        )
+        self.assertIn(REQUIRED_FIELD_HINT, self._visible_required_hint_texts())
+
+    def _visible_required_hint_texts(self) -> str:
+        texts: list[str] = []
+        for widget in self.app.root.winfo_children():
+            self._collect_label_texts(widget, texts)
+        return "\n".join(texts)
+
+    def _collect_label_texts(self, widget: tk.Misc, texts: list[str]) -> None:
+        try:
+            text = widget.cget("text")
+        except tk.TclError:
+            text = ""
+        if text:
+            texts.append(str(text))
+        for child in widget.winfo_children():
+            self._collect_label_texts(child, texts)
+
+    def test_enter_moves_to_next_field_and_shift_enter_returns(self) -> None:
+        first_entry = self.app.entry_widgets["geometry.outside_diameter_mm"]
+        second_key = "geometry.wall_thickness_mm"
+
+        with patch.object(self.app, "_focus_field") as focus_field:
+            result = self.app._on_entry_return(SimpleNamespace(widget=first_entry, state=0))
+
+        self.assertEqual(result, "break")
+        focus_field.assert_called_once_with(second_key)
+
+        wall_entry = self.app.entry_widgets[second_key]
+        with patch.object(self.app, "_focus_field") as focus_field:
+            result = self.app._on_entry_return(SimpleNamespace(widget=wall_entry, state=0x1))
+
+        self.assertEqual(result, "break")
+        focus_field.assert_called_once_with("geometry.outside_diameter_mm")
+        self.assertEqual(self.app._focus_order()[0], "geometry.outside_diameter_mm")
+
+    def test_enter_on_text_widget_and_ctrl_enter_do_not_move_focus(self) -> None:
+        with patch.object(self.app, "_focus_field") as focus_field:
+            result = self.app._on_entry_return(
+                SimpleNamespace(widget=self.app.detail_report_text, state=0)
+            )
+            ctrl_result = self.app._on_entry_return(
+                SimpleNamespace(
+                    widget=self.app.entry_widgets["geometry.outside_diameter_mm"],
+                    state=0x4,
+                )
+            )
+
+        self.assertIsNone(result)
+        self.assertIsNone(ctrl_result)
+        focus_field.assert_not_called()
+
+    def test_keyboard_shortcuts_and_focus_ring_are_available(self) -> None:
+        with patch.object(self.app, "_run_selected_test") as run_selected:
+            result = self.app._on_evaluate_shortcut()
+
+        self.assertEqual(result, "break")
+        run_selected.assert_called_once()
+
+        with patch.object(self.app, "_recalculate_active_coefficients") as recalculate:
+            result = self.app._on_refresh_shortcut()
+
+        self.assertEqual(result, "break")
+        recalculate.assert_called_once()
+
+        border_map = self.app.ui_style.map("Hydro.neutral.TEntry", "bordercolor")
+        self.assertTrue(any(str(item[0]) == "focus" for item in border_map))
+
+    def test_pig_gate_requires_distance_and_time(self) -> None:
+        self.app._select_tab_by_key("field")
+
+        self.assertEqual(str(self.app.pig_calculate_button.cget("state")), "disabled")
+        self.assertIn("mesafe", self.app.gate_labels["field"].cget("text"))
+
+        self.app.field_vars["pig_distance_m"].set("1000")
+        self.app.field_vars["pig_travel_time_min"].set("8")
+
+        self.assertEqual(str(self.app.pig_calculate_button.cget("state")), "normal")
+        self.assertEqual(self.app.gate_labels["field"].cget("text"), "")
+
+        self.app._calculate_pig_speed(log_result=False)
+
+        self.assertIn("SAHA KONTROL", self.app.header_status_var.get())
+        self.assertIn("2.083333", self.app.header_status_var.get())
+        self.assertIn("limit", self.app.header_rule_var.get())
+
+    def test_invalid_or_missing_field_receives_focus_and_scrolls(self) -> None:
+        with patch.object(self.app, "_focus_field") as focus_field:
+            result = self.app._run_selected_test()
+
+        self.assertIsNone(result)
+        self.assertIn("Eksik:", self.app.banner_var.get())
+        focus_field.assert_called_once_with("geometry.outside_diameter_mm")
+
+        self._fill_geometry()
+        self.app.air_vars["temperature_c"].set("20")
+        self.app.air_vars["pressure_bar"].set("80")
+        with patch.object(self.app, "_focus_field") as focus_field:
+            self.app._run_air_test()
+
+        focus_field.assert_any_call("air.actual_added_water_m3")
+
+        with patch.object(self.app, "_scroll_widget_into_view") as scroll_into_view:
+            self.app._focus_field("air.actual_added_water_m3")
+
+        scroll_into_view.assert_called_once()
+
+    def test_mousewheel_is_scoped_to_canvas_under_pointer(self) -> None:
+        entry = self.app.entry_widgets["geometry.length_m"]
+        entry_canvas = self.app._canvas_for_widget(entry)
+
+        self.assertIsNotNone(entry_canvas)
+        self.assertIsNone(self.app._canvas_for_widget(self.app.detail_report_text))
+        self.assertEqual(self.app.root.bind("<MouseWheel>"), "")
+        self.assertEqual(self.app.detail_report_text.bind("<MouseWheel>"), "")
+
+        assert entry_canvas is not None
+        with patch.object(entry_canvas, "yview_scroll") as scroll:
+            result = self.app._on_mousewheel(SimpleNamespace(widget=entry, delta=-120))
+
+        self.assertEqual(result, "break")
+        scroll.assert_called_once_with(1, "units")
+
+        with patch.object(entry_canvas, "yview_scroll") as scroll:
+            result = self.app._on_mousewheel(
+                SimpleNamespace(widget=self.app.detail_report_text, delta=-120)
+            )
+
+        self.assertIsNone(result)
+        scroll.assert_not_called()
+
+    def test_visible_units_and_terminology_are_consistent(self) -> None:
+        labels = " | ".join(
+            str(widget.cget("text")) for widget in self.app.field_label_widgets.values()
+        )
+
+        self.assertIn("Su sicakligi (°C)", labels)
+        self.assertIn("m³", labels)
+        self.assertIn("m/s", labels)
+        self.assertIn("10^-6/bar", labels)
+        self.assertIn("10^-6/°C", labels)
+        self.assertNotIn("degC", labels)
+        self.assertNotIn(" m3", labels)
+
+        self.assertEqual(self.app.notebook.tab(2, "text"), "Saha Kontrol")
+        self.assertEqual(self.app.side_panel_toggle_button.cget("text"), "Detay Panelini Gizle")
+        self.assertEqual(self.app.help_notes_toggle_button.cget("text"), "Aciklamalari Goster")
+
+    def test_reference_badge_uses_single_table_term(self) -> None:
+        self.app.air_vars["temperature_c"].set("10")
+        self.app.air_vars["pressure_bar"].set("50")
+        self.app.air_a_mode_var.set(REFERENCE_A_MODE)
+        self.app._on_air_a_mode_changed()
+        self.app.air_a_reference_var.set(BOTAS_REFERENCE_OPTION_LABEL)
+
+        self.app._on_air_a_reference_changed()
+
+        self.assertEqual(self.app.coefficient_source_vars["air_a"].get(), "TABLO")
+        self.assertNotIn("REFERANS", self.app.coefficient_source_vars["air_a"].get())
+
+    def test_flow_checklist_stays_visible_when_explanations_hidden(self) -> None:
+        self.assertFalse(self.app.help_notes_visible_var.get())
+        self.assertTrue(self.app.workflow_steps_label.grid_info())
+        self.assertIn("P=1.0 bar", self.app.workflow_steps_var.get())
+
+        self.app._toggle_help_notes_visibility()
+
+        self.assertTrue(self.app.workflow_steps_label.grid_info())
+        self.assertEqual(self.app.help_notes_toggle_button.cget("text"), "Aciklamalari Gizle")
+
+    def test_small_screen_hides_detail_panel_but_keeps_critical_buttons(self) -> None:
+        self.assertTrue(self.app._should_auto_hide_side_panel(1024, 700))
+
+        self.app._apply_responsive_side_panel(1024, 700)
+
+        self.assertFalse(self.app.side_panel_visible_var.get())
+        self.assertNotIn(str(self.app.side_panel), {str(p) for p in self.app.content_pane.panes()})
+        self.assertEqual(self.app.save_report_button.cget("text"), "Raporu Kaydet")
+        self.assertTrue(self.app.save_report_button.winfo_manager())
+        self.assertTrue(self.app.air_test_button.winfo_manager())
+        self.assertTrue(self.app.pressure_test_button.winfo_manager())
+        self.assertEqual(self.app.side_panel_toggle_button.cget("text"), "Detay Panelini Goster")
+
+        self.app._toggle_side_panel_visibility()
+        self.app._apply_responsive_side_panel(1024, 700)
+
+        self.assertTrue(self.app.side_panel_visible_var.get())
+        self.assertIn(str(self.app.side_panel), {str(p) for p in self.app.content_pane.panes()})
 
 
 if __name__ == "__main__":

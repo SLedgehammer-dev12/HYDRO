@@ -1,5 +1,21 @@
 # UI Ergonomi Notlari
 
+## Faz 2 - Uygulanan Ergonomi Iyilestirmeleri (2026-11)
+
+- Her zaman gorunur karar seridi: durum + kabul kurali + limit + marj; yan panel
+  gizliyken de gorunur. `BEKLIYOR` gri, `DOGRULANAMADI`/`KATSAYI GUNCELLENMELI`
+  amber, `BASARILI` yesil, `BASARISIZ` kirmizi.
+- Zorunlu alan kapisi: `Degerlendir` / `Hesapla` butonlari eksik alanda pasif;
+  yaninda "Eksik: ..." gerekcesi ve dinamik `*` isaretleri.
+- Klavye: `Enter` sonraki alan, `Shift+Enter` onceki, `Ctrl+Enter` degerlendir,
+  `F5` katsayilari yenile; hatali alana otomatik odak + kaydirma; gorunur odak halkasi.
+- Kaydirma: global `bind_all` kaldirildi; tekerlek yalnizca imlecin uzerindeki
+  paneli kaydiriyor.
+- Birim/terminoloji: `°C`, `m³`, `m/s`, `10^-6/bar`; "Saha Kontrol" tek terim.
+- Akis kontrol listesi varsayilan gorunur; buton "Aciklamalari Goster/Gizle".
+- Karar ozeti 240 karakterde kisaltiliyor; tam metin karar kaydi/rapor/detayda.
+- Kucuk ekranda detay paneli otomatik gizleniyor; kritik butonlar erisilebilir.
+
 ## Gozlenen Mevcut Gucler
 
 - Geometri, katsayi, karar ve oturum kaydi ayni ekranda gorulebiliyor.

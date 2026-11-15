@@ -7,8 +7,10 @@ from hidrostatik_test.ui.helpers import (
     PALETTE,
     format_detail_value,
     format_field_message,
+    format_required_marker,
     get_palette_colors,
     get_visual_level,
+    truncate_text,
 )
 
 
@@ -35,6 +37,25 @@ class UiHelperTests(unittest.TestCase):
         self.assertEqual(format_detail_value("-", "bar"), "-")
         self.assertEqual(format_detail_value("12.5", ""), "12.5")
         self.assertEqual(format_detail_value("12.5", " "), "12.5")
+
+    def test_truncate_text_keeps_short_text_and_cuts_at_word_boundary(self) -> None:
+        self.assertEqual(truncate_text("kisa karar", 40), "kisa karar")
+        shortened = truncate_text("kelime " * 80, 60)
+
+        self.assertLessEqual(len(shortened), 60)
+        self.assertTrue(shortened.endswith("..."))
+        self.assertFalse(shortened[:-3].endswith(" "))
+
+    def test_truncate_text_normalizes_whitespace_and_handles_limits(self) -> None:
+        self.assertEqual(truncate_text("  cok   bosluklu \n metin  ", 100), "cok bosluklu metin")
+        self.assertEqual(truncate_text("metin", 0), "")
+        self.assertEqual(truncate_text("abcdef", 3), "abc")
+
+    def test_required_marker_is_added_and_removed_idempotently(self) -> None:
+        self.assertEqual(format_required_marker("Vpa (m³)", True), "Vpa (m³) *")
+        self.assertEqual(format_required_marker("Vpa (m³)", False), "Vpa (m³)")
+        self.assertEqual(format_required_marker("A (10^-6/bar) *", True), "A (10^-6/bar) *")
+        self.assertEqual(format_required_marker("A (10^-6/bar) *", False), "A (10^-6/bar)")
 
 
 if __name__ == "__main__":

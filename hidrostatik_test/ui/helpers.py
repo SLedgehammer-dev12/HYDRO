@@ -45,12 +45,42 @@ def format_detail_value(value: str, unit: str = "") -> str:
     return f"{value} {clean_unit}"
 
 
+def truncate_text(text: str, limit: int = 240, suffix: str = "...") -> str:
+    """Kisa ozet alanlari icin metni kelime sinirinda kisaltir.
+
+    Tam metin her zaman karar kaydinda ve detay raporda korunur; bu yardimci
+    yalnizca dar panelde okunabilir bir ozet uretir.
+    """
+    clean = " ".join(text.split())
+    if limit <= 0:
+        return ""
+    if len(clean) <= limit:
+        return clean
+    if len(suffix) >= limit:
+        return clean[:limit]
+    cut = clean[: limit - len(suffix)].rstrip()
+    boundary = cut.rfind(" ")
+    if boundary >= int(limit * 0.6):
+        cut = cut[:boundary].rstrip()
+    return f"{cut}{suffix}"
+
+
+def format_required_marker(label: str, required: bool, marker: str = " *") -> str:
+    """Alan etiketine dinamik zorunluluk isareti ekler."""
+    base = label.rstrip()
+    if base.endswith("*"):
+        base = base[:-1].rstrip()
+    return f"{base}{marker}" if required else base
+
+
 __all__ = [
     "FIELD_MESSAGE_PREFIXES",
     "PALETTE",
     "VISUAL_LEVEL_MAP",
     "format_detail_value",
     "format_field_message",
+    "format_required_marker",
     "get_palette_colors",
     "get_visual_level",
+    "truncate_text",
 ]

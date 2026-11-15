@@ -65,6 +65,21 @@ davranis regresyonlarini testle sabitlemek ve e2e akisi eklemek.
 - [x] Graphify haritasinin yenilenmesi
 - [x] Remediation raporu
 
+## Faz 2 - Ergonomi
+- [x] Her zaman gorunur karar seridi (kural + limit + marj)
+- [x] Zorunlu alan kapisi + dinamik `*` + gerekce
+- [x] Enter/Shift+Enter/Ctrl+Enter/F5, odak ve hata kaydirma
+- [x] Panel bazli mousewheel, birim/terminoloji standardi
+- [x] Varsayilan gorunur akis listesi, kucuk ekran davranisi
+
+## Faz 2 - OCR rapor kontrolu
+- [x] PDF metin katmani + opsiyonel Tesseract
+- [x] Rapor semasi, alan/guven cikarimi, toleransli karsilastirma
+- [x] CLI (`tools/ocr_report.py`) ve UI (`Rapor > Test Raporu Kontrol (OCR)...`)
+- [x] JSON cikti, insan onayi, dusuk guven vurgusu
+- [ ] Gercek saha raporlariyla kalibrasyon (ornek PDF/JPG bekleniyor)
+- [ ] Onaylanan alanlari forma otomatik doldurma ve denetim izi
+
 ## Karar gerektirenler (cozulenler + kalanlar)
 
 ### Cozulenler

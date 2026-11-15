@@ -52,14 +52,67 @@ DEFAULT_DECISION_SUMMARY = (
     "Girdileri tamamlayip ilgili testi calistirdiginizda nihai karar burada gosterilecek."
 )
 
+# Kabul kurallari tek kaynaktan yonetilir; karar seridi, karar karti ve rapor
+# ayni metni gosterir.
+AIR_ACCEPTANCE_RULE = "Vpa < 1.06 x Vp"
+PRESSURE_ACCEPTANCE_RULE = "(Pa - Pt) <= 0.3 bar"
+
+# Zorunlu alan kapisi: degerlendirme/hesaplama butonlari bu alanlar gecerli
+# olmadan pasif kalir. Geometri segmentli modda ayrica kontrol edilir.
+GEOMETRY_REQUIRED_FIELDS = (
+    "geometry.outside_diameter_mm",
+    "geometry.wall_thickness_mm",
+    "geometry.length_m",
+)
+AIR_REQUIRED_FIELDS = (
+    *GEOMETRY_REQUIRED_FIELDS,
+    "air.pressure_rise_bar",
+    "air.k_factor",
+    "air.actual_added_water_m3",
+)
+PRESSURE_REQUIRED_FIELDS = (
+    *GEOMETRY_REQUIRED_FIELDS,
+    "pressure.delta_t_c",
+    "pressure.actual_pressure_change_bar",
+)
+PIG_REQUIRED_FIELDS = (
+    "field.pig_distance_m",
+    "field.pig_travel_time_min",
+)
+
+# Kapi mesajlarinda kullanilan kisa alan adlari. Operator "Eksik: geometri, A,
+# Vpa" satirinda hangi alanin eksik oldugunu tek bakista gorur.
+REQUIRED_FIELD_LABELS = {
+    "geometry": "geometri",
+    "geometry.outside_diameter_mm": "dis cap",
+    "geometry.wall_thickness_mm": "et kalinligi",
+    "geometry.length_m": "hat uzunlugu",
+    "air.temperature_c": "su sicakligi",
+    "air.pressure_bar": "su basinci",
+    "air.a_micro_per_bar": "A",
+    "air.pressure_rise_bar": "P",
+    "air.k_factor": "K",
+    "air.actual_added_water_m3": "Vpa",
+    "pressure.temperature_c": "su sicakligi",
+    "pressure.pressure_bar": "su basinci",
+    "pressure.a_micro_per_bar": "A",
+    "pressure.b_micro_per_c": "B",
+    "pressure.delta_t_c": "dT",
+    "pressure.actual_pressure_change_bar": "Pa",
+    "field.pig_distance_m": "mesafe",
+    "field.pig_travel_time_min": "sure",
+}
+
+REQUIRED_FIELD_HINT = "* = zorunlu"
+
 # NGTL 5007 saha uygulama kontrol noktalarindan olusan kanonik liste.
 # 14.3, 15.1, 16-17 ve 21 maddeleri burada birlikte temsil edilir.
 FIELD_CHECK_DEFINITIONS = (
-    ("ambient_temp", "Dolum sirasinda hava sicakligi +2 degC limitine gore kontrol edildi", "10.1"),
+    ("ambient_temp", "Dolum sirasinda hava sicakligi +2 °C limitine gore kontrol edildi", "10.1"),
     ("temp_probes", "Boru ve toprak sicaklik problari uygun yerlere yerlestirildi", "10.4"),
     ("fill_air_entry", "Su dolumu sirasinda sisteme hava girmesi engellendi", "11.2"),
     ("fill_records", "Doldurulan su hacmi ve sicakligi saatlik olarak kaydedildi", "11.3-11.4"),
-    ("thermal_balance", "Minimum 24 saat termal dengeleme ve 0.5 degC kosulu kontrol edildi", "12"),
+    ("thermal_balance", "Minimum 24 saat termal dengeleme ve 0.5 °C kosulu kontrol edildi", "12"),
     ("air_content_limit", "Hava icerik testi %6 kabul sinirina gore teyit edildi", "13"),
     ("pressurization_volume", "14.2 icin basinc-hacim ve %0.2 ilave su limiti izlendi", "14.2"),
     ("two_hour_hold", "14.3 icin 2 saat bekleme ve 15 dakikalik okumalar alindi", "14.3"),
@@ -87,6 +140,8 @@ FIELD_VALUE_RANGES = {
 }
 
 __all__ = [
+    "AIR_ACCEPTANCE_RULE",
+    "AIR_REQUIRED_FIELDS",
     "AUTO_A_MODE",
     "AUTO_B_MODE",
     "B_SOURCE_AUTO_LABEL",
@@ -96,6 +151,12 @@ __all__ = [
     "B_SOURCE_LABELS",
     "B_SOURCE_MANUAL_LABEL",
     "DEFAULT_STEEL_MODEL_LABEL",
+    "PRESSURE_ACCEPTANCE_RULE",
+    "PRESSURE_REQUIRED_FIELDS",
+    "PIG_REQUIRED_FIELDS",
+    "GEOMETRY_REQUIRED_FIELDS",
+    "REQUIRED_FIELD_HINT",
+    "REQUIRED_FIELD_LABELS",
     "STEEL_MODEL_BY_LABEL",
     "STEEL_MODEL_LABELS",
     "STEEL_MODEL_LINEAR_LABEL",

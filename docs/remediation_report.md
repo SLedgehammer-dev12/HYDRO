@@ -9,19 +9,21 @@ Yontem: Graphify haritasi + paralel dosya-sahipligi iscileri + dogrulama dalgasi
 
 | Alan | Durum | Kanit |
 | --- | --- | --- |
-| Domain fizigi | Tamam | 560 test, domain mypy temiz |
+| Domain fizigi | Tamam | 651 test, domain mypy temiz |
 | Veri katmani | Tamam (veri duzeltmesi haric) | 12 + 10 test, anomali tespiti |
 | Servisler / updater | Tamam | 113 hedefli test, guvenli cikarma + rollback |
 | UI dogruluk | Tamam | 82 UI testi + 4 e2e |
+| UI ergonomisi (Faz 2) | Tamam | 114 UI testi |
+| OCR rapor kontrolu | Tamam (servis + UI) | 61 OCR testi |
 | Paketleme / CI | Tamam | `.zip` sozlesmesi, tag↔surum kapisi |
 | Dokumantasyon | Tamam | surum/test sayisi senkronu |
 | Kod kalitesi | Tamam | ruff temiz, domain mypy temiz |
-| E2E | Tamam | 4 senaryo |
+| E2E | Tamam | 5 senaryo |
 
 **Dogrulama:**
 
-- `python3 -m unittest discover -s tests -p "test_*.py"` → **560 test OK**
-- `python3 -m coverage run -m unittest discover ...` → **%79** kaynak-only branch kapsami
+- `python3 -m unittest discover -s tests -p "test_*.py"` → **651 test OK**
+- `python3 -m coverage run -m unittest discover ...` → **%81** kaynak-only branch kapsami
 - `python3 -m ruff check .` → **All checks passed**
 - `python3 -m ruff format --check .` → **59+ dosya formatli**
 - `python3 -m mypy hidrostatik_test/domain/` → **Success: no issues**
