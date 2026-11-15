@@ -213,3 +213,54 @@ def test_project_name_validation(client, headers):
     )
     assert updated.status_code == 422
     assert updated.json()["code"] == "validation_error"
+
+
+def test_project_section_kp_meta_persisted_and_listed(client, headers):
+    project = _create_project(client, headers, name="KP Test Projesi", code="PRJ-KP")
+    first = client.post(
+        "/api/sessions",
+        json={
+            "name": "K-01 · KP 0+000–12+000",
+            "project_id": project["id"],
+            "inputs": {
+                "section_meta": {
+                    "section_no": "K-01",
+                    "description": "Birinci kesit",
+                    "start_kp": "0+000",
+                    "end_kp": "12+000",
+                    "location": "KP 0+000 – 12+000",
+                }
+            },
+        },
+        headers=headers,
+    )
+    assert first.status_code == 201
+
+    second = client.post(
+        "/api/sessions",
+        json={
+            "name": "K-02 · KP 12+000–24+500",
+            "project_id": project["id"],
+            "inputs": {
+                "section_meta": {
+                    "section_no": "K-02",
+                    "description": "Ikinci kesit",
+                    "start_kp": "12+000",
+                    "end_kp": "24+500",
+                    "location": "KP 12+000 – 24+500",
+                }
+            },
+        },
+        headers=headers,
+    )
+    assert second.status_code == 201
+
+    listed = client.get(
+        f"/api/sessions?project_id={project['id']}", headers=headers
+    ).json()["items"]
+    by_no = {item["section_meta"]["section_no"]: item["section_meta"] for item in listed}
+    assert by_no["K-01"]["start_kp"] == "0+000"
+    assert by_no["K-01"]["end_kp"] == "12+000"
+    assert by_no["K-02"]["start_kp"] == "12+000"
+    assert by_no["K-02"]["end_kp"] == "24+500"
+    assert by_no["K-01"]["end_kp"] == by_no["K-02"]["start_kp"]

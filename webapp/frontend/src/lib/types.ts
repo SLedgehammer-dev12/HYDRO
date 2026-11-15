@@ -506,6 +506,8 @@ export interface SectionMeta {
   section_no: string;
   description: string;
   location: string;
+  start_kp: string;
+  end_kp: string;
   test_date: string;
   test_type: string;
   notes: string;
@@ -541,6 +543,7 @@ export interface SessionListItem {
   updated_at: string;
   created_at?: string;
   result_summary?: SessionResultSummary;
+  section_meta?: SectionMeta;
 }
 
 export interface SessionSummaryResponse {

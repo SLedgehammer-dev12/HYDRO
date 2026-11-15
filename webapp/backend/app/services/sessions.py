@@ -44,6 +44,16 @@ def default_inputs() -> dict[str, Any]:
         "schema_version": 1,
         "active_tab": "air",
         "water_backend": "table_v1",
+        "section_meta": {
+            "section_no": "",
+            "description": "",
+            "location": "",
+            "start_kp": "",
+            "end_kp": "",
+            "test_date": "",
+            "test_type": "Hidrostatik test",
+            "notes": "",
+        },
         "geometry": {
             "outside_diameter_mm": None,
             "wall_thickness_mm": None,
@@ -158,6 +168,22 @@ def serialize_session(session: HydroSession) -> dict[str, Any]:
 
 def session_brief(session: HydroSession) -> dict[str, Any]:
     summary = session.result_summary or {}
+    raw_inputs = session.inputs if isinstance(session.inputs, dict) else {}
+    raw_meta = (
+        raw_inputs.get("section_meta")
+        if isinstance(raw_inputs.get("section_meta"), dict)
+        else {}
+    )
+    section_meta = {
+        "section_no": str(raw_meta.get("section_no") or ""),
+        "description": str(raw_meta.get("description") or ""),
+        "location": str(raw_meta.get("location") or ""),
+        "start_kp": str(raw_meta.get("start_kp") or ""),
+        "end_kp": str(raw_meta.get("end_kp") or ""),
+        "test_date": str(raw_meta.get("test_date") or ""),
+        "test_type": str(raw_meta.get("test_type") or ""),
+        "notes": str(raw_meta.get("notes") or ""),
+    }
     return {
         "id": session.id,
         "project_id": session.project_id,
@@ -167,6 +193,7 @@ def session_brief(session: HydroSession) -> dict[str, Any]:
         "updated_at": iso_z(session.updated_at),
         "created_at": iso_z(session.created_at),
         "result_summary": summary,
+        "section_meta": section_meta,
     }
 
 

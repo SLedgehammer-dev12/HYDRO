@@ -1,5 +1,6 @@
 import { createDefaultInputs } from "./mock";
 import { parseNumber } from "./format";
+import { extractKpFromLocation, formatKpLocation } from "./kp";
 import type {
   AMode,
   AppInputs,
@@ -96,12 +97,19 @@ export function normalizeInputs(raw: unknown): AppInputs {
   const airA = asNumber(air.a_micro_per_bar, base.air.a_micro_per_bar);
   const pressureA = asNumber(pressure.a_micro_per_bar, base.pressure.a_micro_per_bar);
 
+  const rawLocation = asString(sectionMeta.location, base.section_meta.location);
+  const extractedKp = extractKpFromLocation(rawLocation);
+  const startKp = asString(sectionMeta.start_kp, extractedKp.start_kp || base.section_meta.start_kp);
+  const endKp = asString(sectionMeta.end_kp, extractedKp.end_kp || base.section_meta.end_kp);
+
   const next: AppInputs = {
     ...base,
     section_meta: {
       section_no: asString(sectionMeta.section_no, base.section_meta.section_no),
       description: asString(sectionMeta.description, base.section_meta.description),
-      location: asString(sectionMeta.location, base.section_meta.location),
+      location: rawLocation || formatKpLocation(startKp, endKp),
+      start_kp: startKp,
+      end_kp: endKp,
       test_date: asString(sectionMeta.test_date, base.section_meta.test_date),
       test_type: asString(sectionMeta.test_type, base.section_meta.test_type),
       notes: asString(sectionMeta.notes, base.section_meta.notes),

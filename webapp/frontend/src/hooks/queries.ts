@@ -578,10 +578,12 @@ export function useSaveSession() {
         await sleep(420);
         return { demo: true, revision: state.revision };
       }
+      const realProjectId =
+        state.projectId && !state.projectId.startsWith("demo-") ? state.projectId : null;
       if (!state.sessionId) {
         const created = await api.createSession({
           name,
-          project_id: state.projectId,
+          project_id: realProjectId,
           inputs: toApiInputs(state.inputs),
         });
         return { demo: false, session: created, revision: created.revision };
@@ -591,7 +593,7 @@ export function useSaveSession() {
         {
           name,
           status: state.sessionStatus,
-          project_id: state.projectId,
+          project_id: realProjectId,
           inputs: toApiInputs(state.inputs),
         },
         state.revision,
@@ -648,9 +650,12 @@ export function useCreateSession() {
           },
         };
       }
+      const rawProjectId = projectId ?? state.projectId;
+      const realProjectId =
+        rawProjectId && !rawProjectId.startsWith("demo-") ? rawProjectId : null;
       const session = await api.createSession({
         name,
-        project_id: projectId ?? state.projectId,
+        project_id: realProjectId,
         inputs,
       });
       return { demo: false, session };

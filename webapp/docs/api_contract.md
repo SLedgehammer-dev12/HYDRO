@@ -1724,7 +1724,7 @@ Kısmi güncelleme; `mapping` gönderilirse **tam değiştirilir** (merge edilme
 - `DELETE` → soft delete; bağlı kesit oturumları silinmez, `project_id=null` olur; 204.
 **Hatalar:** 404, 422.
 
-Not: Kesit kimliği (`section_no`, `description`, `location`, `test_date`, `test_type`, `notes`) oturumun `inputs.section_meta` alanı içinde saklanır; oturumlar `GET /api/sessions?project_id={id}` ile projeye göre filtrelenir.
+Not: Kesit kimliği (`section_no`, `description`, `location`, `start_kp`, `end_kp`, `test_date`, `test_type`, `notes`) oturumun `inputs.section_meta` alanı içinde saklanır ve `GET /api/sessions` yanıtındaki her öğenin `section_meta` alanında da döner; oturumlar `GET /api/sessions?project_id={id}` ile projeye göre filtrelenir.
 
 ---
 

@@ -107,9 +107,18 @@ export default function App() {
           pushToast("info", "Oturum geri yüklendi", session.name);
         } else {
           const state = useAppStore.getState();
+          const validProjectId =
+            state.projectId &&
+            !state.projectId.startsWith("demo-") &&
+            projectsQuery.data?.some((item) => item.id === state.projectId)
+              ? state.projectId
+              : null;
+          if (!validProjectId && state.projectId) {
+            setProject(null);
+          }
           const created = await api.createSession({
             name: state.sessionName || "Oturum 1",
-            project_id: state.projectId,
+            project_id: validProjectId,
             inputs: toApiInputs(state.inputs),
           });
           setSessionMeta({

@@ -1,10 +1,12 @@
 import { useMemo, useState } from "react";
 import {
+  AlertTriangle,
   ArrowRight,
   Building2,
   CheckCircle2,
   Copy,
   FolderOpen,
+  GitCompareArrows,
   Layers,
   Pencil,
   Plus,
@@ -32,6 +34,14 @@ import {
 import { useAppStore } from "../store/useAppStore";
 import { createDefaultInputs } from "../lib/mock";
 import { toApiInputs } from "../lib/normalize";
+import {
+  evaluateProjectKpContinuity,
+  formatKp,
+  formatKpLocation,
+  normalizeKpText,
+  parseKpMeters,
+  resolveSectionMeta,
+} from "../lib/kp";
 import { dateTime, num, relativeTime } from "../lib/format";
 import type { Project, SectionMeta, SessionListItem, SessionStatus } from "../lib/types";
 
@@ -40,6 +50,15 @@ interface ProjectForm {
   code: string;
   client: string;
   description: string;
+}
+
+interface SectionForm {
+  section_no: string;
+  start_kp: string;
+  end_kp: string;
+  description: string;
+  test_date: string;
+  notes: string;
 }
 
 const EMPTY_FORM: ProjectForm = { name: "", code: "", client: "", description: "" };
@@ -88,22 +107,61 @@ export function ProjectsPage() {
     [projects, selectedId, projectId],
   );
   const sectionsQuery = useSessions(selected?.id ?? null);
-  const [sortKey, setSortKey] = useState<"name" | "updated" | "status">("name");
+  const rawSections = sectionsQuery.data ?? [];
+
+  /* Projeye ait tüm kesitler için ardışık KP sürekliliği denetimi */
+  const kpContinuity = useMemo(
+    () => evaluateProjectKpContinuity(rawSections),
+    [rawSections],
+  );
+
+  const [sortKey, setSortKey] = useState<"kp" | "name" | "updated" | "status">("kp");
   const sections = useMemo(() => {
-    const items = [...(sectionsQuery.data ?? [])];
+    const items = [...rawSections];
+    const orderIndex = new Map(kpContinuity.orderedIds.map((id, idx) => [id, idx]));
     items.sort((a, b) => {
+      if (sortKey === "kp") {
+        return (orderIndex.get(a.id) ?? 0) - (orderIndex.get(b.id) ?? 0);
+      }
       if (sortKey === "updated") return b.updated_at.localeCompare(a.updated_at);
       if (sortKey === "status") return a.status.localeCompare(b.status) || a.name.localeCompare(b.name);
-      return a.name.localeCompare(b.name, "tr");
+      return a.name.localeCompare(b.name, "tr", { numeric: true });
     });
     return items;
-  }, [sectionsQuery.data, sortKey]);
+  }, [rawSections, sortKey, kpContinuity.orderedIds]);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Project | null>(null);
   const [form, setForm] = useState<ProjectForm>(EMPTY_FORM);
   const [deletingProject, setDeletingProject] = useState<Project | null>(null);
   const [deletingSection, setDeletingSection] = useState<SessionListItem | null>(null);
+
+  /* Yeni kesit (section) oluşturma modal durumu */
+  const [sectionDialogOpen, setSectionDialogOpen] = useState(false);
+  const [sectionForm, setSectionForm] = useState<SectionForm>({
+    section_no: "K-01",
+    start_kp: "0+000",
+    end_kp: "12+000",
+    description: "",
+    test_date: new Date().toISOString().slice(0, 10),
+    notes: "",
+  });
+
+  /* Yeni kesit eklenirken bir önceki kesitin bitiş KP'sini bul */
+  const lastOrderedSection = useMemo(() => {
+    if (kpContinuity.orderedIds.length === 0) return null;
+    const lastId = kpContinuity.orderedIds[kpContinuity.orderedIds.length - 1];
+    return kpContinuity.byId[lastId] ?? null;
+  }, [kpContinuity]);
+
+  const modalStartM = parseKpMeters(sectionForm.start_kp);
+  const modalEndM = parseKpMeters(sectionForm.end_kp);
+  const modalSpanM = modalStartM !== null && modalEndM !== null ? modalEndM - modalStartM : null;
+  const modalPrevEndM = lastOrderedSection?.endM ?? null;
+  const modalDeltaFromPrevM =
+    modalPrevEndM !== null && modalStartM !== null ? modalStartM - modalPrevEndM : null;
+  const modalMatchesPrev =
+    modalDeltaFromPrevM === null ? true : Math.abs(modalDeltaFromPrevM) <= 0.5;
 
   const totalSections = projects.reduce((sum, project) => sum + project.section_count, 0);
 
@@ -169,20 +227,62 @@ export function ProjectsPage() {
     });
   }
 
-  function createSection() {
+  function openCreateSectionDialog() {
     if (!selected) return;
+    /* Varsa son kesitin bitiş KP'sini yeni kesitin başlangıç KP'si olarak öner */
+    const suggestedStartM = lastOrderedSection?.endM ?? 0;
+    const suggestedEndM = suggestedStartM + 12_000;
+    setSectionForm({
+      section_no: nextSectionNo(rawSections),
+      start_kp: formatKp(suggestedStartM),
+      end_kp: formatKp(suggestedEndM),
+      description: selected.name,
+      test_date: new Date().toISOString().slice(0, 10),
+      notes: "",
+    });
+    setSectionDialogOpen(true);
+  }
+
+  function submitCreateSection() {
+    if (!selected) return;
+    if (modalStartM === null || modalEndM === null) {
+      pushToast(
+        "warning",
+        "KP bilgisi gerekli",
+        "Başlangıç ve bitiş KP noktalarını girin (ör. 0+000 ve 12+000).",
+      );
+      return;
+    }
+    if (modalEndM <= modalStartM) {
+      pushToast(
+        "error",
+        "Geçersiz KP aralığı",
+        `Bitiş KP (${formatKp(modalEndM)}), başlangıç KP (${formatKp(modalStartM)}) değerinden büyük olmalıdır.`,
+      );
+      return;
+    }
+
+    const startFormatted = formatKp(modalStartM);
+    const endFormatted = formatKp(modalEndM);
+    const sectionNo = sectionForm.section_no.trim() || nextSectionNo(rawSections);
+    const lengthM = Math.round((modalEndM - modalStartM) * 100) / 100;
+
     const inputs = createDefaultInputs();
     const meta: SectionMeta = {
       ...inputs.section_meta,
-      section_no: nextSectionNo(sections),
-      description: selected.name,
-      location: "",
-      test_date: new Date().toISOString().slice(0, 10),
+      section_no: sectionNo,
+      description: sectionForm.description.trim() || selected.name,
+      start_kp: startFormatted,
+      end_kp: endFormatted,
+      location: formatKpLocation(startFormatted, endFormatted),
+      test_date: sectionForm.test_date || new Date().toISOString().slice(0, 10),
       test_type: "Hidrostatik test",
-      notes: "",
+      notes: sectionForm.notes.trim(),
     };
     inputs.section_meta = meta;
-    const name = `${meta.section_no} · ${selected.code || selected.name}`;
+    inputs.geometry.length_m = lengthM;
+
+    const name = `${meta.section_no} · KP ${startFormatted}–${endFormatted} · ${selected.code || selected.name}`;
     setProject(selected);
     applySessionInputs(inputs);
     createSession.mutate(
@@ -197,6 +297,14 @@ export function ProjectsPage() {
             revision: session.revision,
           });
           markSaved(session.revision);
+          setSectionDialogOpen(false);
+          if (!modalMatchesPrev && lastOrderedSection) {
+            pushToast(
+              "warning",
+              "KP süreklilik uyarısı",
+              `${lastOrderedSection.sectionLabel} bitiş KP (${lastOrderedSection.endKp}) ile ${sectionNo} başlangıç KP (${startFormatted}) eşleşmiyor.`,
+            );
+          }
           setTab("geometry");
         },
       },
@@ -215,17 +323,26 @@ export function ProjectsPage() {
       <PageHeader
         kicker="Projeler & Kesitler"
         title="Proje kayıtları ve kesit envanteri"
-        description="Projeyi seçin, kesitleri sıralayın ve istediğiniz kesiti yeniden açın. Kesit kimliği Geometri & Saha sayfasında düzenlenir."
+        description="Projeyi seçin, boru kesitlerini başlangıç/bitiş KP noktalarıyla kaydedin, ardışık KP sürekliliğini denetleyin ve istediğiniz kesiti yeniden açın."
         meta={
           <>
             <Badge tone="info">{projects.length} proje</Badge>
             <Badge tone="neutral">{totalSections} kesit</Badge>
             {selected ? <span className="chip">{selected.code || "kod yok"}</span> : null}
+            {rawSections.length > 0 ? (
+              <Badge tone={kpContinuity.status}>
+                {kpContinuity.status === "pass"
+                  ? "KP sürekliliği uygun"
+                  : kpContinuity.status === "fail"
+                    ? "KP uyuşmazlığı var"
+                    : "KP eksik"}
+              </Badge>
+            ) : null}
           </>
         }
         actions={
           <>
-            <Button variant="ghost" icon={<Rows3 size={14} />} onClick={() => setTab("geometry")}>
+            <Button size="lg" variant="ghost" icon={<Rows3 size={15} />} onClick={() => setTab("geometry")}>
               Geometri & Saha
             </Button>
             <Button size="lg" variant="primary" icon={<Plus size={15} />} onClick={openCreateProject}>
@@ -247,10 +364,31 @@ export function ProjectsPage() {
           tone="info"
         />
         <KpiCard
-          label="Aktif kesit"
-          value={sections.find((item) => item.status === "active") ? "Var" : "—"}
-          icon={CheckCircle2}
-          hint={selected ? `${selected.code || "kod yok"} · ${sections.length} kayıt` : "Kesit seçilmedi"}
+          label="KP sürekliliği"
+          value={
+            rawSections.length === 0
+              ? "—"
+              : kpContinuity.status === "pass"
+                ? "Uyumlu"
+                : kpContinuity.status === "fail"
+                  ? "Uyuşmazlık"
+                  : "Eksik KP"
+          }
+          icon={GitCompareArrows}
+          tone={
+            rawSections.length === 0
+              ? undefined
+              : kpContinuity.status === "pass"
+                ? "pass"
+                : kpContinuity.status === "fail"
+                  ? "fail"
+                  : "warning"
+          }
+          hint={
+            rawSections.length > 0
+              ? `${rawSections.length} kesit kontrol edildi`
+              : "Kesit eklendiğinde denetlenir"
+          }
         />
       </div>
 
@@ -323,7 +461,13 @@ export function ProjectsPage() {
             icon={Layers}
             action={
               <div className="flex flex-wrap items-center gap-1.5">
-                <Button size="sm" variant="primary" icon={<Plus size={12} />} disabled={!selected} onClick={createSection}>
+                <Button
+                  size="lg"
+                  variant="primary"
+                  icon={<Plus size={15} />}
+                  disabled={!selected}
+                  onClick={openCreateSectionDialog}
+                >
                   Yeni kesit
                 </Button>
                 {selected ? (
@@ -356,12 +500,38 @@ export function ProjectsPage() {
               </div>
             ) : null}
 
+            {rawSections.length > 0 ? (
+              <div className="mb-3">
+                <InlineNotice
+                  tone={
+                    kpContinuity.status === "pass"
+                      ? "success"
+                      : kpContinuity.status === "fail"
+                        ? "danger"
+                        : "warning"
+                  }
+                  title="Ardışık kesit KP süreklilik kontrolü"
+                  icon={GitCompareArrows}
+                >
+                  <p>{kpContinuity.headline}</p>
+                  {kpContinuity.issues.length > 0 ? (
+                    <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[11px]">
+                      {kpContinuity.issues.map((issue) => (
+                        <li key={issue}>{issue}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </InlineNotice>
+              </div>
+            ) : null}
+
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <span className="text-[10.5px] text-[var(--text-faint)]">
                 {sections.length} kesit · sıralama:
               </span>
               <div className="seg-control" role="group" aria-label="Kesit sıralaması">
                 {[
+                  { key: "kp" as const, label: "KP sırası" },
                   { key: "name" as const, label: "Kesit no" },
                   { key: "updated" as const, label: "Güncelleme" },
                   { key: "status" as const, label: "Durum" },
@@ -382,10 +552,10 @@ export function ProjectsPage() {
             {sections.length === 0 ? (
               <EmptyState
                 title="Bu projede kesit yok"
-                description="Yeni kesit oluşturarak geometri, hava içerik ve basınç değişim kayıtlarını bu proje altında toplayın."
+                description="Yeni kesit oluşturarak başlangıç/bitiş KP noktalarını, geometriyi ve test kayıtlarını bu proje altında toplayın."
                 icon={Layers}
                 action={
-                  <Button variant="primary" size="sm" icon={<Plus size={13} />} disabled={!selected} onClick={createSection}>
+                  <Button variant="primary" size="sm" icon={<Plus size={13} />} disabled={!selected} onClick={openCreateSectionDialog}>
                     Yeni kesit
                   </Button>
                 }
@@ -399,6 +569,9 @@ export function ProjectsPage() {
                   <thead>
                     <tr>
                       <th scope="col">Kesit</th>
+                      <th scope="col" className="num">Başlangıç KP</th>
+                      <th scope="col" className="num">Bitiş KP</th>
+                      <th scope="col">KP Sürekliliği</th>
                       <th scope="col">Durum</th>
                       <th scope="col" className="num">Rev.</th>
                       <th scope="col">Güncelleme</th>
@@ -406,44 +579,80 @@ export function ProjectsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {sections.map((session) => (
-                      <tr key={session.id}>
-                        <td>
-                          <span className="block max-w-[320px] truncate font-medium text-[var(--text)]">{session.name}</span>
-                          <span className="mt-0.5 block font-mono text-[9.5px] text-[var(--text-faint)]">{session.id.slice(0, 8)}</span>
-                        </td>
-                        <td>
-                          <Badge tone={statusTone(session.status)}>{statusLabel(session.status)}</Badge>
-                        </td>
-                        <td className="num">{session.revision}</td>
-                        <td>
-                          <span className="block text-[11px] text-[var(--text-soft)]">{relativeTime(session.updated_at)}</span>
-                          <span className="block text-[9.5px] text-[var(--text-faint)]">{dateTime(session.updated_at)}</span>
-                        </td>
-                        <td>
-                          <div className="flex flex-wrap items-center gap-1">
-                            <Button size="sm" variant="ghost" icon={<FolderOpen size={11} />} onClick={() => openSection(session)}>
-                              Aç
-                            </Button>
-                            <Button size="sm" variant="ghost" icon={<Copy size={11} />} onClick={() => copySection(session)}>
-                              Kopyala
-                            </Button>
-                            <Button size="sm" variant="danger" icon={<Trash2 size={11} />} onClick={() => setDeletingSection(session)}>
-                              Sil
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                    {sections.map((session) => {
+                      const meta = resolveSectionMeta(session);
+                      const check = kpContinuity.byId[session.id];
+                      return (
+                        <tr key={session.id}>
+                          <td>
+                            <span className="block max-w-[260px] truncate font-medium text-[var(--text)]">
+                              {meta.section_no ? `${meta.section_no} · ` : ""}
+                              {meta.description || session.name}
+                            </span>
+                            <span className="mt-0.5 block font-mono text-[9.5px] text-[var(--text-faint)]">
+                              {session.name} · {session.id.slice(0, 8)}
+                            </span>
+                          </td>
+                          <td className="num font-mono">
+                            {check?.startKp || normalizeKpText(meta.start_kp) || "—"}
+                          </td>
+                          <td className="num font-mono">
+                            {check?.endKp || normalizeKpText(meta.end_kp) || "—"}
+                          </td>
+                          <td>
+                            {check ? (
+                              <div className="space-y-0.5">
+                                <Badge tone={check.tone}>{check.badgeLabel}</Badge>
+                                <span className="block max-w-[230px] text-[10px] leading-snug text-[var(--text-muted)]">
+                                  {check.prevCheck
+                                    ? `Önceki (${check.prevCheck.prevLabel} bitiş ${check.prevCheck.prevEndKp}) → ${
+                                        check.prevCheck.matched
+                                          ? "eşleşiyor"
+                                          : `${check.prevCheck.deltaM > 0 ? "+" : ""}${Math.round(check.prevCheck.deltaM)} m fark`
+                                      }`
+                                    : check.lengthM !== null
+                                      ? `Uzunluk: ${num(check.lengthM, 0)} m`
+                                      : check.detail}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-[10.5px] text-[var(--text-faint)]">—</span>
+                            )}
+                          </td>
+                          <td>
+                            <Badge tone={statusTone(session.status)}>{statusLabel(session.status)}</Badge>
+                          </td>
+                          <td className="num">{session.revision}</td>
+                          <td>
+                            <span className="block text-[11px] text-[var(--text-soft)]">{relativeTime(session.updated_at)}</span>
+                            <span className="block text-[9.5px] text-[var(--text-faint)]">{dateTime(session.updated_at)}</span>
+                          </td>
+                          <td>
+                            <div className="flex flex-wrap items-center gap-1">
+                              <Button size="sm" variant="ghost" icon={<FolderOpen size={11} />} onClick={() => openSection(session)}>
+                                Aç
+                              </Button>
+                              <Button size="sm" variant="ghost" icon={<Copy size={11} />} onClick={() => copySection(session)}>
+                                Kopyala
+                              </Button>
+                              <Button size="sm" variant="danger" icon={<Trash2 size={11} />} onClick={() => setDeletingSection(session)}>
+                                Sil
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
             )}
           </SectionCard>
 
-          <InlineNotice tone="info" title="Kesit kimliği">
-            Kesit numarası, konum ve test tarihi Geometri & Saha sayfasındaki “Kesit kimliği”
-            kartından düzenlenir. Kaydet düğmesi kesiti seçili projeye bağlar.
+          <InlineNotice tone="info" title="Kesit kimliği ve KP kontrolü">
+            Yeni kesit eklenirken bir önceki kesitin bitiş KP noktası otomatik olarak başlangıç KP
+            alanına önerilir; ayrıca Geometri &amp; Saha sayfasındaki “Kesit kimliği ve KP aralığı”
+            kartından da istediğiniz zaman düzenlenebilir.
           </InlineNotice>
         </div>
       </div>
@@ -498,6 +707,135 @@ export function ProjectsPage() {
             placeholder="Kısa kapsam notu"
           />
         </FieldGrid>
+      </Modal>
+
+      <Modal
+        open={sectionDialogOpen}
+        onClose={() => setSectionDialogOpen(false)}
+        title="Yeni boru kesiti (section) oluştur"
+        description={
+          selected
+            ? `${selected.name} (${selected.code || "proje"}) altına başlangıç ve bitiş KP noktalarıyla yeni kesit kaydedilir.`
+            : "Başlangıç ve bitiş KP noktalarını girin."
+        }
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setSectionDialogOpen(false)}>
+              Vazgeç
+            </Button>
+            <Button
+              variant="primary"
+              loading={createSession.isPending}
+              onClick={submitCreateSection}
+            >
+              Kesiti oluştur ve aç
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          {lastOrderedSection && lastOrderedSection.endM !== null ? (
+            <div
+              className={`flex items-start gap-2 rounded-xl border px-3 py-2 text-[11.5px] ${
+                modalMatchesPrev
+                  ? "border-[var(--success-border)] bg-[var(--success-bg)]"
+                  : "border-[var(--warning-border)] bg-[var(--warning-bg)]"
+              }`}
+            >
+              {modalMatchesPrev ? (
+                <CheckCircle2 size={14} className="mt-0.5 shrink-0 tone-pass" aria-hidden />
+              ) : (
+                <AlertTriangle size={14} className="mt-0.5 shrink-0 tone-warning" aria-hidden />
+              )}
+              <div>
+                <p className="font-medium">
+                  {modalMatchesPrev
+                    ? `Önceki kesit (${lastOrderedSection.sectionLabel}) bitiş KP noktası (${lastOrderedSection.endKp}) ile yeni kesitin başlangıç KP noktası eşleşiyor.`
+                    : `KP uyuşmazlığı: Önceki kesit (${lastOrderedSection.sectionLabel}) bitiş KP noktası ${lastOrderedSection.endKp} iken yeni kesit başlangıç KP noktası ${
+                        modalStartM !== null ? formatKp(modalStartM) : sectionForm.start_kp || "—"
+                      } (${
+                        modalDeltaFromPrevM !== null
+                          ? `${modalDeltaFromPrevM > 0 ? "+" : ""}${Math.round(modalDeltaFromPrevM)} m fark`
+                          : "geçersiz KP"
+                      }).`}
+                </p>
+                {!modalMatchesPrev ? (
+                  <button
+                    type="button"
+                    className="mt-1 text-[10.5px] font-semibold text-[var(--primary)] underline"
+                    onClick={() =>
+                      setSectionForm((current) => ({
+                        ...current,
+                        start_kp: lastOrderedSection.endKp,
+                      }))
+                    }
+                  >
+                    Başlangıç KP&apos;yi {lastOrderedSection.endKp} olarak eşitle
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          <FieldGrid cols={3}>
+            <TextField
+              label="Kesit no"
+              value={sectionForm.section_no}
+              onChange={(value) => setSectionForm((current) => ({ ...current, section_no: value }))}
+              placeholder="K-01"
+              required
+              maxLength={40}
+            />
+            <TextField
+              label="Başlangıç KP"
+              value={sectionForm.start_kp}
+              onChange={(value) => setSectionForm((current) => ({ ...current, start_kp: value }))}
+              placeholder="0+000"
+              required
+              maxLength={40}
+              help={modalStartM !== null ? `${formatKp(modalStartM)} (${num(modalStartM, 0)} m)` : "Ör: 0+000"}
+            />
+            <TextField
+              label="Bitiş KP"
+              value={sectionForm.end_kp}
+              onChange={(value) => setSectionForm((current) => ({ ...current, end_kp: value }))}
+              placeholder="12+000"
+              required
+              maxLength={40}
+              help={
+                modalEndM !== null
+                  ? `${formatKp(modalEndM)} (${num(modalEndM, 0)} m)${
+                      modalSpanM !== null && modalSpanM > 0 ? ` · ΔKP ${num(modalSpanM, 0)} m` : ""
+                    }`
+                  : "Ör: 12+000"
+              }
+            />
+          </FieldGrid>
+
+          <FieldGrid cols={2}>
+            <TextField
+              label="Kesit açıklaması"
+              value={sectionForm.description}
+              onChange={(value) => setSectionForm((current) => ({ ...current, description: value }))}
+              placeholder="Bölüm 12–13 · Doğu Hattı"
+              maxLength={200}
+            />
+            <TextField
+              label="Test tarihi"
+              type="date"
+              value={sectionForm.test_date}
+              onChange={(value) => setSectionForm((current) => ({ ...current, test_date: value }))}
+            />
+          </FieldGrid>
+
+          <TextField
+            label="Not"
+            value={sectionForm.notes}
+            onChange={(value) => setSectionForm((current) => ({ ...current, notes: value }))}
+            placeholder="Kısa saha notu"
+            maxLength={240}
+          />
+        </div>
       </Modal>
 
       <ConfirmDialog
