@@ -57,6 +57,13 @@ Docker:
 docker compose -f webapp/docker-compose.yml up --build
 ```
 
+## Notlar
+
+- `THREE.Clock` deprecation uyarisi R3F v9 + Three r187 kaynaklidir; yalnizca
+  dev modda ve yalnizca bu mesaj icin filtrelenir (`src/main.tsx`). R3F/Three
+  surumu yukseltilince filtre kaldirilabilir.
+- Uretim build'inde console filtresi calismaz; hata/uyarilar aynen gorunur.
+
 ## Bilinen Eksikler / Sonraki Faz
 
 1. **Rapor formati (yarin):** OCR mapping profile `pre_extract`/`post_map` uygulanmiyor;
