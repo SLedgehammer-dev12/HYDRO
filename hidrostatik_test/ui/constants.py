@@ -10,6 +10,41 @@ TABLE_B_MODE = "Tablo"
 REFERENCE_B_MODE = TABLE_B_MODE
 MANUAL_B_MODE = "Manuel"
 
+# B katsayisi kaynak secenekleri. Varsayilan kaynak kurum ici A/B kontrol
+# tablosudur; degerler domain.coefficient_sources.BSource ile ayni anahtarlari
+# kullanir.
+B_SOURCE_INSTITUTIONAL_LABEL = "Kurum ici tablo (varsayilan)"
+B_SOURCE_GAIL_LABEL = "GAIL referans tablosu"
+B_SOURCE_AUTO_LABEL = "Otomatik (beta - 3*alpha)"
+B_SOURCE_MANUAL_LABEL = "Manuel B"
+B_SOURCE_LABELS = (
+    B_SOURCE_INSTITUTIONAL_LABEL,
+    B_SOURCE_GAIL_LABEL,
+    B_SOURCE_AUTO_LABEL,
+)
+B_SOURCE_BY_LABEL = {
+    B_SOURCE_INSTITUTIONAL_LABEL: "institutional",
+    B_SOURCE_GAIL_LABEL: "gail",
+    B_SOURCE_AUTO_LABEL: "auto",
+}
+
+# Otomatik B hesabinda celik genlesme modeli. Varsayilan fiziksel olarak dogru
+# hacimsel modeldir (B = beta - 3*alpha).
+STEEL_MODEL_VOLUMETRIC_LABEL = "Hacimsel 3*alpha (varsayilan)"
+STEEL_MODEL_LINEAR_LABEL = "Lineer alpha"
+STEEL_MODEL_TEMPERATURE_LABEL = "Sicakliga bagli 3*alpha(T)"
+STEEL_MODEL_LABELS = (
+    STEEL_MODEL_VOLUMETRIC_LABEL,
+    STEEL_MODEL_LINEAR_LABEL,
+    STEEL_MODEL_TEMPERATURE_LABEL,
+)
+STEEL_MODEL_BY_LABEL = {
+    STEEL_MODEL_VOLUMETRIC_LABEL: "volumetric",
+    STEEL_MODEL_LINEAR_LABEL: "linear",
+    STEEL_MODEL_TEMPERATURE_LABEL: "volumetric_temperature",
+}
+DEFAULT_STEEL_MODEL_LABEL = STEEL_MODEL_VOLUMETRIC_LABEL
+
 
 DEFAULT_DECISION_TITLE = "Henuz degerlendirme yapilmadi"
 DEFAULT_DECISION_STATUS = "BEKLIYOR"
@@ -54,6 +89,18 @@ FIELD_VALUE_RANGES = {
 __all__ = [
     "AUTO_A_MODE",
     "AUTO_B_MODE",
+    "B_SOURCE_AUTO_LABEL",
+    "B_SOURCE_BY_LABEL",
+    "B_SOURCE_GAIL_LABEL",
+    "B_SOURCE_INSTITUTIONAL_LABEL",
+    "B_SOURCE_LABELS",
+    "B_SOURCE_MANUAL_LABEL",
+    "DEFAULT_STEEL_MODEL_LABEL",
+    "STEEL_MODEL_BY_LABEL",
+    "STEEL_MODEL_LABELS",
+    "STEEL_MODEL_LINEAR_LABEL",
+    "STEEL_MODEL_TEMPERATURE_LABEL",
+    "STEEL_MODEL_VOLUMETRIC_LABEL",
     "TABLE_A_MODE",
     "TABLE_B_MODE",
     "REFERENCE_A_MODE",

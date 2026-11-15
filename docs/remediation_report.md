@@ -9,7 +9,7 @@ Yontem: Graphify haritasi + paralel dosya-sahipligi iscileri + dogrulama dalgasi
 
 | Alan | Durum | Kanit |
 | --- | --- | --- |
-| Domain fizigi | Tamam | 508 test, domain mypy temiz |
+| Domain fizigi | Tamam | 560 test, domain mypy temiz |
 | Veri katmani | Tamam (veri duzeltmesi haric) | 12 + 10 test, anomali tespiti |
 | Servisler / updater | Tamam | 113 hedefli test, guvenli cikarma + rollback |
 | UI dogruluk | Tamam | 82 UI testi + 4 e2e |
@@ -20,7 +20,7 @@ Yontem: Graphify haritasi + paralel dosya-sahipligi iscileri + dogrulama dalgasi
 
 **Dogrulama:**
 
-- `python3 -m unittest discover -s tests -p "test_*.py"` → **508 test OK**
+- `python3 -m unittest discover -s tests -p "test_*.py"` → **560 test OK**
 - `python3 -m coverage run -m unittest discover ...` → **%79** kaynak-only branch kapsami
 - `python3 -m ruff check .` → **All checks passed**
 - `python3 -m ruff format --check .` → **59+ dosya formatli**
@@ -54,7 +54,8 @@ Yontem: Graphify haritasi + paralel dosya-sahipligi iscileri + dogrulama dalgasi
 - Guvenli zip cikarma: path traversal, symlink, dosya sayisi/boyut/oran limitleri.
 - Kurulum: `backup-<version>`, atomik takas, hata halinde rollback, `apply_update.log`.
 - macOS: gecici readonly mount, `xattr -cr` kaldirildi, `codesign --verify` denemesi.
-- Opsiyonel Ed25519 imza kancasi (`HYDRO_UPDATE_PUBKEY`, `HYDRO_REQUIRE_SIGNATURE`).
+- Ed25519 detached imza varsayilan olarak zorunlu (fail-closed); public key
+  gomulu, ozel anahtar repo disinda, CI secret'i `HYDRO_UPDATE_PRIVATE_KEY`.
 - SQLite: RLock + `check_same_thread=False`, `busy_timeout`, UTC, `0700/0600`, user_version migration.
 - Otomatik kayit timer'i hata halinde yeniden kuruluyor; `updated_at` korunuyor.
 - PDF: XML escaping, A4/Unicode font, atomik yazma; Excel: formül notrleme, tipli hucre.
@@ -84,29 +85,41 @@ Yontem: Graphify haritasi + paralel dosya-sahipligi iscileri + dogrulama dalgasi
 - ruff/mypy yapilandirmasi; domain mypy bloklayici; surum pinleri.
 - README/CHANGELOG/docs test sayisi ve surum senkronu.
 
-## 3. Mühendislik Onayi Gerektirenler
+## 3. Cozulen Kararlar ve Kalan Onaylar
 
-Bu maddeler bilincli olarak veri/karar degistirmeden birakildi:
+### Cozulenler
 
-1. **B kaynagi:** Otomatik `beta - alpha`, kurum ici tablo ve GAIL tablosu arasinda
-   %26–45 fark var. Hangisinin resmi oldugu belirlenmeli; UI'de karsilastirma ve
-   uyari altyapisi hazir.
-2. **7 °C / 90–98 bar A anomalisi:** Dokuz hucrede ~%4 sapma. Test ve denetim
-   hazir; resmi duzeltme veri sahibinden gelmeli.
-3. **Kod imzalama/notarization:** Anahtarlar ve sertifikalar yok. Imza dogrulama
-   kancasi hazir; `HYDRO_REQUIRE_SIGNATURE=1` icin Ed25519 public key ve
-   `<asset>.sig` yayini gerekli.
-4. **A birimi:** Sartnamede `1/K` ve `1/bar` celiskisi. Kod `1e-6 / bar` olarak
-   normalize ediyor; yazili kurum onayi bekliyor.
+1. **B kaynagi:** Secilebilir hale getirildi; varsayilan **kurum ici A/B tablosu**.
+   GAIL ve otomatik (`beta - 3*alpha`) ikincil kaynaklar. Her kaynak raporda
+   provenance satiriyla gorunur; fark esikleri warn/confirm olarak isaretlenir.
+2. **7 °C / 81–100 bar A anomalisi:** Ham CSV degistirilmeden calisma zamaninda
+   ayni T satirinda lineer kopru ile onariliyor (7/90: 45.515 -> 47.115).
+   `repaired` / `repair_note` alanlariyla izlenebilir; B etkilenmiyor.
+3. **Kod imzalama:** Ed25519 detached imza (`<artifact>.sig`) varsayilan olarak
+   **zorunlu (fail-closed)**. Public key `app_metadata` icinde gomulu; ozel
+   anahtar repo disinda (`~/.config/hydro/update_signing_key.pem`, 0600).
+   `tools/update_signing.py` ile uretim/imzalama/dogrulama; CI secret'i
+   `HYDRO_UPDATE_PRIVATE_KEY`. Imzasiz/bozuk paket kurulmuyor.
+4. **A birimi:** `docs/spec/ab_methods_and_units.md` boyut analiziyle A'nin
+   `1/bar` ve formülde `micro/bar` oldugunu dogruladi; §13'teki `1/K` basim
+   hatasi. Vp ve ΔP sayisal ornekleri kodla birebir.
+
+### Kalan kurum onaylari
+
+- B tablosunun resmi kaynagi ve olcum zinciri (0.5 °C belirsizlik ~0.5 bar;
+  0.3 bar esiginden buyuk).
+- Kurum ici tablonun kalici resmi revizyonu (runtime onarim yerine veri duzeltmesi).
+- Notarization sertifikasi ve imza anahtarinin kurumsal yedegi/rotasyonu.
 
 ## 4. Kalan Riskler
 
 - Windows build ve PowerShell updater bu makinede calistirilamadi; statik olarak
   dogrulandi. Gercek Windows runner'da smoke test gerekli.
-- macOS DMG olusturma/imzalama bu ortamda anahtar olmadigi icin ad-hoc kalabilir.
-- Tam paket mypy hala bilgilendirici (116 hata, agirlikli `ui/app.py` snapshot
-  tipleri); domain bloklayici ve temiz.
-- Updater imza kancasi varsayilan kapali; guvenlik tam olarak anahtar yayinlandiginda saglanir.
+- macOS DMG notarization kurumsal sertifika gerektiriyor; ad-hoc imza kalabilir.
+- Ozel imza anahtari yalnizca bu makinede; `HYDRO_UPDATE_PRIVATE_KEY` secret'i
+  eklenmezse release kasitli olarak durur. Sifreli yedek alinmali.
+- Tam paket mypy hala bilgilendirici (agirlikli `ui/app.py` snapshot tipleri);
+  domain bloklayici ve temiz.
 - Graphify haritasi `_pyinstaller_hook.py` disinda tum kaynaklari testlerle eslestiriyor.
 
 ## 5. Yeniden Uretim

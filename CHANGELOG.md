@@ -20,11 +20,27 @@
   - Paketleme/CI: `.zip` + cift checksum sozlesmesi, runtime hook, surum tek
     kaynagi, tag↔surum kapisi, Windows matrisi duzeltmesi, Xvfb'li release
     testi, ruff/mypy yapilandirmasi.
-- **Graphify**: `skills/graphify/` ve `docs/codebase_map.md` eklendi
-  (981 dugum, 7.795 kenar).
-- **Test**: 495 otomatik test; kaynak-only branch kapsami **%79**.
-- **E2E**: geometri -> A/B -> hava + basinc -> karar -> txt/pdf/xlsx rapor ->
-  SQLite oturum kaliciligi -> updater asset sozlesmesi akisi eklendi.
+- **Domain: A/B fizik modeli**
+  - B artik hacimsel olarak hesaplaniyor: varsayilan `B = beta - 3*alpha`;
+    lineer ve sicakliga bagli `3*alpha(T)` opsiyonel.
+  - B kaynagi secilebilir: kurum ici tablo (varsayilan), GAIL, otomatik.
+  - A'nin `1/bar` ve formülde `micro/bar` oldugu boyut analiziyle dogrulandi
+    (`docs/spec/ab_methods_and_units.md`).
+- **Veri: A anomalisi onarimi**
+  - 7 °C / 81-100 bar A anomalisi ham CSV degistirilmeden calisma zamaninda
+    onariliyor (7/90: 45.515 -> 47.115); `repaired` / `repair_note` provenance.
+- **Guvenlik: guncelleme imzasi varsayilan acik**
+  - Ed25519 detached imza (`<artifact>.sig`) fail-closed zorunlu; public key
+    `app_metadata` icinde gomulu, ozel anahtar repo disinda.
+  - `tools/update_signing.py` (generate/sign/verify/fingerprint); CI secret'i
+    `HYDRO_UPDATE_PRIVATE_KEY`; imzasiz/bozuk paket kurulmuyor.
+- **Dokumantasyon**: A/B yontem ve birim arastirmasi, imza runbook'u,
+  remediation raporu ve guncel test sayilari.
+- **Graphify**: `skills/graphify/` ve `docs/codebase_map.md`
+  (1.400+ dugum, 11.000+ kenar).
+- **Test ve E2E**: 550+ otomatik test; kaynak-only branch kapsami ~%79;
+  geometri -> A/B -> hava + basinc -> karar -> txt/pdf/xlsx rapor -> SQLite
+  oturum kaliciligi -> updater asset/imza sozlesmesi e2e akisi.
 
 ## 1.7.3 - 2026-06-08
 

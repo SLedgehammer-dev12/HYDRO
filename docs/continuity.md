@@ -7,7 +7,7 @@
 - Build artefact'lari `dist/` (PyInstaller ham cikti) ve `release/` (yayina hazir paketler) altinda ayrildi; ikisi de git disi
 - Eski prototip ve onceki calisma notlari `docs/legacy/` altina arsivlendi
 - Yerel calisma klasoru `hidrostatik-test-v1.5.9` yayin adayi ile hizalandi
-- Otomatik test paketi 508 test ile geciyor
+- Otomatik test paketi 560 test ile geciyor
 - Updater birincil olarak `SLedgehammer-dev12/HYDRO`, gecis icin ikinci kaynak olarak `SLedgehammer-dev12/Programlar` release'lerini tarayacak sekilde calisiyor
 - UI artik kok seviyede ve sekme seviyesinde kaydirilabilir
 - `Boru Kesiti` alani sikistirildi; segment tablosu varsayilan olarak gizli ve ihtiyac halinde aciliyor
@@ -29,6 +29,7 @@
 - UI uc bolmeli ve yeniden boyutlandirilabilir; girdiler solda, aktif test sekmeleri ortada, detay raporu sagda gosteriliyor
 - Basinc kontrolu canli kart, kot semasi, `%100 SMYS` span kontrolu ve 5007 tek kesit uzunluk/hacim limitleriyle birlikte izleniyor
 - Giris alanlari canli semantik dogrulama ve renkli geri bildirim ile kullaniciyi yonlendiriyor
+- Guncelleme imzasi (Ed25519) artik **varsayilan olarak etkin**: gomulu public key (`app_metadata.UPDATE_SIGNING_PUBLIC_KEY`) sayesinde imzasi olmayan veya gecersiz paket kurulmuyor (fail-closed); imzasiz guncelleme yalnizca `HYDRO_ALLOW_UNSIGNED_UPDATE=1` / `HYDRO_REQUIRE_SIGNATURE=0` gelistirici kacis bayraklariyla mumkun ve dagitimda kullanilmiyor
 
 ## Teknik Gercekler
 
@@ -47,6 +48,9 @@
 - `ab_control_table_v1.csv` ve `ab_control_table_v1.meta.json` hem kaynakta hem PyInstaller paketinde dogrulanmis durumda; `BOTAS referans tablosu` secenegi bu dosyalari paylasir
 - `gail_reference_table_v1.csv` ve `gail_reference_table_v1.meta.json` dosyalari hem kaynakta hem PyInstaller paketinde dogrulanmis durumda
 - Surum tek kaynaktan yonetiliyor: `hidrostatik_test/app_metadata.py` (`APP_VERSION`, `RELEASE_ASSET_TEMPLATE`)
+- Guncelleme imzalama anahtari `tools/update_signing.py` ile yonetiliyor (`generate` / `sign` / `verify`); ozel anahtar `~/.config/hydro/update_signing_key.pem` (0600) konumunda ve repo disinda tutuluyor, CI'da `HYDRO_UPDATE_PRIVATE_KEY` secret'i olarak saglaniyor
+- Updater imzayi `verify_asset_signature` icinde zorunlu tutuyor; `HYDRO_UPDATE_PUBKEY` ortam degiskeni gomulu anahtari gecersiz kilar (rotasyon kancasi)
+- `.sig` dosyalari release sozlesmesinin parcasidir; build ve CI imzasiz artefakt yayinlamaz
 - `pressure_profile.py` ile minimum yuksek nokta test basinci ve 100% SMYS kritik dusuk nokta limiti ayni ekranda izlenebiliyor
 
 ## Acik Riskler
@@ -56,6 +60,8 @@
 - Segmentli geometri yaklasimi icin kurum ici metod onayi alinmadi
 - A birimi dokumanda tutarsiz gorunuyor; saha oncesi tablo ile teyit edilmeli
 - EXE/DMG dagitimi icin kod imzalama ve notarization halen yok; SmartScreen / Gatekeeper / kurumsal AV false positive riski suruyor
+- Guncelleme imzasi artik zorunlu ancak anahtar kaybi/sizmasi operasyonel risk: ozel anahtar yedegi sifreli medyada tutulmali, sizma suphesinde `generate --force` + public key rotasyonu + yeni surumun elle dagitimi gerekir
+- `HYDRO_ALLOW_UNSIGNED_UPDATE=1` / `HYDRO_REQUIRE_SIGNATURE=0` gelistirici kacis bayraklari uretim makinelerinde veya kullanici ortaminda set edilmemeli; edilirse imzasiz paket kabul edilir (yalnizca imza yoklugunda, gecersiz imza yine reddedilir)
 - Update paketi gecici klasor mantigiyla iniyor; audit / retention kurali gerekiyorsa ek saklama politikasi tanimlanmali
 
 ## Sonraki Oturumda Ilk Okunacaklar

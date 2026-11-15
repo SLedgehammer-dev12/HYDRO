@@ -19,6 +19,11 @@ DEFAULT_MAX_A_STEP_PER_BAR = 0.05
 DEFAULT_MAX_B_STEP_PER_BAR = 1.0
 DEFAULT_QUALITY_TOLERANCE = 1e-6
 
+# A-only findings along a constant-temperature row that can be repaired by
+# interpolating between the nearest healthy pressures. Temperature-column
+# findings are consequences of the row anomaly and are deliberately excluded.
+REPAIRABLE_A_ISSUE_KINDS = ("a_monotonicity", "a_step")
+
 
 class ABControlTableError(ValueError):
     """Raised when the official A/B control table cannot serve the requested point."""
@@ -68,6 +73,10 @@ class ABControlPoint:
     a_micro_per_bar: float
     b_micro_per_c: float
     source_note: str
+    # Backwards-compatible extras: populated when a lookup used the runtime
+    # anomaly repair. ``repair_note`` records the raw workbook value.
+    repaired: bool = False
+    repair_note: str = ""
 
 
 @dataclass(frozen=True)
@@ -105,6 +114,21 @@ class ABControlTableIssue:
     field_name: str | None = None
     value: float | None = None
     previous_value: float | None = None
+
+
+@dataclass(frozen=True)
+class ABControlRepairGrid:
+    """Runtime view of the control table with anomalous A cells repaired.
+
+    ``a_grid`` starts from the raw workbook A grid and only replaces cells
+    flagged by :func:`find_ab_control_table_issues`; the B grid is never part
+    of this view. ``repaired_mask`` marks replaced cells so lookups can report
+    provenance.
+    """
+
+    a_grid: tuple[tuple[float, ...], ...]
+    repaired_mask: tuple[tuple[bool, ...], ...]
+    repaired_count: int
 
 
 def default_ab_control_table_spec() -> ABControlTableSpec:
@@ -591,12 +615,106 @@ def find_ab_control_table_issues(
     return issues
 
 
+@lru_cache(maxsize=8)
+def _load_ab_control_repair_grid(csv_path: Path, metadata_path: Path) -> ABControlRepairGrid:
+    """Cache the A-only repair view for one control table.
+
+    Raw CSV values stay untouched; every cell flagged by
+    :func:`find_ab_control_table_issues` with an ``a_monotonicity`` or
+    ``a_step`` finding is replaced by linear interpolation between the nearest
+    healthy pressures on the same temperature row. B is never modified.
+    """
+
+    grid = load_ab_control_table(csv_path=csv_path, metadata_path=metadata_path)
+    issues = find_ab_control_table_issues(csv_path=csv_path, metadata_path=metadata_path)
+
+    temperature_points = grid.temperature_points
+    pressure_points = grid.pressure_points
+
+    flagged: set[tuple[int, int]] = set()
+    for issue in issues:
+        if issue.kind not in REPAIRABLE_A_ISSUE_KINDS:
+            continue
+        if issue.temp_c is None or issue.pressure_bar is None:
+            continue
+        t_index = _axis_index_or_none(temperature_points, issue.temp_c)
+        p_index = _axis_index_or_none(pressure_points, issue.pressure_bar)
+        if t_index is None or p_index is None:
+            continue
+        flagged.add((t_index, p_index))
+
+    row_count = len(temperature_points)
+    column_count = len(pressure_points)
+    if not flagged:
+        return ABControlRepairGrid(
+            a_grid=grid.a_grid,
+            repaired_mask=tuple(tuple(False for _ in pressure_points) for _ in temperature_points),
+            repaired_count=0,
+        )
+
+    repaired_a = [list(row) for row in grid.a_grid]
+    repaired_mask = [[False] * column_count for _ in range(row_count)]
+
+    for t_index, p_index in sorted(flagged):
+        lower_index = p_index - 1
+        while lower_index >= 0 and (t_index, lower_index) in flagged:
+            lower_index -= 1
+        upper_index = p_index + 1
+        while upper_index < column_count and (t_index, upper_index) in flagged:
+            upper_index += 1
+
+        if lower_index < 0 and upper_index >= column_count:
+            continue
+        if lower_index < 0:
+            repaired_value = grid.a_grid[t_index][upper_index]
+        elif upper_index >= column_count:
+            repaired_value = grid.a_grid[t_index][lower_index]
+        else:
+            repaired_value = _linear_interpolate(
+                pressure_points[p_index],
+                pressure_points[lower_index],
+                pressure_points[upper_index],
+                grid.a_grid[t_index][lower_index],
+                grid.a_grid[t_index][upper_index],
+            )
+
+        repaired_a[t_index][p_index] = repaired_value
+        repaired_mask[t_index][p_index] = True
+
+    return ABControlRepairGrid(
+        a_grid=tuple(tuple(row) for row in repaired_a),
+        repaired_mask=tuple(tuple(row) for row in repaired_mask),
+        repaired_count=sum(1 for row in repaired_mask for is_repaired in row if is_repaired),
+    )
+
+
+def count_repaired_ab_control_points(
+    csv_path: Path = DEFAULT_CONTROL_TABLE_CSV_PATH,
+    metadata_path: Path = DEFAULT_CONTROL_TABLE_METADATA_PATH,
+) -> int:
+    """Return how many A cells the runtime anomaly repair would replace."""
+
+    return _load_ab_control_repair_grid(Path(csv_path), Path(metadata_path)).repaired_count
+
+
 def lookup_ab_control_point(
     temp_c: float,
     pressure_bar: float,
     csv_path: Path = DEFAULT_CONTROL_TABLE_CSV_PATH,
     metadata_path: Path = DEFAULT_CONTROL_TABLE_METADATA_PATH,
+    repair_anomalies: bool = True,
 ) -> ABControlPoint:
+    """Interpolate the A/B control table at ``(temp_c, pressure_bar)``.
+
+    ``repair_anomalies`` defaults to ``True``: A cells flagged by the quality
+    checks (currently the 7 degC workbook dip) are replaced at runtime by a
+    row-wise linear interpolation between healthy neighbours. Raw CSV values
+    and the B grid are never modified. Pass ``repair_anomalies=False`` to read
+    the untouched workbook values for provenance or regression tests.
+    """
+
+    csv_path = Path(csv_path)
+    metadata_path = Path(metadata_path)
     grid = load_ab_control_table(csv_path=csv_path, metadata_path=metadata_path)
     temperature_points = grid.temperature_points
     pressure_points = grid.pressure_points
@@ -610,6 +728,13 @@ def lookup_ab_control_point(
     p0 = pressure_points[p0_index]
     p1 = pressure_points[p1_index]
 
+    a_grid = grid.a_grid
+    repaired_mask: tuple[tuple[bool, ...], ...] | None = None
+    if repair_anomalies:
+        repair_grid = _load_ab_control_repair_grid(csv_path, metadata_path)
+        a_grid = repair_grid.a_grid
+        repaired_mask = repair_grid.repaired_mask
+
     a_value = _bilinear_interpolate(
         temp_c,
         pressure_bar,
@@ -617,10 +742,10 @@ def lookup_ab_control_point(
         t1,
         p0,
         p1,
-        grid.a_grid[t0_index][p0_index],
-        grid.a_grid[t1_index][p0_index],
-        grid.a_grid[t0_index][p1_index],
-        grid.a_grid[t1_index][p1_index],
+        a_grid[t0_index][p0_index],
+        a_grid[t1_index][p0_index],
+        a_grid[t0_index][p1_index],
+        a_grid[t1_index][p1_index],
     )
     b_value = _bilinear_interpolate(
         temp_c,
@@ -640,17 +765,59 @@ def lookup_ab_control_point(
         if t0_index == t1_index and p0_index == p1_index
         else "Kurum ici A/B kontrol tablosu - bilinear interpolation"
     )
+
+    repaired = False
+    repair_note = ""
+    if repaired_mask is not None:
+        repaired = any(
+            repaired_mask[t_index][p_index]
+            for t_index in {t0_index, t1_index}
+            for p_index in {p0_index, p1_index}
+        )
+    if repaired:
+        raw_a_value = _bilinear_interpolate(
+            temp_c,
+            pressure_bar,
+            t0,
+            t1,
+            p0,
+            p1,
+            grid.a_grid[t0_index][p0_index],
+            grid.a_grid[t1_index][p0_index],
+            grid.a_grid[t0_index][p1_index],
+            grid.a_grid[t1_index][p1_index],
+        )
+        source_note = f"{source_note} - onarilmis A (anomali duzeltmesi; ham {raw_a_value:.6f})"
+        repair_note = (
+            f"onarilmis A degeri: ham {raw_a_value:.6f} -> {a_value:.6f} "
+            f"(10^-6 / bar). A hucreleri ayni T satirinda komsu gecerli "
+            f"basinclardan lineer interpolasyonla onarildi; B ham tablodan alindi."
+        )
+
     return ABControlPoint(
         temp_c=temp_c,
         pressure_bar=pressure_bar,
         a_micro_per_bar=a_value,
         b_micro_per_c=b_value,
         source_note=source_note,
+        repaired=repaired,
+        repair_note=repair_note,
     )
 
 
 def clear_ab_control_table_cache() -> None:
     load_ab_control_table.cache_clear()
+    _load_ab_control_repair_grid.cache_clear()
+
+
+def _axis_index_or_none(
+    points: tuple[float, ...], value: float, tolerance: float = DEFAULT_QUALITY_TOLERANCE
+) -> int | None:
+    insertion = bisect_left(points, value)
+    for index in (insertion - 1, insertion):
+        if 0 <= index < len(points) and abs(points[index] - value) <= tolerance:
+            return index
+    return None
 
 
 def _axis_bounds(value: float, points: tuple[float, ...], label: str) -> tuple[int, int]:

@@ -30,6 +30,7 @@ from ..app_metadata import (
     RELEASE_ASSET_TEMPLATE_MACOS,
     RELEASE_TAG_PREFIX,
     RELEASES_PAGE_URL,
+    UPDATE_SIGNING_PUBLIC_KEY,
 )
 from .download_manager import DownloadManager, ProgressCallback
 
@@ -51,13 +52,42 @@ MAX_COMPRESSION_RATIO = 200
 
 SIGNATURE_ENV_PUBKEY = "HYDRO_UPDATE_PUBKEY"
 SIGNATURE_ENV_REQUIRED = "HYDRO_REQUIRE_SIGNATURE"
-# NOT: Ed25519 imza dogrulama altyapisi hazirdir ancak varsayilan olarak
-# kapalidir (mevcut davranis degismez). Yayin anahtari uretilip
-# HYDRO_UPDATE_PUBKEY olarak dagitildiginda HYDRO_REQUIRE_SIGNATURE=1 ile
-# zorunlu hale getirilebilir; o zamana kadar SHA-256 dogrulamasi zorunludur.
+SIGNATURE_ENV_ALLOW_UNSIGNED = "HYDRO_ALLOW_UNSIGNED_UPDATE"
+# Guncelleme imzasi varsayilan olarak ZORUNLUDUR (fail-closed): gomulu public
+# key (`app_metadata.UPDATE_SIGNING_PUBLIC_KEY`) veya `HYDRO_UPDATE_PUBKEY`
+# varsa `.sig` dosyasi olmayan/gecersiz paket kurulmaz.
+#
+# Yalnizca gelistirici makinelerinde, acikca istenerek kapatilabilir:
+#   HYDRO_ALLOW_UNSIGNED_UPDATE=1  veya  HYDRO_REQUIRE_SIGNATURE=0
+# Bu iki bayrak yalnizca imza dosyasinin YOKLUGUNU tolere eder; imza varsa
+# yine dogrulanir. Uretim dagitiminda kullanilmamalidir.
 SIGNATURE_URL_SUFFIXES = (".sig", ".minisig")
 SIGNATURE_ALGORITHM_MINISIGN = (b"Ed", b"ED")
+_SIGNATURE_FALSE_VALUES = {"0", "false", "no", "off", "disabled"}
 UPDATE_LOG_NAME = "apply_update.log"
+
+MISSING_SIGNATURE_MESSAGE = (
+    "Guncelleme imzasi (.sig) bulunamadi. Bu surum imzali olarak yayinlanmamis "
+    "veya imza dosyasi release'e yuklenmemis olabilir. Guvenlik nedeniyle "
+    "guncelleme iptal edildi. Lutfen {releases_url} adresinden paketi elle "
+    "indirin veya yayin sorumlusundan imzali surum isteyin."
+)
+MISSING_PUBLIC_KEY_MESSAGE = (
+    "Guncelleme imza anahtari tanimli degil (app_metadata.UPDATE_SIGNING_PUBLIC_KEY "
+    "bos). Imza dogrulanamadigi icin guncelleme iptal edildi. Yonetici "
+    "HYDRO_UPDATE_PUBKEY ortam degiskeniyle anahtari saglayabilir."
+)
+INVALID_SIGNATURE_MESSAGE = (
+    "Guncelleme paketinin dijital imzasi gecersiz. Paket bozulmus veya "
+    "degistirilmis olabilir. Guvenlik nedeniyle guncelleme iptal edildi. "
+    "Lutfen {releases_url} adresinden yeniden indirin; sorun surerse yayin "
+    "sorumlusuna bildirin."
+)
+MISSING_CRYPTOGRAPHY_MESSAGE = (
+    "Imza dogrulamasi icin 'cryptography' paketi gerekli ancak bulunamadi. "
+    "Guvenlik nedeniyle guncelleme iptal edildi. Paketi kurun "
+    "(python -m pip install -r requirements.txt) ve tekrar deneyin."
+)
 
 logger = logging.getLogger(__name__)
 
@@ -507,15 +537,37 @@ def _verify_sha256(file_path: Path, expected_hex: str) -> None:
         )
 
 
-# --- Optional Ed25519 signature hook ---------------------------------------
+# --- Ed25519 signature enforcement ------------------------------------------
 
 
 def _env_flag(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _signing_required() -> bool:
+    """Guncelleme imzasi zorunlu mu? Varsayilan: evet (fail-closed).
+
+    Kaçış bayraklari yalnizca acikca verildiginde imza *yoklugunu* tolere eder:
+    ``HYDRO_ALLOW_UNSIGNED_UPDATE=1`` veya ``HYDRO_REQUIRE_SIGNATURE=0``.
+    """
+    if _env_flag(SIGNATURE_ENV_ALLOW_UNSIGNED):
+        return False
+    explicit = os.environ.get(SIGNATURE_ENV_REQUIRED, "").strip().lower()
+    if explicit in _SIGNATURE_FALSE_VALUES:
+        return False
+    return True
+
+
+def _signing_public_key_material() -> str:
+    """Ortam degiskeni override'i (rotasyon) once, gomulu anahtar sonra."""
+    override = os.environ.get(SIGNATURE_ENV_PUBKEY, "").strip()
+    if override:
+        return override
+    return str(UPDATE_SIGNING_PUBLIC_KEY or "").strip()
+
+
 def _decode_public_key(material: str) -> bytes:
-    """``HYDRO_UPDATE_PUBKEY`` degerini 32 baytlik Ed25519 anahtarina cevirir.
+    """Public key degerini 32 baytlik Ed25519 anahtarina cevirir.
 
     Deger ya base64/hex kodlanmis anahtar ya da anahtari iceren bir dosya yolu
     olabilir.
@@ -532,9 +584,15 @@ def _decode_public_key(material: str) -> bytes:
     try:
         key = base64.b64decode(compact, validate=True)
     except (ValueError, TypeError) as exc:
-        raise UpdateError("HYDRO_UPDATE_PUBKEY base64 veya hex kodlu olmali.") from exc
+        raise UpdateError(
+            "Guncelleme imza anahtari base64 veya hex kodlu olmali. "
+            "Anahtar rotasyonu icin HYDRO_UPDATE_PUBKEY degerini kontrol edin."
+        ) from exc
     if len(key) != 32:
-        raise UpdateError("HYDRO_UPDATE_PUBKEY 32 baytlik bir Ed25519 anahtari olmali.")
+        raise UpdateError(
+            "Guncelleme imza anahtari 32 baytlik bir Ed25519 anahtari olmali "
+            f"(gelen: {len(key)} bayt)."
+        )
     return key
 
 
@@ -544,14 +602,20 @@ def _signature_candidate_urls(asset_download_url: str) -> list[str]:
 
 def _decode_signature_blob(data: bytes) -> bytes:
     if not data:
-        raise UpdateError("Imza dosyasi bos.")
+        raise UpdateError(
+            "Imza dosyasi bos. Guvenlik nedeniyle guncelleme iptal edildi; "
+            "paketi release sayfasindan yeniden indirmeyi deneyin."
+        )
     # Ham Ed25519 imzasi ikili veridir; metin normalizasyonu (strip/base64)
     # uygulanmaz. Aksi halde rastgele bir imzanin son bayti kirpilabilir.
     if len(data) == 64:
         return data
     blob = data.strip()
     if not blob:
-        raise UpdateError("Imza dosyasi bos.")
+        raise UpdateError(
+            "Imza dosyasi bos. Guvenlik nedeniyle guncelleme iptal edildi; "
+            "paketi release sayfasindan yeniden indirmeyi deneyin."
+        )
     if blob.startswith(b"untrusted comment"):
         lines = [line.strip() for line in blob.splitlines() if line.strip()]
         if len(lines) < 2:
@@ -564,11 +628,17 @@ def _decode_signature_blob(data: bytes) -> bytes:
         try:
             blob = base64.b64decode(blob, validate=True)
         except (ValueError, TypeError) as exc:
-            raise UpdateError("Imza dosyasi base64 olarak okunamadi.") from exc
+            raise UpdateError(
+                "Imza dosyasi base64 olarak okunamadi; dosya bozulmus olabilir. "
+                "Guvenlik nedeniyle guncelleme iptal edildi, paketi yeniden indirin."
+            ) from exc
     if len(blob) == 74 and blob[:2] in SIGNATURE_ALGORITHM_MINISIGN:
         blob = blob[10:]
     if len(blob) != 64:
-        raise UpdateError("Imza formati desteklenmiyor (64 baytlik Ed25519 imzasi bekleniyor).")
+        raise UpdateError(
+            "Imza formati desteklenmiyor (64 baytlik Ed25519 imzasi bekleniyor). "
+            "Yayin sorumlusundan gecerli bir .sig dosyasi isteyin."
+        )
     return blob
 
 
@@ -588,9 +658,15 @@ def _download_signature(
         except HTTPError as exc:
             if exc.code == 404:
                 continue
-            raise UpdateError(f"Imza dosyasi indirilemedi: HTTP {exc.code}") from exc
+            raise UpdateError(
+                f"Imza dosyasi indirilemedi (HTTP {exc.code}). "
+                "Guvenlik nedeniyle guncelleme iptal edildi; lutfen daha sonra tekrar deneyin."
+            ) from exc
         except URLError as exc:
-            raise UpdateError("Imza dosyasina ulasilamadi.") from exc
+            raise UpdateError(
+                "Imza dosyasina ulasilamadi. Ag baglantisini kontrol edip tekrar deneyin; "
+                "guvenlik nedeniyle imzasiz guncelleme yapilmaz."
+            ) from exc
         if data.strip():
             return data
     return None
@@ -602,10 +678,7 @@ def _verify_ed25519_signature(file_path: Path, signature: bytes, public_key: byt
         from cryptography.exceptions import InvalidSignature
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
     except ImportError as exc:  # pragma: no cover - runtime bagimliligi
-        raise UpdateError(
-            "Imza dogrulamasi icin 'cryptography' paketi gerekli. "
-            "Paket yoksa HYDRO_REQUIRE_SIGNATURE kapatilmalidir."
-        ) from exc
+        raise UpdateError(MISSING_CRYPTOGRAPHY_MESSAGE) from exc
 
     if len(public_key) != 32:
         raise UpdateError("Ed25519 acik anahtari 32 bayt olmali.")
@@ -617,7 +690,7 @@ def _verify_ed25519_signature(file_path: Path, signature: bytes, public_key: byt
     try:
         key.verify(signature, payload)
     except InvalidSignature as exc:
-        raise UpdateError("Guncelleme paketinin dijital imzasi gecersiz.") from exc
+        raise UpdateError(INVALID_SIGNATURE_MESSAGE.format(releases_url=RELEASES_PAGE_URL)) from exc
 
 
 def verify_asset_signature(
@@ -625,37 +698,40 @@ def verify_asset_signature(
     asset_download_url: str,
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
 ) -> bool:
-    """Opsiyonel imza dogrulama kancasi.
+    """Indirilen artefaktin Ed25519 imzasini dogrular.
 
-    - Ne ``HYDRO_UPDATE_PUBKEY`` ne de ``HYDRO_REQUIRE_SIGNATURE`` tanimliysa
-      hicbir sey yapmaz (varsayilan davranis degismez) ve ``False`` doner.
-    - ``HYDRO_REQUIRE_SIGNATURE`` etkinse imza ve anahtar zorunludur; eksikligi
-      ``UpdateError`` ile guncellemeyi durdurur.
-    - Yalnizca ``HYDRO_UPDATE_PUBKEY`` tanimliysa imza varsa dogrulanir, yoksa
-      uyari loglanir.
+    Varsayilan davranis **fail-closed**: gomulu public key
+    (``app_metadata.UPDATE_SIGNING_PUBLIC_KEY``) veya ``HYDRO_UPDATE_PUBKEY``
+    varsa imza zorunludur. Imza dosyasi yoksa/gecersizse ``UpdateError``
+    yukselir ve guncelleme uygulanmaz.
 
-    Basarili dogrulamada ``True`` doner.
+    - ``HYDRO_UPDATE_PUBKEY`` gomulu anahtari gecersiz kilar (rotasyon kancasi).
+    - ``HYDRO_ALLOW_UNSIGNED_UPDATE=1`` / ``HYDRO_REQUIRE_SIGNATURE=0`` yalnizca
+      gelistirici icin imza *yoklugunu* tolere eder; imza varsa yine dogrulanir.
+
+    Basarili dogrulamada ``True`` doner. Imza zorunlu degilse ve imza dosyasi
+    yoksa ``False`` doner.
     """
-    required = _env_flag(SIGNATURE_ENV_REQUIRED)
-    key_material = os.environ.get(SIGNATURE_ENV_PUBKEY, "").strip()
-    if not required and not key_material:
-        return False
+    required = _signing_required()
+    key_material = _signing_public_key_material()
     if not key_material:
-        raise UpdateError(
-            "HYDRO_REQUIRE_SIGNATURE etkin ancak HYDRO_UPDATE_PUBKEY tanimli degil. "
-            "Guncelleme guvenlik nedeniyle iptal edildi."
+        if required:
+            raise UpdateError(MISSING_PUBLIC_KEY_MESSAGE)
+        logger.warning(
+            "Imza dogrulamasi devre disi: public key tanimli degil ve "
+            "%s etkin. Bu yalnizca gelistirici makineleri icindir.",
+            SIGNATURE_ENV_ALLOW_UNSIGNED,
         )
+        return False
 
     public_key = _decode_public_key(key_material)
     signature_blob = _download_signature(asset_download_url, timeout_seconds)
     if signature_blob is None:
         if required:
-            raise UpdateError(
-                "Guncelleme imzasi (.sig/.minisig) bulunamadi. "
-                "Guvenlik nedeniyle guncelleme iptal edildi."
-            )
+            raise UpdateError(MISSING_SIGNATURE_MESSAGE.format(releases_url=RELEASES_PAGE_URL))
         logger.warning(
-            "HYDRO_UPDATE_PUBKEY tanimli ancak %s icin imza dosyasi bulunamadi.",
+            "Imza zorunlu degil ve %s icin imza dosyasi bulunamadi; "
+            "gelistirici kacis bayragi etkin oldugu icin devam ediliyor.",
             asset_path.name,
         )
         return False
@@ -684,7 +760,15 @@ def _download_asset(
 
     expected_sha = _download_checksum(asset.download_url, timeout_seconds)
     _verify_sha256(target_path, expected_sha)
-    verify_asset_signature(target_path, asset.download_url, timeout_seconds)
+    signature_verified = verify_asset_signature(target_path, asset.download_url, timeout_seconds)
+    if signature_verified:
+        logger.info("Guncelleme paketi imzali: %s", asset.name)
+    else:
+        logger.warning(
+            "Guncelleme paketi imza dogrulamasi olmadan kabul edildi "
+            "(gelistirici kacis bayragi etkin): %s",
+            asset.name,
+        )
 
 
 def _append_update_log(log_path: Path | None, message: str) -> None:

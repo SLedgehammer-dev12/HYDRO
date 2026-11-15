@@ -19,6 +19,7 @@ from ..app_metadata import (
 )
 from ..data.ab_control_table import (
     ABControlTableError,
+    count_repaired_ab_control_points,
 )
 from ..data.botas_reference_table import (
     BOTAS_REFERENCE_OPTION_LABEL,
@@ -53,8 +54,19 @@ from ..domain import (
     get_water_property_backend,
 )
 from ..domain.coefficient_manager import CoefficientManager, CoefficientState
+from ..domain.coefficient_sources import (
+    BSource,
+    BSourceComparison,
+    BSourceResult,
+    compare_b_sources,
+    resolve_b_value,
+)
 from ..domain.hydrotest_core import (
+    DEFAULT_STEEL_MODEL,
     SEAMLESS_PIPE_K,
+    STEEL_MODEL_LINEAR,
+    STEEL_MODEL_VOLUMETRIC,
+    STEEL_MODEL_VOLUMETRIC_TEMPERATURE,
     WELDED_PIPE_K,
     AirContentInputs,
     PipeGeometry,
@@ -66,6 +78,7 @@ from ..domain.hydrotest_core import (
     calculate_water_thermal_expansion_beta,
     evaluate_air_content_test,
     evaluate_pressure_variation_test,
+    normalize_steel_model,
 )
 from ..domain.operations import (
     AMBIENT_TEMP_LIMIT_C,
@@ -90,15 +103,25 @@ from ..services.updater import (
 from .constants import (
     AUTO_A_MODE,
     AUTO_B_MODE,
+    B_SOURCE_AUTO_LABEL,
+    B_SOURCE_BY_LABEL,
+    B_SOURCE_GAIL_LABEL,
+    B_SOURCE_INSTITUTIONAL_LABEL,
+    B_SOURCE_LABELS,
+    B_SOURCE_MANUAL_LABEL,
     DEFAULT_DECISION_STATUS,
     DEFAULT_DECISION_SUMMARY,
     DEFAULT_DECISION_TITLE,
+    DEFAULT_STEEL_MODEL_LABEL,
     FIELD_CHECK_DEFINITIONS,
     FIELD_VALUE_RANGES,
     MANUAL_A_MODE,
     MANUAL_B_MODE,
     REFERENCE_A_MODE,
     REFERENCE_B_MODE,
+    STEEL_MODEL_BY_LABEL,
+    STEEL_MODEL_LABELS,
+    TABLE_B_MODE,
 )
 from .helpers import format_field_message, get_visual_level
 from .validators import safe_float as _safe_float_util
@@ -158,22 +181,36 @@ class HydrostaticTestApp:
         }
         self.air_a_mode_var = tk.StringVar(value=AUTO_A_MODE)
         self.pressure_a_mode_var = tk.StringVar(value=AUTO_A_MODE)
-        self.pressure_b_mode_var = tk.StringVar(value=AUTO_B_MODE)
+        self.pressure_b_mode_var = tk.StringVar(value=TABLE_B_MODE)
         self.pig_mode_var = tk.StringVar(value=get_pig_speed_limit_options()[0])
         self.air_a_reference_var = tk.StringVar()
         self.pressure_a_reference_var = tk.StringVar()
-        self.pressure_b_reference_var = tk.StringVar()
+        self.pressure_b_reference_var = tk.StringVar(value=BOTAS_REFERENCE_OPTION_LABEL)
+        self.pressure_b_source_var = tk.StringVar(value=B_SOURCE_INSTITUTIONAL_LABEL)
+        self.steel_model_var = tk.StringVar(value=DEFAULT_STEEL_MODEL_LABEL)
         self.k_preset_var = tk.StringVar(value="Kaynakli boru - 1.02")
         self.steel_preset_var = tk.StringVar(value="Karbon celik - 12.0")
-        self.use_b_helper_var = tk.BooleanVar(value=True)
+        # Varsayilan B kaynagi kurum ici tablodur; bu nedenle B helper varsayilan
+        # olarak devre disidir ve B degeri tablodan hazirlanir.
+        self.use_b_helper_var = tk.BooleanVar(value=False)
         self.b_helper_vars = {
             "steel_alpha_micro_per_c": tk.StringVar(value="12.0"),
             "water_beta_micro_per_c": tk.StringVar(),
         }
+        self.pressure_b_source_summary_var = tk.StringVar(
+            value=(
+                f"B kaynagi: {B_SOURCE_INSTITUTIONAL_LABEL}. Karsilastirma icin sicaklik "
+                "ve basinc girilmelidir."
+            )
+        )
+        self._b_source_result: BSourceResult | None = None
+        self._b_source_comparison: BSourceComparison | None = None
+        self._ab_repaired_cell_count: int | None = None
         self.banner_var = tk.StringVar(
             value=(
                 "Akis: geometriyi girin, katsayilari kontrol edin ve ilgili testi degerlendirin. "
-                "Helper aciksa B otomatik uretilecek, A ise gerektiginde yeniden hesaplanacaktir."
+                "Varsayilan B kaynagi kurum ici A/B tablosudur; otomatik secilirse B = beta - 3*alpha "
+                "ile hesaplanir."
             )
         )
         self.section_feedback_vars = {
@@ -1766,14 +1803,14 @@ class HydrostaticTestApp:
         self._add_entry(
             conditions_frame,
             1,
-            "A (10^-6 / bar)",
+            "A (micro/bar = 10^-6/bar)",
             self.pressure_vars["a_micro_per_bar"],
             field_key="pressure.a_micro_per_bar",
         )
         self._add_entry(
             conditions_frame,
             1,
-            "B (10^-6 / degC)",
+            "B (micro/K = 10^-6/degC)",
             self.pressure_vars["b_micro_per_c"],
             field_key="pressure.b_micro_per_c",
             column=2,
@@ -1804,7 +1841,21 @@ class HydrostaticTestApp:
             textvariable=self.coefficient_status_vars["pressure_b"],
             foreground="#8A6D3B",
         ).grid(row=2, column=3, sticky="w", pady=(0, 6))
-        ttk.Label(conditions_frame, text="A secenegi").grid(row=3, column=0, sticky="w", pady=6)
+        ttk.Label(conditions_frame, text="B kaynagi").grid(row=3, column=0, sticky="w", pady=6)
+        self.pressure_b_source_combo = ttk.Combobox(
+            conditions_frame,
+            textvariable=self.pressure_b_source_var,
+            state="readonly",
+            values=B_SOURCE_LABELS,
+            width=34,
+        )
+        self.pressure_b_source_combo.grid(
+            row=3, column=1, columnspan=3, sticky="ew", padx=(0, 12), pady=6
+        )
+        self.pressure_b_source_combo.bind(
+            "<<ComboboxSelected>>", self._on_pressure_b_source_changed
+        )
+        ttk.Label(conditions_frame, text="A secenegi").grid(row=4, column=0, sticky="w", pady=6)
         pressure_a_mode_combo = ttk.Combobox(
             conditions_frame,
             textvariable=self.pressure_a_mode_var,
@@ -1812,9 +1863,9 @@ class HydrostaticTestApp:
             values=(AUTO_A_MODE, REFERENCE_A_MODE, MANUAL_A_MODE),
             width=24,
         )
-        pressure_a_mode_combo.grid(row=3, column=1, sticky="ew", padx=(0, 12), pady=6)
+        pressure_a_mode_combo.grid(row=4, column=1, sticky="ew", padx=(0, 12), pady=6)
         pressure_a_mode_combo.bind("<<ComboboxSelected>>", self._on_pressure_a_mode_changed)
-        ttk.Label(conditions_frame, text="B secenegi").grid(row=3, column=2, sticky="w", pady=6)
+        ttk.Label(conditions_frame, text="B secenegi").grid(row=4, column=2, sticky="w", pady=6)
         pressure_b_mode_combo = ttk.Combobox(
             conditions_frame,
             textvariable=self.pressure_b_mode_var,
@@ -1822,10 +1873,10 @@ class HydrostaticTestApp:
             values=(AUTO_B_MODE, REFERENCE_B_MODE, MANUAL_B_MODE),
             width=24,
         )
-        pressure_b_mode_combo.grid(row=3, column=3, sticky="ew", padx=(0, 12), pady=6)
+        pressure_b_mode_combo.grid(row=4, column=3, sticky="ew", padx=(0, 12), pady=6)
         pressure_b_mode_combo.bind("<<ComboboxSelected>>", self._on_pressure_b_mode_changed)
-        ttk.Label(conditions_frame, text="A referans tablosu").grid(
-            row=4, column=0, sticky="w", pady=6
+        ttk.Label(conditions_frame, text="A referans tablosu (micro/bar)").grid(
+            row=5, column=0, sticky="w", pady=6
         )
         self.pressure_a_reference_combo = ttk.Combobox(
             conditions_frame,
@@ -1835,7 +1886,7 @@ class HydrostaticTestApp:
             style="Hydro.neutral.TCombobox",
             width=24,
         )
-        self.pressure_a_reference_combo.grid(row=4, column=1, sticky="ew", padx=(0, 12), pady=6)
+        self.pressure_a_reference_combo.grid(row=5, column=1, sticky="ew", padx=(0, 12), pady=6)
         self.pressure_a_reference_combo.bind(
             "<<ComboboxSelected>>", self._on_pressure_a_reference_changed
         )
@@ -1846,8 +1897,8 @@ class HydrostaticTestApp:
             label="A referans tablosu",
             required=False,
         )
-        ttk.Label(conditions_frame, text="B referans tablosu").grid(
-            row=4, column=2, sticky="w", pady=6
+        ttk.Label(conditions_frame, text="B referans tablosu (micro/K)").grid(
+            row=5, column=2, sticky="w", pady=6
         )
         self.pressure_b_reference_combo = ttk.Combobox(
             conditions_frame,
@@ -1857,7 +1908,7 @@ class HydrostaticTestApp:
             style="Hydro.neutral.TCombobox",
             width=24,
         )
-        self.pressure_b_reference_combo.grid(row=4, column=3, sticky="ew", padx=(0, 12), pady=6)
+        self.pressure_b_reference_combo.grid(row=5, column=3, sticky="ew", padx=(0, 12), pady=6)
         self.pressure_b_reference_combo.bind(
             "<<ComboboxSelected>>", self._on_pressure_b_reference_changed
         )
@@ -1868,6 +1919,28 @@ class HydrostaticTestApp:
             label="B referans tablosu",
             required=False,
         )
+        ttk.Label(conditions_frame, text="Celik modeli (otomatik B)").grid(
+            row=6, column=0, sticky="w", pady=6
+        )
+        self.steel_model_combo = ttk.Combobox(
+            conditions_frame,
+            textvariable=self.steel_model_var,
+            state="disabled",
+            values=STEEL_MODEL_LABELS,
+            width=34,
+        )
+        self.steel_model_combo.grid(
+            row=6, column=1, columnspan=3, sticky="ew", padx=(0, 12), pady=6
+        )
+        self.steel_model_combo.bind("<<ComboboxSelected>>", self._on_steel_model_changed)
+        self.b_source_summary_label = ttk.Label(
+            conditions_frame,
+            textvariable=self.pressure_b_source_summary_var,
+            wraplength=self.input_subframe_wraplength,
+            justify="left",
+            foreground="#35506B",
+        )
+        self.b_source_summary_label.grid(row=7, column=0, columnspan=4, sticky="w", pady=(6, 0))
 
         measurements_frame = ttk.LabelFrame(
             frame, text="Basinc Testi - Olculen Degerler", padding=12
@@ -1908,7 +1981,7 @@ class HydrostaticTestApp:
         self._add_entry(
             measurements_frame,
             1,
-            "Celik alpha (10^-6 / degC)",
+            "Celik alpha (micro/K = 10^-6/degC)",
             self.b_helper_vars["steel_alpha_micro_per_c"],
             field_key="helper.steel_alpha_micro_per_c",
             column=2,
@@ -1916,7 +1989,7 @@ class HydrostaticTestApp:
         self._add_entry(
             measurements_frame,
             2,
-            "Su beta (10^-6 / degC)",
+            "Su beta hacimsel (micro/K)",
             self.b_helper_vars["water_beta_micro_per_c"],
             field_key="helper.water_beta_micro_per_c",
             readonly=True,
@@ -2544,6 +2617,8 @@ class HydrostaticTestApp:
             + list(self.control_check_vars.values())
         ):
             variable.trace_add("write", lambda *_: self._session_auto_save_check())
+        for variable in (self.pressure_b_source_var, self.steel_model_var):
+            variable.trace_add("write", lambda *_: self._session_auto_save_check())
 
     def _bind_shortcuts(self) -> None:
         self.root.bind("<Control-Return>", lambda *_: self._run_selected_test())
@@ -2776,16 +2851,8 @@ class HydrostaticTestApp:
                     self._pressure_a_is_reference() and self.pressure_a_reference_var.get().strip()
                 ):
                     self._apply_pressure_a_reference(log_result=False, silent=True)
-                if self._pressure_b_is_auto():
-                    if (
-                        self._safe_float(self.b_helper_vars["steel_alpha_micro_per_c"].get())
-                        is not None
-                    ):
-                        self._calculate_b_helper(log_result=False, silent=True)
-                elif (
-                    self._pressure_b_is_reference() and self.pressure_b_reference_var.get().strip()
-                ):
-                    self._apply_pressure_b_reference(log_result=False, silent=True)
+                if self._pressure_b_can_be_prepared_live():
+                    self._calculate_b_helper(log_result=False, silent=True)
         finally:
             self._coefficient_refresh_in_progress = False
         self._update_live_notice()
@@ -2954,8 +3021,8 @@ class HydrostaticTestApp:
                 "Basinc Degisim Testi",
                 "DOGRULANAMADI",
                 (
-                    "A veya B katsayisi hazir degil. Otomatik modda hesaplayin, tablo modda referans "
-                    "secin veya manuel dogrulanmis deger girin."
+                    "A veya B katsayisi hazir degil. B kaynagi olarak kurum ici tablo, GAIL veya "
+                    "otomatik secin; manuel modda dogrulanmis degeri girin."
                 ),
             )
             return
@@ -3018,8 +3085,9 @@ class HydrostaticTestApp:
             "Basinc Degisim Testi (canli)",
             (
                 f"Durum: {status}\n"
-                f"A: {self.pressure_vars['a_micro_per_bar'].get().strip()} (10^-6 / bar)\n"
-                f"B: {self.pressure_vars['b_micro_per_c'].get().strip()} (10^-6 / degC)\n"
+                f"A: {self.pressure_vars['a_micro_per_bar'].get().strip()} (micro/bar)\n"
+                f"B: {self.pressure_vars['b_micro_per_c'].get().strip()} (micro/K)\n"
+                f"B kaynagi: {self._b_source_label()}\n"
                 f"dT = Tilk - Tson: {self.pressure_vars['delta_t_c'].get().strip()} degC\n"
                 f"Pa = Pilk - Pson: {self.pressure_vars['actual_pressure_change_bar'].get().strip()} bar\n"
                 f"Pt: {result.theoretical_pressure_change_bar:.6f} bar\n"
@@ -3148,9 +3216,12 @@ class HydrostaticTestApp:
         if field_key == "pressure.b_micro_per_c":
             if self.use_b_helper_var.get():
                 if self._pressure_b_is_reference():
-                    return "Tablo modda B degeri secilen BOTAS veya GAIL referans tablosundan dogrudan yuklenir."
-                return f"Otomatik modda B, secili backend ({backend_label}) ile su beta ve celik alpha kullanarak hesaplanir."
-            return "Manuel modda tablo/prosedurden B degerini girin."
+                    return "Tablo modda B degeri (micro/K) secilen kurum ici A/B veya GAIL referans tablosundan dogrudan yuklenir."
+                return (
+                    "Otomatik modda B = suyun hacimsel genlesmesi - celigin hacimsel genlesmesi "
+                    f"(3*alpha) olarak {backend_label} backend'i ile hesaplanir (micro/K)."
+                )
+            return "Manuel modda tablo/prosedurden B degerini micro/K olarak girin."
         if field_key == "air.pressure_rise_bar":
             return "Sartnameye gore bu alan 1.0 bar olmalidir."
         if field_key == "pressure.delta_t_c":
@@ -3160,12 +3231,13 @@ class HydrostaticTestApp:
         if field_key == "helper.steel_alpha_micro_per_c" and self.use_b_helper_var.get():
             if self._pressure_b_is_reference():
                 return "Tablo modda B dogrudan referans tablodan alindigi icin celik alpha kullanilmaz."
-            return "Otomatik B icin celik alpha preset secin veya ozel deger girin."
+            return "Otomatik B icin celik alpha preset secin veya ozel deger girin (micro/K)."
         if field_key == "helper.water_beta_micro_per_c" and self.use_b_helper_var.get():
             if self._pressure_b_is_reference():
                 return "Tablo modda su beta alani kullanilmaz; B dogrudan referans tablodan gelir."
             return (
-                f"B hesaplandiginda {backend_label} backend'inden gelen su beta burada gosterilir."
+                f"B hesaplandiginda {backend_label} backend'inden gelen suyun hacimsel genlesmesi "
+                "(beta, micro/K) burada gosterilir."
             )
         if field_key == "geometry.highest_elevation_m":
             return "Test bolumundeki en yuksek kot noktasini metre cinsinden girin."
@@ -4506,7 +4578,10 @@ class HydrostaticTestApp:
                 return "Mevcut deger var ama kosullar degistigi icin yeniden dogrulanmali."
             return "Hazir degil; secili moda gore A degeri bekleniyor."
         if state == CoefficientState.COMPUTED:
-            return f"Program hesabi (su beta - celik alpha, backend: {backend_label})."
+            return (
+                "Program hesabi (suyun hacimsel genlesmesi - celigin hacimsel "
+                f"genlesmesi (3*alpha), backend: {backend_label})."
+            )
         if state == CoefficientState.REFERENCE:
             reference_label = self.pressure_b_reference_var.get().strip() or "tablo secilmedi"
             return (
@@ -4516,10 +4591,10 @@ class HydrostaticTestApp:
         if state == CoefficientState.MANUAL:
             return "Kullanici girdisi / manuel tablo-prosedur."
         if state == CoefficientState.STALE:
-            return "Mevcut deger var ama helper kosullari degistigi icin yeniden dogrulanmali."
+            return "Mevcut deger var ama kaynak veya kosullar degistigi icin yeniden dogrulanmali."
         if self.use_b_helper_var.get():
-            return "Hazir degil; B helper veya tablo secimi ile olusturulmayi bekliyor."
-        return "Hazir degil; kullanici tarafindan manuel B degeri bekleniyor."
+            return "Hazir degil; secilen B kaynagi (tablo/otomatik) ile olusturulmayi bekliyor."
+        return "Hazir degil; kaynak secimi veya manuel B degeri bekleniyor."
 
     def _sync_detail_report_summary(self) -> None:
         active_tab = self._active_tab_key()
@@ -4659,14 +4734,16 @@ class HydrostaticTestApp:
             f"A modu: {self.pressure_a_mode_var.get().strip()}",
             f"A durum: {self.coefficient_status_vars['pressure_a'].get()}",
             f"A kaynagi: {self._coefficient_origin_text('pressure_a')}",
-            f"A degeri: {self._format_detail_value(self.pressure_vars['a_micro_per_bar'], '(10^-6 / bar)')}",
-            f"B modu: {self.pressure_b_mode_var.get().strip()}",
+            f"A degeri: {self._format_detail_value(self.pressure_vars['a_micro_per_bar'], '(micro/bar = 10^-6 / bar)')}",
+            f"B secenegi: {self.pressure_b_mode_var.get().strip()}",
+            f"B kaynagi: {self._b_source_label()}",
             f"B durum: {self.coefficient_status_vars['pressure_b'].get()}",
-            f"B kaynagi: {self._coefficient_origin_text('pressure_b')}",
-            f"B degeri: {self._format_detail_value(self.pressure_vars['b_micro_per_c'], '(10^-6 / degC)')}",
+            f"B kaynagi detayi: {self._coefficient_origin_text('pressure_b')}",
+            f"B degeri: {self._format_detail_value(self.pressure_vars['b_micro_per_c'], '(micro/K = 10^-6 / degC)')}",
+            f"B kaynak ozeti: {self.pressure_b_source_summary_var.get()}",
             f"B helper modu: {'Acik' if self.use_b_helper_var.get() else 'Kapali'}",
-            f"Celik alpha: {self._format_detail_value(self.b_helper_vars['steel_alpha_micro_per_c'], '(10^-6 / degC)')}",
-            f"Su beta: {self._format_detail_value(self.b_helper_vars['water_beta_micro_per_c'], '(10^-6 / degC)')}",
+            f"Celik alpha: {self._format_detail_value(self.b_helper_vars['steel_alpha_micro_per_c'], 'micro/K')}",
+            f"Su beta (hacimsel): {self._format_detail_value(self.b_helper_vars['water_beta_micro_per_c'], 'micro/K')}",
             f"Su backend'i: {self._selected_water_backend_info().label}",
             f"Backend karsilastirmasi: {self.pressure_backend_comparison_var.get()}",
             f"Kontrol tablosu: {self.pressure_control_table_var.get()}",
@@ -4681,6 +4758,7 @@ class HydrostaticTestApp:
             f"Ozet: {self.geometry_summary_var.get()}",
             f"Basinc penceresi: {self.section_pressure_summary_var.get()}",
         ]
+        lines.extend(self._b_source_traceability_lines())
         if self.geometry_segments:
             lines.append(f"Segment ozeti: {self.segment_summary_var.get()}")
 
@@ -4819,6 +4897,7 @@ class HydrostaticTestApp:
         self.air_control_table_var.set(self._build_air_control_table_summary())
         self.pressure_control_table_var.set(self._build_pressure_control_table_summary())
         self._sync_control_table_summary()
+        self._refresh_b_source_summary()
         self._refresh_detail_reports()
 
     def _build_air_control_table_summary(self) -> str:
@@ -4873,6 +4952,10 @@ class HydrostaticTestApp:
                 internal.append(
                     f"B farki = {self._format_control_table_delta(current_b, point.b_micro_per_c)}."
                 )
+            if point.repaired:
+                repair_text = self._current_ab_repair_text()
+                if repair_text:
+                    internal.append(repair_text + ".")
             parts.append(" ".join(internal))
         except (ABControlTableError, FileNotFoundError, ValueError) as exc:
             parts.append(f"{BOTAS_REFERENCE_TABLE_LABEL} kullanilamadi ({exc}).")
@@ -4899,6 +4982,296 @@ class HydrostaticTestApp:
         delta = value - reference
         delta_pct = (delta / reference * 100.0) if abs(reference) > 1e-12 else 0.0
         return f"{delta:+.6f} | %{delta_pct:+.6f}"
+
+    def _selected_b_source(self) -> BSource | None:
+        """Return the selected B source or ``None`` when the label is unknown."""
+
+        source_value = B_SOURCE_BY_LABEL.get(self.pressure_b_source_var.get().strip())
+        if source_value is None:
+            return None
+        try:
+            return BSource(source_value)
+        except ValueError:
+            return None
+
+    def _pressure_b_is_manual(self) -> bool:
+        return self.pressure_b_mode_var.get() == MANUAL_B_MODE
+
+    def _b_source_label(self) -> str:
+        if self._pressure_b_is_manual():
+            return B_SOURCE_MANUAL_LABEL
+        source = self._selected_b_source()
+        if source is BSource.GAIL:
+            return B_SOURCE_GAIL_LABEL
+        if source is BSource.AUTO:
+            return B_SOURCE_AUTO_LABEL
+        return B_SOURCE_INSTITUTIONAL_LABEL
+
+    def _selected_steel_model(self) -> str:
+        model = STEEL_MODEL_BY_LABEL.get(self.steel_model_var.get().strip())
+        if model is None:
+            return DEFAULT_STEEL_MODEL
+        try:
+            return normalize_steel_model(model)
+        except ValidationError:
+            return DEFAULT_STEEL_MODEL
+
+    def _steel_alpha_for_b(self) -> float:
+        value = self._safe_float(self.b_helper_vars["steel_alpha_micro_per_c"].get())
+        if value is None or value < 0:
+            return 12.0
+        return value
+
+    def _steel_model_note(self) -> str:
+        model = self._selected_steel_model()
+        if model == STEEL_MODEL_LINEAR:
+            return "B = beta - alpha (lineer model)"
+        if model == STEEL_MODEL_VOLUMETRIC_TEMPERATURE:
+            return "B = beta - 3*alpha(T) (sicakliga bagli hacimsel model)"
+        if model == STEEL_MODEL_VOLUMETRIC:
+            return "B = beta - 3*alpha (hacimsel model)"
+        return f"B = beta - {model}"
+
+    def _steel_model_formula(self) -> str:
+        model = self._selected_steel_model()
+        if model == STEEL_MODEL_LINEAR:
+            return "B = beta - alpha"
+        if model == STEEL_MODEL_VOLUMETRIC_TEMPERATURE:
+            return "B = beta - 3*alpha(T)"
+        return "B = beta - 3*alpha"
+
+    def _b_source_traceability_lines(self) -> list[str]:
+        """Return report lines that make the B source auditable."""
+
+        source = self._selected_b_source()
+        if self._pressure_b_is_manual():
+            return [
+                "B kaynagi: Manuel B (kullanici girdisi).",
+                "A/B kontrol tablosu onarim izi: manuel modda kullanilmaz.",
+            ]
+        lines: list[str] = []
+        if source is BSource.AUTO:
+            alpha = self._steel_alpha_for_b()
+            lines.append(
+                f"Otomatik B modeli: {self._steel_model_formula()}, alpha={alpha:.1f} micro/K"
+            )
+            result = self._b_source_result
+            if result is not None and result.water_beta_micro_per_c is not None:
+                steel_contribution = result.water_beta_micro_per_c - result.b_micro_per_c
+                lines.append(
+                    "Suyun hacimsel genlesmesi beta = "
+                    f"{result.water_beta_micro_per_c:.6f} micro/K; celik katkisi = "
+                    f"{steel_contribution:.4f} micro/K ({self._steel_model_formula()})."
+                )
+            return lines
+        if source is BSource.GAIL:
+            return [
+                "GAIL referans tablosu kullanildi; kurum ici A/B onarim izi bu kaynakta uygulanmaz."
+            ]
+        if source is BSource.INSTITUTIONAL:
+            repaired_count = self._ab_repaired_count()
+            if repaired_count is not None:
+                lines.append(f"A/B kontrol tablosu (onarilmis hucre: {repaired_count}).")
+        repair_text = self._current_ab_repair_text()
+        if repair_text:
+            lines.append(repair_text + ".")
+        if not lines:
+            lines.append("A/B kontrol tablosu onarim izi: bu noktada onarim gerekmedi.")
+        return lines
+
+    def _pressure_inputs_have_state(self) -> bool:
+        return (
+            self._safe_float(self.pressure_vars["temperature_c"].get()) is not None
+            and self._safe_float(self.pressure_vars["pressure_bar"].get()) is not None
+        )
+
+    def _pressure_b_can_be_prepared_live(self) -> bool:
+        if self._pressure_b_is_manual() or not self._pressure_inputs_have_state():
+            return False
+        if self._selected_b_source() is BSource.AUTO:
+            return self._safe_float(self.b_helper_vars["steel_alpha_micro_per_c"].get()) is not None
+        return True
+
+    def _ab_repaired_count(self) -> int | None:
+        if self._ab_repaired_cell_count is None:
+            try:
+                self._ab_repaired_cell_count = count_repaired_ab_control_points()
+            except (ABControlTableError, FileNotFoundError, OSError, ValueError):
+                return None
+        return self._ab_repaired_cell_count
+
+    def _current_ab_repair_text(self) -> str:
+        """Return the runtime A repair provenance for the active T/P node."""
+
+        temp_c = self._safe_float(self.pressure_vars["temperature_c"].get())
+        pressure_bar = self._safe_float(self.pressure_vars["pressure_bar"].get())
+        if temp_c is None or pressure_bar is None:
+            return ""
+        try:
+            repaired_point = lookup_botas_reference_point(
+                temp_c=temp_c, pressure_bar=pressure_bar, repair_anomalies=True
+            )
+            if not repaired_point.repaired:
+                return ""
+            raw_point = lookup_botas_reference_point(
+                temp_c=temp_c, pressure_bar=pressure_bar, repair_anomalies=False
+            )
+        except (ABControlTableError, FileNotFoundError, OSError, ValueError):
+            return ""
+        return (
+            f"A onarilmis: ham {raw_point.a_micro_per_bar:.3f} -> "
+            f"{repaired_point.a_micro_per_bar:.3f} (micro/bar)"
+        )
+
+    def _build_b_source_summary(self) -> tuple[str, str]:
+        """Return the three-source comparison line and its severity level."""
+
+        selected_label = self._b_source_label()
+        if self._pressure_b_is_manual():
+            return (
+                f"B kaynagi: {selected_label} (kullanici girdisi). "
+                "Karsilastirma icin tablo/otomatik kaynak secilebilir.",
+                "info",
+            )
+        temp_c = self._safe_float(self.pressure_vars["temperature_c"].get())
+        pressure_bar = self._safe_float(self.pressure_vars["pressure_bar"].get())
+        if temp_c is None or pressure_bar is None:
+            return (
+                f"B kaynagi: {selected_label}. Karsilastirma icin sicaklik ve basinc girilmelidir.",
+                "info",
+            )
+
+        steel_alpha = self._steel_alpha_for_b()
+        steel_model = self._selected_steel_model()
+        self._b_source_comparison = None
+        try:
+            comparison = compare_b_sources(
+                temp_c=temp_c,
+                pressure_bar=pressure_bar,
+                steel_alpha_micro_per_c=steel_alpha,
+                steel_model=steel_model,
+            )
+        except (ABControlTableError, FileNotFoundError, OSError, ValidationError):
+            comparison = None
+
+        if comparison is not None:
+            self._b_source_comparison = comparison
+            institutional = comparison.institutional.b_micro_per_c
+            gail = comparison.gail.b_micro_per_c
+            auto = comparison.auto.b_micro_per_c
+            delta = comparison.institutional_vs_gail
+            text = (
+                f"B kaynaklari: Kurum {institutional:.2f} | GAIL {gail:.2f} | "
+                f"Oto {auto:.2f} (\u0394kurum-GAIL {delta:+.2f})"
+            )
+            reference = max(abs(institutional), abs(gail), abs(auto), 1e-9)
+            max_delta = max(
+                abs(comparison.institutional_vs_gail),
+                abs(comparison.auto_vs_institutional),
+                abs(comparison.auto_vs_gail),
+            )
+            if max_delta > 5.0 or (max_delta / reference) > 0.10:
+                return (
+                    text
+                    + f". UYARI: kaynaklar arasi fark esigi asildi (max {max_delta:.2f} micro/K)."
+                    + f" Kullanilan kaynak: {selected_label}.",
+                    "warning",
+                )
+            return text + f". Kullanilan kaynak: {selected_label}.", "info"
+
+        # Kurum ici tablo aralik disi olabilir; GAIL ve otomatik yine denenir.
+        parts = [f"B kaynagi: {selected_label}."]
+        try:
+            gail_result = resolve_b_value(BSource.GAIL, temp_c=temp_c, pressure_bar=pressure_bar)
+            parts.append(f"GAIL {gail_result.b_micro_per_c:.2f}")
+        except (ABControlTableError, FileNotFoundError, OSError, ValidationError):
+            parts.append("GAIL -")
+        try:
+            auto_result = resolve_b_value(
+                BSource.AUTO,
+                temp_c=temp_c,
+                pressure_bar=pressure_bar,
+                steel_alpha_micro_per_c=steel_alpha,
+                steel_model=steel_model,
+            )
+            parts.append(f"Oto {auto_result.b_micro_per_c:.2f}")
+        except (ABControlTableError, FileNotFoundError, OSError, ValidationError):
+            parts.append("Oto -")
+        parts.append("Kurum ici tablo - (aralik disi)")
+        return ("B kaynaklari: " + " | ".join(parts), "warning")
+
+    def _refresh_b_source_summary(self) -> None:
+        text, level = self._build_b_source_summary()
+        self.pressure_b_source_summary_var.set(text)
+        label = getattr(self, "b_source_summary_label", None)
+        if label is not None:
+            colors = {
+                "info": "#35506B",
+                "success": "#1E6F43",
+                "warning": "#8A5B00",
+                "error": "#A4262C",
+            }
+            label.configure(foreground=colors.get(level, "#35506B"))
+
+    def _clear_pressure_b_value(self) -> None:
+        """Drop the stored B value so provenance cannot mix between sources."""
+
+        self._programmatic_coefficient_updates.add("pressure_b")
+        try:
+            self.pressure_vars["b_micro_per_c"].set("")
+            self.b_helper_vars["water_beta_micro_per_c"].set("")
+        finally:
+            self._programmatic_coefficient_updates.discard("pressure_b")
+        self._b_source_result = None
+        self.coefficient_manager.set("pressure_b", CoefficientState.EMPTY)
+        self._refresh_coefficient_statuses()
+
+    def _sync_b_source_from_mode(self) -> None:
+        if self._pressure_b_is_manual():
+            return
+        if self._pressure_b_is_auto():
+            label = B_SOURCE_AUTO_LABEL
+        elif self._is_gail_reference_selection(self.pressure_b_reference_var.get()):
+            label = B_SOURCE_GAIL_LABEL
+        else:
+            label = B_SOURCE_INSTITUTIONAL_LABEL
+        if self.pressure_b_source_var.get().strip() != label:
+            self.pressure_b_source_var.set(label)
+
+    def _on_pressure_b_source_changed(self, _: tk.Event | None = None) -> None:
+        source = self._selected_b_source()
+        if source is None:
+            return
+        # Kaynak degisimi eski B degerinin yeni kaynak gibi etiketlenmesini
+        # engellemek icin degeri temizler; ardindan yeni kaynakla hazirlanir.
+        self._clear_pressure_b_value()
+        if source is BSource.AUTO:
+            self.pressure_b_mode_var.set(AUTO_B_MODE)
+        else:
+            self.pressure_b_mode_var.set(TABLE_B_MODE)
+            self.pressure_b_reference_var.set(
+                BOTAS_REFERENCE_OPTION_LABEL
+                if source is BSource.INSTITUTIONAL
+                else GAIL_REFERENCE_OPTION_LABEL
+            )
+        self._apply_b_helper_mode()
+        if self._pressure_b_can_be_prepared_live():
+            self._calculate_b_helper(log_result=True)
+        else:
+            self._refresh_b_source_summary()
+            self._set_banner(
+                f"B kaynagi: {self._b_source_label()}. Sicaklik ve basinc girildiginde "
+                "B degeri bu kaynaktan otomatik hazirlanacak.",
+                "info",
+            )
+
+    def _on_steel_model_changed(self, _: tk.Event | None = None) -> None:
+        if self._selected_b_source() is not BSource.AUTO:
+            return
+        if self._pressure_b_can_be_prepared_live():
+            self._calculate_b_helper(log_result=True)
+        else:
+            self._refresh_b_source_summary()
 
     def _mark_water_backend_change(self) -> None:
         if self._air_a_is_auto() and self.air_vars["a_micro_per_bar"].get().strip():
@@ -5084,9 +5457,11 @@ class HydrostaticTestApp:
                 else "A manuel modda; tablo/prosedur degeri beklenir."
             )
             b_mode = (
-                f"B otomatik modda; helper secili backend ({backend_label}) ile su beta ve celik alpha kullanir."
+                "B kaynagi otomatik; B = suyun hacimsel genlesmesi - celigin hacimsel "
+                "genlesmesi (3*alpha) olarak hesaplanir."
                 if self._pressure_b_is_auto()
-                else "B tablo modda; secilen BOTAS veya GAIL referans tablosundan dogrudan yuklenir."
+                else "B kaynagi tablo; B degeri kurum ici A/B tablosundan veya GAIL referans "
+                "tablosundan dogrudan yuklenir."
                 if self._pressure_b_is_reference()
                 else "B manuel modda; degeri dogrudan ve dogrulanmis kaynaktan girmelisiniz."
             )
@@ -5229,15 +5604,18 @@ class HydrostaticTestApp:
             and self._safe_float(self.air_vars["temperature_c"].get()) is not None
             and self._safe_float(self.air_vars["pressure_bar"].get()) is not None
         )
-        pressure_ready = (
-            self._pressure_a_is_auto()
-            and self._safe_float(self.pressure_vars["temperature_c"].get()) is not None
+        pressure_state_ready = (
+            self._safe_float(self.pressure_vars["temperature_c"].get()) is not None
             and self._safe_float(self.pressure_vars["pressure_bar"].get()) is not None
         )
+        pressure_ready = self._pressure_a_is_auto() and pressure_state_ready
         b_ready = (
-            self._pressure_b_is_auto()
-            and pressure_ready
-            and self._safe_float(self.b_helper_vars["steel_alpha_micro_per_c"].get()) is not None
+            not self._pressure_b_is_manual()
+            and pressure_state_ready
+            and (
+                self._selected_b_source() is not BSource.AUTO
+                or self._safe_float(self.b_helper_vars["steel_alpha_micro_per_c"].get()) is not None
+            )
         )
         if air_ready:
             self._calculate_air_a(log_result=False, silent=True)
@@ -5372,7 +5750,12 @@ class HydrostaticTestApp:
                 continue
             if b_enabled:
                 try:
-                    b_value = calculate_b_coefficient(beta_value, steel_alpha)
+                    b_value = calculate_b_coefficient(
+                        beta_value,
+                        steel_alpha,
+                        steel_model=self._selected_steel_model(),
+                        temp_c=temp_c,
+                    )
                     b_error = None
                 except ValidationError as exc:
                     b_value = None
@@ -5398,7 +5781,7 @@ class HydrostaticTestApp:
         selected_b = selected_row["b_value"]
         header = f"Basinc A/B karsilastirmasi @ {temp_c:.3f} degC / {pressure_bar:.3f} bar."
         if b_enabled:
-            header += f" Celik alpha = {steel_alpha:.6f}."
+            header += f" Celik alpha = {steel_alpha:.6f}; model: {self._steel_model_note()}."
         else:
             header += " Celik alpha verilmedigi icin yalnizca A ve beta karsilastirildi."
         parts = [header]
@@ -5549,9 +5932,9 @@ class HydrostaticTestApp:
         if active_tab == "pressure":
             if not self._calculate_pressure_a():
                 return False
-            if self.use_b_helper_var.get():
-                return self._calculate_b_helper()
-            return True
+            if self._pressure_b_is_manual():
+                return True
+            return self._calculate_b_helper()
         self._update_check_summary()
         if (
             self.field_vars["pig_distance_m"].get().strip()
@@ -5766,11 +6149,23 @@ class HydrostaticTestApp:
             self._programmatic_coefficient_updates.add("pressure_b")
             try:
                 self.pressure_vars["b_micro_per_c"].set("")
-                self.pressure_b_reference_var.set("")
             finally:
                 self._programmatic_coefficient_updates.discard("pressure_b")
+            self._b_source_result = None
             self.coefficient_manager.set("pressure_b", CoefficientState.EMPTY)
+            self._refresh_coefficient_statuses()
         self.use_b_helper_var.set(helper_active)
+        if hasattr(self, "pressure_b_source_combo"):
+            self.pressure_b_source_combo.configure(
+                state="disabled" if self._pressure_b_is_manual() else "readonly"
+            )
+        if hasattr(self, "steel_model_combo"):
+            self.steel_model_combo.configure(state="readonly" if auto_mode else "disabled")
+        self._sync_b_source_from_mode()
+        if reference_mode and not self.pressure_b_reference_var.get().strip():
+            # Varsayilan kaynak kurum ici tablodur; tablo moduna gecildiginde
+            # referans secimi de ayni varsayilanla tutarli tutulur.
+            self.pressure_b_reference_var.set(BOTAS_REFERENCE_OPTION_LABEL)
         if hasattr(self, "pressure_b_reference_combo"):
             self.pressure_b_reference_combo.configure(
                 state="readonly" if reference_mode else "disabled"
@@ -5801,10 +6196,12 @@ class HydrostaticTestApp:
                     else CoefficientState.EMPTY,
                 )
                 self.helper_mode_summary_var.set(
-                    "B secenegi otomatik. B alani kilitlidir; helper su beta ve celik alpha ile hesaplar."
+                    "B kaynagi otomatik. B alani kilitlidir; B = suyun hacimsel genlesmesi - "
+                    "celigin hacimsel genlesmesi (3*alpha) olarak hesaplanir."
                 )
                 self._set_banner(
-                    "B secenegi otomatik. Degerlendirme sirasinda B helper kullanilir ve alan otomatik doldurulur.",
+                    "B kaynagi otomatik. B = beta - 3*alpha (hacimsel model) ile hesaplanir; "
+                    "celik modeli ve alpha degeri degistirilebilir.",
                     "info",
                 )
             else:
@@ -5816,11 +6213,11 @@ class HydrostaticTestApp:
                 )
                 self.b_helper_vars["water_beta_micro_per_c"].set("")
                 self.helper_mode_summary_var.set(
-                    f"B secenegi tablo modda. {BOTAS_REFERENCE_TABLE_LABEL} veya "
-                    f"{GAIL_REFERENCE_TABLE_LABEL} secildiginde B dogrudan tablodan yuklenir."
+                    f"B kaynagi: {self._b_source_label()}. B degeri (micro/K) secilen tablodan "
+                    "dogrudan yuklenir; A/B kontrol tablosu onarimlari raporda gorunur."
                 )
                 self._set_banner(
-                    "B secenegi tablo modda. B degeri secilen referans tablodan yuklenir.",
+                    f"B kaynagi: {self._b_source_label()}. B degeri secilen referans tablodan yuklenir.",
                     "info",
                 )
         else:
@@ -5856,6 +6253,7 @@ class HydrostaticTestApp:
         self._refresh_coefficient_statuses()
         self._sync_coefficient_field_messages()
         self._refresh_choice_validation_states()
+        self._refresh_b_source_summary()
         self._update_live_notice()
         self._update_workflow_hint()
         self._refresh_live_coefficients()
@@ -5934,40 +6332,15 @@ class HydrostaticTestApp:
         return True
 
     def _apply_pressure_b_reference(self, log_result: bool = True, silent: bool = False) -> bool:
-        selected_label = self.pressure_b_reference_var.get().strip()
-        if not selected_label:
+        source = self._selected_b_source()
+        if source is not BSource.AUTO and not self.pressure_b_reference_var.get().strip():
             if not silent:
                 self._set_feedback("pressure", "Basinc testi B icin bir referans tablo secin.")
                 self._focus_field("pressure.b_micro_per_c")
             return False
-        try:
-            point = self._lookup_selected_table_reference("pressure", selected_label)
-        except ValidationError as exc:
-            if not silent:
-                self._set_banner(str(exc), "error")
-                self._update_decision_card("Basinc Degisim Testi", "DOGRULANAMADI", str(exc))
-            return False
-        table_label = self._selected_reference_table_label(selected_label)
-        self.b_helper_vars["water_beta_micro_per_c"].set("")
-        self._set_coefficient_value(
-            "pressure_b",
-            self.pressure_vars["b_micro_per_c"],
-            point.b_micro_per_c,
-            state=CoefficientState.REFERENCE,
-        )
-        if log_result:
-            self._append_result(
-                "Basinc Degisim Testi - B referansi",
-                (
-                    f"B = {point.b_micro_per_c:.6f} (10^-6 / degC) {table_label} uzerinden yuklendi.\n"
-                    f"Referans: {selected_label}\n"
-                    f"Kaynak: {point.source_note}"
-                ),
-            )
-        if not silent:
-            self._set_banner(f"Basinc testi icin B {table_label} uzerinden yuklendi.", "success")
-        self._refresh_control_table_summaries()
-        return True
+        # Tek hesaplama yolu: secili kaynak uzerinden B cozulur. Boylece tablo,
+        # onarilmis A ve otomatik model provenance'i ayni yerden uretilir.
+        return self._calculate_b_helper(log_result=log_result, silent=silent)
 
     def _set_coefficient_value(
         self,
@@ -6115,54 +6488,99 @@ class HydrostaticTestApp:
         return True
 
     def _calculate_b_helper(self, log_result: bool = True, silent: bool = False) -> bool:
-        self._clear_feedback("pressure")
-        backend_info = self._selected_water_backend_info()
-        try:
-            water_beta = calculate_water_thermal_expansion_beta(
-                temp_c=self._read_float(
-                    self.pressure_vars["temperature_c"],
-                    "Su sicakligi",
-                    "pressure",
-                    "pressure.temperature_c",
-                ),
-                pressure_bar=self._read_float(
-                    self.pressure_vars["pressure_bar"],
-                    "Su basinci",
-                    "pressure",
-                    "pressure.pressure_bar",
-                ),
-                backend=backend_info.key,
-            )
-            steel_alpha = self._read_float(
-                self.b_helper_vars["steel_alpha_micro_per_c"],
-                "Celik alpha",
-                "pressure",
-                "helper.steel_alpha_micro_per_c",
-            )
-            b_value = calculate_b_coefficient(water_beta, steel_alpha)
-        except ValidationError as exc:
+        """Resolve and store B from the selected source (primary path).
+
+        ``institutional``/``gail`` write the table value with ``REFERENCE``
+        provenance; ``auto`` computes ``beta - 3*alpha`` (or the selected steel
+        model) with ``COMPUTED`` provenance. The legacy helper entries are kept
+        as diagnostics but are no longer required to prepare B.
+        """
+
+        source = self._selected_b_source()
+        if source is None:
             if not silent:
-                self._set_banner(str(exc), "error")
-                self._update_decision_card("Basinc Degisim Testi", "DOGRULANAMADI", str(exc))
+                self._set_banner("B kaynagi secimi gecersiz. Listeden bir kaynak secin.", "error")
+            return False
+        if not silent:
+            self._clear_feedback("pressure")
+        backend_info = self._selected_water_backend_info()
+        steel_model = self._selected_steel_model()
+        try:
+            temp_c = self._read_float(
+                self.pressure_vars["temperature_c"],
+                "Su sicakligi",
+                "pressure",
+                "pressure.temperature_c",
+            )
+            pressure_bar = self._read_float(
+                self.pressure_vars["pressure_bar"],
+                "Su basinci",
+                "pressure",
+                "pressure.pressure_bar",
+            )
+            if source is BSource.AUTO:
+                steel_alpha = self._read_float(
+                    self.b_helper_vars["steel_alpha_micro_per_c"],
+                    "Celik alpha",
+                    "pressure",
+                    "helper.steel_alpha_micro_per_c",
+                )
+            else:
+                steel_alpha = self._steel_alpha_for_b()
+            result = resolve_b_value(
+                source,
+                temp_c=temp_c,
+                pressure_bar=pressure_bar,
+                steel_alpha_micro_per_c=steel_alpha,
+                steel_model=steel_model,
+            )
+        except ValidationError as exc:
+            self._b_source_result = None
+            if not silent:
+                message = (
+                    f"B kaynagi {self._b_source_label()} bu nokta icin kullanilamadi: {exc} "
+                    "GAIL referans tablosu veya Otomatik kaynagi deneyin."
+                )
+                self._set_feedback("pressure", message)
+                self._set_banner(message, "error")
+                self._update_decision_card("Basinc Degisim Testi", "DOGRULANAMADI", message)
+            self._refresh_b_source_summary()
             return False
 
-        self.b_helper_vars["water_beta_micro_per_c"].set(f"{water_beta:.6f}")
-        self._set_coefficient_value("pressure_b", self.pressure_vars["b_micro_per_c"], b_value)
+        self._b_source_result = result
+        if result.source is BSource.AUTO:
+            if result.water_beta_micro_per_c is not None:
+                self.b_helper_vars["water_beta_micro_per_c"].set(
+                    f"{result.water_beta_micro_per_c:.6f}"
+                )
+            state = CoefficientState.COMPUTED
+        else:
+            self.b_helper_vars["water_beta_micro_per_c"].set("")
+            state = CoefficientState.REFERENCE
+        self._set_coefficient_value(
+            "pressure_b", self.pressure_vars["b_micro_per_c"], result.b_micro_per_c, state=state
+        )
         self._refresh_control_table_summaries()
         if log_result:
+            model_line = (
+                f"{self._steel_model_note()}, alpha = {steel_alpha:.1f} micro/K"
+                if result.source is BSource.AUTO
+                else f"Tablo B degeri dogrudan alindi ({BOTAS_REFERENCE_TABLE_LABEL} veya GAIL)."
+            )
             self._append_result(
-                "B Yardimcisi",
+                "B kaynagi",
                 (
+                    f"B kaynagi: {self._b_source_label()}\n"
+                    f"B = {result.b_micro_per_c:.6f} (micro/K = 10^-6 / degC)\n"
+                    f"Model: {model_line}\n"
                     f"Backend: {backend_info.label}\n"
-                    f"Su beta: {water_beta:.6f} (10^-6 / degC)\n"
-                    f"Celik alpha: {steel_alpha:.6f} (10^-6 / degC)\n"
-                    f"Hesaplanan B: {b_value:.6f} (10^-6 / degC)\n"
+                    f"Kaynak notu: {result.note}\n"
                     f"Kontrol tablosu: {self.pressure_control_table_var.get()}"
                 ),
             )
         if not silent:
             self._set_banner(
-                "Basinc degisim testi icin B katsayisi helper ile guncellendi.", "success"
+                f"B kaynagi {self._b_source_label()} ile B katsayisi guncellendi.", "success"
             )
         return True
 
@@ -6203,11 +6621,16 @@ class HydrostaticTestApp:
             )
             return False
         if key == "pressure_b":
-            if self._pressure_b_is_reference():
-                return self._apply_pressure_b_reference(log_result=False)
-            if self.use_b_helper_var.get():
+            if not self._pressure_b_is_manual():
+                # Birincil yol kaynak secimidir: tablo ise tablodan, otomatik ise
+                # beta - 3*alpha ile B hazirlanir. Kullaniciyi B helper ile
+                # ugrastirmaya gerek yoktur.
                 return self._calculate_b_helper(log_result=False)
-        self._set_feedback("pressure", "B degeri manuel girilmeli veya yardimci ile hesaplanmali.")
+            if self.coefficient_value_present(key):
+                self.coefficient_manager.set(key, CoefficientState.MANUAL)
+                self._refresh_coefficient_statuses()
+                return True
+        self._set_feedback("pressure", "B degeri manuel girilmeli veya kaynak secilmelidir.")
         self._focus_field("pressure.b_micro_per_c")
         self._set_banner("Basinc testi icin B degeri hazir degil.", "warning")
         self._update_decision_card(
@@ -6348,13 +6771,15 @@ class HydrostaticTestApp:
                 f"Durum: {status}\n"
                 f"Su sicakligi: {self.pressure_vars['temperature_c'].get().strip()} degC\n"
                 f"Su basinci: {self.pressure_vars['pressure_bar'].get().strip()} bar\n"
-                f"A: {self.pressure_vars['a_micro_per_bar'].get().strip()} (10^-6 / bar)\n"
-                f"B: {self.pressure_vars['b_micro_per_c'].get().strip()} (10^-6 / degC)\n"
+                f"A: {self.pressure_vars['a_micro_per_bar'].get().strip()} (micro/bar)\n"
+                f"B: {self.pressure_vars['b_micro_per_c'].get().strip()} (micro/K)\n"
+                f"B kaynagi: {self._b_source_label()}\n"
+                f"B kaynak ozeti: {self.pressure_b_source_summary_var.get()}\n"
                 f"Su sicaklik degisimi dT = Tilk - Tson: {self.pressure_vars['delta_t_c'].get().strip()} degC\n"
                 f"Fiili basinc degisimi Pa = Pilk - Pson: {self.pressure_vars['actual_pressure_change_bar'].get().strip()} bar\n"
                 f"B helper modu: {'Acik' if self.use_b_helper_var.get() else 'Kapali'}\n"
-                f"Celik alpha: {self.b_helper_vars['steel_alpha_micro_per_c'].get().strip() or '-'} (10^-6 / degC)\n"
-                f"Su beta: {self.b_helper_vars['water_beta_micro_per_c'].get().strip() or '-'} (10^-6 / degC)\n"
+                f"Celik alpha: {self.b_helper_vars['steel_alpha_micro_per_c'].get().strip() or '-'} (micro/K)\n"
+                f"Su beta hacimsel: {self.b_helper_vars['water_beta_micro_per_c'].get().strip() or '-'} (micro/K)\n"
                 f"Ic yaricap: {pipe.internal_radius_mm:.3f} mm\n"
                 f"Teorik basinc degisimi Pt: {result.theoretical_pressure_change_bar:.6f} bar\n"
                 f"Ust kabul siniri (Pt + 0.3): {result.allowable_upper_pressure_change_bar:.6f} bar\n"
@@ -6502,6 +6927,7 @@ class HydrostaticTestApp:
         self.b_helper_vars["steel_alpha_micro_per_c"].set(self._default_steel_alpha())
         self.coefficient_manager.set("pressure_a", CoefficientState.EMPTY)
         self.coefficient_manager.set("pressure_b", CoefficientState.EMPTY)
+        self._b_source_result = None
         self.pressure_backend_comparison_var.set(self._default_backend_comparison_text("pressure"))
         self.pressure_control_table_var.set(self._default_control_table_text("pressure"))
         self._remove_touched_fields("pressure")
@@ -6509,6 +6935,7 @@ class HydrostaticTestApp:
         self._refresh_coefficient_statuses()
         self._sync_backend_comparison_summary()
         self._sync_control_table_summary()
+        self._refresh_b_source_summary()
         self._reset_decision_card("pressure")
         self._set_banner("Basinc degisim testi formu temizlendi.", "info")
         self._refresh_visual_schema()
@@ -6603,18 +7030,21 @@ class HydrostaticTestApp:
                 f"Su basinci (bar): {self._format_var_value(self.pressure_vars['pressure_bar'])}",
                 f"A secenegi: {self.pressure_a_mode_var.get().strip()}",
                 f"A referans tablosu: {self.pressure_a_reference_var.get().strip() or '-'}",
-                f"A (10^-6 / bar): {self._format_var_value(self.pressure_vars['a_micro_per_bar'])}",
+                f"A (micro/bar = 10^-6 / bar): {self._format_var_value(self.pressure_vars['a_micro_per_bar'])}",
                 f"B secenegi: {self.pressure_b_mode_var.get().strip()}",
+                f"B kaynagi: {self._b_source_label()}",
                 f"B referans tablosu: {self.pressure_b_reference_var.get().strip() or '-'}",
-                f"B (10^-6 / degC): {self._format_var_value(self.pressure_vars['b_micro_per_c'])}",
+                f"B (micro/K = 10^-6 / degC): {self._format_var_value(self.pressure_vars['b_micro_per_c'])}",
+                f"B kaynak ozeti: {self.pressure_b_source_summary_var.get()}",
                 "B yorumu: negatif B su buzulme bolgesi demektir; dP isareti ters doner ve gecerlidir.",
                 f"Basinc backend karsilastirmasi: {self.pressure_backend_comparison_var.get()}",
                 f"Basinc kontrol tablosu: {self.pressure_control_table_var.get()}",
                 f"Su sicaklik degisimi dT = Tilk - Tson (degC): {self._format_var_value(self.pressure_vars['delta_t_c'])}",
                 f"Fiili basinc degisimi Pa = Pilk - Pson (bar): {self._format_var_value(self.pressure_vars['actual_pressure_change_bar'])}",
                 f"B helper modu: {'Acik' if self.use_b_helper_var.get() else 'Kapali'}",
-                f"Celik alpha (10^-6 / degC): {self._format_var_value(self.b_helper_vars['steel_alpha_micro_per_c'])}",
-                f"Su beta (10^-6 / degC): {self._format_var_value(self.b_helper_vars['water_beta_micro_per_c'])}",
+                f"Celik alpha (micro/K): {self._format_var_value(self.b_helper_vars['steel_alpha_micro_per_c'])}",
+                f"Su beta hacimsel (micro/K): {self._format_var_value(self.b_helper_vars['water_beta_micro_per_c'])}",
+                *self._b_source_traceability_lines(),
                 "",
                 "Operasyon Kontrol Noktalari",
                 f"Kontrol ozeti: {self.check_summary_var.get()}",
@@ -6684,6 +7114,8 @@ class HydrostaticTestApp:
                 "air_a_mode": self.air_a_mode_var.get(),
                 "pressure_a_mode": self.pressure_a_mode_var.get(),
                 "pressure_b_mode": self.pressure_b_mode_var.get(),
+                "pressure_b_source": self.pressure_b_source_var.get(),
+                "steel_model": self.steel_model_var.get(),
                 "air_a_reference": self.air_a_reference_var.get(),
                 "pressure_a_reference": self.pressure_a_reference_var.get(),
                 "pressure_b_reference": self.pressure_b_reference_var.get(),
@@ -6759,6 +7191,19 @@ class HydrostaticTestApp:
             self.air_a_reference_var.set(str(modes.get("air_a_reference", "")))
             self.pressure_a_reference_var.set(str(modes.get("pressure_a_reference", "")))
             self.pressure_b_reference_var.set(str(modes.get("pressure_b_reference", "")))
+            source_label = str(modes.get("pressure_b_source", "")).strip()
+            if source_label not in B_SOURCE_BY_LABEL:
+                if self.pressure_b_mode_var.get() == AUTO_B_MODE:
+                    source_label = B_SOURCE_AUTO_LABEL
+                elif self._is_gail_reference_selection(self.pressure_b_reference_var.get()):
+                    source_label = B_SOURCE_GAIL_LABEL
+                else:
+                    source_label = B_SOURCE_INSTITUTIONAL_LABEL
+            self.pressure_b_source_var.set(source_label)
+            steel_model_label = str(modes.get("steel_model", "")).strip()
+            if steel_model_label not in STEEL_MODEL_BY_LABEL:
+                steel_model_label = DEFAULT_STEEL_MODEL_LABEL
+            self.steel_model_var.set(steel_model_label)
             self.k_preset_var.set(str(modes.get("k_preset", self.k_preset_var.get())))
             self.steel_preset_var.set(str(modes.get("steel_preset", self.steel_preset_var.get())))
             self.pig_mode_var.set(str(modes.get("pig_mode", self.pig_mode_var.get())))

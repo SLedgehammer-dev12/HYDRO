@@ -17,6 +17,7 @@ from hidrostatik_test.domain.hydrotest_core import (
     evaluate_pressure_variation_test,
     scale_expansion_coefficient_k_to_micro_per_c,
     scale_isothermal_compressibility_pa_to_micro_per_bar,
+    steel_alpha_at_temperature_micro_per_c,
 )
 
 
@@ -211,7 +212,7 @@ class PressureVariationTests(unittest.TestCase):
 
         b_value = calculate_b_coefficient(beta_value, 12.0)
         self.assertLess(b_value, 0.0)
-        self.assertTrue(isclose(b_value, beta_value - 12.0, rel_tol=0.0, abs_tol=1e-12))
+        self.assertTrue(isclose(b_value, beta_value - 36.0, rel_tol=0.0, abs_tol=1e-12))
 
         inputs = PressureVariationInputs(
             pipe=PipeSection(outside_diameter_mm=406.4, wall_thickness_mm=8.74, length_m=1000),
@@ -262,14 +263,58 @@ class CompressibilityScaleTests(unittest.TestCase):
 
 
 class BCoefficientTests(unittest.TestCase):
-    def test_b_coefficient_is_water_minus_steel(self) -> None:
+    def test_b_coefficient_uses_volumetric_steel_expansion_by_default(self) -> None:
         self.assertTrue(
-            isclose(calculate_b_coefficient(218.29719116700636, 12.0), 206.29719116700636)
+            isclose(calculate_b_coefficient(218.29719116700636, 12.0), 182.29719116700636)
         )
 
+    def test_linear_steel_model_preserves_historic_behaviour(self) -> None:
+        self.assertTrue(
+            isclose(
+                calculate_b_coefficient(218.29719116700636, 12.0, steel_model="linear"),
+                206.29719116700636,
+            )
+        )
+
+    def test_volumetric_temperature_model_uses_temperature_dependent_alpha(self) -> None:
+        # alpha(20) = 10.8 + 0.012 * 20 = 11.04; B = 100 - 3 * 11.04.
+        self.assertTrue(
+            isclose(
+                calculate_b_coefficient(
+                    100.0,
+                    12.0,
+                    steel_model="volumetric_temperature",
+                    temp_c=20.0,
+                ),
+                66.88,
+                rel_tol=1e-12,
+            )
+        )
+        self.assertTrue(isclose(steel_alpha_at_temperature_micro_per_c(20.0), 11.04, rel_tol=1e-12))
+
+    def test_volumetric_temperature_model_requires_temperature(self) -> None:
+        with self.assertRaises(ValidationError):
+            calculate_b_coefficient(100.0, 12.0, steel_model="volumetric_temperature")
+
     def test_negative_b_coefficient_is_allowed(self) -> None:
-        self.assertEqual(calculate_b_coefficient(-50.0, 12.0), -62.0)
-        self.assertEqual(calculate_b_coefficient(0.0, 12.0), -12.0)
+        self.assertEqual(calculate_b_coefficient(-50.0, 12.0), -86.0)
+        self.assertEqual(calculate_b_coefficient(0.0, 12.0), -36.0)
+
+    def test_volumetric_temperature_model_rejects_negative_alpha_and_non_finite_temperature(
+        self,
+    ) -> None:
+        with self.assertRaises(ValidationError):
+            calculate_b_coefficient(
+                100.0, 12.0, steel_model="volumetric_temperature", temp_c=-1000.0
+            )
+        with self.assertRaises(ValidationError):
+            calculate_b_coefficient(
+                100.0, 12.0, steel_model="volumetric_temperature", temp_c=float("nan")
+            )
+
+    def test_unknown_steel_model_is_rejected(self) -> None:
+        with self.assertRaises(ValidationError):
+            calculate_b_coefficient(100.0, 12.0, steel_model="quadratic")
 
     def test_b_coefficient_rejects_non_finite_inputs(self) -> None:
         invalid_pairs = (
@@ -291,10 +336,11 @@ class BCoefficientTests(unittest.TestCase):
 
     def test_water_property_reference_points_match_iapws95_cross_check(self) -> None:
         # Reference values were cross-checked against an independent IAPWS-95 implementation.
+        # B uses the default volumetric steel model: B = beta - 3 * 12.0.
         reference_points = (
-            (10.0, 50.0, 47.193088967078, 99.621630836736, 87.621630836736),
-            (15.0, 80.0, 45.786845210898, 165.612819003945, 153.612819003945),
-            (20.0, 100.0, 44.744088115012, 221.153338084596, 209.153338084596),
+            (10.0, 50.0, 47.193088967078, 99.621630836736, 63.621630836736),
+            (15.0, 80.0, 45.786845210898, 165.612819003945, 129.612819003945),
+            (20.0, 100.0, 44.744088115012, 221.153338084596, 185.153338084596),
         )
 
         for temp_c, pressure_bar, expected_a, expected_beta, expected_b in reference_points:

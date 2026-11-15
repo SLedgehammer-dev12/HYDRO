@@ -29,6 +29,22 @@ WELDED_PIPE_K: Final[float] = 1.02
 FLOAT_TOLERANCE: Final[float] = 1e-9
 NUMERIC_COMPARISON_RELATIVE_TOLERANCE: Final[float] = 1e-9
 
+# Celik genlesme modeli secenekleri. B, suyun hacimsel genlesmesi ile celigin
+# hacimsel genlesmesi arasindaki farktir; fiziksel olarak dogru yaklasim
+# celigin lineer genlesme katsayisinin uc katini (hacimsel genlesme) almaktir.
+STEEL_MODEL_LINEAR: Final[str] = "linear"
+STEEL_MODEL_VOLUMETRIC: Final[str] = "volumetric"
+STEEL_MODEL_VOLUMETRIC_TEMPERATURE: Final[str] = "volumetric_temperature"
+DEFAULT_STEEL_MODEL: Final[str] = STEEL_MODEL_VOLUMETRIC
+STEEL_MODELS: Final[tuple[str, ...]] = (
+    STEEL_MODEL_LINEAR,
+    STEEL_MODEL_VOLUMETRIC,
+    STEEL_MODEL_VOLUMETRIC_TEMPERATURE,
+)
+# Arastirma raporundaki sicakliga bagli karbon celigi lineer genlesme modeli.
+STEEL_ALPHA_TEMPERATURE_BASE_MICRO_PER_C: Final[float] = 10.8
+STEEL_ALPHA_TEMPERATURE_SLOPE_MICRO_PER_C2: Final[float] = 0.012
+
 
 class ValidationError(ValueError):
     """Raised when user data is incomplete or physically inconsistent."""
@@ -137,17 +153,82 @@ def calculate_water_thermal_expansion_beta(
         raise ValidationError(str(exc)) from exc
 
 
-def calculate_b_coefficient(water_beta_micro_per_c: float, steel_alpha_micro_per_c: float) -> float:
+def calculate_b_coefficient(
+    water_beta_micro_per_c: float,
+    steel_alpha_micro_per_c: float,
+    steel_model: str = DEFAULT_STEEL_MODEL,
+    temp_c: float | None = None,
+) -> float:
+    """Return B (10^-6 / degC) from water expansion minus steel expansion.
+
+    ``steel_model`` selects how the steel contribution is derived:
+
+    - ``"linear"``: historic behaviour, ``B = beta - alpha``.
+    - ``"volumetric"`` (default): physically correct volume expansion,
+      ``B = beta - 3 * alpha``.
+    - ``"volumetric_temperature"``: ``B = beta - 3 * alpha(T)`` with
+      ``alpha(T) = 10.8 + 0.012 * T`` (micro/K), the research-report model.
+      ``temp_c`` is required for this model and the nominal
+      ``steel_alpha_micro_per_c`` value is superseded by ``alpha(T)``.
+
+    Negative water beta (below ~4 degC) and negative B are valid results.
+    """
+
     _require_finite(water_beta_micro_per_c, "Su genlesme katsayisi")
     _require_finite(steel_alpha_micro_per_c, "Celik genlesme katsayisi")
     if steel_alpha_micro_per_c < 0:
         raise ValidationError("Celik genlesme katsayisi negatif olamaz.")
 
+    model = normalize_steel_model(steel_model)
+    if model == STEEL_MODEL_LINEAR:
+        steel_contribution = steel_alpha_micro_per_c
+    elif model == STEEL_MODEL_VOLUMETRIC:
+        steel_contribution = 3.0 * steel_alpha_micro_per_c
+    else:
+        if temp_c is None:
+            raise ValidationError(
+                "volumetric_temperature modeli icin sicaklik (temp_c) gereklidir."
+            )
+        steel_contribution = 3.0 * steel_alpha_at_temperature_micro_per_c(temp_c)
+
     # 4 degC altinda suyun hacimsel genlesme katsayisi ve dolayisiyla B negatiftir.
-    b_micro_per_c = water_beta_micro_per_c - steel_alpha_micro_per_c
+    b_micro_per_c = water_beta_micro_per_c - steel_contribution
     if not isfinite(b_micro_per_c):
         raise ValidationError("Hesaplanan B katsayisi sonlu bir sayi olmalidir.")
     return b_micro_per_c
+
+
+def normalize_steel_model(steel_model: str) -> str:
+    """Return a canonical steel-model key or raise :class:`ValidationError`."""
+
+    if not isinstance(steel_model, str):
+        raise ValidationError("Celik genlesme modeli metin olmalidir.")
+    normalized = steel_model.strip().lower()
+    if normalized not in STEEL_MODELS:
+        raise ValidationError(
+            f"Bilinmeyen celik genlesme modeli: {steel_model!r}. "
+            f"Gecerli modeller: {', '.join(STEEL_MODELS)}."
+        )
+    return normalized
+
+
+def steel_alpha_at_temperature_micro_per_c(
+    temp_c: float,
+    *,
+    base_micro_per_c: float = STEEL_ALPHA_TEMPERATURE_BASE_MICRO_PER_C,
+    slope_micro_per_c2: float = STEEL_ALPHA_TEMPERATURE_SLOPE_MICRO_PER_C2,
+) -> float:
+    """Temperature-dependent linear steel expansion coefficient (micro/K)."""
+
+    _require_finite(temp_c, "Sicaklik")
+    _require_finite(base_micro_per_c, "Celik alpha taban degeri")
+    _require_finite(slope_micro_per_c2, "Celik alpha egimi")
+    alpha = base_micro_per_c + slope_micro_per_c2 * temp_c
+    if not isfinite(alpha):
+        raise ValidationError("Hesaplanan celik genlesme katsayisi sonlu bir sayi olmalidir.")
+    if alpha < 0:
+        raise ValidationError("Celik genlesme katsayisi negatif olamaz.")
+    return alpha
 
 
 @dataclass(frozen=True)

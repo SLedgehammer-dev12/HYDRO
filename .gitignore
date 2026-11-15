@@ -31,6 +31,11 @@ release/
 *.log
 *.tmp
 
+# Imzalama anahtarlari (ASLA commit edilmez)
+*.pem
+.hydro_signing/
+update_signing_key*
+
 # Isletim sistemi dosyalari
 .DS_Store
 Thumbs.db

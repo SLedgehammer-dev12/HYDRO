@@ -16,7 +16,7 @@ Her anlamli degisiklikten sonra (Windows PowerShell'de `python`, macOS/Linux'ta 
 - `python -m py_compile` ile degisen moduller (build scriptleri tam listeyi calistirir)
 - `python -c "import sys; sys.path.insert(0, r'.'); import Hidrostatik_Test_Chat; import hidrostatik_test.app_metadata; import hidrostatik_test.domain.hydrotest_core; import hidrostatik_test.domain.water_properties; import hidrostatik_test.data.pipe_catalog; import hidrostatik_test.services.updater; print('import-ok')"`
 
-Test paketi 508 otomatik test icerir. Yeni modul eklenirken
+Test paketi 560 otomatik test icerir. Yeni modul eklenirken
 `build_exe.ps1` icindeki `py_compile` listesi ve `HidrostatikTest.spec` veri
 girdileri de guncellenmelidir.
 

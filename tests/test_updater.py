@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import tkinter as tk
 import unittest
@@ -12,7 +14,7 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 
-from hidrostatik_test.app_metadata import APP_VERSION, BINARY_NAME
+from hidrostatik_test.app_metadata import APP_VERSION, BINARY_NAME, UPDATE_SIGNING_PUBLIC_KEY
 from hidrostatik_test.services import updater
 from hidrostatik_test.services.updater import (
     ReleaseAsset,
@@ -20,6 +22,7 @@ from hidrostatik_test.services.updater import (
     UpdateError,
     UpdateInfo,
     _checksum_candidate_urls,
+    _decode_public_key,
     _download_asset,
     _download_checksum,
     _ensure_pe_executable,
@@ -46,6 +49,43 @@ except ImportError:  # pragma: no cover
     HAVE_CRYPTOGRAPHY = False
 
 NEXT_TEST_VERSION = f"{int(APP_VERSION.split('.', 1)[0]) + 1}.0.0"
+SIGNING_TOOL = Path(__file__).resolve().parents[1] / "tools" / "update_signing.py"
+
+
+def _clean_hydro_env(**values: str) -> dict[str, str]:
+    """Gelistirici kabugundaki HYDRO_* degiskenlerini testten izole eder."""
+    env = {key: value for key, value in os.environ.items() if not key.startswith("HYDRO_")}
+    env.update(values)
+    return env
+
+
+def _new_keypair():
+    private_key = Ed25519PrivateKey.generate()
+    public_raw = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    return private_key, base64.b64encode(public_raw).decode("ascii")
+
+
+class UnsignedUpdateAllowedMixin:
+    """Imza uretmeyen eski testler icin acik gelistirici kacis bayragi.
+
+    Varsayilan davranis fail-closed oldugu icin bu testler imzayi bilerek
+    devre disi birakir; imza zorunlulugu ``SignatureEnforcementTests`` ile
+    ayrica dogrulanir.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        env_patch = patch.dict(
+            os.environ, _clean_hydro_env(HYDRO_ALLOW_UNSIGNED_UPDATE="1"), clear=True
+        )
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
+        key_patch = patch.object(updater, "UPDATE_SIGNING_PUBLIC_KEY", "")
+        key_patch.start()
+        self.addCleanup(key_patch.stop)
 
 
 class _FakeJsonResponse:
@@ -90,7 +130,7 @@ def _fake_pe_bytes() -> bytes:
     return bytes(data)
 
 
-class UpdaterTests(unittest.TestCase):
+class UpdaterTests(UnsignedUpdateAllowedMixin, unittest.TestCase):
     def test_fetch_latest_update_info_filters_project_specific_releases(self) -> None:
         payload = [
             {
@@ -441,7 +481,7 @@ class UpdaterTests(unittest.TestCase):
         )
 
 
-class UpdaterUtilityTests(unittest.TestCase):
+class UpdaterUtilityTests(UnsignedUpdateAllowedMixin, unittest.TestCase):
     def test_version_from_tag_with_prefix(self) -> None:
         self.assertEqual(_version_from_tag("hidrostatik-test-v1.2.3"), "1.2.3")
 
@@ -1026,105 +1066,508 @@ class UpdaterUtilityTests(unittest.TestCase):
             self.assertIn("Geri alma tamamlandi", log_text)
 
 
-class SignatureHookTests(unittest.TestCase):
-    def _signature_env(self, **values: str):
-        env = {
-            key: value
-            for key, value in os.environ.items()
-            if not key.startswith("HYDRO_UPDATE") and key != "HYDRO_REQUIRE_SIGNATURE"
-        }
-        env.update(values)
-        return patch.dict(os.environ, env, clear=True)
+class SignatureEnforcementTests(unittest.TestCase):
+    """Imza varsayilan olarak zorunludur: imzasiz/bozuk paket kurulmaz."""
 
-    def test_signature_is_disabled_by_default(self) -> None:
+    def _env(self, **values: str):
+        return patch.dict(os.environ, _clean_hydro_env(**values), clear=True)
+
+    def test_embedded_public_key_is_a_32_byte_ed25519_key(self) -> None:
+        self.assertTrue(UPDATE_SIGNING_PUBLIC_KEY)
+        self.assertEqual(len(_decode_public_key(UPDATE_SIGNING_PUBLIC_KEY)), 32)
+
+    def test_unsigned_update_is_rejected_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             asset_path = Path(temp_dir) / "app.zip"
             asset_path.write_bytes(b"payload")
             with (
-                self._signature_env(),
-                patch("hidrostatik_test.services.updater.urlopen") as mocked_urlopen,
+                self._env(),
+                patch(
+                    "hidrostatik_test.services.updater.urlopen",
+                    side_effect=HTTPError(
+                        "https://example.com/app.zip.sig", 404, "Not Found", {}, None
+                    ),
+                ) as mocked_urlopen,
             ):
-                verified = verify_asset_signature(asset_path, "https://example.com/app.zip", 10)
-            self.assertFalse(verified)
-            mocked_urlopen.assert_not_called()
+                with self.assertRaisesRegex(UpdateError, r"imzasi \(\.sig\) bulunamadi"):
+                    verify_asset_signature(asset_path, "https://example.com/app.zip", 10)
+
+            # .sig ve .minisig adaylari denendi; hicbiri bulunamadi.
+            self.assertEqual(mocked_urlopen.call_count, 2)
 
     @unittest.skipUnless(HAVE_CRYPTOGRAPHY, "cryptography paketi yok")
-    def test_valid_ed25519_signature_is_accepted(self) -> None:
-        import base64
-
-        private_key = Ed25519PrivateKey.generate()
-        public_key = private_key.public_key().public_bytes(
-            encoding=serialization.Encoding.Raw,
-            format=serialization.PublicFormat.Raw,
-        )
+    def test_valid_raw_signature_is_accepted_with_embedded_key(self) -> None:
+        private_key, public_b64 = _new_keypair()
         with tempfile.TemporaryDirectory() as temp_dir:
             asset_path = Path(temp_dir) / "app.zip"
             asset_path.write_bytes(b"payload")
             signature = private_key.sign(b"payload")
-            with self._signature_env(HYDRO_UPDATE_PUBKEY=base64.b64encode(public_key).decode()):
-                with patch(
+            with (
+                self._env(),
+                patch.object(updater, "UPDATE_SIGNING_PUBLIC_KEY", public_b64),
+                patch(
                     "hidrostatik_test.services.updater.urlopen",
                     return_value=_FakeBytesResponse(signature),
-                ) as mocked_urlopen:
-                    verified = verify_asset_signature(asset_path, "https://example.com/app.zip", 10)
+                ) as mocked_urlopen,
+            ):
+                verified = verify_asset_signature(asset_path, "https://example.com/app.zip", 10)
 
             self.assertTrue(verified)
             self.assertTrue(mocked_urlopen.call_args.args[0].full_url.endswith("app.zip.sig"))
 
     @unittest.skipUnless(HAVE_CRYPTOGRAPHY, "cryptography paketi yok")
-    def test_tampered_payload_fails_signature_verification(self) -> None:
-        import base64
-
-        private_key = Ed25519PrivateKey.generate()
-        public_key = private_key.public_key().public_bytes(
-            encoding=serialization.Encoding.Raw,
-            format=serialization.PublicFormat.Raw,
-        )
-        with tempfile.TemporaryDirectory() as temp_dir:
-            asset_path = Path(temp_dir) / "app.zip"
-            asset_path.write_bytes(b"tampered")
-            signature = private_key.sign(b"original")
-            with self._signature_env(HYDRO_UPDATE_PUBKEY=base64.b64encode(public_key).decode()):
-                with patch(
-                    "hidrostatik_test.services.updater.urlopen",
-                    return_value=_FakeBytesResponse(signature),
-                ):
-                    with self.assertRaisesRegex(UpdateError, "imzasi gecersiz"):
-                        verify_asset_signature(asset_path, "https://example.com/app.zip", 10)
-
-    def test_required_signature_without_public_key_fails(self) -> None:
+    def test_base64_signature_format_is_accepted(self) -> None:
+        private_key, public_b64 = _new_keypair()
         with tempfile.TemporaryDirectory() as temp_dir:
             asset_path = Path(temp_dir) / "app.zip"
             asset_path.write_bytes(b"payload")
-            with self._signature_env(HYDRO_REQUIRE_SIGNATURE="1"):
-                with self.assertRaisesRegex(UpdateError, "HYDRO_UPDATE_PUBKEY"):
+            signature_b64 = base64.b64encode(private_key.sign(b"payload")) + b"\n"
+            with (
+                self._env(),
+                patch.object(updater, "UPDATE_SIGNING_PUBLIC_KEY", public_b64),
+                patch(
+                    "hidrostatik_test.services.updater.urlopen",
+                    return_value=_FakeBytesResponse(signature_b64),
+                ),
+            ):
+                verified = verify_asset_signature(asset_path, "https://example.com/app.zip", 10)
+
+            self.assertTrue(verified)
+
+    @unittest.skipUnless(HAVE_CRYPTOGRAPHY, "cryptography paketi yok")
+    def test_corrupted_signature_is_rejected(self) -> None:
+        private_key, public_b64 = _new_keypair()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            asset_path = Path(temp_dir) / "app.zip"
+            asset_path.write_bytes(b"payload")
+            corrupted = bytearray(private_key.sign(b"payload"))
+            corrupted[0] ^= 0xFF
+            with (
+                self._env(),
+                patch.object(updater, "UPDATE_SIGNING_PUBLIC_KEY", public_b64),
+                patch(
+                    "hidrostatik_test.services.updater.urlopen",
+                    return_value=_FakeBytesResponse(bytes(corrupted)),
+                ),
+            ):
+                with self.assertRaisesRegex(UpdateError, "imzasi gecersiz"):
                     verify_asset_signature(asset_path, "https://example.com/app.zip", 10)
 
     @unittest.skipUnless(HAVE_CRYPTOGRAPHY, "cryptography paketi yok")
-    def test_required_signature_missing_file_fails(self) -> None:
-        import base64
-
-        private_key = Ed25519PrivateKey.generate()
-        public_key = private_key.public_key().public_bytes(
-            encoding=serialization.Encoding.Raw,
-            format=serialization.PublicFormat.Raw,
-        )
+    def test_signature_from_foreign_key_is_rejected(self) -> None:
+        foreign_key, _foreign_public = _new_keypair()
+        _trusted_key, trusted_public = _new_keypair()
         with tempfile.TemporaryDirectory() as temp_dir:
             asset_path = Path(temp_dir) / "app.zip"
             asset_path.write_bytes(b"payload")
-            env = {
-                "HYDRO_REQUIRE_SIGNATURE": "1",
-                "HYDRO_UPDATE_PUBKEY": base64.b64encode(public_key).decode(),
-            }
-            with self._signature_env(**env):
-                with patch(
+            with (
+                self._env(),
+                patch.object(updater, "UPDATE_SIGNING_PUBLIC_KEY", trusted_public),
+                patch(
+                    "hidrostatik_test.services.updater.urlopen",
+                    return_value=_FakeBytesResponse(foreign_key.sign(b"payload")),
+                ),
+            ):
+                with self.assertRaisesRegex(UpdateError, "imzasi gecersiz"):
+                    verify_asset_signature(asset_path, "https://example.com/app.zip", 10)
+
+    @unittest.skipUnless(HAVE_CRYPTOGRAPHY, "cryptography paketi yok")
+    def test_env_pubkey_overrides_embedded_key_for_rotation(self) -> None:
+        rotation_key, rotation_public = _new_keypair()
+        embedded_key, embedded_public = _new_keypair()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            asset_path = Path(temp_dir) / "app.zip"
+            asset_path.write_bytes(b"payload")
+            rotation_signature = rotation_key.sign(b"payload")
+            with (
+                self._env(HYDRO_UPDATE_PUBKEY=rotation_public),
+                patch.object(updater, "UPDATE_SIGNING_PUBLIC_KEY", embedded_public),
+                patch(
+                    "hidrostatik_test.services.updater.urlopen",
+                    return_value=_FakeBytesResponse(rotation_signature),
+                ),
+            ):
+                self.assertTrue(
+                    verify_asset_signature(asset_path, "https://example.com/app.zip", 10)
+                )
+
+            # Ayni imza, override kaldirilinca gomulu anahtarla reddedilir.
+            with (
+                self._env(),
+                patch.object(updater, "UPDATE_SIGNING_PUBLIC_KEY", embedded_public),
+                patch(
+                    "hidrostatik_test.services.updater.urlopen",
+                    return_value=_FakeBytesResponse(rotation_signature),
+                ),
+            ):
+                with self.assertRaisesRegex(UpdateError, "imzasi gecersiz"):
+                    verify_asset_signature(asset_path, "https://example.com/app.zip", 10)
+
+            # Gomulu anahtarin imzasi override etkinken gecersizdir.
+            with (
+                self._env(HYDRO_UPDATE_PUBKEY=rotation_public),
+                patch.object(updater, "UPDATE_SIGNING_PUBLIC_KEY", embedded_public),
+                patch(
+                    "hidrostatik_test.services.updater.urlopen",
+                    return_value=_FakeBytesResponse(embedded_key.sign(b"payload")),
+                ),
+            ):
+                with self.assertRaisesRegex(UpdateError, "imzasi gecersiz"):
+                    verify_asset_signature(asset_path, "https://example.com/app.zip", 10)
+
+    @unittest.skipUnless(HAVE_CRYPTOGRAPHY, "cryptography paketi yok")
+    def test_env_pubkey_can_point_to_a_key_file(self) -> None:
+        private_key, public_b64 = _new_keypair()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            asset_path = Path(temp_dir) / "app.zip"
+            asset_path.write_bytes(b"payload")
+            key_file = Path(temp_dir) / "public_key.txt"
+            key_file.write_text(public_b64, encoding="utf-8")
+            with (
+                self._env(HYDRO_UPDATE_PUBKEY=str(key_file)),
+                patch(
+                    "hidrostatik_test.services.updater.urlopen",
+                    return_value=_FakeBytesResponse(private_key.sign(b"payload")),
+                ),
+            ):
+                self.assertTrue(
+                    verify_asset_signature(asset_path, "https://example.com/app.zip", 10)
+                )
+
+    def test_missing_public_key_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            asset_path = Path(temp_dir) / "app.zip"
+            asset_path.write_bytes(b"payload")
+            with (
+                self._env(),
+                patch.object(updater, "UPDATE_SIGNING_PUBLIC_KEY", ""),
+                patch("hidrostatik_test.services.updater.urlopen") as mocked_urlopen,
+            ):
+                with self.assertRaisesRegex(UpdateError, "imza anahtari tanimli degil"):
+                    verify_asset_signature(asset_path, "https://example.com/app.zip", 10)
+            mocked_urlopen.assert_not_called()
+
+    @unittest.skipUnless(HAVE_CRYPTOGRAPHY, "cryptography paketi yok")
+    def test_allow_unsigned_env_flag_tolerates_missing_signature(self) -> None:
+        _private_key, public_b64 = _new_keypair()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            asset_path = Path(temp_dir) / "app.zip"
+            asset_path.write_bytes(b"payload")
+            with (
+                self._env(HYDRO_ALLOW_UNSIGNED_UPDATE="1"),
+                patch.object(updater, "UPDATE_SIGNING_PUBLIC_KEY", public_b64),
+                patch(
                     "hidrostatik_test.services.updater.urlopen",
                     side_effect=HTTPError(
                         "https://example.com/app.zip.sig", 404, "Not Found", {}, None
                     ),
-                ):
-                    with self.assertRaisesRegex(UpdateError, "imzasi.*bulunamadi"):
-                        verify_asset_signature(asset_path, "https://example.com/app.zip", 10)
+                ),
+            ):
+                verified = verify_asset_signature(asset_path, "https://example.com/app.zip", 10)
+            self.assertFalse(verified)
+
+    @unittest.skipUnless(HAVE_CRYPTOGRAPHY, "cryptography paketi yok")
+    def test_require_signature_zero_flag_tolerates_missing_signature(self) -> None:
+        _private_key, public_b64 = _new_keypair()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            asset_path = Path(temp_dir) / "app.zip"
+            asset_path.write_bytes(b"payload")
+            with (
+                self._env(HYDRO_REQUIRE_SIGNATURE="0"),
+                patch.object(updater, "UPDATE_SIGNING_PUBLIC_KEY", public_b64),
+                patch(
+                    "hidrostatik_test.services.updater.urlopen",
+                    side_effect=HTTPError(
+                        "https://example.com/app.zip.sig", 404, "Not Found", {}, None
+                    ),
+                ),
+            ):
+                verified = verify_asset_signature(asset_path, "https://example.com/app.zip", 10)
+            self.assertFalse(verified)
+
+    @unittest.skipUnless(HAVE_CRYPTOGRAPHY, "cryptography paketi yok")
+    def test_developer_escape_still_rejects_a_bad_signature(self) -> None:
+        private_key, public_b64 = _new_keypair()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            asset_path = Path(temp_dir) / "app.zip"
+            asset_path.write_bytes(b"payload")
+            with (
+                self._env(HYDRO_ALLOW_UNSIGNED_UPDATE="1"),
+                patch.object(updater, "UPDATE_SIGNING_PUBLIC_KEY", public_b64),
+                patch(
+                    "hidrostatik_test.services.updater.urlopen",
+                    return_value=_FakeBytesResponse(private_key.sign(b"other-payload")),
+                ),
+            ):
+                with self.assertRaisesRegex(UpdateError, "imzasi gecersiz"):
+                    verify_asset_signature(asset_path, "https://example.com/app.zip", 10)
+
+    def test_malformed_signature_file_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            asset_path = Path(temp_dir) / "app.zip"
+            asset_path.write_bytes(b"payload")
+            with (
+                self._env(),
+                patch(
+                    "hidrostatik_test.services.updater.urlopen",
+                    return_value=_FakeBytesResponse(b"not-a-valid-signature!!"),
+                ),
+            ):
+                with self.assertRaisesRegex(UpdateError, "base64 olarak okunamadi"):
+                    verify_asset_signature(asset_path, "https://example.com/app.zip", 10)
+
+    def test_signature_download_http_error_is_actionable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            asset_path = Path(temp_dir) / "app.zip"
+            asset_path.write_bytes(b"payload")
+            with (
+                self._env(),
+                patch(
+                    "hidrostatik_test.services.updater.urlopen",
+                    side_effect=HTTPError(
+                        "https://example.com/app.zip.sig", 500, "Server Error", {}, None
+                    ),
+                ),
+            ):
+                with self.assertRaisesRegex(UpdateError, r"HTTP 500.*iptal edildi"):
+                    verify_asset_signature(asset_path, "https://example.com/app.zip", 10)
+
+    def test_signature_download_network_error_is_actionable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            asset_path = Path(temp_dir) / "app.zip"
+            asset_path.write_bytes(b"payload")
+            with (
+                self._env(),
+                patch(
+                    "hidrostatik_test.services.updater.urlopen",
+                    side_effect=URLError("offline"),
+                ),
+            ):
+                with self.assertRaisesRegex(UpdateError, "Imza dosyasina ulasilamadi"):
+                    verify_asset_signature(asset_path, "https://example.com/app.zip", 10)
+
+    def test_download_asset_rejects_unsigned_package(self) -> None:
+        asset = ReleaseAsset(
+            name=f"HidrostatikTest-v{NEXT_TEST_VERSION}-windows-x64.zip",
+            download_url="https://example.com/app.zip",
+            size=42,
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_path = Path(temp_dir) / asset.name
+
+            def fake_download(url: str, dest: Path, on_progress=None):
+                self.assertEqual(url, asset.download_url)
+                dest.write_bytes(b"downloaded-data")
+
+            with (
+                self._env(),
+                patch(
+                    "hidrostatik_test.services.download_manager.DownloadManager.download_file",
+                    side_effect=fake_download,
+                ),
+                patch(
+                    "hidrostatik_test.services.updater._download_checksum",
+                    return_value=hashlib.sha256(b"downloaded-data").hexdigest(),
+                ),
+                patch(
+                    "hidrostatik_test.services.updater.urlopen",
+                    side_effect=HTTPError(
+                        "https://example.com/app.zip.sig", 404, "Not Found", {}, None
+                    ),
+                ),
+            ):
+                with self.assertRaisesRegex(UpdateError, r"imzasi \(\.sig\) bulunamadi"):
+                    _download_asset(asset, target_path, 10)
+
+    def test_install_update_does_not_apply_unsigned_package(self) -> None:
+        info = UpdateInfo(
+            current_version=APP_VERSION,
+            latest_version=NEXT_TEST_VERSION,
+            tag_name=f"hidrostatik-test-v{NEXT_TEST_VERSION}",
+            html_url="https://example.com/update",
+            body="notes",
+            published_at="2026-03-30T12:00:00Z",
+            asset=ReleaseAsset(
+                name=f"HidrostatikTest-v{NEXT_TEST_VERSION}-windows-x64.zip",
+                download_url="https://example.com/update.zip",
+                size=1024,
+            ),
+            update_available=True,
+            source_repository="SLedgehammer-dev12/HYDRO",
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+            working_root = base_dir / "work"
+            working_root.mkdir()
+            install_dir = base_dir / "install"
+            install_dir.mkdir()
+            executable_path = install_dir / "HidrostatikTest.exe"
+            executable_path.write_bytes(_fake_pe_bytes())
+            runtime = RuntimeContext(
+                frozen=True,
+                can_self_update=True,
+                executable_path=executable_path,
+                install_dir=install_dir,
+            )
+
+            def fake_download(url: str, dest: Path, on_progress=None):
+                del url, on_progress
+                _make_zip(
+                    dest,
+                    {
+                        f"{BINARY_NAME}/marker.txt": b"ok",
+                        f"{BINARY_NAME}/{BINARY_NAME}.exe": b"stub",
+                    },
+                )
+
+            with (
+                self._env(),
+                patch(
+                    "hidrostatik_test.services.updater.tempfile.mkdtemp",
+                    return_value=str(working_root),
+                ),
+                patch(
+                    "hidrostatik_test.services.updater.get_runtime_context",
+                    return_value=runtime,
+                ),
+                patch(
+                    "hidrostatik_test.services.download_manager.DownloadManager.download_file",
+                    side_effect=fake_download,
+                ),
+                patch(
+                    "hidrostatik_test.services.updater._download_checksum",
+                    return_value="0" * 64,
+                ),
+                patch("hidrostatik_test.services.updater._verify_sha256"),
+                patch(
+                    "hidrostatik_test.services.updater.urlopen",
+                    side_effect=HTTPError(
+                        "https://example.com/update.zip.sig", 404, "Not Found", {}, None
+                    ),
+                ),
+                patch("hidrostatik_test.services.updater.subprocess.Popen") as mocked_popen,
+            ):
+                with self.assertRaisesRegex(UpdateError, r"imzasi \(\.sig\) bulunamadi"):
+                    install_update(info, download_root=base_dir / "downloads")
+
+            mocked_popen.assert_not_called()
+            self.assertFalse((working_root / "stage").exists())
+            self.assertFalse((install_dir / "marker.txt").exists())
+
+
+class UpdateSigningToolTests(unittest.TestCase):
+    """tools/update_signing.py: generate / sign / verify ve updater uyumu."""
+
+    def _run_tool(self, *arguments: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(SIGNING_TOOL), *arguments],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+
+    @unittest.skipUnless(HAVE_CRYPTOGRAPHY, "cryptography paketi yok")
+    def test_generate_sign_verify_roundtrip(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            key_path = Path(temp_dir) / "update_signing_key.pem"
+            generated = self._run_tool("generate", "--key", str(key_path))
+            self.assertEqual(generated.returncode, 0, generated.stderr)
+            public_b64 = generated.stdout.strip()
+            self.assertEqual(len(base64.b64decode(public_b64)), 32)
+            self.assertTrue(key_path.is_file())
+            self.assertEqual(key_path.stat().st_mode & 0o777, 0o600)
+
+            artifact = Path(temp_dir) / "app.zip"
+            artifact.write_bytes(b"release-payload")
+            signed = self._run_tool("sign", str(artifact), "--key", str(key_path))
+            self.assertEqual(signed.returncode, 0, signed.stderr)
+            signature_path = artifact.with_name("app.zip.sig")
+            self.assertTrue(signature_path.is_file())
+            signature = base64.b64decode(signature_path.read_text(encoding="ascii").strip())
+            self.assertEqual(len(signature), 64)
+
+            verified = self._run_tool(
+                "verify", str(artifact), str(signature_path), "--public-key", public_b64
+            )
+            self.assertEqual(verified.returncode, 0, verified.stderr)
+            self.assertIn("OK", verified.stdout)
+
+            # Bozulan artefakt reddedilir.
+            artifact.write_bytes(b"tampered-payload")
+            tampered = self._run_tool(
+                "verify", str(artifact), str(signature_path), "--public-key", public_b64
+            )
+            self.assertNotEqual(tampered.returncode, 0)
+            self.assertIn("GECERSIZ", tampered.stderr)
+
+    @unittest.skipUnless(HAVE_CRYPTOGRAPHY, "cryptography paketi yok")
+    def test_tool_signature_is_accepted_by_updater(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            key_path = Path(temp_dir) / "update_signing_key.pem"
+            generated = self._run_tool("generate", "--key", str(key_path))
+            self.assertEqual(generated.returncode, 0, generated.stderr)
+            public_b64 = generated.stdout.strip()
+
+            artifact = Path(temp_dir) / "app.zip"
+            artifact.write_bytes(b"release-payload")
+            signed = self._run_tool("sign", str(artifact), "--key", str(key_path))
+            self.assertEqual(signed.returncode, 0, signed.stderr)
+            signature_bytes = artifact.with_name("app.zip.sig").read_bytes()
+
+            with (
+                patch.dict(
+                    os.environ,
+                    _clean_hydro_env(HYDRO_UPDATE_PUBKEY=public_b64),
+                    clear=True,
+                ),
+                patch(
+                    "hidrostatik_test.services.updater.urlopen",
+                    return_value=_FakeBytesResponse(signature_bytes),
+                ),
+            ):
+                verified = verify_asset_signature(artifact, "https://example.com/app.zip", 10)
+
+            self.assertTrue(verified)
+
+    @unittest.skipUnless(HAVE_CRYPTOGRAPHY, "cryptography paketi yok")
+    def test_generate_does_not_overwrite_existing_key_without_force(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            key_path = Path(temp_dir) / "update_signing_key.pem"
+            first = self._run_tool("generate", "--key", str(key_path))
+            self.assertEqual(first.returncode, 0, first.stderr)
+            original = key_path.read_bytes()
+
+            second = self._run_tool("generate", "--key", str(key_path))
+            self.assertEqual(second.returncode, 0, second.stderr)
+            self.assertEqual(second.stdout.strip(), first.stdout.strip())
+            self.assertEqual(key_path.read_bytes(), original)
+            self.assertIn("zaten mevcut", second.stderr)
+
+            forced = self._run_tool("generate", "--key", str(key_path), "--force")
+            self.assertEqual(forced.returncode, 0, forced.stderr)
+            self.assertNotEqual(forced.stdout.strip(), first.stdout.strip())
+            self.assertNotEqual(key_path.read_bytes(), original)
+
+    def test_sign_without_private_key_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact = Path(temp_dir) / "app.zip"
+            artifact.write_bytes(b"payload")
+            result = self._run_tool(
+                "sign", str(artifact), "--key", str(Path(temp_dir) / "missing.pem")
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("Ozel anahtar bulunamadi", result.stderr)
+            self.assertFalse(artifact.with_name("app.zip.sig").exists())
+
+    def test_verify_without_signature_file_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact = Path(temp_dir) / "app.zip"
+            artifact.write_bytes(b"payload")
+            result = self._run_tool("verify", str(artifact))
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("Imza dosyasi bulunamadi", result.stderr)
 
 
 class UpdateUiTests(unittest.TestCase):

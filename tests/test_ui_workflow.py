@@ -9,18 +9,25 @@ from unittest.mock import patch
 import hidrostatik_test.ui.app as app_module
 from hidrostatik_test.app_metadata import APP_VERSION, SPEC_DOCUMENT_CODE
 from hidrostatik_test.data import BOTAS_REFERENCE_OPTION_LABEL, GAIL_REFERENCE_OPTION_LABEL
+from hidrostatik_test.domain import BSource
 from hidrostatik_test.domain.coefficient_manager import CoefficientState
-from hidrostatik_test.domain.hydrotest_core import ValidationError
+from hidrostatik_test.domain.hydrotest_core import STEEL_MODELS, ValidationError
 from hidrostatik_test.services.download_manager import DownloadManager
 from hidrostatik_test.ui import constants as ui_constants
 from hidrostatik_test.ui.app import HydrostaticTestApp
 from hidrostatik_test.ui.constants import (
     AUTO_A_MODE,
     AUTO_B_MODE,
+    B_SOURCE_AUTO_LABEL,
+    B_SOURCE_GAIL_LABEL,
+    B_SOURCE_INSTITUTIONAL_LABEL,
     MANUAL_A_MODE,
     MANUAL_B_MODE,
     REFERENCE_A_MODE,
     REFERENCE_B_MODE,
+    STEEL_MODEL_LINEAR_LABEL,
+    STEEL_MODEL_VOLUMETRIC_LABEL,
+    TABLE_B_MODE,
 )
 
 
@@ -55,22 +62,31 @@ class UiWorkflowTests(unittest.TestCase):
             self.app.field_message_vars["air.a_micro_per_bar"].get(), "Hazir: Hesap guncel."
         )
 
-    def test_pressure_evaluation_auto_calculates_a_and_b(self) -> None:
+    def test_pressure_evaluation_prepares_default_table_b_without_helper(self) -> None:
         self._fill_geometry()
+        self.assertEqual(self.app.pressure_b_source_var.get(), B_SOURCE_INSTITUTIONAL_LABEL)
+        self.assertEqual(self.app.pressure_b_mode_var.get(), TABLE_B_MODE)
+        self.assertEqual(self.app.pressure_b_reference_var.get(), BOTAS_REFERENCE_OPTION_LABEL)
+        self.assertFalse(self.app.use_b_helper_var.get())
+
         self.app.pressure_vars["temperature_c"].set("20")
         self.app.pressure_vars["pressure_bar"].set("80")
         self.app.pressure_vars["delta_t_c"].set("0.6")
-        self.app.pressure_vars["actual_pressure_change_bar"].set("2.1")
-        self.app.b_helper_vars["steel_alpha_micro_per_c"].set("12.0")
-        self.app.use_b_helper_var.set(True)
+        self.assertTrue(self.app._calculate_pressure_a(log_result=False))
+        self.assertTrue(self.app._calculate_b_helper(log_result=False))
+        a_value = float(self.app.pressure_vars["a_micro_per_bar"].get())
+        b_value = float(self.app.pressure_vars["b_micro_per_c"].get())
+        theoretical = (b_value * 0.6) / (
+            self.app._build_pipe_section("pressure").elasticity_term + a_value
+        )
+        self.app.pressure_vars["actual_pressure_change_bar"].set(f"{theoretical + 0.1:.9f}")
 
         self.app._run_pressure_test()
 
         self.assertEqual(self.app.decision_status_var.get(), "BASARILI")
-        self.assertNotEqual(self.app.pressure_vars["a_micro_per_bar"].get(), "")
-        self.assertNotEqual(self.app.pressure_vars["b_micro_per_c"].get(), "")
+        self.assertEqual(self.app.pressure_vars["b_micro_per_c"].get(), "188.661000")
         self.assertEqual(self.app.coefficient_manager.get("pressure_a"), CoefficientState.COMPUTED)
-        self.assertEqual(self.app.coefficient_manager.get("pressure_b"), CoefficientState.COMPUTED)
+        self.assertEqual(self.app.coefficient_manager.get("pressure_b"), CoefficientState.REFERENCE)
 
     def test_air_evaluation_accepts_manual_a_mode(self) -> None:
         self._fill_geometry()
@@ -193,6 +209,154 @@ class UiWorkflowTests(unittest.TestCase):
         self.assertFalse(self.app.use_b_helper_var.get())
         self.assertEqual(self.app.b_helper_vars["water_beta_micro_per_c"].get(), "")
 
+    def test_b_source_selector_defaults_to_institutional_table(self) -> None:
+        values = tuple(str(value) for value in self.app.pressure_b_source_combo["values"])
+
+        self.assertEqual(
+            values,
+            (
+                B_SOURCE_INSTITUTIONAL_LABEL,
+                B_SOURCE_GAIL_LABEL,
+                B_SOURCE_AUTO_LABEL,
+            ),
+        )
+        self.assertEqual(self.app.pressure_b_source_var.get(), B_SOURCE_INSTITUTIONAL_LABEL)
+        self.assertEqual(self.app.pressure_b_mode_var.get(), TABLE_B_MODE)
+        self.assertEqual(self.app.pressure_b_reference_var.get(), BOTAS_REFERENCE_OPTION_LABEL)
+        self.assertEqual(self.app.steel_model_var.get(), STEEL_MODEL_VOLUMETRIC_LABEL)
+        self.assertFalse(self.app.use_b_helper_var.get())
+        self.assertEqual(str(self.app.pressure_b_source_combo.cget("state")), "readonly")
+        self.assertEqual(str(self.app.steel_model_combo.cget("state")), "disabled")
+
+    def test_b_source_labels_match_domain_contract(self) -> None:
+        self.assertEqual(
+            set(ui_constants.B_SOURCE_BY_LABEL.values()),
+            {source.value for source in BSource},
+        )
+        self.assertEqual(
+            set(ui_constants.STEEL_MODEL_BY_LABEL.values()),
+            set(STEEL_MODELS),
+        )
+        self.assertEqual(
+            ui_constants.DEFAULT_STEEL_MODEL_LABEL,
+            ui_constants.STEEL_MODEL_VOLUMETRIC_LABEL,
+        )
+
+    def test_b_source_switch_resolves_expected_values_and_states(self) -> None:
+        self.app.pressure_vars["temperature_c"].set("10")
+        self.app.pressure_vars["pressure_bar"].set("50")
+
+        self.app.pressure_b_source_var.set(B_SOURCE_INSTITUTIONAL_LABEL)
+        self.app._on_pressure_b_source_changed()
+
+        self.assertEqual(self.app.pressure_vars["b_micro_per_c"].get(), "64.923000")
+        self.assertEqual(self.app.coefficient_manager.get("pressure_b"), CoefficientState.REFERENCE)
+        self.assertEqual(self.app.pressure_b_mode_var.get(), TABLE_B_MODE)
+        self.assertEqual(self.app.pressure_b_reference_var.get(), BOTAS_REFERENCE_OPTION_LABEL)
+        self.assertFalse(self.app.use_b_helper_var.get())
+
+        self.app.pressure_b_source_var.set(B_SOURCE_GAIL_LABEL)
+        self.app._on_pressure_b_source_changed()
+
+        self.assertEqual(self.app.pressure_vars["b_micro_per_c"].get(), "60.450000")
+        self.assertEqual(self.app.coefficient_manager.get("pressure_b"), CoefficientState.REFERENCE)
+        self.assertEqual(self.app.pressure_b_reference_var.get(), GAIL_REFERENCE_OPTION_LABEL)
+        self.assertFalse(self.app.use_b_helper_var.get())
+
+        self.app.pressure_b_source_var.set(B_SOURCE_AUTO_LABEL)
+        self.app._on_pressure_b_source_changed()
+
+        self.assertEqual(self.app.pressure_vars["b_micro_per_c"].get(), "63.621631")
+        self.assertEqual(self.app.coefficient_manager.get("pressure_b"), CoefficientState.COMPUTED)
+        self.assertEqual(self.app.pressure_b_mode_var.get(), AUTO_B_MODE)
+        self.assertTrue(self.app.use_b_helper_var.get())
+        self.assertEqual(self.app.b_helper_vars["water_beta_micro_per_c"].get(), "99.621631")
+
+        self.app.pressure_b_source_var.set(B_SOURCE_INSTITUTIONAL_LABEL)
+        self.app._on_pressure_b_source_changed()
+
+        self.assertEqual(self.app.pressure_vars["b_micro_per_c"].get(), "64.923000")
+        self.assertEqual(self.app.coefficient_manager.get("pressure_b"), CoefficientState.REFERENCE)
+        self.assertEqual(self.app.b_helper_vars["water_beta_micro_per_c"].get(), "")
+
+    def test_auto_steel_model_linear_and_volumetric_differ(self) -> None:
+        self.app.notebook.select(1)
+        self.app._on_tab_changed()
+        self.app.pressure_vars["temperature_c"].set("10")
+        self.app.pressure_vars["pressure_bar"].set("50")
+        self.app.pressure_b_source_var.set(B_SOURCE_AUTO_LABEL)
+        self.app._on_pressure_b_source_changed()
+        self.assertEqual(str(self.app.steel_model_combo.cget("state")), "readonly")
+
+        self.app.steel_model_var.set(STEEL_MODEL_LINEAR_LABEL)
+        self.app._on_steel_model_changed()
+
+        self.assertEqual(self.app.pressure_vars["b_micro_per_c"].get(), "87.621631")
+        self.assertIn("B = beta - alpha", self.app.active_detail_report_var.get())
+
+        self.app.steel_model_var.set(STEEL_MODEL_VOLUMETRIC_LABEL)
+        self.app._on_steel_model_changed()
+
+        self.assertEqual(self.app.pressure_vars["b_micro_per_c"].get(), "63.621631")
+        self.assertIn(
+            "Otomatik B modeli: B = beta - 3*alpha, alpha=12.0 micro/K",
+            self.app.active_detail_report_var.get(),
+        )
+
+    def test_institutional_repair_is_visible_in_detail_and_report(self) -> None:
+        self.app.notebook.select(1)
+        self.app._on_tab_changed()
+        self.app.pressure_vars["temperature_c"].set("7")
+        self.app.pressure_vars["pressure_bar"].set("90")
+
+        self.assertTrue(self.app._calculate_b_helper(log_result=False))
+        detail = self.app.active_detail_report_var.get()
+        report = self.app._build_report_text()
+
+        self.assertEqual(self.app.pressure_vars["b_micro_per_c"].get(), "32.663000")
+        for text in (detail, report):
+            self.assertIn("A/B kontrol tablosu (onarilmis hucre: 20)", text)
+            self.assertIn("A onarilmis: ham 45.515 -> 47.115", text)
+            self.assertIn(f"B kaynagi: {B_SOURCE_INSTITUTIONAL_LABEL}", text)
+
+    def test_b_source_change_clears_previous_value_before_recompute(self) -> None:
+        self.app.pressure_vars["temperature_c"].set("10")
+        self.app.pressure_vars["pressure_bar"].set("50")
+        self.app.pressure_b_source_var.set(B_SOURCE_INSTITUTIONAL_LABEL)
+        self.app._on_pressure_b_source_changed()
+        self.assertEqual(self.app.pressure_vars["b_micro_per_c"].get(), "64.923000")
+
+        # Yeniden hesaplamayi engellemek icin sicakligi kaldir; kaynak degisimi
+        # eski tablo degerini temizlemelidir.
+        self.app.pressure_vars["temperature_c"].set("")
+        self.app.pressure_b_source_var.set(B_SOURCE_GAIL_LABEL)
+        self.app._on_pressure_b_source_changed()
+
+        self.assertEqual(self.app.pressure_vars["b_micro_per_c"].get(), "")
+        self.assertEqual(self.app.coefficient_manager.get("pressure_b"), CoefficientState.EMPTY)
+        self.assertEqual(self.app.pressure_b_reference_var.get(), GAIL_REFERENCE_OPTION_LABEL)
+        self.assertIn("B kaynagi:", self.app.pressure_b_source_summary_var.get())
+
+    def test_b_source_summary_lists_three_sources_and_delta(self) -> None:
+        self.app.pressure_vars["temperature_c"].set("10")
+        self.app.pressure_vars["pressure_bar"].set("50")
+
+        summary = self.app.pressure_b_source_summary_var.get()
+
+        self.assertIn("B kaynaklari: Kurum 64.92 | GAIL 60.45 | Oto 63.62", summary)
+        self.assertIn("\u0394kurum-GAIL +4.47", summary)
+        self.assertIn(f"Kullanilan kaynak: {B_SOURCE_INSTITUTIONAL_LABEL}", summary)
+
+    def test_b_source_out_of_institutional_range_warns_and_blocks_value(self) -> None:
+        self.app.pressure_vars["temperature_c"].set("26")
+        self.app.pressure_vars["pressure_bar"].set("50")
+        self.app.pressure_b_source_var.set(B_SOURCE_INSTITUTIONAL_LABEL)
+        self.app._on_pressure_b_source_changed()
+
+        self.assertEqual(self.app.pressure_vars["b_micro_per_c"].get(), "")
+        self.assertIn("aralik disi", self.app.pressure_b_source_summary_var.get())
+        self.assertEqual(self.app.banner_level, "error")
+
     def test_material_grade_selection_populates_smys(self) -> None:
         option = next(
             option for option in self.app.material_grade_combo["values"] if "X65 / L450" in option
@@ -296,7 +460,8 @@ class UiWorkflowTests(unittest.TestCase):
 
         self.assertIn("Basinc Degisim Testi - Detay Raporu", detail)
         self.assertIn("A kaynagi: Kullanici girdisi / manuel tablo-prosedur.", detail)
-        self.assertIn("B kaynagi: Kullanici girdisi / manuel tablo-prosedur.", detail)
+        self.assertIn("B kaynagi detayi: Kullanici girdisi / manuel tablo-prosedur.", detail)
+        self.assertIn("B kaynagi: Manuel B", detail)
         self.assertIn("Karar kurali: (Pa - Pt) <= 0.3 bar", detail)
         self.assertIn("Anlik sonuc: BASARILI", detail)
 
@@ -410,15 +575,20 @@ class UiWorkflowTests(unittest.TestCase):
         self.root.update_idletasks()
         self.app.pressure_vars["temperature_c"].set("20")
         self.app.pressure_vars["pressure_bar"].set("80")
+        a_value = float(self.app.pressure_vars["a_micro_per_bar"].get())
+        b_value = float(self.app.pressure_vars["b_micro_per_c"].get())
+        theoretical = (b_value * 0.6) / (
+            self.app._build_pipe_section("pressure").elasticity_term + a_value
+        )
         self.app.pressure_vars["delta_t_c"].set("0.6")
-        self.app.pressure_vars["actual_pressure_change_bar"].set("2.1")
-        self.app.b_helper_vars["steel_alpha_micro_per_c"].set("12.0")
+        self.app.pressure_vars["actual_pressure_change_bar"].set(f"{theoretical + 0.1:.9f}")
 
         self.assertEqual(self.app.decision_title_var.get(), "Basinc Degisim Testi")
         self.assertEqual(self.app.decision_status_var.get(), "BASARILI")
         self.assertIn("Canli sonuc: Pt =", self.app.decision_summary_var.get())
         self.assertEqual(self.app.coefficient_manager.get("pressure_a"), CoefficientState.COMPUTED)
-        self.assertEqual(self.app.coefficient_manager.get("pressure_b"), CoefficientState.COMPUTED)
+        self.assertEqual(self.app.coefficient_manager.get("pressure_b"), CoefficientState.REFERENCE)
+        self.assertEqual(self.app.pressure_vars["b_micro_per_c"].get(), "188.661000")
 
     def test_empty_required_field_sets_feedback(self) -> None:
         self.app._run_air_test()
@@ -936,12 +1106,14 @@ class UiWorkflowTests(unittest.TestCase):
         self.assertIn("Hava Icerik Testi Girdileri", report)
         self.assertIn("Basinc Degisim Testi Girdileri", report)
         self.assertIn(f"A secenegi: {AUTO_A_MODE}", report)
-        self.assertIn(f"B secenegi: {AUTO_B_MODE}", report)
+        self.assertIn(f"B secenegi: {TABLE_B_MODE}", report)
+        self.assertIn(f"B kaynagi: {B_SOURCE_INSTITUTIONAL_LABEL}", report)
         self.assertIn("Su backend'i: CoolProp EOS", report)
         self.assertIn("Hava backend karsilastirmasi: Hava A karsilastirmasi", report)
         self.assertIn("Basinc backend karsilastirmasi: Basinc A/B karsilastirmasi", report)
         self.assertIn("A referans tablosu: -", report)
-        self.assertIn("B referans tablosu: -", report)
+        self.assertIn(f"B referans tablosu: {BOTAS_REFERENCE_OPTION_LABEL}", report)
+        self.assertIn("A/B kontrol tablosu (onarilmis hucre:", report)
         self.assertIn("Dis cap (mm): 406.4", report)
         self.assertIn("Boru malzeme kalitesi: API 5L PSL2 X65 / L450 - SMYS 450 MPa", report)
         self.assertIn("SMYS (MPa): 450", report)
@@ -1090,8 +1262,15 @@ class UiWorkflowTests(unittest.TestCase):
         self.app._on_tab_changed()
         self.app.pressure_vars["temperature_c"].set("20")
         self.app.pressure_vars["pressure_bar"].set("80")
+        self.assertTrue(self.app._calculate_pressure_a(log_result=False))
+        self.assertTrue(self.app._calculate_b_helper(log_result=False))
+        a_value = float(self.app.pressure_vars["a_micro_per_bar"].get())
+        b_value = float(self.app.pressure_vars["b_micro_per_c"].get())
+        theoretical = (b_value * 0.6) / (
+            self.app._build_pipe_section("pressure").elasticity_term + a_value
+        )
         self.app.pressure_vars["delta_t_c"].set("0.6")
-        self.app.pressure_vars["actual_pressure_change_bar"].set("2.1")
+        self.app.pressure_vars["actual_pressure_change_bar"].set(f"{theoretical + 0.1:.9f}")
         self.app._run_pressure_test()
         self.assertEqual(self.app._decisions["pressure"]["status"], "BASARILI")
 

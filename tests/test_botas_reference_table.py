@@ -82,6 +82,30 @@ class BotasReferenceTableTests(unittest.TestCase):
         with self.assertRaises(ABControlTableError):
             compare_reference_b_sources(temp_c=26.0, pressure_bar=30.0)
 
+    def test_comparison_uses_repaired_institutional_a_and_raw_b(self) -> None:
+        comparison = compare_reference_b_sources(temp_c=7.0, pressure_bar=90.0)
+
+        self.assertTrue(comparison.control_point.repaired)
+        self.assertIn("onarilmis", comparison.control_point.source_note)
+        self.assertTrue(
+            isclose(comparison.control_point.a_micro_per_bar, 47.115047619047616, rel_tol=1e-12)
+        )
+        self.assertTrue(isclose(comparison.control_point.b_micro_per_c, 32.663, rel_tol=1e-12))
+        self.assertTrue(isclose(comparison.gail_point.b_micro_per_c, 28.0, rel_tol=1e-12))
+        self.assertFalse(comparison.gail_point.repaired)
+        self.assertTrue(isclose(comparison.b_delta, 32.663 - 28.0, rel_tol=1e-12))
+
+    def test_comparison_can_request_raw_institutional_a(self) -> None:
+        raw_comparison = compare_reference_b_sources(
+            temp_c=7.0, pressure_bar=90.0, repair_anomalies=False
+        )
+
+        self.assertFalse(raw_comparison.control_point.repaired)
+        self.assertTrue(
+            isclose(raw_comparison.control_point.a_micro_per_bar, 45.515, rel_tol=1e-12)
+        )
+        self.assertTrue(isclose(raw_comparison.control_point.b_micro_per_c, 32.663, rel_tol=1e-12))
+
     def test_dead_botas_reference_files_are_gone(self) -> None:
         self.assertFalse((_DATA_DIR / "botas_reference_table_v1.csv").exists())
         self.assertFalse((_DATA_DIR / "botas_reference_table_v1.meta.json").exists())

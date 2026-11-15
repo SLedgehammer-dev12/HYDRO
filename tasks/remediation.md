@@ -65,8 +65,22 @@ davranis regresyonlarini testle sabitlemek ve e2e akisi eklemek.
 - [x] Graphify haritasinin yenilenmesi
 - [x] Remediation raporu
 
-## Karar gerektirenler (muhendislik onayi olmadan degistirilmez)
-- B kaynagi: otomatik `beta-alpha` mi, kurum ici tablo mu, GAIL mi?
-- Kurum ici A/B tablosundaki 7 degC / 90-98 bar anomalisinin resmi duzeltmesi
-- Kod imzalama/notarization anahtarlari ve yayin sertifikalari
-- A biriminin sartname icindeki 1/K vs 1/bar celiskisinin resmi yorumu
+## Karar gerektirenler (cozulenler + kalanlar)
+
+### Cozulenler
+- **B kaynagi:** Secilebilir hale getirildi (`Kurum ici tablo` varsayilan, `GAIL`,
+  `Otomatik beta - 3*alpha`). Varsayilan kaynak kurum ici A/B kontrol tablosu.
+- **7 degC / 81-100 bar A anomalisi:** Ham veri degistirilmeden calisma zamaninda
+  ayni satirda lineer kopru ile onariliyor (7/90: 45.515 -> 47.115); provenance
+  alanlari (`repaired`, `repair_note`) eklendi.
+- **Imza/notarization:** Ed25519 imza varsayilan olarak zorunlu (fail-closed);
+  public key gomulu, ozel anahtar repo disinda, CI secret'i
+  `HYDRO_UPDATE_PRIVATE_KEY`. Notarization anahtarlari ayri bir kurum isi.
+- **A birimi:** Arastirma raporu (`docs/spec/ab_methods_and_units.md`) A'nin
+  `1/bar` ve formülde `micro/bar` oldugunu boyut analiziyle dogruladi.
+
+### Kalanlar (kurum onayi)
+- B tablosunun resmi kaynagi ve olcum zinciri (0.5 degC belirsizlik 0.5 bar'a
+  karsilik geliyor; 0.3 bar esiginden buyuk).
+- Kurum ici tablonun resmi revizyonu (onarim yerine kalici veri duzeltmesi).
+- Notarization sertifikasi ve kod imzalama anahtarinin kurumsal yedegi/rotasyonu.

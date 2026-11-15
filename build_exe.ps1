@@ -1,7 +1,10 @@
 param(
     [string]$PythonExe = "python",
     [switch]$SkipTests,
-    [switch]$SkipArchive
+    [switch]$SkipArchive,
+    # Yalnizca gelistirici makinelerinde: imza uretmeden paketler. Yayina
+    # cikacak build'lerde KULLANILMAMALIDIR (updater imzayi zorunlu tutar).
+    [switch]$SkipSigning
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,6 +15,13 @@ $entryPoint = Join-Path $projectRoot "Hidrostatik_Test_Chat.py"
 $manifestSourcePath = Join-Path $projectRoot "windows_manifest.xml"
 $runtimeHookPath = Join-Path $projectRoot "hidrostatik_test\_pyinstaller_hook.py"
 $releasePath = Join-Path $projectRoot "release"
+$signingScriptPath = Join-Path $projectRoot "tools\update_signing.py"
+$userProfilePath = [Environment]::GetFolderPath("UserProfile")
+$signingKeyPath = if ($env:HYDRO_UPDATE_SIGNING_KEY) {
+    $env:HYDRO_UPDATE_SIGNING_KEY
+} else {
+    Join-Path $userProfilePath ".config\hydro\update_signing_key.pem"
+}
 $abControlTableCsvPath = Join-Path $projectRoot "hidrostatik_test\data\ab_control_table_v1.csv"
 $abControlTableMetadataPath = Join-Path $projectRoot "hidrostatik_test\data\ab_control_table_v1.meta.json"
 $gailReferenceTableCsvPath = Join-Path $projectRoot "hidrostatik_test\data\gail_reference_table_v1.csv"
@@ -38,6 +48,85 @@ function Get-VersionQuad {
         $segments += "0"
     }
     return (($segments[0..3]) -join ".")
+}
+
+# --- Guncelleme imzasi (Ed25519) -------------------------------------------
+# Updater imzayi varsayilan olarak zorunlu tutar. Bu yuzden yayina cikacak her
+# artefakt icin .sig uretilir; anahtar yoksa veya anahtar gomulu public key ile
+# eslesmiyorsa build durur. -SkipSigning yalnizca gelistirici icindir.
+
+function Assert-UpdateSigningReady {
+    if ($SkipSigning) {
+        Write-Warning "UYARI: -SkipSigning etkin. Uretilen paketler IMZASIZ olacak ve updater tarafindan reddedilecektir. Bu moddan yalnizca gelistirme icin kullanin."
+        return
+    }
+    if (-not (Test-Path -LiteralPath $signingScriptPath)) {
+        throw "Imzalama araci bulunamadi: $signingScriptPath"
+    }
+    if (-not (Test-Path -LiteralPath $signingKeyPath)) {
+        $missingKeyMessage = @"
+Guncelleme imzalama anahtari bulunamadi: $signingKeyPath
+Imzasiz release yayinlanmaz (updater imzayi zorunlu tutar).
+Anahtar uretmek icin: python tools\update_signing.py generate
+Farkli bir konum kullanmak icin HYDRO_UPDATE_SIGNING_KEY ortam degiskenini ayarlayin.
+"@
+        throw $missingKeyMessage
+    }
+
+    # stderr bilincli olarak yonlendirilmez: Windows PowerShell 5.1'de
+    # $ErrorActionPreference='Stop' ile native stderr'i 2>&1 yapmak terminating
+    # hataya donusebilir. stdout yalnizca public key satirlarini tasir.
+    $keyInfo = & $PythonExe $signingScriptPath fingerprint --key $signingKeyPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Ozel anahtar okunamadi: $signingKeyPath"
+    }
+    $publicLine = @($keyInfo) | Where-Object { $_ -like "Public key (base64): *" } | Select-Object -First 1
+    if (-not $publicLine) {
+        throw "Anahtar parmak izi ciktisi okunamadi: $keyInfo"
+    }
+    $signingPublicKey = ($publicLine -replace "^Public key \(base64\):\s*", "").Trim()
+    $embeddedPublicKey = Get-MetadataValue "UPDATE_SIGNING_PUBLIC_KEY"
+    if ($signingPublicKey -ne $embeddedPublicKey) {
+        $mismatchMessage = @"
+Ozel anahtar, app_metadata.UPDATE_SIGNING_PUBLIC_KEY ile eslesmiyor.
+  Ozel anahtar : $signingPublicKey
+  Gomulu key   : $embeddedPublicKey
+Bu durumda uretilen .sig dosyalari uygulama tarafindan reddedilir. Anahtar
+rotasyonu icin once public key'i app_metadata.py icine yazin veya dogru
+anahtari HYDRO_UPDATE_SIGNING_KEY ile gosterin.
+"@
+        throw $mismatchMessage
+    }
+    Write-Host "Imzalama anahtari hazir: $signingKeyPath"
+}
+
+function Invoke-ArtifactSigning {
+    param([string]$ArtifactPath)
+
+    if ($SkipSigning) {
+        return $null
+    }
+    if (-not (Test-Path -LiteralPath $ArtifactPath)) {
+        throw "Imzalanacak artefakt bulunamadi: $ArtifactPath"
+    }
+
+    $signaturePath = "$ArtifactPath.sig"
+    # Ciktilar | Out-Host ile konsola yazilir; aksi halde fonksiyonun donus
+    # degerine karisir ve imza yolu yerine bir dizi doner.
+    & $PythonExe $signingScriptPath sign $ArtifactPath --key $signingKeyPath | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw "Artefakt imzalanamadi: $ArtifactPath"
+    }
+    if (-not (Test-Path -LiteralPath $signaturePath)) {
+        throw "Imza dosyasi olusmadi: $signaturePath"
+    }
+
+    & $PythonExe $signingScriptPath verify $ArtifactPath $signaturePath --key $signingKeyPath | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw "Imza dogrulanamadi: $ArtifactPath"
+    }
+    Write-Host "Imza uretildi ve dogrulandi: $signaturePath"
+    return $signaturePath
 }
 
 # Windows manifest surumu statik tutulmaz: her build'de app_metadata APP_VERSION
@@ -117,6 +206,7 @@ function Write-ReleaseNotes {
         [string]$AppName,
         [string]$AppVersion,
         [string]$ArtifactName,
+        [string]$SignatureFileName,
         [string]$HashFileName,
         [string]$ArchiveHashFileName,
         [string]$ReleaseTag
@@ -127,6 +217,7 @@ function Write-ReleaseNotes {
 
 ## Included Artifacts
 - $ArtifactName
+- $SignatureFileName
 - $HashFileName
 - $ArchiveHashFileName
 
@@ -134,6 +225,7 @@ function Write-ReleaseNotes {
 - python -m unittest discover -s tests -p "test_*.py"
 - import smoke check
 - zip icerigi ve SHA-256 dogrulamasi
+- Ed25519 detached imza dogrulamasi ($SignatureFileName)
 
 ## Build Notes
 - Windows standalone executable (.exe) generated with PyInstaller
@@ -143,6 +235,8 @@ function Write-ReleaseNotes {
 - CoolProp dependency and CSV/JSON data tables bundled directly into the executable
 - Startup update check and manual update control are enabled
 - Auto-updater bu paketi HidrostatikTest\HidrostatikTest.exe yapisiyla bekler
+- Guncelleme paketi Ed25519 ile imzalanmistir; imzasi olmayan paketler uygulama
+  tarafindan reddedilir. Zip imzasi icindeki .exe dosyasini da kapsar.
 
 ## Install
 1. Zip arsivini bos bir klasore acin.
@@ -150,6 +244,7 @@ function Write-ReleaseNotes {
 
 ## Verification
 Get-FileHash .\$ArtifactName -Algorithm SHA256 ciktisi $HashFileName ile ayni olmalidir.
+Imza dogrulamasi: python tools\update_signing.py verify $ArtifactName $SignatureFileName
 
 ## Suggested Tag
 - $ReleaseTag
@@ -322,6 +417,7 @@ $archivePath = Join-Path $releasePath "$artifactBaseName.zip"
 $hashPath = Join-Path $releasePath "$artifactBaseName.sha256.txt"
 $archiveHashPath = Join-Path $releasePath "$artifactBaseName.zip.sha256.txt"
 $notesPath = Join-Path $releasePath "$artifactBaseName-RELEASE-NOTES.md"
+$archiveSignaturePath = $null
 $releaseTag = "$releaseTagPrefix$appVersion"
 $runId = "{0}-{1}" -f (Get-Date -Format "yyyyMMdd_HHmmss_fff"), ([System.Guid]::NewGuid().ToString("N").Substring(0, 8))
 $compileScratchPath = Join-Path $releasePath "compile-check-$runId"
@@ -359,6 +455,10 @@ if (-not (Test-Path -LiteralPath $waterPropertyCsvPath)) {
 if (-not (Test-Path -LiteralPath $waterPropertyMetadataPath)) {
     throw "Su ozelligi metadata dosyasi bulunamadi: $waterPropertyMetadataPath"
 }
+
+# Imza anahtari build'in basinda dogrulanir: uzun PyInstaller adimindan sonra
+# "imzalanamadi" hatasi almak yerine erken ve acik mesajla durulur.
+Assert-UpdateSigningReady
 
 if (-not $SkipTests) {
     Write-Host "Otomatik testler calistiriliyor..."
@@ -471,11 +571,21 @@ if (-not $SkipArchive) {
     Set-Content -LiteralPath $hashPath -Value $hashRecord -Encoding ASCII
     Set-Content -LiteralPath $archiveHashPath -Value $hashRecord -Encoding ASCII
 
+    # Ed25519 detached imza: updater "<asset-url>.sig" adresini indirip dogrular.
+    # Zip imzasi paket icindeki .exe dosyasini da kapsar.
+    $archiveSignaturePath = Invoke-ArtifactSigning -ArtifactPath $archivePath
+    if ($archiveSignaturePath) {
+        $signatureFileName = [System.IO.Path]::GetFileName($archiveSignaturePath)
+    } else {
+        $signatureFileName = "(imza uretilmedi - SkipSigning)"
+    }
+
     Write-ReleaseNotes `
         -OutputPath $notesPath `
         -AppName $appName `
         -AppVersion $appVersion `
         -ArtifactName ([System.IO.Path]::GetFileName($archivePath)) `
+        -SignatureFileName $signatureFileName `
         -HashFileName ([System.IO.Path]::GetFileName($hashPath)) `
         -ArchiveHashFileName ([System.IO.Path]::GetFileName($archiveHashPath)) `
         -ReleaseTag $releaseTag
@@ -491,6 +601,11 @@ if (-not $SkipArchive) {
     Write-Host "Release zip: $archivePath"
     Write-Host "SHA256: $hashPath"
     Write-Host "SHA256 (updater): $archiveHashPath"
+    if ($archiveSignaturePath) {
+        Write-Host "Imza: $archiveSignaturePath"
+    } else {
+        Write-Warning "Imza uretilmedi (-SkipSigning). Bu paket updater tarafindan KABUL EDILMEZ."
+    }
     Write-Host "Release notes: $notesPath"
     Write-Host "Git tag onerisi: $releaseTag"
 }

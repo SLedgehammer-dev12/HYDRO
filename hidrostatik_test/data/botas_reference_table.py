@@ -60,31 +60,41 @@ def describe_botas_reference_table_range() -> str:
     return describe_ab_control_table_range()
 
 
-def lookup_botas_reference_point(temp_c: float, pressure_bar: float) -> ABControlPoint:
+def lookup_botas_reference_point(
+    temp_c: float, pressure_bar: float, repair_anomalies: bool = True
+) -> ABControlPoint:
     point = lookup_ab_control_point(
         temp_c=temp_c,
         pressure_bar=pressure_bar,
         csv_path=BOTAS_REFERENCE_TABLE_CSV_PATH,
         metadata_path=BOTAS_REFERENCE_TABLE_METADATA_PATH,
+        repair_anomalies=repair_anomalies,
     )
+    repair_suffix = " - onarilmis A" if point.repaired else ""
     if "exact grid" in point.source_note:
-        source_note = f"{BOTAS_REFERENCE_TABLE_LABEL} - exact grid"
+        source_note = f"{BOTAS_REFERENCE_TABLE_LABEL} - exact grid{repair_suffix}"
     else:
-        source_note = f"{BOTAS_REFERENCE_TABLE_LABEL} - bilinear interpolation"
+        source_note = f"{BOTAS_REFERENCE_TABLE_LABEL} - bilinear interpolation{repair_suffix}"
     return ABControlPoint(
         temp_c=point.temp_c,
         pressure_bar=point.pressure_bar,
         a_micro_per_bar=point.a_micro_per_bar,
         b_micro_per_c=point.b_micro_per_c,
         source_note=source_note,
+        repaired=point.repaired,
+        repair_note=point.repair_note,
     )
 
 
-def compare_reference_b_sources(temp_c: float, pressure_bar: float) -> ReferenceBComparison:
+def compare_reference_b_sources(
+    temp_c: float, pressure_bar: float, repair_anomalies: bool = True
+) -> ReferenceBComparison:
     """Return control-table and GAIL A/B values for the same ``(T, P)`` node.
 
-    This intentionally compares table values only; it does not import the
-    domain ``beta - alpha`` calculation. Both lookups must be inside the control
+    The institutional (BOTAS) side uses the repaired A values by default; its
+    B column is always the untouched workbook value. This intentionally
+    compares table values only; it does not import the domain
+    ``beta - alpha`` calculation. Both lookups must be inside the control
     table range (T=1-25 degC), so a comparison at T=26 degC raises
     :class:`ABControlTableError` even though GAIL alone spans up to 30 degC.
     """
@@ -92,7 +102,11 @@ def compare_reference_b_sources(temp_c: float, pressure_bar: float) -> Reference
     return ReferenceBComparison(
         temp_c=temp_c,
         pressure_bar=pressure_bar,
-        control_point=lookup_botas_reference_point(temp_c=temp_c, pressure_bar=pressure_bar),
+        control_point=lookup_botas_reference_point(
+            temp_c=temp_c,
+            pressure_bar=pressure_bar,
+            repair_anomalies=repair_anomalies,
+        ),
         gail_point=lookup_gail_reference_point(temp_c=temp_c, pressure_bar=pressure_bar),
     )
 

@@ -14,6 +14,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from hidrostatik_test.domain.coefficient_manager import CoefficientState
 from hidrostatik_test.domain.hydrotest_core import (
     AirContentInputs,
     evaluate_air_content_test,
@@ -63,10 +64,9 @@ class EndToEndWorkflowTests(unittest.TestCase):
         self.app.pressure_vars["temperature_c"].set("20")
         self.app.pressure_vars["pressure_bar"].set("80")
         self.app.pressure_vars["delta_t_c"].set("0.6")
-        self.app.use_b_helper_var.set(True)
-        self.app.b_helper_vars["steel_alpha_micro_per_c"].set("12")
         self.assertTrue(self.app._calculate_pressure_a(log_result=False))
-        self.assertTrue(self.app._calculate_b_helper(log_result=False))
+        # Varsayilan B kaynagi kurum ici A/B tablosudur; B helper gerekmez.
+        self.assertTrue(self.app._ensure_coefficient_ready("pressure_b"))
         pipe = self.app._build_pipe_section("pressure")
         a_value = float(self.app.pressure_vars["a_micro_per_bar"].get())
         b_value = float(self.app.pressure_vars["b_micro_per_c"].get())
@@ -79,6 +79,8 @@ class EndToEndWorkflowTests(unittest.TestCase):
         self.assertEqual(self.app._decisions["air"]["status"], "BASARILI")
 
         self._prepare_pressure_pass()
+        self.assertFalse(self.app.use_b_helper_var.get())
+        self.assertEqual(self.app.coefficient_manager.get("pressure_b"), CoefficientState.REFERENCE)
         self.app._run_pressure_test()
         self.assertEqual(self.app._decisions["pressure"]["status"], "BASARILI")
 
@@ -94,6 +96,8 @@ class EndToEndWorkflowTests(unittest.TestCase):
         self.assertIn("Basinc Degisim Testi", report_text)
         self.assertIn("1.06", report_text)
         self.assertIn("0.3 bar", report_text)
+        self.assertIn("B kaynagi: Kurum ici tablo (varsayilan)", report_text)
+        self.assertIn("A/B kontrol tablosu (onarilmis hucre:", report_text)
 
         for suffix, signature in (("txt", b"Hidrostatik"), ("pdf", b"%PDF"), ("xlsx", b"PK")):
             target = self.tmp / f"e2e.{suffix}"
