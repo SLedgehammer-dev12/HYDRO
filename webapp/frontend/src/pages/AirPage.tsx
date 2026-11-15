@@ -422,10 +422,10 @@ export function AirPage() {
             }
             actions={
               <>
-                <Button size="sm" variant="primary" icon={<ArrowRight size={12} />} onClick={() => setTab("pressure")}>
+                <Button size="lg" variant="primary" icon={<ArrowRight size={15} />} onClick={() => setTab("pressure")}>
                   Basınç testine geç
                 </Button>
-                <Button size="sm" variant="ghost" onClick={() => setTab("coefficients")}>
+                <Button size="lg" variant="ghost" onClick={() => setTab("coefficients")}>
                   A kaynağını gör
                 </Button>
               </>

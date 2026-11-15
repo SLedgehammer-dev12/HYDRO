@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { twMerge } from "tailwind-merge";
 import type { SceneData } from "../../lib/scene";
 import SceneCanvas from "./SceneCanvas";
+import { SceneLabels } from "./SceneHtml";
 import SceneFallback from "./SceneFallback";
 import {
   PresetToolbar,
@@ -164,32 +165,34 @@ export default function PipelineScene({ data, className }: PipelineSceneProps) {
       )}
     >
       <div className="relative h-[620px] w-full sm:h-[600px]">
-        {webglAvailable ? (
-          <SceneCanvas
-            scene={scene}
-            layout={layout}
-            clipPlane={clipPlane}
-            clipPlanes={clipPlanes}
-            colorMode={colorMode}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            showLabels={showLabels}
-            showFlow={showFlow}
-            cutaway={cutaway}
-            cameraRequest={cameraRequest}
-            focusEquipment={focusEquipment}
-            pigPlaying={pigPlaying}
-            pigRate={pigRate}
-            pigStart={pigStart}
-            pigPositionRef={pigPosition}
-            reducedMotion={reducedMotion}
-            compact={compact}
-            visible={documentVisible}
-            fallback={fallback}
-          />
-        ) : (
-          fallback
-        )}
+        <SceneLabels>
+          {webglAvailable ? (
+            <SceneCanvas
+              scene={scene}
+              layout={layout}
+              clipPlane={clipPlane}
+              clipPlanes={clipPlanes}
+              colorMode={colorMode}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              showLabels={showLabels}
+              showFlow={showFlow}
+              cutaway={cutaway}
+              cameraRequest={cameraRequest}
+              focusEquipment={focusEquipment}
+              pigPlaying={pigPlaying}
+              pigRate={pigRate}
+              pigStart={pigStart}
+              pigPositionRef={pigPosition}
+              reducedMotion={reducedMotion}
+              compact={compact}
+              visible={documentVisible}
+              fallback={fallback}
+            />
+          ) : (
+            fallback
+          )}
+        </SceneLabels>
 
         <div className="pointer-events-none absolute inset-0 z-30 flex flex-col justify-between gap-2 p-2 sm:p-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">

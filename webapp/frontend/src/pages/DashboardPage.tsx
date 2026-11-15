@@ -36,6 +36,9 @@ export function DashboardPage() {
   const backend = useAppStore((state) => state.backend);
   const sessionName = useAppStore((state) => state.sessionName);
   const sessionStatus = useAppStore((state) => state.sessionStatus);
+  const projectId = useAppStore((state) => state.projectId);
+  const projectName = useAppStore((state) => state.projectName);
+  const projectCode = useAppStore((state) => state.projectCode);
   const setTab = useAppStore((state) => state.setTab);
   const { data: meta } = useMeta();
 
@@ -50,7 +53,9 @@ export function DashboardPage() {
   const bReady = Boolean(inputs.pressure.b_micro_per_c);
   const deltaReady = Boolean(inputs.pressure.delta_t_c !== null && inputs.pressure.actual_pressure_change_bar !== null);
 
-  const nextStep = !geometry
+  const nextStep = !projectId
+    ? { tab: "projects" as const, label: "Proje ve kesit seç", detail: "Kesit kaydı bir projeye bağlanmadan çalışma başlatılamaz." }
+    : !geometry
     ? { tab: "geometry" as const, label: "Geometriyi tamamla", detail: "Dış çap, et kalınlığı ve uzunluk girilmeden hesap yapılamaz." }
     : !airAReady || !bReady
       ? { tab: "coefficients" as const, label: "Katsayıları hazırla", detail: "A ve B katsayıları testlerin temel girdisidir." }
@@ -61,6 +66,12 @@ export function DashboardPage() {
           : { tab: "reports" as const, label: "Raporu üret", detail: "Kararlar hazır; PDF, Excel veya TXT olarak dışa aktarın." };
 
   const prep = [
+    {
+      label: "Proje ve kesit kimliği",
+      ready: Boolean(projectId),
+      tab: "projects" as const,
+      detail: projectId ? `${projectCode || "proje"} · ${inputs.section_meta.section_no || "kesit"}` : "Proje seçilmedi",
+    },
     {
       label: "Geometri (kesit + uzunluk)",
       ready: Boolean(geometry),
@@ -94,9 +105,12 @@ export function DashboardPage() {
         title={`Merhaba, ${inputs.report.operator || "operatör"}`}
         description={
           <>
-            <span className="font-medium text-[var(--text-soft)]">{sessionName}</span> oturumunun
-            durumu. Kararlar backend’den veya demo motorundan gelir; son kabul her zaman yetkili
-            personel tarafından verilir.
+            <span className="font-medium text-[var(--text-soft)]">{projectName || "Proje seçilmedi"}</span>
+            {projectCode ? <span className="font-mono text-[11px] text-[var(--text-faint)]"> · {projectCode}</span> : null}
+            <span className="text-[var(--text-faint)]"> · </span>
+            <span className="font-medium text-[var(--text-soft)]">{sessionName}</span> kesitinin durumu.
+            Kararlar backend’den veya demo motorundan gelir; son kabul her zaman yetkili personel
+            tarafından verilir.
           </>
         }
         meta={
@@ -112,10 +126,13 @@ export function DashboardPage() {
         }
         actions={
           <>
-            <Button variant="ghost" icon={<Map size={14} />} onClick={() => setTab("field")}>
+            <Button variant="ghost" icon={<Layers size={14} />} onClick={() => setTab("projects")}>
+              Projeler
+            </Button>
+            <Button variant="ghost" icon={<Map size={14} />} onClick={() => setTab("geometry")}>
               Sahayı gör
             </Button>
-            <Button variant="primary" icon={<ArrowRight size={14} />} onClick={() => setTab(nextStep.tab)}>
+            <Button size="lg" variant="primary" icon={<ArrowRight size={15} />} onClick={() => setTab(nextStep.tab)}>
               {nextStep.label}
             </Button>
           </>
@@ -260,7 +277,7 @@ export function DashboardPage() {
           description="4 kot noktasından türetilen yaklaşık profil. Gerçek ölçüm noktaları eklendiğinde 3D sahne güncellenir."
           icon={Mountain}
           action={
-            <Button size="sm" variant="ghost" icon={<ArrowRight size={12} />} onClick={() => setTab("field")}>
+            <Button size="sm" variant="ghost" icon={<ArrowRight size={12} />} onClick={() => setTab("geometry")}>
               Sahaya git
             </Button>
           }
@@ -310,10 +327,10 @@ export function DashboardPage() {
       <div className="grid gap-4 xl:grid-cols-[1.4fr_1fr]">
         <SectionCard
           title="3D saha önizlemesi"
-          description="Segmentler, ekipman ve pig konumu. Tam sahne Profil / Saha sekmesinde."
+          description="Segmentler, ekipman ve pig konumu. Tam sahne Geometri & Saha sayfasındadır."
           icon={Layers}
           action={
-            <Button size="sm" variant="ghost" icon={<ArrowRight size={12} />} onClick={() => setTab("field")}>
+            <Button size="sm" variant="ghost" icon={<ArrowRight size={12} />} onClick={() => setTab("geometry")}>
               Tam sahne
             </Button>
           }

@@ -147,12 +147,12 @@ HYDRO/                                  # mevcut masaüstü repo kökü
     │   ├── src/
     │   │   ├── main.tsx
     │   │   ├── app/                    # router, layout, providers
-    │   │   ├── routes/                 # dashboard, geometry, coefficients, air, pressure, field, reports, ocr, settings
+    │   │   ├── pages/                  # Dashboard, Projects, Geometry (+Field), Coefficients, CoefficientDetail, Air, Pressure, Reports, OCR, Settings
     │   │   ├── features/               # alan bazlı bileşen + hook + test
     │   │   ├── components/
     │   │   │   ├── ui/                 # Button, Field, Card, Badge, Table, Banner
     │   │   │   ├── charts/             # PressureChart, ElevationProfile, DecisionGauge
-    │   │   │   └── scene/              # FullFieldScene, PipeRun, Valve, Pump, Pig...
+    │   │   │   └── three/              # PipelineScene, SceneHtml (DOM etiket katmanı), PipeNetwork, SceneEquipment, PigAndFlow...
     │   │   ├── lib/
     │   │   │   ├── api/                # fetch client, endpoint tipleri
     │   │   │   ├── types.ts            # API sözleşmesinden üretilen/elle tutulan tipler

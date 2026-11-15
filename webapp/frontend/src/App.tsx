@@ -8,17 +8,18 @@ import { HelpDialog } from "./components/layout/HelpDialog";
 import { ToastHost } from "./components/ui/ToastHost";
 import { PageErrorBoundary } from "./components/PageErrorBoundary";
 import { DashboardPage } from "./pages/DashboardPage";
+import { ProjectsPage } from "./pages/ProjectsPage";
 import { GeometryPage } from "./pages/GeometryPage";
 import { CoefficientsPage } from "./pages/CoefficientsPage";
+import { CoefficientDetailPage } from "./pages/CoefficientDetailPage";
 import { AirPage } from "./pages/AirPage";
 import { PressurePage } from "./pages/PressurePage";
-import { FieldPage } from "./pages/FieldPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import OcrPage from "./features/ocr/OcrPage";
-import { useBackendProbe, useSaveSession, useSessions } from "./hooks/queries";
+import { useBackendProbe, useProjects, useSaveSession, useSessions } from "./hooks/queries";
 import { useAppStore } from "./store/useAppStore";
-import { TAB_BY_KEY, TABS, hashForTab, tabFromHash } from "./lib/constants";
+import { TAB_BY_KEY, VISIBLE_TABS, hashForTab, tabFromHash } from "./lib/constants";
 import { api, apiErrorMessage } from "./lib/api";
 import { toApiInputs } from "./lib/normalize";
 
@@ -45,6 +46,7 @@ export default function App() {
   const sessionId = useAppStore((state) => state.sessionId);
   const applySessionInputs = useAppStore((state) => state.applySessionInputs);
   const setSessionMeta = useAppStore((state) => state.setSessionMeta);
+  const setProject = useAppStore((state) => state.setProject);
   const pushToast = useAppStore((state) => state.pushToast);
 
   const queryClient = useQueryClient();
@@ -52,6 +54,7 @@ export default function App() {
 
   useBackendProbe();
   const sessionsQuery = useSessions();
+  const projectsQuery = useProjects();
   const saveSession = useSaveSession();
   const bootstrapped = useRef(false);
 
@@ -97,12 +100,17 @@ export default function App() {
             revision: session.revision,
             status: session.status,
           });
+          const project = projectsQuery.data?.find((item) => item.id === session.project_id);
+          if (project) setProject(project);
+          else if (session.project_id) setProject({ id: session.project_id, name: "" });
+          else setProject(null);
           queryClient.setQueryData(["session", session.id], session);
           pushToast("info", "Oturum geri yüklendi", session.name);
         } else {
           const state = useAppStore.getState();
           const created = await api.createSession({
             name: state.sessionName || "Oturum 1",
+            project_id: state.projectId,
             inputs: toApiInputs(state.inputs),
           });
           setSessionMeta({
@@ -120,9 +128,11 @@ export default function App() {
   }, [
     backend,
     sessionsQuery.data,
+    projectsQuery.data,
     sessionId,
     applySessionInputs,
     setSessionMeta,
+    setProject,
     queryClient,
     pushToast,
   ]);
@@ -143,7 +153,7 @@ export default function App() {
       }
       if (event.altKey && /^[1-9]$/.test(event.key)) {
         event.preventDefault();
-        const next = TABS[Number(event.key) - 1];
+        const next = VISIBLE_TABS[Number(event.key) - 1];
         if (next) setTab(next.key);
         return;
       }
@@ -160,16 +170,21 @@ export default function App() {
     switch (tab) {
       case "dashboard":
         return <DashboardPage />;
+      case "projects":
+        return <ProjectsPage />;
       case "geometry":
         return <GeometryPage />;
       case "coefficients":
         return <CoefficientsPage />;
+      case "coefficient_detail":
+        return <CoefficientDetailPage />;
       case "air":
         return <AirPage />;
       case "pressure":
         return <PressurePage />;
       case "field":
-        return <FieldPage />;
+        /* Eski `#/field` bağlantısı birleşik Geometri & Saha sayfasına gider. */
+        return <GeometryPage />;
       case "reports":
         return <ReportsPage />;
       case "ocr":

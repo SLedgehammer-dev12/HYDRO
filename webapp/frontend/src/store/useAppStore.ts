@@ -41,6 +41,10 @@ export interface AppStore {
   revision: number;
   dirty: boolean;
 
+  projectId: string | null;
+  projectName: string;
+  projectCode: string;
+
   inputs: AppInputs;
   results: ResultBundle;
 
@@ -66,6 +70,7 @@ export interface AppStore {
     status?: SessionStatus;
   }) => void;
   setSessionName: (name: string) => void;
+  setProject: (project: { id: string; name: string; code?: string } | null) => void;
   markDirty: () => void;
   markSaved: (revision?: number) => void;
 
@@ -110,6 +115,10 @@ export const useAppStore = create<AppStore>()(
       revision: 3,
       dirty: false,
 
+      projectId: "demo-project-001",
+      projectName: "Doğu Hattı Hidrostatik Testi",
+      projectCode: "PRJ-DOGU-12",
+
       inputs: initial.inputs,
       results: initial.results,
 
@@ -137,6 +146,14 @@ export const useAppStore = create<AppStore>()(
         })),
 
       setSessionName: (sessionName) => set({ sessionName, dirty: true }),
+
+      setProject: (project) =>
+        set({
+          projectId: project?.id ?? null,
+          projectName: project?.name ?? "",
+          projectCode: project?.code ?? "",
+        }),
+
       markDirty: () => set({ dirty: true }),
       markSaved: (revision) =>
         set((state) => ({ dirty: false, revision: revision ?? state.revision })),
@@ -328,9 +345,12 @@ export const useAppStore = create<AppStore>()(
           sessionStatus: "draft",
           revision: 0,
           dirty: false,
+          projectId: null,
+          projectName: "",
+          projectCode: "",
           exports: [],
           toasts: [],
-          tab: "dashboard",
+          tab: "projects",
         });
       },
     }),
@@ -343,6 +363,9 @@ export const useAppStore = create<AppStore>()(
         sessionName: state.sessionName,
         sessionStatus: state.sessionStatus,
         revision: state.revision,
+        projectId: state.projectId,
+        projectName: state.projectName,
+        projectCode: state.projectCode,
         inputs: state.inputs,
         results: state.results,
         history: state.history,
@@ -350,6 +373,19 @@ export const useAppStore = create<AppStore>()(
         theme: state.theme,
         rightPanelOpen: state.rightPanelOpen,
       }),
+      /**
+       * Eski sürümlerden gelen `inputs` şeması eksik olabilir (ör. `section_meta`).
+       * Kayıtlı durumu her zaman güncel varsayılanlarla birleştirip normalize
+       * ediyoruz; aksi halde ilk render eksik alana erişip çöker.
+       */
+      merge: (persisted, current) => {
+        const saved = (persisted ?? {}) as Partial<AppStore>;
+        return {
+          ...current,
+          ...saved,
+          inputs: normalizeInputs(saved.inputs),
+        };
+      },
       onRehydrateStorage: () => (state) => {
         if (state?.theme && typeof document !== "undefined") {
           document.documentElement.dataset.theme = state.theme;

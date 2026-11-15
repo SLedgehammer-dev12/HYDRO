@@ -1709,20 +1709,22 @@ Kısmi güncelleme; `mapping` gönderilirse **tam değiştirilir** (merge edilme
 **Yanıt 200**
 
 ```json
-{"items": [{"id": "p1", "name": "Doğu Hattı 2026", "client": "…", "description": "", "session_count": 4, "created_at": "2026-11-01T08:00:00Z", "updated_at": "2026-11-15T19:00:00Z"}], "total": 1, "limit": 50, "offset": 0}
+{"items": [{"id": "p1", "name": "Doğu Hattı 2026", "code": "PRJ-DOGU-12", "client": "BOTAŞ", "description": "", "section_count": 4, "created_at": "2026-11-01T08:00:00Z", "updated_at": "2026-11-15T19:00:00Z"}], "total": 1, "limit": 50, "offset": 0}
 ```
 
 ### 11.2 `POST /api/projects`
 
-**İstek** `{"name": "Doğu Hattı 2026", "client": "…", "description": "12-16. bölümler"}`
-**Yanıt 201** — proje nesnesi. **Hatalar:** 422.
+**İstek** `{"name": "Doğu Hattı 2026", "code": "PRJ-DOGU-12", "client": "BOTAŞ", "description": "12-16. bölümler"}`
+**Yanıt 201** — proje nesnesi (`section_count` dahil). **Hatalar:** 422.
 
 ### 11.3 `GET/PUT/DELETE /api/projects/{id}`
 
-- `GET` → proje + `session_count`.
-- `PUT` → kısmi güncelleme; 200.
-- `DELETE` → soft delete; oturumlar `project_id=null` olur; 204.
+- `GET` → proje + `section_count` (`sessions.project_id` üzerinden sayılır).
+- `PUT` → kısmi güncelleme (`name`, `code`, `client`, `description`); 200.
+- `DELETE` → soft delete; bağlı kesit oturumları silinmez, `project_id=null` olur; 204.
 **Hatalar:** 404, 422.
+
+Not: Kesit kimliği (`section_no`, `description`, `location`, `test_date`, `test_type`, `notes`) oturumun `inputs.section_meta` alanı içinde saklanır; oturumlar `GET /api/sessions?project_id={id}` ile projeye göre filtrelenir.
 
 ---
 

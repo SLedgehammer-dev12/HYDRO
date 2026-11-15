@@ -14,6 +14,7 @@ export interface TabMeta {
   index: number;
   group: "calisma" | "cikti";
   description: string;
+  hidden?: boolean;
 }
 
 export const TABS: TabMeta[] = [
@@ -23,29 +24,45 @@ export const TABS: TabMeta[] = [
     path: "/",
     index: 1,
     group: "calisma",
-    description: "Oturum durumu, kararlar ve sıradaki adım",
+    description: "Proje durumu, kararlar ve sıradaki adım",
+  },
+  {
+    key: "projects",
+    label: "Projeler & Kesitler",
+    path: "/projects",
+    index: 2,
+    group: "calisma",
+    description: "Proje kayıtları, kesit listesi ve kayıtlı çalışmalar",
   },
   {
     key: "geometry",
-    label: "Geometri",
+    label: "Geometri & Saha",
     path: "/geometry",
-    index: 2,
+    index: 3,
     group: "calisma",
-    description: "Kesitler, segmentler, kotlar ve malzeme",
+    description: "Kesit, segment, kot, malzeme, basınç penceresi ve pig",
   },
   {
     key: "coefficients",
     label: "Katsayılar",
     path: "/coefficients",
-    index: 3,
+    index: 4,
     group: "calisma",
-    description: "A/B hazırlama, kaynak ve provenance",
+    description: "A/B hazırlama ve testlere hızlı geçiş",
+  },
+  {
+    key: "coefficient_detail",
+    label: "Katsayı Detayı",
+    path: "/coefficient-detail",
+    index: 5,
+    group: "calisma",
+    description: "Üç kaynak, backend ve A onarım karşılaştırması",
   },
   {
     key: "air",
     label: "Hava İçerik",
     path: "/air",
-    index: 4,
+    index: 6,
     group: "calisma",
     description: "Hava içerik testi değerlendirmesi",
   },
@@ -53,23 +70,15 @@ export const TABS: TabMeta[] = [
     key: "pressure",
     label: "Basınç Değişim",
     path: "/pressure",
-    index: 5,
+    index: 7,
     group: "calisma",
     description: "Basınç değişim testi değerlendirmesi",
-  },
-  {
-    key: "field",
-    label: "Profil / Saha",
-    path: "/field",
-    index: 6,
-    group: "calisma",
-    description: "Basınç penceresi, saha kontrolü ve pig",
   },
   {
     key: "reports",
     label: "Raporlar",
     path: "/reports",
-    index: 7,
+    index: 8,
     group: "cikti",
     description: "Rapor önizleme ve dışa aktarma",
   },
@@ -77,7 +86,7 @@ export const TABS: TabMeta[] = [
     key: "ocr",
     label: "OCR",
     path: "/ocr",
-    index: 8,
+    index: 9,
     group: "cikti",
     description: "Rapor yükleme, alan onayı, uyuşmazlık",
   },
@@ -85,11 +94,23 @@ export const TABS: TabMeta[] = [
     key: "settings",
     label: "Ayarlar",
     path: "/settings",
-    index: 9,
+    index: 10,
     group: "cikti",
     description: "Backend, görünüm ve oturum yönetimi",
   },
+  {
+    key: "field",
+    label: "Profil / Saha",
+    path: "/field",
+    index: 0,
+    group: "calisma",
+    description: "Eski bağlantı; Geometri & Saha sayfasına yönlendirilir",
+    hidden: true,
+  },
 ];
+
+/** Kenar çubuğunda görünen sekmeler (eski `field` gizlidir). */
+export const VISIBLE_TABS = TABS.filter((tab) => !tab.hidden);
 
 export const TAB_BY_KEY: Record<TabKey, TabMeta> = TABS.reduce(
   (acc, tab) => {
@@ -100,12 +121,15 @@ export const TAB_BY_KEY: Record<TabKey, TabMeta> = TABS.reduce(
 );
 
 export function tabFromHash(hash: string): TabKey {
-  const path = hash.replace(/^#/, "").split("?")[0];
-  const found = TABS.find((tab) => tab.path === (path || "/"));
+  const path = hash.replace(/^#/, "").split("?")[0] || "/";
+  /* Eski `#/field` bağlantıları birleşik Geometri & Saha sayfasına gider. */
+  if (path === "/field") return "geometry";
+  const found = TABS.find((tab) => !tab.hidden && tab.path === path);
   return found?.key ?? "dashboard";
 }
 
 export function hashForTab(tab: TabKey): string {
+  if (tab === "field") return "#/geometry";
   return `#${TAB_BY_KEY[tab].path}`;
 }
 

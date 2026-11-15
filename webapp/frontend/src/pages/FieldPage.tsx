@@ -69,7 +69,7 @@ function WindowBar({
   );
 }
 
-export function FieldPage() {
+export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
   const inputs = useAppStore((state) => state.inputs);
   const results = useAppStore((state) => state.results);
   const patchInputs = useAppStore((state) => state.patchInputs);
@@ -203,36 +203,57 @@ export function FieldPage() {
   const pigMode = (meta?.pig_modes ?? FALLBACK_PIG_MODES).find((mode) => mode.label === inputs.modes.pig_mode);
   const pigLimit = pig?.limit.max_speed_m_per_s ?? pigMode?.max_speed_m_per_s ?? null;
 
+  const headerMeta = (
+    <>
+      <Badge tone={profile ? (profile.feasible ? "pass" : "fail") : "pending"}>
+        {profile ? (profile.feasible ? "Pencere uygun" : "Pencere uygun değil") : "Profil bekliyor"}
+      </Badge>
+      <span className="text-[10.5px] text-[var(--text-faint)]">
+        {checked}/{CHECK_DEFINITIONS.length} saha kontrolü
+      </span>
+      <span className="chip">{PUMP_LABELS[inputs.pump_location] ?? inputs.pump_location ?? "pompa seçilmedi"}</span>
+    </>
+  );
+
+  const headerActions = (
+    <Button
+      variant="primary"
+      icon={<CheckCircle2 size={14} />}
+      loading={calculateProfile.isPending}
+      disabled={missing.length > 0}
+      title={missing.length ? `Eksik: ${missing.join(", ")}` : "Profili doğrula"}
+      onClick={evaluateProfile}
+    >
+      Profili doğrula
+    </Button>
+  );
+
   return (
-    <div className="space-y-5">
-      <PageHeader
-        kicker="Profil / Saha"
-        title="Basınç penceresi, saha kontrolü ve pig"
-        description="Test bölümünün hidrolik penceresi; 20.000 m uzunluk, 12.500 m³ hacim ve %100 SMYS limitleri birlikte değerlendirilir."
-        meta={
-          <>
-            <Badge tone={profile ? (profile.feasible ? "pass" : "fail") : "pending"}>
-              {profile ? (profile.feasible ? "Pencere uygun" : "Pencere uygun değil") : "Profil bekliyor"}
-            </Badge>
-            <span className="text-[10.5px] text-[var(--text-faint)]">
-              {checked}/{CHECK_DEFINITIONS.length} saha kontrolü
-            </span>
-            <span className="chip">{PUMP_LABELS[inputs.pump_location] ?? inputs.pump_location ?? "pompa seçilmedi"}</span>
-          </>
-        }
-        actions={
-          <Button
-            variant="primary"
-            icon={<CheckCircle2 size={14} />}
-            loading={calculateProfile.isPending}
-            disabled={missing.length > 0}
-            title={missing.length ? `Eksik: ${missing.join(", ")}` : "Profili doğrula"}
-            onClick={evaluateProfile}
-          >
-            Profili doğrula
-          </Button>
-        }
-      />
+    <div id={embedded ? "saha" : undefined} className={embedded ? "space-y-5 border-t border-[var(--border)] pt-5" : "space-y-5"}>
+      {embedded ? (
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="min-w-0">
+            <p className="eyebrow">Saha & Profil</p>
+            <h2 className="mt-1 text-[18px] font-semibold leading-tight tracking-[-0.02em]">
+              Basınç penceresi, saha kontrolü ve pig
+            </h2>
+            <p className="mt-1 max-w-[70ch] text-[11.5px] leading-relaxed text-[var(--text-muted)]">
+              Test bölümünün hidrolik penceresi; 20.000 m uzunluk, 12.500 m³ hacim ve %100 SMYS
+              limitleri birlikte değerlendirilir.
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">{headerMeta}</div>
+          </div>
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">{headerActions}</div>
+        </div>
+      ) : (
+        <PageHeader
+          kicker="Profil / Saha"
+          title="Basınç penceresi, saha kontrolü ve pig"
+          description="Test bölümünün hidrolik penceresi; 20.000 m uzunluk, 12.500 m³ hacim ve %100 SMYS limitleri birlikte değerlendirilir."
+          meta={headerMeta}
+          actions={headerActions}
+        />
+      )}
 
       {missing.length > 0 ? (
         <InlineNotice tone="warning" title="Profil için eksik alanlar">

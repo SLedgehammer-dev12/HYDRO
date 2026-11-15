@@ -319,6 +319,9 @@ def update_session(
         session.name = str(changes["name"]).strip() or session.name
     if "status" in changes and changes["status"] is not None:
         session.status = str(changes["status"])
+    if "project_id" in changes:
+        _validate_project(db, changes["project_id"], session.workspace_id_hash)
+        session.project_id = changes["project_id"]
     if "notes" in changes and changes["notes"] is not None:
         session.notes = str(changes["notes"])
     if "inputs" in changes and changes["inputs"] is not None:

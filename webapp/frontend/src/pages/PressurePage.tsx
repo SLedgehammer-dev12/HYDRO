@@ -425,10 +425,10 @@ export function PressurePage() {
             }
             actions={
               <>
-                <Button size="sm" variant="primary" icon={<ArrowRight size={12} />} onClick={() => setTab("field")}>
-                  Profil / Sahaya geç
+                <Button size="lg" variant="primary" icon={<ArrowRight size={15} />} onClick={() => setTab("geometry")}>
+                  Geometri & Sahaya geç
                 </Button>
-                <Button size="sm" variant="ghost" onClick={() => setTab("coefficients")}>
+                <Button size="lg" variant="ghost" onClick={() => setTab("coefficients")}>
                   B kaynağını gör
                 </Button>
               </>

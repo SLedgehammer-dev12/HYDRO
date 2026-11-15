@@ -168,10 +168,37 @@ class SessionCreate(StrictModel):
 
 class SessionUpdate(StrictModel):
     name: str | None = Field(default=None, max_length=200)
+    project_id: str | None = None
     status: SESSION_STATUS | None = None
     inputs: dict[str, Any] | None = None
     wizard_state: dict[str, Any] | None = None
     notes: str | None = None
+
+
+class ProjectCreate(StrictModel):
+    name: str = Field(min_length=1, max_length=200)
+    code: str | None = Field(default=None, max_length=64)
+    client: str | None = Field(default=None, max_length=200)
+    description: str | None = None
+
+
+class ProjectUpdate(StrictModel):
+    name: str | None = Field(default=None, max_length=200)
+    code: str | None = Field(default=None, max_length=64)
+    client: str | None = Field(default=None, max_length=200)
+    description: str | None = None
+
+
+class ProjectSummary(StrictModel):
+    id: str
+    code: str = ""
+    name: str
+    client: str | None = None
+    description: str | None = None
+    section_count: int = 0
+    created_at: str | None = None
+    updated_at: str | None = None
+
 
 
 class SessionDuplicate(StrictModel):
@@ -270,6 +297,9 @@ __all__ = [
     "PressureProfileRequest",
     "PressureVariationRequest",
     "PressurizationRequest",
+    "ProjectCreate",
+    "ProjectSummary",
+    "ProjectUpdate",
     "ReferenceCompareRequest",
     "ReportExportRequest",
     "ResultCreate",

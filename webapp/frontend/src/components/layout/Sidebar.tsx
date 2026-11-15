@@ -1,6 +1,7 @@
 import {
   Droplet,
   FileText,
+  FolderKanban,
   Gauge,
   LayoutDashboard,
   Map,
@@ -8,11 +9,12 @@ import {
   ScanLine,
   Settings,
   Sigma,
+  Table2,
   Wind,
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { TABS } from "../../lib/constants";
+import { VISIBLE_TABS } from "../../lib/constants";
 import type { BackendMode, TabKey } from "../../lib/types";
 import { useMeta } from "../../hooks/queries";
 import { useAppStore } from "../../store/useAppStore";
@@ -20,8 +22,10 @@ import { cn } from "../../lib/utils";
 
 const ICONS: Record<TabKey, LucideIcon> = {
   dashboard: LayoutDashboard,
+  projects: FolderKanban,
   geometry: Ruler,
   coefficients: Sigma,
+  coefficient_detail: Table2,
   air: Wind,
   pressure: Gauge,
   field: Map,
@@ -89,7 +93,7 @@ export function Sidebar() {
               {group.label}
             </p>
             <div className="space-y-0.5">
-              {TABS.filter((item) => item.group === group.key).map((item) => {
+              {VISIBLE_TABS.filter((item) => item.group === group.key).map((item) => {
                 const Icon = ICONS[item.key];
                 return (
                   <button

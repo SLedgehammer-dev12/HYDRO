@@ -480,6 +480,37 @@ export interface ResultSummaryEntry {
   computed_at?: string | null;
 }
 
+/* ------------------------------------------------------------------ */
+/* Projeler ve kesitler                                                */
+/* ------------------------------------------------------------------ */
+
+export interface Project {
+  id: string;
+  code: string;
+  name: string;
+  client: string | null;
+  description: string | null;
+  section_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectInput {
+  name: string;
+  code?: string;
+  client?: string;
+  description?: string;
+}
+
+export interface SectionMeta {
+  section_no: string;
+  description: string;
+  location: string;
+  test_date: string;
+  test_type: string;
+  notes: string;
+}
+
 export interface SessionResultSummary {
   air?: ResultSummaryEntry;
   pressure?: ResultSummaryEntry;
@@ -503,10 +534,12 @@ export interface Session {
 
 export interface SessionListItem {
   id: string;
+  project_id: string | null;
   name: string;
   status: SessionStatus;
   revision: number;
   updated_at: string;
+  created_at?: string;
   result_summary?: SessionResultSummary;
 }
 
@@ -678,6 +711,7 @@ export interface ReportMeta {
 }
 
 export interface AppInputs {
+  section_meta: SectionMeta;
   geometry: GeometryInputs;
   geometry_catalog: GeometryCatalogInputs;
   segments: SegmentRow[];
@@ -751,8 +785,10 @@ export interface ToastItem {
 
 export type TabKey =
   | "dashboard"
+  | "projects"
   | "geometry"
   | "coefficients"
+  | "coefficient_detail"
   | "air"
   | "pressure"
   | "field"

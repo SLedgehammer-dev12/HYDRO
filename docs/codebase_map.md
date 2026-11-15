@@ -8,12 +8,12 @@ Bu dosya `skills/graphify` tarafindan uretilmistir. Elle duzenlemeyin;
 
 | Metrik | Deger |
 | --- | ---: |
-| Dosya | 119 |
-| Sembol (sinif + fonksiyon) | 2136 |
-| Dugum | 2269 |
-| Kenar | 18838 |
+| Dosya | 122 |
+| Sembol (sinif + fonksiyon) | 2164 |
+| Dugum | 2300 |
+| Kenar | 19100 |
 | SQLite tablosu | 14 |
-| Test edilen kaynak dosya | 54 / 64 |
+| Test edilen kaynak dosya | 56 / 66 |
 
 ## Paket Bagimliliklari
 
@@ -69,9 +69,9 @@ Bu dosya `skills/graphify` tarafindan uretilmistir. Elle duzenlemeyin;
 | `tests/test_hydrotest_core.py` | 6 | 29 | 35 |
 | `tests/test_coefficient_manager.py` | 2 | 32 | 34 |
 | `tests/test_download_dialog.py` | 4 | 29 | 33 |
+| `webapp/backend/app/schemas.py` | 32 | 0 | 32 |
 | `hidrostatik_test/domain/session_manager.py` | 2 | 30 | 32 |
 | `webapp/backend/app/services/ocr.py` | 0 | 31 | 31 |
-| `webapp/backend/app/schemas.py` | 29 | 0 | 29 |
 | `hidrostatik_test/services/download_manager.py` | 4 | 24 | 28 |
 | `webapp/backend/app/services/sessions.py` | 0 | 27 | 27 |
 
@@ -121,8 +121,9 @@ Bu dosya `skills/graphify` tarafindan uretilmistir. Elle duzenlemeyin;
 | `webapp/backend/app/api/catalog.py` | `tests/test_pipe_catalog.py`, `tests/test_ui_workflow.py`, `webapp/backend/tests/test_catalog.py` |
 | `webapp/backend/app/api/coefficients.py` | `tests/test_database.py`, `tests/test_e2e_workflow.py`, `tests/test_ui_workflow.py`, `webapp/backend/tests/parity/test_domain_parity.py`, `webapp/backend/tests/test_coefficients.py`, `webapp/backend/tests/test_system.py` |
 | `webapp/backend/app/api/ocr.py` | `tests/test_report_ocr.py`, `tests/test_report_ocr_dialog.py`, `tests/test_ui_workflow.py`, `webapp/backend/tests/test_ocr.py`, `webapp/backend/tests/test_sessions.py`, `webapp/backend/tests/test_system.py` |
+| `webapp/backend/app/api/projects.py` | `webapp/backend/tests/test_projects.py` |
 | `webapp/backend/app/api/reports.py` | `tests/test_coefficient_sources.py`, `tests/test_report_ocr.py`, `tests/test_session_manager.py`, `tests/test_ui_workflow.py`, `tests/test_wizard.py`, `webapp/backend/tests/test_sessions.py` |
-| `webapp/backend/app/api/sessions.py` | `tests/test_database.py`, `tests/test_e2e_workflow.py`, `tests/test_session_manager.py`, `webapp/backend/tests/test_ocr.py`, `webapp/backend/tests/test_sessions.py`, `webapp/backend/tests/test_system.py` |
+| `webapp/backend/app/api/sessions.py` | `tests/test_database.py`, `tests/test_e2e_workflow.py`, `tests/test_session_manager.py`, `webapp/backend/tests/test_ocr.py`, `webapp/backend/tests/test_projects.py`, `webapp/backend/tests/test_sessions.py`, `webapp/backend/tests/test_system.py` |
 | `webapp/backend/app/core/__init__.py` | `tests/test_download_dialog.py`, `tests/test_report_ocr_dialog.py`, `tests/test_session_manager.py`, `tests/test_ui_workflow.py`, `tests/test_updater.py`, `tests/test_wizard.py` |
 | `webapp/backend/app/core/config.py` | `tests/test_ui_workflow.py`, `tests/test_wizard.py` |
 | `webapp/backend/app/core/context.py` | `tests/test_ab_control_table.py`, `tests/test_download_dialog.py`, `tests/test_report_ocr.py`, `tests/test_updater.py`, `tests/test_validators.py` |
@@ -138,9 +139,10 @@ Bu dosya `skills/graphify` tarafindan uretilmistir. Elle duzenlemeyin;
 | `webapp/backend/app/services/coefficients.py` | `tests/test_database.py`, `tests/test_e2e_workflow.py`, `tests/test_ui_workflow.py`, `webapp/backend/tests/parity/test_domain_parity.py`, `webapp/backend/tests/test_coefficients.py`, `webapp/backend/tests/test_system.py` |
 | `webapp/backend/app/services/decisions.py` | `tests/test_e2e_workflow.py`, `tests/test_ui_workflow.py` |
 | `webapp/backend/app/services/ocr.py` | `tests/test_report_ocr.py`, `tests/test_report_ocr_dialog.py`, `tests/test_ui_workflow.py`, `webapp/backend/tests/test_ocr.py`, `webapp/backend/tests/test_sessions.py`, `webapp/backend/tests/test_system.py` |
+| `webapp/backend/app/services/projects.py` | `webapp/backend/tests/test_projects.py` |
 | `webapp/backend/app/services/reports.py` | `tests/test_coefficient_sources.py`, `tests/test_report_ocr.py`, `tests/test_session_manager.py`, `tests/test_ui_workflow.py`, `tests/test_wizard.py`, `webapp/backend/tests/test_sessions.py` |
 | `webapp/backend/app/services/scene.py` | `webapp/backend/tests/test_sessions.py` |
-| `webapp/backend/app/services/sessions.py` | `tests/test_database.py`, `tests/test_e2e_workflow.py`, `tests/test_session_manager.py`, `webapp/backend/tests/test_ocr.py`, `webapp/backend/tests/test_sessions.py`, `webapp/backend/tests/test_system.py` |
+| `webapp/backend/app/services/sessions.py` | `tests/test_database.py`, `tests/test_e2e_workflow.py`, `tests/test_session_manager.py`, `webapp/backend/tests/test_ocr.py`, `webapp/backend/tests/test_projects.py`, `webapp/backend/tests/test_sessions.py`, `webapp/backend/tests/test_system.py` |
 | `webapp/backend/app/services/snapshot.py` | `tests/test_download_manager.py`, `tests/test_ui_workflow.py`, `webapp/backend/tests/test_sessions.py` |
 
 ### Dogrudan test eslesmesi olmayan kaynak dosyalar
@@ -160,36 +162,36 @@ Bu dosya `skills/graphify` tarafindan uretilmistir. Elle duzenlemeyin;
 
 | Sembol | Cagri noktasi | Ornek cagiranlar |
 | --- | ---: | --- |
-| `get` | 423 | `docs/legacy/Hidrostatik_Test_Chat_v0.py:calculate_A`, `docs/legacy/Hidrostatik_Test_Chat_v0.py:run_air_content_test`, `docs/legacy/Hidrostatik_Test_Chat_v0.py:run_pressure_test` (+420) |
+| `get` | 434 | `docs/legacy/Hidrostatik_Test_Chat_v0.py:calculate_A`, `docs/legacy/Hidrostatik_Test_Chat_v0.py:run_air_content_test`, `docs/legacy/Hidrostatik_Test_Chat_v0.py:run_pressure_test` (+431) |
 | `assertEqual` | 359 | `tests/test_ab_control_table.py:test_default_load_keeps_permissive_behaviour`, `tests/test_ab_control_table.py:test_excessive_adjacent_jump_is_reported`, `tests/test_ab_control_table.py:test_known_seven_degree_anomaly_is_reported` (+356) |
 | `set` | 221 | `hidrostatik_test/_pyinstaller_hook.py:_setup_numpy_dll_paths`, `hidrostatik_test/data/ab_control_table.py:_load_ab_control_repair_grid`, `hidrostatik_test/services/download_manager.py:cancel` (+218) |
-| `str` | 204 | `hidrostatik_test/data/ab_control_table.py:_axis_from_metadata`, `hidrostatik_test/data/ab_control_table.py:_spec_from_metadata`, `hidrostatik_test/data/ab_control_table.py:load_ab_control_table` (+201) |
+| `str` | 208 | `hidrostatik_test/data/ab_control_table.py:_axis_from_metadata`, `hidrostatik_test/data/ab_control_table.py:_spec_from_metadata`, `hidrostatik_test/data/ab_control_table.py:load_ab_control_table` (+205) |
 | `assertTrue` | 176 | `tests/test_ab_control_table.py:test_duplicate_grid_node_is_reported`, `tests/test_ab_control_table.py:test_exact_grid_node_matches_imported_workbook_value`, `tests/test_ab_control_table.py:test_known_seven_degree_anomaly_is_reported` (+173) |
-| `len` | 143 | `hidrostatik_test/data/ab_control_table.py:__init__`, `hidrostatik_test/data/ab_control_table.py:_axis_bounds`, `hidrostatik_test/data/ab_control_table.py:_axis_index_or_none` (+140) |
+| `len` | 144 | `hidrostatik_test/data/ab_control_table.py:__init__`, `hidrostatik_test/data/ab_control_table.py:_axis_bounds`, `hidrostatik_test/data/ab_control_table.py:_axis_index_or_none` (+141) |
 | `assertIn` | 139 | `tests/test_ab_control_table.py:test_exact_grid_node_matches_imported_workbook_value`, `tests/test_ab_control_table.py:test_midpoint_uses_bilinear_interpolation`, `tests/test_ab_control_table.py:test_seven_degree_anomaly_is_repaired_at_runtime` (+136) |
-| `strip` | 127 | `hidrostatik_test/data/botas_reference_table.py:is_botas_reference_option`, `hidrostatik_test/data/coefficient_reference.py:find_reference_point`, `hidrostatik_test/data/gail_reference_table.py:is_gail_reference_option` (+124) |
+| `strip` | 131 | `hidrostatik_test/data/botas_reference_table.py:is_botas_reference_option`, `hidrostatik_test/data/coefficient_reference.py:find_reference_point`, `hidrostatik_test/data/gail_reference_table.py:is_gail_reference_option` (+128) |
+| `append` | 123 | `hidrostatik_test/_pyinstaller_hook.py:_setup_numpy_dll_paths`, `hidrostatik_test/data/ab_control_table.py:find_ab_control_table_issues`, `hidrostatik_test/domain/report_schema.py:iter_fields` (+120) |
 | `Path` | 123 | `hidrostatik_test/data/ab_control_table.py:count_repaired_ab_control_points`, `hidrostatik_test/data/ab_control_table.py:find_ab_control_table_issues`, `hidrostatik_test/data/ab_control_table.py:load_ab_control_table` (+120) |
-| `append` | 122 | `hidrostatik_test/_pyinstaller_hook.py:_setup_numpy_dll_paths`, `hidrostatik_test/data/ab_control_table.py:find_ab_control_table_issues`, `hidrostatik_test/domain/report_schema.py:iter_fields` (+119) |
 | `assertFalse` | 98 | `tests/test_ab_control_table.py:test_known_seven_degree_anomaly_is_reported`, `tests/test_ab_control_table.py:test_runtime_repair_keeps_healthy_lookups_unchanged`, `tests/test_ab_control_table.py:test_small_table_anomaly_is_repaired_by_row_interpolation` (+95) |
-| `post` | 91 | `webapp/backend/app/api/calculations.py:air_content`, `webapp/backend/app/api/calculations.py:geometry`, `webapp/backend/app/api/calculations.py:pig_speed` (+88) |
-| `json` | 85 | `webapp/backend/tests/conftest.py:create_session`, `webapp/backend/tests/parity/test_domain_parity.py:test_parity_air_content`, `webapp/backend/tests/parity/test_domain_parity.py:test_parity_air_exact_limit_fails` (+82) |
+| `post` | 96 | `webapp/backend/app/api/calculations.py:air_content`, `webapp/backend/app/api/calculations.py:geometry`, `webapp/backend/app/api/calculations.py:pig_speed` (+93) |
+| `json` | 95 | `webapp/backend/tests/conftest.py:create_session`, `webapp/backend/tests/parity/test_domain_parity.py:test_parity_air_content`, `webapp/backend/tests/parity/test_domain_parity.py:test_parity_air_exact_limit_fails` (+92) |
 | `float` | 74 | `docs/legacy/Hidrostatik_Test_Chat_v0.py:calculate_A`, `docs/legacy/Hidrostatik_Test_Chat_v0.py:run_air_content_test`, `docs/legacy/Hidrostatik_Test_Chat_v0.py:run_pressure_test` (+71) |
-| `isinstance` | 70 | `hidrostatik_test/data/ab_control_table.py:_axis_from_metadata`, `hidrostatik_test/data/ab_control_table.py:_spec_from_metadata`, `hidrostatik_test/data/pipe_catalog.py:_item_schedules` (+67) |
+| `isinstance` | 71 | `hidrostatik_test/data/ab_control_table.py:_axis_from_metadata`, `hidrostatik_test/data/ab_control_table.py:_spec_from_metadata`, `hidrostatik_test/data/pipe_catalog.py:_item_schedules` (+68) |
 | `TemporaryDirectory` | 70 | `tests/test_ab_control_table.py:test_duplicate_grid_node_is_reported`, `tests/test_ab_control_table.py:test_excessive_adjacent_jump_is_reported`, `tests/test_ab_control_table.py:test_missing_grid_node_is_reported` (+67) |
 | `assertRaises` | 68 | `tests/test_ab_control_table.py:test_out_of_range_lookup_raises_error`, `tests/test_ab_control_table.py:test_validate_flag_raises_with_attached_issues`, `tests/test_botas_reference_table.py:test_botas_rejects_26c_while_gail_still_serves_it` (+65) |
 | `join` | 66 | `hidrostatik_test/_pyinstaller_hook.py:_setup_numpy_dll_paths`, `hidrostatik_test/domain/coefficient_sources.py:normalize_b_source`, `hidrostatik_test/domain/hydrotest_core.py:normalize_steel_model` (+63) |
 | `isclose` | 66 | `tests/test_ab_control_table.py:test_exact_grid_node_matches_imported_workbook_value`, `tests/test_ab_control_table.py:test_known_seven_degree_anomaly_is_reported`, `tests/test_ab_control_table.py:test_midpoint_uses_bilinear_interpolation` (+63) |
 | `patch` | 65 | `tests/test_download_dialog.py:test_cancel_declined_keeps_download_running`, `tests/test_download_dialog.py:test_cancel_while_running_asks_once`, `tests/test_download_dialog.py:test_close_while_running_asks_and_cancels` (+62) |
 | `items` | 57 | `hidrostatik_test/domain/coefficient_manager.py:as_dict`, `hidrostatik_test/domain/coefficient_manager.py:from_dict`, `hidrostatik_test/domain/report_schema.py:validate_report` (+54) |
+| `int` | 48 | `hidrostatik_test/data/ab_control_table.py:_axis_from_metadata`, `hidrostatik_test/data/ab_control_table.py:_spec_from_metadata`, `hidrostatik_test/data/ab_control_table.py:load_ab_control_table` (+45) |
+| `getattr` | 47 | `hidrostatik_test/_pyinstaller_hook.py:_setup_numpy_dll_paths`, `hidrostatik_test/domain/report_schema.py:get_field`, `hidrostatik_test/services/download_manager.py:_content_length` (+44) |
 | `_set_banner` | 47 | `hidrostatik_test/ui/app.py:_add_geometry_segment`, `hidrostatik_test/ui/app.py:_add_time_series_record`, `hidrostatik_test/ui/app.py:_apply_air_a_reference` (+44) |
-| `getattr` | 46 | `hidrostatik_test/_pyinstaller_hook.py:_setup_numpy_dll_paths`, `hidrostatik_test/domain/report_schema.py:get_field`, `hidrostatik_test/services/download_manager.py:_content_length` (+43) |
+| `select` | 46 | `hidrostatik_test/ui/app.py:_active_tab_key`, `hidrostatik_test/ui/app.py:_apply_input_snapshot`, `hidrostatik_test/ui/app.py:_select_tab_by_key` (+43) |
 | `configure` | 46 | `hidrostatik_test/ui/app.py:_append_result`, `hidrostatik_test/ui/app.py:_apply_b_helper_mode`, `hidrostatik_test/ui/app.py:_apply_field_visual_state` (+43) |
-| `int` | 45 | `hidrostatik_test/data/ab_control_table.py:_axis_from_metadata`, `hidrostatik_test/data/ab_control_table.py:_spec_from_metadata`, `hidrostatik_test/data/ab_control_table.py:load_ab_control_table` (+42) |
 | `exists` | 44 | `hidrostatik_test/data/ab_control_table.py:find_ab_control_table_issues`, `hidrostatik_test/data/ab_control_table.py:load_ab_control_table`, `hidrostatik_test/data/water_property_table.py:load_water_property_table` (+41) |
-| `select` | 43 | `hidrostatik_test/ui/app.py:_active_tab_key`, `hidrostatik_test/ui/app.py:_apply_input_snapshot`, `hidrostatik_test/ui/app.py:_select_tab_by_key` (+40) |
 | `assertIsNotNone` | 42 | `tests/test_database.py:test_timestamps_are_utc_iso8601`, `tests/test_download_manager.py:test_get_task_returns_detached_copy`, `tests/test_e2e_workflow.py:test_session_persistence_with_sqlite` (+39) |
+| `execute` | 42 | `hidrostatik_test/services/database.py:__init__`, `hidrostatik_test/services/database.py:_current_schema_version`, `hidrostatik_test/services/database.py:_migrate` (+39) |
 | `cget` | 41 | `hidrostatik_test/ui/app.py:_apply_progress_button_appearance`, `hidrostatik_test/ui/app.py:_finish_progress_button`, `tests/test_download_dialog.py:test_cancel_while_running_asks_once` (+38) |
-| `assertIsNone` | 41 | `tests/test_coefficient_reference.py:test_lookup_accepts_exact_labels_only`, `tests/test_database.py:test_delete_session_cascades`, `tests/test_download_dialog.py:test_cancel_declined_keeps_download_running` (+38) |
 
 ## Kritik Dosyalarin Etki Alani
 
@@ -250,23 +252,23 @@ Bu dosya `skills/graphify` tarafindan uretilmistir. Elle duzenlemeyin;
 
 ### `webapp/backend/app/services/sessions.py`
 
-- Bagli testler: `tests/test_database.py`, `tests/test_e2e_workflow.py`, `tests/test_session_manager.py`, `webapp/backend/tests/test_ocr.py`, `webapp/backend/tests/test_sessions.py`, `webapp/backend/tests/test_system.py`
+- Bagli testler: `tests/test_database.py`, `tests/test_e2e_workflow.py`, `tests/test_session_manager.py`, `webapp/backend/tests/test_ocr.py`, `webapp/backend/tests/test_projects.py`, `webapp/backend/tests/test_sessions.py`, `webapp/backend/tests/test_system.py`
 - Etkilenen dosyalar (5): `webapp/backend/app/api/imports.py`, `webapp/backend/app/api/sessions.py`, `webapp/backend/app/api/system.py`, `webapp/backend/app/services/ocr.py`, `webapp/backend/app/services/scene.py`
 
 ## Veritabani Tablolari
 
 | Tablo | Kullanan moduller |
 | --- | --- |
-| `IF` | `hidrostatik_test/_pyinstaller_hook.py`, `hidrostatik_test/data/ab_control_table.py`, `hidrostatik_test/data/botas_reference_table.py`, `hidrostatik_test/data/coefficient_reference.py`, `hidrostatik_test/data/gail_reference_table.py`, `hidrostatik_test/data/pipe_catalog.py`, `hidrostatik_test/data/water_property_table.py`, `hidrostatik_test/domain/coefficient_manager.py`, `hidrostatik_test/domain/coefficient_sources.py`, `hidrostatik_test/domain/hydrotest_core.py`, `hidrostatik_test/domain/operations.py`, `hidrostatik_test/domain/pressure_profile.py`, `hidrostatik_test/domain/pressurization.py`, `hidrostatik_test/domain/report_schema.py`, `hidrostatik_test/domain/session_manager.py`, `hidrostatik_test/domain/time_series.py`, `hidrostatik_test/domain/water_properties.py`, `hidrostatik_test/services/database.py`, `hidrostatik_test/services/download_manager.py`, `hidrostatik_test/services/report_export.py`, `hidrostatik_test/services/report_ocr.py`, `hidrostatik_test/services/updater.py`, `hidrostatik_test/ui/app.py`, `hidrostatik_test/ui/download_dialog.py`, `hidrostatik_test/ui/helpers.py`, `hidrostatik_test/ui/report_ocr_dialog.py`, `hidrostatik_test/ui/validators.py`, `hidrostatik_test/ui/wizard.py`, `webapp/backend/app/api/ocr.py`, `webapp/backend/app/api/reports.py`, `webapp/backend/app/api/sessions.py`, `webapp/backend/app/api/system.py`, `webapp/backend/app/core/config.py`, `webapp/backend/app/core/errors.py`, `webapp/backend/app/core/security.py`, `webapp/backend/app/core/timeutil.py`, `webapp/backend/app/db.py`, `webapp/backend/app/domain_adapter.py`, `webapp/backend/app/main.py`, `webapp/backend/app/services/calculations.py`, `webapp/backend/app/services/catalog.py`, `webapp/backend/app/services/coefficients.py`, `webapp/backend/app/services/decisions.py`, `webapp/backend/app/services/ocr.py`, `webapp/backend/app/services/reports.py`, `webapp/backend/app/services/scene.py`, `webapp/backend/app/services/sessions.py`, `webapp/backend/app/services/snapshot.py`, `webapp/backend/app/services/storage.py`, `webapp/backend/app/services/system.py` |
+| `IF` | `hidrostatik_test/_pyinstaller_hook.py`, `hidrostatik_test/data/ab_control_table.py`, `hidrostatik_test/data/botas_reference_table.py`, `hidrostatik_test/data/coefficient_reference.py`, `hidrostatik_test/data/gail_reference_table.py`, `hidrostatik_test/data/pipe_catalog.py`, `hidrostatik_test/data/water_property_table.py`, `hidrostatik_test/domain/coefficient_manager.py`, `hidrostatik_test/domain/coefficient_sources.py`, `hidrostatik_test/domain/hydrotest_core.py`, `hidrostatik_test/domain/operations.py`, `hidrostatik_test/domain/pressure_profile.py`, `hidrostatik_test/domain/pressurization.py`, `hidrostatik_test/domain/report_schema.py`, `hidrostatik_test/domain/session_manager.py`, `hidrostatik_test/domain/time_series.py`, `hidrostatik_test/domain/water_properties.py`, `hidrostatik_test/services/database.py`, `hidrostatik_test/services/download_manager.py`, `hidrostatik_test/services/report_export.py`, `hidrostatik_test/services/report_ocr.py`, `hidrostatik_test/services/updater.py`, `hidrostatik_test/ui/app.py`, `hidrostatik_test/ui/download_dialog.py`, `hidrostatik_test/ui/helpers.py`, `hidrostatik_test/ui/report_ocr_dialog.py`, `hidrostatik_test/ui/validators.py`, `hidrostatik_test/ui/wizard.py`, `webapp/backend/app/api/ocr.py`, `webapp/backend/app/api/reports.py`, `webapp/backend/app/api/sessions.py`, `webapp/backend/app/api/system.py`, `webapp/backend/app/core/config.py`, `webapp/backend/app/core/errors.py`, `webapp/backend/app/core/security.py`, `webapp/backend/app/core/timeutil.py`, `webapp/backend/app/db.py`, `webapp/backend/app/domain_adapter.py`, `webapp/backend/app/main.py`, `webapp/backend/app/services/calculations.py`, `webapp/backend/app/services/catalog.py`, `webapp/backend/app/services/coefficients.py`, `webapp/backend/app/services/decisions.py`, `webapp/backend/app/services/ocr.py`, `webapp/backend/app/services/projects.py`, `webapp/backend/app/services/reports.py`, `webapp/backend/app/services/scene.py`, `webapp/backend/app/services/sessions.py`, `webapp/backend/app/services/snapshot.py`, `webapp/backend/app/services/storage.py`, `webapp/backend/app/services/system.py` |
 | `attachments` | `webapp/backend/app/models.py` |
 | `audit_events` | `webapp/backend/app/api/sessions.py`, `webapp/backend/app/models.py` |
 | `coefficients` | `hidrostatik_test/services/database.py`, `webapp/backend/app/api/coefficients.py`, `webapp/backend/app/main.py`, `webapp/backend/app/schemas.py`, `webapp/backend/app/services/calculations.py`, `webapp/backend/app/services/sessions.py` |
 | `geometry_records` | `hidrostatik_test/services/database.py` |
 | `ocr_analyses` | `webapp/backend/app/models.py` |
 | `ocr_mapping_profiles` | `webapp/backend/app/models.py` |
-| `projects` | `webapp/backend/app/models.py` |
+| `projects` | `webapp/backend/app/api/projects.py`, `webapp/backend/app/db.py`, `webapp/backend/app/main.py`, `webapp/backend/app/models.py` |
 | `schema_version` | `hidrostatik_test/data/ab_control_table.py`, `hidrostatik_test/data/water_property_table.py`, `hidrostatik_test/domain/report_schema.py`, `hidrostatik_test/services/database.py`, `hidrostatik_test/services/water_property_table_builder.py`, `hidrostatik_test/ui/app.py`, `webapp/backend/app/models.py`, `webapp/backend/app/schemas.py`, `webapp/backend/app/services/ocr.py`, `webapp/backend/app/services/scene.py`, `webapp/backend/app/services/sessions.py`, `webapp/backend/app/services/snapshot.py` |
-| `sessions` | `hidrostatik_test/domain/session_manager.py`, `hidrostatik_test/services/database.py`, `hidrostatik_test/ui/app.py`, `webapp/backend/app/api/imports.py`, `webapp/backend/app/api/sessions.py`, `webapp/backend/app/api/system.py`, `webapp/backend/app/main.py`, `webapp/backend/app/models.py`, `webapp/backend/app/schemas.py`, `webapp/backend/app/services/ocr.py`, `webapp/backend/app/services/scene.py` |
+| `sessions` | `hidrostatik_test/domain/session_manager.py`, `hidrostatik_test/services/database.py`, `hidrostatik_test/ui/app.py`, `webapp/backend/app/api/imports.py`, `webapp/backend/app/api/sessions.py`, `webapp/backend/app/api/system.py`, `webapp/backend/app/main.py`, `webapp/backend/app/models.py`, `webapp/backend/app/schemas.py`, `webapp/backend/app/services/ocr.py`, `webapp/backend/app/services/projects.py`, `webapp/backend/app/services/scene.py` |
 | `test_entries` | `hidrostatik_test/services/database.py` |
 | `test_results` | `webapp/backend/app/api/reports.py`, `webapp/backend/app/models.py`, `webapp/backend/app/schemas.py`, `webapp/backend/app/services/reports.py` |
 | `time_series` | `webapp/backend/app/models.py`, `webapp/backend/app/services/calculations.py`, `webapp/backend/app/services/decisions.py`, `webapp/backend/app/services/sessions.py`, `webapp/backend/app/services/system.py` |

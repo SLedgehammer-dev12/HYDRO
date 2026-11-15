@@ -81,6 +81,7 @@ export function normalizeInputs(raw: unknown): AppInputs {
   const base = createDefaultInputs();
   if (!isRecord(raw)) return base;
 
+  const sectionMeta = asRecord(raw.section_meta);
   const geometry = asRecord(raw.geometry);
   const catalog = asRecord(raw.geometry_catalog);
   const profile = asRecord(raw.section_profile);
@@ -97,6 +98,14 @@ export function normalizeInputs(raw: unknown): AppInputs {
 
   const next: AppInputs = {
     ...base,
+    section_meta: {
+      section_no: asString(sectionMeta.section_no, base.section_meta.section_no),
+      description: asString(sectionMeta.description, base.section_meta.description),
+      location: asString(sectionMeta.location, base.section_meta.location),
+      test_date: asString(sectionMeta.test_date, base.section_meta.test_date),
+      test_type: asString(sectionMeta.test_type, base.section_meta.test_type),
+      notes: asString(sectionMeta.notes, base.section_meta.notes),
+    },
     geometry: {
       outside_diameter_mm: asNumber(geometry.outside_diameter_mm, base.geometry.outside_diameter_mm),
       wall_thickness_mm: asNumber(geometry.wall_thickness_mm, base.geometry.wall_thickness_mm),

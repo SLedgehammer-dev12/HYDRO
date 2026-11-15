@@ -20,6 +20,7 @@ import {
   computeTablePoint,
   createDemoHistory,
   createDemoSession,
+  demoProjects,
   demoSessionDetail,
   demoSessions,
   sleep,
@@ -49,6 +50,8 @@ import type {
   PressureProfileResponse,
   PressureVariationRequest,
   PressureVariationResponse,
+  Project,
+  ProjectInput,
   ReferenceTableMeta,
   Session,
   SessionListItem,
@@ -249,15 +252,15 @@ export function useCatalog() {
 /* Oturumlar                                                           */
 /* ------------------------------------------------------------------ */
 
-export function useSessions() {
+export function useSessions(projectId?: string | null) {
   return useQuery<SessionListItem[]>({
-    queryKey: ["sessions"],
+    queryKey: ["sessions", projectId ?? "all"],
     queryFn: async () => {
       const state = useAppStore.getState();
       const fallback = () => ({
-        items: demoSessions(state.inputs, state.sessionName),
-        total: 3,
-        limit: 50,
+        items: demoSessions(state.inputs, state.sessionName, projectId),
+        total: demoSessions(state.inputs, state.sessionName, projectId).length,
+        limit: 100,
         offset: 0,
       });
       if (state.backend === "demo") {
@@ -265,7 +268,7 @@ export function useSessions() {
         return fallback().items;
       }
       try {
-        const response = await api.sessions();
+        const response = await api.sessions(projectId);
         state.setSessionApiReady(true);
         return response.items;
       } catch (error) {
@@ -276,15 +279,230 @@ export function useSessions() {
         throw error;
       }
     },
-    initialData: DEMO_SESSION_LIST_FALLBACK(),
+    initialData: DEMO_SESSION_LIST_FALLBACK(projectId),
     initialDataUpdatedAt: 0,
     staleTime: 20_000,
   });
 }
 
-function DEMO_SESSION_LIST_FALLBACK(): SessionListItem[] {
+function DEMO_SESSION_LIST_FALLBACK(projectId?: string | null): SessionListItem[] {
   const state = useAppStore.getState();
-  return demoSessions(state.inputs, state.sessionName);
+  return demoSessions(state.inputs, state.sessionName, projectId);
+}
+
+/* ------------------------------------------------------------------ */
+/* Projeler                                                            */
+/* ------------------------------------------------------------------ */
+
+export function useProjects() {
+  return useQuery<Project[]>({
+    queryKey: ["projects"],
+    queryFn: async () => {
+      const state = useAppStore.getState();
+      if (state.backend === "demo") return demoProjects();
+      try {
+        const response = await api.projects();
+        return response.items;
+      } catch (error) {
+        if (isRecoverableError(error)) return demoProjects();
+        throw error;
+      }
+    },
+    initialData: DEMO_PROJECTS_FALLBACK,
+    initialDataUpdatedAt: 0,
+    staleTime: 30_000,
+  });
+}
+
+function DEMO_PROJECTS_FALLBACK(): Project[] {
+  return demoProjects();
+}
+
+function cacheProject(
+  queryClient: ReturnType<typeof useQueryClient>,
+  project: Project,
+  mode: "add" | "replace" | "remove",
+) {
+  queryClient.setQueryData<Project[]>(["projects"], (current) => {
+    const items = current ?? [];
+    if (mode === "add") return [project, ...items];
+    if (mode === "remove") return items.filter((item) => item.id !== project.id);
+    return items.map((item) => (item.id === project.id ? project : item));
+  });
+}
+
+export function useCreateProject() {
+  const queryClient = useQueryClient();
+  return useMutation<Project, Error, ProjectInput>({
+    mutationFn: async (payload) => {
+      const state = useAppStore.getState();
+      if (state.backend !== "online") {
+        await sleep(320);
+        const now = new Date().toISOString();
+        return {
+          id: `demo-project-${Date.now().toString(36)}`,
+          code: payload.code?.trim() || `PRJ-${Date.now().toString(36).slice(-4).toUpperCase()}`,
+          name: payload.name,
+          client: payload.client?.trim() || null,
+          description: payload.description?.trim() || null,
+          section_count: 0,
+          created_at: now,
+          updated_at: now,
+        };
+      }
+      return api.createProject(payload);
+    },
+    onSuccess: (project) => {
+      cacheProject(queryClient, project, "add");
+      useAppStore.getState().pushToast("success", "Proje oluşturuldu", project.name);
+    },
+    onError: (error) => {
+      useAppStore.getState().pushToast("error", "Proje oluşturulamadı", error.message);
+    },
+  });
+}
+
+export function useUpdateProject() {
+  const queryClient = useQueryClient();
+  return useMutation<Project, Error, { id: string; patch: Partial<ProjectInput> }>({
+    mutationFn: async ({ id, patch }) => {
+      const state = useAppStore.getState();
+      if (state.backend !== "online") {
+        await sleep(280);
+        const current = queryClient.getQueryData<Project[]>(["projects"])?.find((p) => p.id === id);
+        return {
+          ...(current ?? {
+            id,
+            code: "",
+            name: patch.name ?? "",
+            client: null,
+            description: null,
+            section_count: 0,
+            created_at: new Date().toISOString(),
+          }),
+          ...patch,
+          client: patch.client ?? current?.client ?? null,
+          description: patch.description ?? current?.description ?? null,
+          updated_at: new Date().toISOString(),
+        } as Project;
+      }
+      return api.updateProject(id, patch);
+    },
+    onSuccess: (project) => {
+      cacheProject(queryClient, project, "replace");
+      useAppStore.getState().pushToast("success", "Proje güncellendi", project.name);
+    },
+    onError: (error) => {
+      useAppStore.getState().pushToast("error", "Proje güncellenemedi", error.message);
+    },
+  });
+}
+
+export function useDeleteProject() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: async (id) => {
+      const state = useAppStore.getState();
+      if (state.backend !== "online") {
+        await sleep(240);
+        return;
+      }
+      await api.deleteProject(id);
+    },
+    onSuccess: (_result, id) => {
+      const removed = queryClient.getQueryData<Project[]>(["projects"])?.find((p) => p.id === id);
+      cacheProject(
+        queryClient,
+        removed ?? ({ id } as Project),
+        "remove",
+      );
+      const store = useAppStore.getState();
+      if (store.projectId === id) store.setProject(null);
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      store.pushToast("success", "Proje silindi", removed?.name ?? "Proje arşivlendi.");
+    },
+    onError: (error) => {
+      useAppStore.getState().pushToast("error", "Proje silinemedi", error.message);
+    },
+  });
+}
+
+export function useDuplicateSession() {
+  const queryClient = useQueryClient();
+  return useMutation<Session, Error, { id: string; name: string }>({
+    mutationFn: async ({ id, name }) => {
+      const state = useAppStore.getState();
+      if (state.backend !== "online" || id.startsWith("demo-")) {
+        await sleep(260);
+        return { ...createDemoSession(), id: `demo-session-${Date.now().toString(36)}`, name };
+      }
+      return api.duplicateSession(id, name);
+    },
+    onSuccess: (session) => {
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      void queryClient.invalidateQueries({ queryKey: ["projects"] });
+      useAppStore.getState().pushToast("success", "Kesit kopyalandı", session.name);
+    },
+    onError: (error) => {
+      useAppStore.getState().pushToast("error", "Kesit kopyalanamadı", error.message);
+    },
+  });
+}
+
+export function useDeleteSection() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: async (id) => {
+      const state = useAppStore.getState();
+      if (state.backend !== "online" || id.startsWith("demo-")) {
+        await sleep(220);
+        return;
+      }
+      await api.deleteSession(id);
+    },
+    onSuccess: (_result, id) => {
+      const store = useAppStore.getState();
+      if (store.sessionId === id) {
+        store.setSessionMeta({ id: null, name: "Yeni oturum", status: "draft", revision: 0 });
+      }
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      void queryClient.invalidateQueries({ queryKey: ["projects"] });
+      store.pushToast("success", "Kesit silindi", "Kesit arşivlendi; proje kaydı korundu.");
+    },
+    onError: (error) => {
+      useAppStore.getState().pushToast("error", "Kesit silinemedi", error.message);
+    },
+  });
+}
+
+export function useOpenSession() {
+  const queryClient = useQueryClient();
+  return useMutation<Session, Error, string>({
+    mutationFn: async (id) => {
+      const state = useAppStore.getState();
+      if (state.backend !== "online" || id.startsWith("demo-")) {
+        await sleep(240);
+        return demoSessionDetail(state.inputs, state.sessionName);
+      }
+      return api.session(id);
+    },
+    onSuccess: (session) => {
+      const store = useAppStore.getState();
+      store.applySessionInputs(session.inputs);
+      store.setSessionMeta({
+        id: session.id,
+        name: session.name,
+        status: session.status,
+        revision: session.revision,
+      });
+      store.markSaved(session.revision);
+      queryClient.setQueryData(["session", session.id], session);
+      store.pushToast("success", "Kesit açıldı", session.name);
+    },
+    onError: (error) => {
+      useAppStore.getState().pushToast("error", "Kesit açılamadı", error.message);
+    },
+  });
 }
 
 export function useSessionDetail(id: string | null) {
@@ -363,6 +581,7 @@ export function useSaveSession() {
       if (!state.sessionId) {
         const created = await api.createSession({
           name,
+          project_id: state.projectId,
           inputs: toApiInputs(state.inputs),
         });
         return { demo: false, session: created, revision: created.revision };
@@ -372,6 +591,7 @@ export function useSaveSession() {
         {
           name,
           status: state.sessionStatus,
+          project_id: state.projectId,
           inputs: toApiInputs(state.inputs),
         },
         state.revision,
@@ -412,15 +632,27 @@ export function useCreateSession() {
   return useMutation<
     { session: Session; demo: boolean },
     Error,
-    { name: string; inputs: Record<string, unknown> }
+    { name: string; inputs: Record<string, unknown>; projectId?: string | null }
   >({
-    mutationFn: async ({ name, inputs }) => {
+    mutationFn: async ({ name, inputs, projectId }) => {
       const state = useAppStore.getState();
       if (state.backend !== "online" || state.sessionApiReady === false) {
         await sleep(360);
-        return { demo: true, session: { ...createDemoSession(), name, revision: 0 } };
+        return {
+          demo: true,
+          session: {
+            ...createDemoSession(),
+            name,
+            project_id: projectId ?? state.projectId,
+            revision: 0,
+          },
+        };
       }
-      const session = await api.createSession({ name, inputs });
+      const session = await api.createSession({
+        name,
+        project_id: projectId ?? state.projectId,
+        inputs,
+      });
       return { demo: false, session };
     },
     onSuccess: ({ session, demo }) => {
@@ -437,6 +669,8 @@ export function useCreateSession() {
         demo ? "Demo modunda yerel oturum açıldı." : `${session.name} · revizyon ${session.revision}`,
       );
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      /* Kesit sayısı proje kartlarında `section_count` olarak görünür. */
+      void queryClient.invalidateQueries({ queryKey: ["projects"] });
     },
     onError: (error) => {
       useAppStore.getState().pushToast("error", "Oturum açılamadı", error.message);

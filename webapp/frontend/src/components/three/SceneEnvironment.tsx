@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react";
-import { ContactShadows, Grid, Html, Line } from "@react-three/drei";
+import { ContactShadows, Grid, Line } from "@react-three/drei";
 import * as THREE from "three";
+import { SceneHtml } from "./SceneHtml";
 import type { SceneLayout } from "./sceneModel";
 
 interface SceneEnvironmentProps {
@@ -97,16 +98,11 @@ function StationRuler({ layout, showLabels }: { layout: SceneLayout; showLabels:
             <meshBasicMaterial color="#3d5878" />
           </mesh>
           {showLabels ? (
-            <Html
-              position={[0, 0.08, 0.32]}
-              center
-              zIndexRange={[8, 0]}
-              style={{ pointerEvents: "none" }}
-            >
+            <SceneHtml position={[0, 0.08, 0.32]} center zIndexRange={[8, 0]}>
               <span className="numeric whitespace-nowrap text-[10px] tracking-wide text-mist-500">
                 {tick.label}
               </span>
-            </Html>
+            </SceneHtml>
           ) : null}
         </group>
       ))}

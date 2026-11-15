@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
-import { Html } from "@react-three/drei";
+import { SceneHtml } from "./SceneHtml";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import {
@@ -148,17 +148,11 @@ export default function PipelinePig({
           <cylinderGeometry args={[0.005, 0.005, 0.5, 4]} />
           <meshBasicMaterial color="#fbbf24" toneMapped={false} />
         </mesh>        {showLabels ? (
-          <Html
-            position={[0, 0.62, 0]}
-            center
-            zIndexRange={[16, 2]}
-            style={{ pointerEvents: "none" }}
-            aria-hidden
-          >
+          <SceneHtml position={[0, 0.62, 0]} center zIndexRange={[16, 2]}>
             <span className="numeric whitespace-nowrap rounded border border-amber-400/50 bg-ink-950/80 px-1.5 py-0.5 text-[10px] text-amber-300">
               PIG · {rateLabel}
             </span>
-          </Html>
+          </SceneHtml>
         ) : null}
       </group>
     </group>

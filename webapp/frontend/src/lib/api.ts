@@ -33,6 +33,8 @@ import type {
   PressureVariationRequest,
   PressureVariationResponse,
   PressurizationResponse,
+  Project,
+  ProjectInput,
   ReferenceCompareResponse,
   ReferenceTableMeta,
   ScheduleOption,
@@ -368,10 +370,27 @@ export const api = {
       { method: "POST", body, signal },
     ),
 
-  sessions: (signal?: AbortSignal) =>
-    apiFetch<ListResponse<SessionListItem>>("/sessions?limit=50", { signal }),
+  sessions: (projectId?: string | null, signal?: AbortSignal) => {
+    const params = new URLSearchParams({ limit: "100" });
+    if (projectId) params.set("project_id", projectId);
+    return apiFetch<ListResponse<SessionListItem>>(`/sessions?${params.toString()}`, { signal });
+  },
 
   session: (id: string, signal?: AbortSignal) => apiFetch<Session>(`/sessions/${id}`, { signal }),
+
+  projects: (signal?: AbortSignal) =>
+    apiFetch<ListResponse<Project>>("/projects?limit=200", { signal }),
+
+  project: (id: string, signal?: AbortSignal) => apiFetch<Project>(`/projects/${id}`, { signal }),
+
+  createProject: (body: ProjectInput, signal?: AbortSignal) =>
+    apiFetch<Project>("/projects", { method: "POST", body, signal }),
+
+  updateProject: (id: string, body: Partial<ProjectInput>, signal?: AbortSignal) =>
+    apiFetch<Project>(`/projects/${id}`, { method: "PUT", body, signal }),
+
+  deleteProject: (id: string, signal?: AbortSignal) =>
+    apiFetch<void>(`/projects/${id}`, { method: "DELETE", signal }),
 
   createSession: (
     body: { name?: string; project_id?: string | null; inputs?: Record<string, unknown> },
@@ -380,7 +399,12 @@ export const api = {
 
   updateSession: (
     id: string,
-    body: { name?: string; status?: string; inputs?: Record<string, unknown> },
+    body: {
+      name?: string;
+      status?: string;
+      project_id?: string | null;
+      inputs?: Record<string, unknown>;
+    },
     revision: number,
     signal?: AbortSignal,
   ) =>

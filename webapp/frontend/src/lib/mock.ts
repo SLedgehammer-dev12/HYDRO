@@ -34,6 +34,7 @@ import type {
   PressureVariationRequest,
   PressureVariationResponse,
   PressurizationResponse,
+  Project,
   ReferenceTableMeta,
   ResultBundle,
   Session,
@@ -332,6 +333,14 @@ export function createDefaultSegments(): AppInputs["segments"] {
 
 export function createDefaultInputs(): AppInputs {
   const inputs: AppInputs = {
+    section_meta: {
+      section_no: "K-01",
+      description: "Bölüm 12–13 · Doğu Hattı",
+      location: "KP 0+000 – 12+000",
+      test_date: "2026-11-15",
+      test_type: "Hidrostatik test",
+      notes: "",
+    },
     geometry: { ...DEMO_GEOMETRY },
     geometry_catalog: {
       size_option: "NPS 16 (DN 400) - OD 406.40 mm",
@@ -1068,9 +1077,33 @@ export function createDemoHistory(inputs: AppInputs): HistoryEntry[] {
   return demoHistory(inputs);
 }
 
+export const DEMO_PROJECTS: Project[] = [
+  {
+    id: "demo-project-001",
+    code: "PRJ-DOGU-12",
+    name: "Doğu Hattı Hidrostatik Testi",
+    client: "BOTAŞ",
+    description: "Bölüm 12–13 doğu hattı; 2026 kasım test kampanyası.",
+    section_count: 2,
+    created_at: "2026-11-10T08:00:00Z",
+    updated_at: "2026-11-15T19:40:12Z",
+  },
+  {
+    id: "demo-project-002",
+    code: "PRJ-KUZEY-09",
+    name: "Kuzey Kol Bağlantısı",
+    client: "BOTAŞ",
+    description: "Bölüm 09 kuzey kol; taslak kesitler.",
+    section_count: 1,
+    created_at: "2026-11-12T10:30:00Z",
+    updated_at: "2026-11-14T15:22:00Z",
+  },
+];
+
 export const DEMO_SESSION_LIST: SessionListItem[] = [
   {
     id: "demo-session-001",
+    project_id: "demo-project-001",
     name: "Bölüm 12–13 · Doğu Hattı",
     status: "active",
     revision: 3,
@@ -1079,6 +1112,7 @@ export const DEMO_SESSION_LIST: SessionListItem[] = [
   },
   {
     id: "demo-session-002",
+    project_id: "demo-project-002",
     name: "Bölüm 09 · Kuzey Kol",
     status: "draft",
     revision: 1,
@@ -1087,6 +1121,7 @@ export const DEMO_SESSION_LIST: SessionListItem[] = [
   },
   {
     id: "demo-session-003",
+    project_id: "demo-project-001",
     name: "Bölüm 04 · Depolama Bağlantısı",
     status: "completed",
     revision: 7,
@@ -1099,7 +1134,7 @@ export function createDemoSession(): Session {
   const inputs = createDefaultInputs();
   return {
     id: "demo-session-001",
-    project_id: null,
+    project_id: "demo-project-001",
     name: "Bölüm 12–13 · Doğu Hattı",
     status: "active",
     revision: 3,
@@ -1293,10 +1328,15 @@ export function demoSessionDetail(inputs: AppInputs, name: string): Session {
   };
 }
 
-export function demoSessions(inputs: AppInputs, name: string): SessionListItem[] {
-  return [
+export function demoSessions(
+  inputs: AppInputs,
+  name: string,
+  projectId: string | null = null,
+): SessionListItem[] {
+  const items: SessionListItem[] = [
     {
       id: "demo-session-001",
+      project_id: projectId ?? "demo-project-001",
       name,
       status: "active",
       revision: 3,
@@ -1304,6 +1344,17 @@ export function demoSessions(inputs: AppInputs, name: string): SessionListItem[]
     },
     ...DEMO_SESSION_LIST.slice(1),
   ];
+  if (!projectId) return items;
+  return items.filter((item) => item.project_id === projectId);
+}
+
+export function demoProjects(): Project[] {
+  return DEMO_PROJECTS.map((project) => ({
+    ...project,
+    section_count: DEMO_SESSION_LIST.filter(
+      (session) => session.project_id === project.id,
+    ).length,
+  }));
 }
 
 export type MockInputs = AppInputs;

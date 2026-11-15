@@ -17,18 +17,25 @@ export function PageHeader({
   className?: string;
 }) {
   return (
-    <div className={cn("flex flex-wrap items-end justify-between gap-3", className)}>
+    <div className={cn("flex flex-wrap items-end justify-between gap-4", className)}>
       <div className="min-w-0">
-        {kicker ? <p className="eyebrow">{kicker}</p> : null}
-        <h1 className="mt-1 text-[22px] font-semibold leading-tight tracking-[-0.025em] sm:text-[26px]">
+        {kicker ? (
+          <p className="eyebrow flex items-center gap-2">
+            <span className="h-px w-6 bg-[var(--primary)]" aria-hidden />
+            {kicker}
+          </p>
+        ) : null}
+        <h1 className="mt-1.5 text-[25px] font-semibold leading-[1.12] tracking-[-0.03em] text-balance sm:text-[30px]">
           {title}
         </h1>
         {description ? (
-          <p className="mt-1 max-w-[70ch] text-[12px] leading-relaxed text-[var(--text-muted)]">{description}</p>
+          <p className="mt-1.5 max-w-[74ch] text-[12px] leading-relaxed text-[var(--text-muted)]">{description}</p>
         ) : null}
-        {meta ? <div className="mt-2 flex flex-wrap items-center gap-2">{meta}</div> : null}
+        {meta ? <div className="mt-2.5 flex flex-wrap items-center gap-2">{meta}</div> : null}
       </div>
-      {actions ? <div className="ml-auto flex flex-wrap items-center justify-end gap-2">{actions}</div> : null}
+      {actions ? (
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2.5">{actions}</div>
+      ) : null}
     </div>
   );
 }

@@ -17,7 +17,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { api, apiErrorMessage } from "../../lib/api";
 import { relativeTime } from "../../lib/format";
-import { useMeta, useSessions, useCreateSession, useSaveSession } from "../../hooks/queries";
+import { useMeta, useProjects, useSessions, useCreateSession, useSaveSession } from "../../hooks/queries";
 import { useAppStore } from "../../store/useAppStore";
 import { toApiInputs } from "../../lib/normalize";
 import { Badge } from "../ui/Badge";
@@ -29,6 +29,8 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
   const sessionName = useAppStore((state) => state.sessionName);
   const sessionStatus = useAppStore((state) => state.sessionStatus);
   const sessionId = useAppStore((state) => state.sessionId);
+  const projectCode = useAppStore((state) => state.projectCode);
+  const setProject = useAppStore((state) => state.setProject);
   const revision = useAppStore((state) => state.revision);
   const dirty = useAppStore((state) => state.dirty);
   const theme = useAppStore((state) => state.theme);
@@ -46,6 +48,7 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
   const pushToast = useAppStore((state) => state.pushToast);
 
   const { data: sessions } = useSessions();
+  const { data: projects } = useProjects();
   const { data: meta } = useMeta();
   const saveSession = useSaveSession();
   const createSession = useCreateSession();
@@ -98,6 +101,10 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
         revision: session.revision,
         status: session.status,
       });
+      const project = projects?.find((item) => item.id === session.project_id);
+      if (project) setProject(project);
+      else if (session.project_id) setProject({ id: session.project_id, name: "" });
+      else setProject(null);
       queryClient.setQueryData(["session", session.id], session);
       pushToast("success", "Oturum açıldı", `${session.name} · revizyon ${session.revision}`);
     } catch (error) {
@@ -147,6 +154,12 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
                   </Badge>
                 </div>
                 <p className="mt-0.5 flex items-center gap-1.5 text-[10.5px] text-[var(--text-faint)]">
+                  {projectCode ? (
+                    <>
+                      <span className="font-mono">{projectCode}</span>
+                      <span aria-hidden>·</span>
+                    </>
+                  ) : null}
                   <span>rev. {revision}</span>
                   <span aria-hidden>·</span>
                   <span className={cn(dirty ? "tone-warning" : "tone-pass")}>

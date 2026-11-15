@@ -35,6 +35,9 @@ from .api import (
     ocr as ocr_router,
 )
 from .api import (
+    projects as projects_router,
+)
+from .api import (
     reports as reports_router,
 )
 from .api import (
@@ -125,6 +128,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(coefficients_router.router, prefix=API_PREFIX)
     app.include_router(calculations_router.router, prefix=API_PREFIX)
     app.include_router(sessions_router.router, prefix=API_PREFIX)
+    app.include_router(projects_router.router, prefix=API_PREFIX)
     app.include_router(reports_router.router, prefix=API_PREFIX)
     app.include_router(imports_router.router, prefix=API_PREFIX)
     app.include_router(ocr_router.router, prefix=API_PREFIX)

@@ -99,7 +99,7 @@ export function RightPanel() {
             <button
               type="button"
               className="mt-2 inline-flex items-center gap-0.5 text-[10.5px] font-semibold text-[var(--primary)] hover:underline"
-              onClick={() => setTab("field")}
+              onClick={() => setTab("geometry")}
             >
               Checklist’i aç <ArrowRight size={11} />
             </button>

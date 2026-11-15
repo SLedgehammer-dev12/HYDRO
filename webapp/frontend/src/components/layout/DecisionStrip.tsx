@@ -6,7 +6,7 @@ import { cn } from "../../lib/utils";
 
 function marginUnit(tab: TabKey): string {
   if (tab === "air") return "m³";
-  if (tab === "pressure" || tab === "field") return "bar";
+  if (tab === "pressure" || tab === "geometry") return "bar";
   return "";
 }
 
@@ -21,10 +21,10 @@ export function DecisionStrip() {
   const profile = results.profile?.decision;
 
   const active: Decision | undefined =
-    tab === "pressure" ? pressure : tab === "field" ? profile : tab === "air" ? air : air ?? pressure;
+    tab === "pressure" ? pressure : tab === "geometry" ? profile : tab === "air" ? air : air ?? pressure;
 
   const activeTab: TabKey =
-    tab === "pressure" || tab === "field" || tab === "air"
+    tab === "pressure" || tab === "geometry" || tab === "air"
       ? tab
       : air
         ? "air"
@@ -74,9 +74,14 @@ export function DecisionStrip() {
             className={cn(
               "badge hidden transition-transform hover:-translate-y-px sm:inline-flex",
               `badge-${statusTone(profile.status)}`,
-              activeTab === "field" && "ring-1 ring-[color-mix(in_srgb,var(--primary)_35%,transparent)]",
+              activeTab === "geometry" && "ring-1 ring-[color-mix(in_srgb,var(--primary)_35%,transparent)]",
             )}
-            onClick={() => setTab("field")}
+            onClick={() => {
+              setTab("geometry");
+              window.setTimeout(() => {
+                document.getElementById("saha")?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }, 30);
+            }}
             title="Basınç penceresi kararı"
           >
             Profil · {decisionLabel(profile.status)}

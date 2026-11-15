@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Html } from "@react-three/drei";
+import { SceneHtml } from "./SceneHtml";
 import * as THREE from "three";
 import type { SceneSegment } from "../../lib/scene";
 import {
@@ -170,12 +170,10 @@ function PipeSegment({
       </group>
 
       {showLabels && !hovered ? (
-        <Html
+        <SceneHtml
           position={[0, radius + 0.34, 0]}
           center
           zIndexRange={[12, 0]}
-          style={{ pointerEvents: "none" }}
-          aria-hidden
         >
           <span
             className="numeric whitespace-nowrap rounded border border-line/60 bg-ink-950/75 px-1.5 py-0.5 text-[10px] text-mist-200"
@@ -183,18 +181,17 @@ function PipeSegment({
           >
             {segment.label}
           </span>
-        </Html>
+        </SceneHtml>
       ) : null}
 
       {hovered ? (
-        <Html
+        <SceneHtml
           position={[0, radius + 0.55, 0]}
           center
           zIndexRange={[24, 12]}
-          style={{ pointerEvents: "none" }}
         >
           <SegmentTooltip segment={segment} />
-        </Html>
+        </SceneHtml>
       ) : null}
     </group>
   );

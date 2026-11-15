@@ -3,7 +3,7 @@ import { Loader2 } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 type Variant = "default" | "primary" | "ghost" | "danger";
-type Size = "md" | "sm";
+type Size = "md" | "sm" | "lg";
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant;
@@ -33,7 +33,12 @@ export function Button({
   return (
     <button
       type={type}
-      className={cn(VARIANT_CLASS[variant], size === "sm" && "btn-sm", className)}
+      className={cn(
+        VARIANT_CLASS[variant],
+        size === "sm" && "btn-sm",
+        size === "lg" && "btn-lg",
+        className,
+      )}
       disabled={disabled || loading}
       {...rest}
     >

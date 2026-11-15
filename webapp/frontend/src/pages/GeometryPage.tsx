@@ -14,13 +14,15 @@ import {
   Wand2,
 } from "lucide-react";
 import { PageHeader } from "../components/layout/PageHeader";
+import { SectionIdentityCard } from "../components/SectionIdentityCard";
+import PipelineScene from "../components/three/PipelineScene";
 import { SectionCard, KpiCard, ResultTile } from "../components/ui/Card";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { NumberField, SelectField, FieldGrid, ReadonlyValue } from "../components/ui/Field";
 import { InlineNotice, EmptyState } from "../components/ui/State";
 import { ElevationProfileChart, UtilizationChart } from "../components/charts/Charts";
-import PipelineScene from "../components/three/PipelineScene";
+import { FieldPage } from "./FieldPage";
 import { useCatalog, useCalculateGeometry, useMeta } from "../hooks/queries";
 import { useAppStore } from "../store/useAppStore";
 import { PUMP_LABELS } from "../lib/constants";
@@ -89,7 +91,6 @@ export function GeometryPage() {
   const sections = sectionsFromInputs(inputs);
   const localGeometry = sections.length > 0 ? computeGeometry(sections) : null;
   const geometry = results.geometry ?? localGeometry;
-  const scene = buildSceneData(inputs, results);
 
   const odError =
     inputs.geometry.outside_diameter_mm !== null && inputs.geometry.outside_diameter_mm <= 0
@@ -172,14 +173,16 @@ export function GeometryPage() {
     });
   }
 
+  const scene = buildSceneData(inputs, results);
+
   const totalLength = geometry?.total_length_m ?? 0;
   const totalVolume = geometry?.internal_volume_m3 ?? 0;
 
   return (
     <div className="space-y-5">
       <PageHeader
-        kicker="Geometri"
-        title="Boru kesiti, segmentler ve test profili"
+        kicker="Geometri & Saha"
+        title="Kesit, segmentler, kotlar ve saha profili"
         description="Segment listesi doluysa tek kesit alanları yok sayılır; hat, segmentlerin zincirleme toplamından hesaplanır."
         meta={
           <>
@@ -198,12 +201,13 @@ export function GeometryPage() {
         }
         actions={
           <>
-            <Button variant="ghost" icon={<ArrowRight size={14} />} onClick={() => setTab("coefficients")}>
+            <Button size="lg" icon={<ArrowRight size={15} />} onClick={() => setTab("coefficients")}>
               Katsayılara geç
             </Button>
             <Button
+              size="lg"
               variant="primary"
-              icon={<CheckCircle2 size={14} />}
+              icon={<CheckCircle2 size={15} />}
               loading={calculate.isPending}
               onClick={validateGeometry}
             >
@@ -212,6 +216,8 @@ export function GeometryPage() {
           </>
         }
       />
+
+      <SectionIdentityCard />
 
       <div className="grid gap-4 xl:grid-cols-[1.15fr_1fr]">
         <SectionCard
@@ -601,6 +607,12 @@ export function GeometryPage() {
         </SectionCard>
       </div>
 
+      {!geometry ? (
+        <InlineNotice tone="warning" title="Hesap için geometri gerekli" icon={ClipboardList}>
+          Tek kesit veya en az bir geçerli segment girildiğinde toplamlar ve doğrulama etkinleşir.
+        </InlineNotice>
+      ) : null}
+
       <SectionCard
         title="3D saha önizlemesi"
         description="Geometri değişiklikleri sahneye anında yansır; kot profili 4 noktadan yaklaşık türetilir."
@@ -613,11 +625,7 @@ export function GeometryPage() {
         </div>
       </SectionCard>
 
-      {!geometry ? (
-        <InlineNotice tone="warning" title="Hesap için geometri gerekli" icon={ClipboardList}>
-          Tek kesit veya en az bir geçerli segment girildiğinde toplamlar ve doğrulama etkinleşir.
-        </InlineNotice>
-      ) : null}
+      <FieldPage embedded />
     </div>
   );
 }

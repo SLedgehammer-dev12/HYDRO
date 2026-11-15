@@ -10,7 +10,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Iterator
 
-from sqlalchemy import Engine, create_engine, event, text
+from sqlalchemy import Engine, create_engine, event, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -82,12 +82,27 @@ def get_sessionmaker() -> sessionmaker[Session]:
     return _session_factory
 
 
+def _apply_light_migrations() -> None:
+    """Add columns that ``create_all`` cannot add to existing tables."""
+
+    inspector = inspect(get_engine())
+    if "projects" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("projects")}
+    if "code" not in columns:
+        with get_engine().begin() as connection:
+            connection.execute(
+                text('ALTER TABLE "projects" ADD COLUMN "code" VARCHAR(64) DEFAULT \'\'')
+            )
+
+
 def init_db() -> None:
     """Create tables for MVP (no Alembic yet)."""
 
     from . import models  # noqa: F401  (register mappers)
 
     models.Base.metadata.create_all(bind=get_engine())
+    _apply_light_migrations()
 
 
 def dispose_database() -> None:

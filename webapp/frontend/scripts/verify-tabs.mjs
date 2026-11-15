@@ -24,15 +24,17 @@ const CDP_PORT = Number(process.env.CDP_PORT ?? 9223);
 const SLEEP = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const ROUTES = [
-  ["geometry", "Boru kesiti, segmentler ve test profili"],
-  ["coefficients", "A/B hazırlama"],
-  ["air", "Hava içerik değerlendirmesi"],
-  ["pressure", "Basınç değişim değerlendirmesi"],
-  ["field", "Basınç penceresi"],
-  ["reports", "Rapor önizleme"],
-  ["ocr", "Test Raporu Kontrolü"],
-  ["settings", "Hesaplama, görünüm ve oturum"],
-  ["dashboard", "Merhaba"],
+  ["projects", "Proje kayıtları ve kesit envanteri", "projects"],
+  ["geometry", "Kesit, segmentler, kotlar ve saha profili", "geometry"],
+  ["field", "Kesit, segmentler, kotlar ve saha profili", "geometry"],
+  ["coefficients", "A/B hazırlama", "coefficients"],
+  ["coefficient-detail", "Üç kaynak, backend ve A onarım", "coefficient_detail"],
+  ["air", "Hava içerik değerlendirmesi", "air"],
+  ["pressure", "Basınç değişim değerlendirmesi", "pressure"],
+  ["reports", "Rapor önizleme", "reports"],
+  ["ocr", "Test Raporu Kontrolü", "ocr"],
+  ["settings", "Hesaplama, görünüm ve oturum", "settings"],
+  ["dashboard", "Merhaba", "dashboard"],
 ];
 
 function findChrome() {
@@ -187,7 +189,7 @@ async function main() {
     await SLEEP(1_800);
 
     const failures = [];
-    for (const [route, expectedTitle] of ROUTES) {
+    for (const [route, expectedTitle, expectedPage = route] of ROUTES) {
       const hash = route === "dashboard" ? "#/" : `#/${route}`;
       await evaluate(`location.hash = ${JSON.stringify(hash)}`);
       await SLEEP(450);
@@ -202,14 +204,14 @@ async function main() {
         };
       })()`);
 
-      const okPage = state.dataPage === route;
+      const okPage = state.dataPage === expectedPage;
       const okTitle = state.h1.includes(expectedTitle);
       const okGreeting = route === "dashboard" ? state.greeting : !state.greeting;
       if (!okPage || !okTitle || !okGreeting) {
-        failures.push({ route, expectedTitle, ...state, okPage, okTitle, okGreeting });
+        failures.push({ route, expectedPage, expectedTitle, ...state, okPage, okTitle, okGreeting });
       }
       console.log(
-        `${okPage && okTitle && okGreeting ? "PASS" : "FAIL"}  ${route.padEnd(13)} ${state.h1}`,
+        `${okPage && okTitle && okGreeting ? "PASS" : "FAIL"}  ${route.padEnd(20)} ${state.h1}`,
       );
     }
 

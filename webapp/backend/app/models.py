@@ -43,6 +43,7 @@ class Project(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
     workspace_id_hash: Mapped[str] = mapped_column(String(64), index=True)
+    code: Mapped[str] = mapped_column(String(64), default="")
     name: Mapped[str] = mapped_column(String(200))
     client: Mapped[str | None] = mapped_column(String(200), default=None)
     description: Mapped[str | None] = mapped_column(Text, default=None)

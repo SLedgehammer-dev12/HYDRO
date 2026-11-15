@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Html } from "@react-three/drei";
+import { SceneHtml } from "./SceneHtml";
 import type { ThreeEvent } from "@react-three/fiber";
 import * as THREE from "three";
 import {
@@ -522,12 +522,10 @@ function EquipmentItem({
       />
 
       {showLabels || hovered ? (
-        <Html
+        <SceneHtml
           position={[0, labelY, 0]}
           center
           zIndexRange={hovered ? [24, 14] : [14, 2]}
-          style={{ pointerEvents: "none" }}
-          aria-hidden
         >
           <EquipmentLabel
             label={equipment.label}
@@ -536,7 +534,7 @@ function EquipmentItem({
             distance={distance}
             hovered={hovered}
           />
-        </Html>
+        </SceneHtml>
       ) : null}
     </group>
   );
