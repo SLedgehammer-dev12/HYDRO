@@ -3,11 +3,13 @@
 Tarih: 2026-11-16
 Dal: `feat/ergonomics-ocr`
 
+> Tek sayfalık güncel özet ve yapılacaklar listesi: [`../../DURUM.md`](../../DURUM.md)
+
 ## Tamamlananlar
 
 | Alan | Durum | Kanit |
 | --- | --- | --- |
-| Backend API | Calisiyor | 51 path (`/api/projects` dahil), 95 pytest |
+| Backend API | Calisiyor | 51 path (`/api/projects` dahil), 97 pytest |
 | Frontend kabuk | Calisiyor | 9 sekme (Projeler & Kesitler, birlesik Geometri & Saha, son sekmede birlesik Katsayilar & Detay), responsive, tema |
 | Hesaplamalar | Parity | A/B, hava, basinc, profil, pig, pressurization, termal denge |
 | Proje & Kesit DB | Calisiyor | `projects` + `sessions.project_id` + `inputs.section_meta`, kesit siralama/acma/kopyalama/silme |
@@ -20,7 +22,7 @@ Dal: `feat/ergonomics-ocr`
 ## Dogrulama
 
 ```bash
-python3 -m pytest webapp/backend/tests -q          # 95 passed
+python3 -m pytest webapp/backend/tests -q          # 97 passed
 python3 -m unittest discover -s tests -p "test_*.py"  # 653 passed
 cd webapp/frontend && npm run build                # PASS
 cd webapp/frontend && HYDRO_APP_URL=http://127.0.0.1:8095 node scripts/verify-tabs.mjs  # 11/11 PASS

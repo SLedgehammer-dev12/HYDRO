@@ -1,0 +1,204 @@
+# HYDRO — Proje Durumu
+
+> Tek kaynak özet. Ayrıntı için "Ayrıntılı notlar" bölümündeki dosyalara bakın.
+>
+> **Son güncelleme:** 2026-11-16
+> **Dal:** `feat/ergonomics-ocr`
+> **Son commit:** `828b563` — segment (alt parça) kontrolü ve Section uzunluğu uyumluluğu
+
+---
+
+## 1. Tek Bakışta
+
+| Alan | Durum | Kanıt |
+| --- | --- | --- |
+| Masaüstü uygulaması | Çalışıyor, kararlı | 653 unittest PASS |
+| Web backend (FastAPI) | Çalışıyor | 97 pytest PASS |
+| Web frontend (React 19) | Çalışıyor | `npm run build` PASS, 11/11 sekme smoke |
+| Domain parity | Masaüstü ile aynı kaynak | `hidrostatik_test.domain` doğrudan import edilir |
+| Proje / Test Bölümü (Section) DB | Çalışıyor | `projects` + `sessions.project_id` + `inputs.section_meta` |
+| KP sürekliliği + Segment denetimi | Tamamlandı | `lib/kp.ts`, Geometri & Saha sayfası |
+| Plan-Profil PDF tarama | Çalışıyor (metin katmanı) | `POST /api/projects/plan-profile/scan` |
+| OCR rapor kontrolü | Çalışıyor (iskelet + onay) | Yükleme, alan/uyuşmazlık, onay, JSON |
+| Docker / dağıtım | Hazır | `webapp/Dockerfile`, `docker-compose.yml` |
+
+**Durum:** MVP tamam. Kalan işler ağırlıklı olarak OCR kalibrasyonu, üretim sertleştirmesi (auth, migration, kod bölme) ve kurum onayı bekleyen veri işleri.
+
+---
+
+## 2. Tamamlananlar
+
+### 2.1 Masaüstü uygulaması
+
+- Domain fizik modeli: negatif B kabulü, `nan/inf` doğrulaması, tam `%6` sınırında FAIL,
+  ardışık 4 saatlik termal denge pencereleri, tek taraflı `%0.2` ilave su kontrolü,
+  bicubic ekstrapolasyonun kapatılması.
+- A/B modeli: `B = β − 3α` hacimsel model, seçilebilir B kaynağı (kurum içi tablo varsayılan,
+  GAIL, otomatik), A biriminin `1/bar` olduğunun boyut analiziyle doğrulanması.
+- Veri katmanı: BOTAŞ kurum içi workbook semantiği, A/B tablosu monotonluk/süreklilik denetimi,
+  7 °C / 81–100 bar A anomalisinin çalışma zamanında lineer köprüyle onarımı (provenance ile).
+- Servisler: `DownloadManager` resume, katı artefakt/checksum sözleşmesi, güvenli zip çıkarma,
+  yedek + atomik kurulum + rollback, SQLite thread güvenliği, PDF/Excel escaping.
+- Güncelleme: Ed25519 imza fail-closed, `HYDRO_UPDATE_PRIVATE_KEY` CI secret'ı.
+- UI ergonomisi: her zaman görünür karar şeridi, zorunlu alan kapısı, klavye kısayolları,
+  panel bazlı kaydırma, birim/terminoloji standardı, küçük ekran davranışı.
+- OCR rapor kontrolü: PDF metin katmanı + opsiyonel Tesseract, alan/uyuşmazlık, insan onayı,
+  JSON çıktı, CLI (`tools/ocr_report.py`) ve UI.
+- Paketleme/CI: `.zip` + çift checksum, tag↔sürüm kapısı, ruff/mypy yapılandırması.
+
+### 2.2 Web uygulaması
+
+- Mimari doküman seti: `architecture.md`, `parity_matrix.md`, `api_contract.md`, `ux_plan.md`, `decisions.md`.
+- FastAPI backend: oturum/snapshot/audit/hesap/rapor/OCR/proje uçları.
+- React 19 + Vite + Tailwind 4 + TanStack Query + Zustand + Recharts + Three.js.
+- 9 görünür sekme (legacy `field` → `geometry`, `coefficient_detail` → `coefficients` yönlendirmesi):
+
+  `Dashboard · Projeler & Kesitler · Geometri & Saha · Hava İçerik · Basınç Değişim · Raporlar · OCR · Ayarlar · Katsayılar`
+
+- Birleştirmeler:
+  - **Geometri & Saha**: eski Profil/Saha sekmesi + tam 3D sahne tek sayfada.
+  - **Katsayılar**: A/B hazırlama + üç kaynak + backend karşılaştırması + katsayı detayı, **son sekme**.
+  - **Tek 3D saha görünümü**: önizleme/tam sahne ayrımı kaldırıldı.
+- Proje & Test Bölümü (Section) katmanı: CRUD, sıralama, aç/kopyala/sil, `section_count`.
+- KP kalıcılığı: `start_kp` / `end_kp` saklanır; `K+MMM` formatı, `0+000` / `12.5 km` / `12000 m` kabul,
+  `location` alanından otomatik KP çıkarımı.
+- KP süreklilik denetimi: ardışık test bölümlerinde önceki bitiş ↔ sonraki başlangıç,
+  bindirme/boşluk uyarısı, `Σ Section = boru hattı KP aralığı` kontrolü.
+- **Segment denetimi**: `Σ Segment = Section uzunluğu`, istasyon zinciri, OD/WT/uzunluk geçerliliği,
+  satır bazlı KP aralığı ve OK/UYARI/HATA rozetleri, segment başına iç hacim.
+- Plan-Profil PDF tarama: metin katmanı/OCR ile taslak test bölümleri, düzenlenebilir tablo, toplu kaydet.
+- 3D sahne: zemin, segmentler, ekipman, pig, akış, kesit, kamera presetleri, `SceneHtml` DOM etiket katmanı.
+- Sekme başlıkları ve ana aksiyon butonları büyütüldü (25/30 px başlık, `btn-lg`).
+- Dockerfile, docker-compose, README, kod haritası.
+
+---
+
+## 3. Devam Eden / Sıradaki İş
+
+Yok — aktif çalışma kapatıldı, `kp.ts` segment denetimi commit'lendi.
+
+Sıradaki mantıklı adımlar (öncelik sırasıyla):
+
+1. **Segment özetini `SectionIdentityCard`'a taşı** — KP girişi ile segment sonucu aynı kartta görünsün.
+2. **Terminoloji ayrımını yaygınlaştır**: "Test Bölümü (Section)" ve
+   "Et Kalınlığı / Çap Alt Parçası (Segment)" metinlerini tüm ekranlarda tutarlı kullan.
+3. **Projeler sayfasında boru hattı toplamı KPI'ı** — `Σ Section` ile ilk/son KP aralığı karşılaştırması.
+4. **Frontend kod bölme** — three.js lazy load (ana bundle ~2.2 MB).
+
+---
+
+## 4. Yapılacaklar
+
+### 4.1 Web / üretim sertleştirmesi (P1)
+
+- [ ] OCR mapping profile `pre_extract` / `post_map` uygulanması (profil CRUD var, alan eşleme verisi yok).
+- [ ] OCR DB kuyruğu + worker + iptal (şu an analiz senkron).
+- [ ] Alembic üretim migrasyonu (`create_all` + hafif kolon migrasyonu yerine).
+- [ ] Auth / OIDC + iki kişi onay kuralı (MVP'de anonim `X-Session-ID`).
+- [ ] Postgres runtime testi (kod uyumlu, `psycopg` kurulu değil).
+- [ ] Frontend kod bölme (three.js lazy load).
+- [ ] Frontend birim testleri (vitest); şu an `verify-tabs.mjs` ile sekme regresyonu korunuyor.
+- [ ] 3D gerçek veri: `profile_points[]` / `equipment[]` girdileri (yoksa yaklaşık sahne + uyarı).
+
+### 4.2 Domain / masaüstü (P1–P2, `tasks/todo.md`)
+
+- [ ] 14.2 basınç–hacim ilişkisi ve `%0.2` ilave su alarm mantığını modele ekle.
+- [ ] 12 ve 15 için zaman serili termal dengeleme / 24 saatlik test kayıt veri modeli.
+- [ ] 16–17 basınç düşürme ve boşaltma iş akışlarını rapor bazlı tasarla.
+- [ ] 21. bölümdeki saha formlarına uygun rapor çıktısı.
+- [ ] Segmentli geometri indirgemesi için kurum içi metod notu.
+- [ ] +2 °C dolum kısıtı için saha uyarı mantığı.
+- [ ] `table_v1` backend'i için UI seçici + backend karşılaştırma raporu.
+- [ ] `table_v1` gridinin resmi veriyle yeniden doldurulması (kurum verisi bekleniyor).
+- [ ] 0–4 °C aralığında negatif `beta_water` ve geçersiz `B` davranışının UI'de açık gösterimi.
+
+### 4.3 Parity borcu (P2, `webapp/docs/parity_matrix.md` §10)
+
+- [ ] Gerçek kot profili (`profile_points[]`) ve ekipman konumları (`equipment[]`).
+- [ ] `t_initial` / `t_final` alanları (basınç sekmesi; `dT` türetimi).
+- [ ] Rapor kimliği alanları (`report_no`, `operator`, `date`).
+- [ ] Masaüstü JSON içe aktarma: `POST /api/import/desktop-snapshot`.
+- [ ] Eşzamanlı düzenleme: `revision` + `If-Match`, çakışmada 409 + diff.
+- [ ] Taranmış (metin katmanı olmayan) PDF için rasterizer — lisans onayı gerekiyor.
+- [ ] Segment bazlı SMYS/kalite (şu an tek kalite tüm hat için).
+
+---
+
+## 5. Engellenenler (dış girdi bekliyor)
+
+| Konu | Beklenen |
+| --- | --- |
+| OCR kalibrasyonu | Gerçek saha rapor örnekleri: `BOT-FRM-CDB-001-015/020/021/022` (PDF/JPG, 2'şer adet) |
+| B tablosu resmi kaynağı | Kurum içi ölçüm zinciri / resmi revizyon |
+| A/B tablosu kalıcı düzeltmesi | Kurum onaylı veri (şu an çalışma zamanı onarımı) |
+| Notarization | Kod imzalama sertifikası ve kurumsal anahtar yedeği/rotasyonu |
+| Release CI | `HYDRO_UPDATE_PRIVATE_KEY` secret'ı yoksa release kasıtlı durur (fail-closed) |
+| Postgres | `psycopg` kurulumu + test ortamı |
+
+---
+
+## 6. Doğrulama (son çalıştırma: 2026-11-16)
+
+```bash
+# Web backend
+python3 -m pytest webapp/backend/tests -q                      # 97 passed
+
+# Masaüstü
+python3 -m unittest discover -s tests -p "test_*.py"           # 653 passed
+
+# Frontend derleme
+cd webapp/frontend && npm run build                            # PASS
+
+# Sekme smoke (uygulama 8095'te çalışırken)
+cd webapp/frontend && HYDRO_APP_URL=http://127.0.0.1:8095 \
+  node scripts/verify-tabs.mjs                                 # 11/11 PASS
+```
+
+Çalıştırma:
+
+```bash
+python3 webapp/run_web.py --host 127.0.0.1 --port 8095
+# veya
+docker compose -f webapp/docker-compose.yml up --build
+```
+
+---
+
+## 7. Bilinen Tuzaklar / Notlar
+
+- `@react-three/drei` `Html` React 19 üretim derlemesinde `removeChild` hatası veriyor;
+  yerine `SceneHtml` + `SceneLabels` DOM katmanı kullanılıyor. Geri dönülmemeli.
+- Demo proje ID'leri (`demo-*`) backend'e gönderilmez; `App.tsx` ve mutation hook'ları filtreler.
+- Ana bundle ~2.2 MB (three.js); kod bölme yapılana kadar build uyarısı normaldir.
+- `implementation_status.md` içindeki eski test sayıları (95) bu dosyayla hizalandı.
+- Plan-Profil tarama motoru yalnızca PDF metin katmanı veya Tesseract varsa çalışır;
+  paket yoksa yanıt `ocr.available=false` döner.
+
+---
+
+## 8. Ayrıntılı Notlar (nerede ne var)
+
+| Dosya | İçerik |
+| --- | --- |
+| `tasks/todo.md` | Masaüstü açık işler (bölüm bazlı) — tarihsel, eski test sayıları |
+| `tasks/remediation.md` | Denetim remediasyonu + faz planı, işaretli maddeler |
+| `docs/remediation_report.md` | Remediasyon sonuç özeti ve kanıt tablosu |
+| `docs/continuity.md` | Masaüstü süreklilik/karar geçmişi |
+| `docs/ui_ergonomics.md` | Masaüstü ergonomi kararları |
+| `docs/codebase_map.md` | Üretilen kod haritası |
+| `webapp/docs/implementation_status.md` | Web uygulaması durumu ve doğrulama |
+| `webapp/docs/parity_matrix.md` | Masaüstü↔web parity matrisi, 28 maddelik eksik listesi |
+| `webapp/docs/api_contract.md` | API sözleşmesi |
+| `webapp/docs/architecture.md` | Web mimarisi |
+| `webapp/docs/ux_plan.md` | UX planı + açık UX kararları |
+| `webapp/docs/decisions.md` | Web karar kaydı |
+| `CHANGELOG.md` | Sürüm bazlı yapılanlar |
+
+---
+
+## 9. Güncelleme Kuralı
+
+1. Her özellik commit'inde bu dosyanın **"Son güncelleme"**, ilgili bölüm ve doğrulama sayıları yenilenir.
+2. Bir iş bitince `[ ]` → `[x]` yapılır; iptal edilirse satır silinmez, "iptal: gerekçe" eklenir.
+3. Yeni engel çıkarsa §5'e, yeni teknik borç §4'e yazılır.
+4. Ayrıntı bu dosyaya taşınmaz; ilgili nota link verilir (tekrar bilgi çoğaltılmaz).
