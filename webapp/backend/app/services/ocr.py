@@ -21,6 +21,7 @@ from hidrostatik_test.services.report_ocr import (
     ReportOcrError,
     analyze_report,
     ocr_available,
+    ocr_engine_name,
     ocr_status,
 )
 
@@ -60,21 +61,30 @@ _ERROR_STATUS = {
 #: Canonical OCR field -> session input paths.
 FIELD_TARGETS: dict[str, tuple[str, ...]] = {
     "pipe_od_mm": ("geometry.outside_diameter_mm",),
+    "pipe_id_mm": ("geometry.inside_diameter_mm",),
     "wall_mm": ("geometry.wall_thickness_mm",),
     "length_m": ("geometry.length_m",),
+    "section_volume_m3": ("geometry.section_volume_m3",),
+    "max_operating_pressure_bar": ("section_profile.design_pressure_bar",),
+    "smys_mpa": ("section_profile.smys_mpa",),
     "test_pressure_bar": ("air.pressure_bar", "pressure.pressure_bar"),
     "air_test.vpa": ("air.actual_added_water_m3",),
+    "air_test.k": ("air.k_factor",),
     "air_test.a": ("air.a_micro_per_bar",),
     "pressure_test.a": ("pressure.a_micro_per_bar",),
     "pressure_test.b": ("pressure.b_micro_per_c",),
     "pressure_test.delta_t": ("pressure.delta_t_c",),
+    "pressure_test.p_delta": ("pressure.p_delta_bar",),
     "pressure_test.pa": ("pressure.actual_pressure_change_bar",),
+    "pressure_test.pl": ("pressure.allowed_pressure_change_bar",),
     "pressure_test.t_initial": ("pressure.t_initial_c",),
     "pressure_test.t_final": ("pressure.t_final_c",),
     "report_no": ("report_meta.report_no",),
     "date": ("report_meta.date",),
     "operator": ("report_meta.operator",),
     "section_id": ("report_meta.section_id",),
+    "start_kp": ("section_meta.start_kp",),
+    "end_kp": ("section_meta.end_kp",),
     "notes": ("report_meta.notes",),
 }
 
@@ -85,7 +95,47 @@ TEXT_TARGETS = {
     "report_meta.operator",
     "report_meta.section_id",
     "report_meta.notes",
+    "section_meta.start_kp",
+    "section_meta.end_kp",
 }
+
+
+def _profile_aliases(profile: OcrMappingProfile | None) -> dict[str, list[str]]:
+    """Return ``pre_extract`` alias overrides from a mapping profile."""
+
+    if profile is None or profile.mode != "pre_extract":
+        return {}
+    fields = (profile.mapping or {}).get("fields") or {}
+    aliases: dict[str, list[str]] = {}
+    for key, value in fields.items():
+        if not isinstance(value, dict):
+            continue
+        items = value.get("aliases")
+        if isinstance(items, list):
+            cleaned = [str(item).strip() for item in items if str(item).strip()]
+            if cleaned:
+                aliases[key] = cleaned
+    return aliases
+
+
+def _profile_targets(profile: OcrMappingProfile | None) -> dict[str, tuple[str, ...]]:
+    """Return ``post_map`` target overrides from a mapping profile."""
+
+    if profile is None or profile.mode != "post_map":
+        return {}
+    fields = (profile.mapping or {}).get("fields") or {}
+    targets: dict[str, tuple[str, ...]] = {}
+    for key, value in fields.items():
+        if not isinstance(value, dict):
+            continue
+        raw = value.get("targets") or value.get("target")
+        if isinstance(raw, str):
+            raw = [raw]
+        if isinstance(raw, list):
+            cleaned = tuple(str(item).strip() for item in raw if str(item).strip())
+            if cleaned:
+                targets[key] = cleaned
+    return targets
 
 
 def _http_error(exc: ReportOcrError, **details: Any) -> AppError:
@@ -103,6 +153,16 @@ def _http_error(exc: ReportOcrError, **details: Any) -> AppError:
 
 
 def _engine_payload() -> dict[str, Any]:
+    name = ocr_engine_name()
+    if name == "vision":
+        import platform
+
+        return {
+            "name": "vision",
+            "version": platform.mac_ver()[0] or None,
+            "languages": ["tr-TR", "en-US"],
+            "default_language": "tr-TR",
+        }
     version = None
     languages: list[str] = []
     try:
@@ -113,7 +173,7 @@ def _engine_payload() -> dict[str, Any]:
     except Exception:
         version = None
     return {
-        "name": "tesseract",
+        "name": "tesseract" if name == "tesseract" else None,
         "version": version,
         "languages": languages,
         "default_language": os.environ.get("HYDRO_OCR_LANG", "tur+eng"),
@@ -324,7 +384,9 @@ def analyze_upload(
     if language:
         os.environ["HYDRO_OCR_LANG"] = language
     try:
-        result: OcrAnalysisResult = analyze_report(stored.path, calculated)
+        result: OcrAnalysisResult = analyze_report(
+            stored.path, calculated, extra_aliases=_profile_aliases(profile)
+        )
     except ReportOcrError as exc:
         analysis.status = "failed"
         analysis.error_code = exc.code
@@ -717,6 +779,13 @@ def apply_to_session(
         raise not_found("session", None)
     session = session_service.get_session(db, target_session_id, analysis.workspace_id_hash)
 
+    profile = (
+        db.get(OcrMappingProfile, analysis.mapping_profile_id)
+        if analysis.mapping_profile_id
+        else None
+    )
+    target_overrides = _profile_targets(profile)
+
     selected = list(field_names) if field_names is not None else sorted(approved)
     not_approved = [name for name in selected if name not in approved]
     if not_approved:
@@ -733,7 +802,7 @@ def apply_to_session(
     conflicts: list[dict[str, Any]] = []
 
     for name in selected:
-        targets = FIELD_TARGETS.get(name)
+        targets = target_overrides.get(name) or FIELD_TARGETS.get(name)
         if not targets:
             skipped.append(
                 {

@@ -517,6 +517,10 @@ class OcrAvailabilityTests(unittest.TestCase):
             Image.new("L", (400, 200), color=255).save(path)
             with mock.patch.object(
                 ocr,
+                "_resolve_ocr_engine",
+                return_value="tesseract",
+            ), mock.patch.object(
+                ocr,
                 "_run_tesseract",
                 return_value=("Report No: R-77\nTest Pressure: 80 bar\n", 0.9, ""),
             ):
@@ -718,6 +722,147 @@ class CliOutsidePdfDependencyTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 2)
         payload = json.loads(completed.stdout)
         self.assertEqual(payload["error"]["code"], "file_not_found")
+
+
+class RealFormOcrFixtureTests(unittest.TestCase):
+    """Gerçek ERCİŞ formlarından alınan OCR satırlarıyla kalibrasyon testleri.
+
+    Metinler macOS Vision çıktısının etiket/değer eşlemesinden sonraki
+    halidir; sayı ve etiket biçimi sahayla birebir aynıdır.
+    """
+
+    AIR_PAGE = """HAVA IÇERIK TESTI KABUL RAPORU
+Test Bölüm No : BÖLÜM 5
+Tarih : 05.10.2026
+Test Bölüm Boyu : 8.802,34
+m
+Test Bölüm acmi : 823,66
+1.Başlık Yeri : 25+404
+Boru Dış Çapı : 355,60
+mm
+Boru İç Çapı : 345,20
+2.Başlık Yeri : 34+203
+mm
+Boru Et Kalınlığı : 5,20
+mm
+Vp : 0,0625
+Vpa : 0,0640
+Test Bölümünün Geometrik Hacmi : 823,66
+Ölçülen Basınç Değişimi : 1,00
+Boru Iç Yarıçapı : 172,60
+Boru Et Kalınlığı : 5,20
+Suyun İzotermal Sıkışabilirlik Katsayısı : 45,106
+[Katsayı, Dikişsiz Borular İçin 1, Kaynaklı Borular için 1,02 : 1,02
+(Vpa/Vp)-1 = : 0,023
+Testin Kabul edilebilmesi için (Vpa/Vp)-1 değeri 0,06'ya eşit yada ondan düşük olmalıdır.
+(Vpa/Vp) -1 değeri 0,06'dan küçük olduğu için test kabul edilmiştir.
+BOT-FRM-CDB-001-023
+"""
+
+    PRESSURE_PAGE = """BASINÇ TESTI KABUL RAPORU
+Test Bölüm No : BÖLÜM 5
+Tarih : 07.10.2026
+Test Bölüm Boyu : 8.802,34
+1.Başlık Yeri : 25+404
+Boru Dış Çapı : 355,60
+2.Başlık Yeri : 34+203
+Boru İç Çapı : 345,20
+Boru Et Kalınlığı : 5,20
+Ölçülen Basınç Değişimi : 0,400
+PA : 0,435
+Testin Başı ve Sonunda su su sıcaklığında oluşan değişim : 0,200
+Su ve Çeliğin Isıl Genleşme Katsayıları Arasındaki Fark : 161,497
+A : 44,892
+Boru Iç Yarıçapı : 172,6
+Boru Et Kalınlığı : 5,20
+PL : 0,300
+(PA-AP) = : -0,035
+TEST KABUL EDİLMİŞTİR.
+BOT-FRM-CDB-001-024
+"""
+
+    def test_air_form_values(self) -> None:
+        report = ocr.parse_report(self.AIR_PAGE)
+
+        self.assertEqual(report.section_id.value, "BÖLÜM 5")
+        self.assertEqual(report.start_kp.value, "25+404")
+        self.assertEqual(report.end_kp.value, "34+203")
+        self.assertAlmostEqual(report.length_m.as_float(), 8802.34)
+        self.assertAlmostEqual(report.pipe_od_mm.as_float(), 355.60)
+        self.assertAlmostEqual(report.pipe_id_mm.as_float(), 345.20)
+        self.assertAlmostEqual(report.wall_mm.as_float(), 5.20)
+        self.assertAlmostEqual(report.section_volume_m3.as_float(), 823.66)
+        self.assertAlmostEqual(report.air_test.vp.as_float(), 0.0625)
+        self.assertAlmostEqual(report.air_test.vpa.as_float(), 0.0640)
+        self.assertAlmostEqual(report.air_test.vt.as_float(), 823.66)
+        self.assertAlmostEqual(report.air_test.k.as_float(), 1.02)
+        self.assertAlmostEqual(report.air_test.ratio.as_float(), 0.023)
+        self.assertAlmostEqual(report.air_test.a.as_float(), 45.106)
+        self.assertEqual(report.result.value, "PASS")
+        # Hava formundaki "Ölçülen Basınç Değişimi" PA'ya yazılmamalı.
+        self.assertIsNone(report.pressure_test.pa)
+
+    def test_pressure_form_values(self) -> None:
+        report = ocr.parse_report(self.PRESSURE_PAGE)
+
+        self.assertEqual(report.start_kp.value, "25+404")
+        self.assertEqual(report.end_kp.value, "34+203")
+        self.assertAlmostEqual(report.pressure_test.pa.as_float(), 0.400)
+        self.assertAlmostEqual(report.pressure_test.p_delta.as_float(), 0.435)
+        self.assertAlmostEqual(report.pressure_test.delta_t.as_float(), 0.200)
+        self.assertAlmostEqual(report.pressure_test.b.as_float(), 161.497)
+        self.assertAlmostEqual(report.pressure_test.a.as_float(), 44.892)
+        self.assertAlmostEqual(report.pressure_test.pl.as_float(), 0.300)
+        self.assertEqual(report.result.value, "PASS")
+
+    def test_formula_lines_do_not_leak_values(self) -> None:
+        text = "\n".join(
+            [
+                "HAVA İÇERİK TESTİ",
+                "Vp = ( 0.884 x (ri/S) +A) x 10(-6) x V,x K",
+                "Vp : 0,0625",
+            ]
+        )
+        report = ocr.parse_report(text)
+        self.assertAlmostEqual(report.air_test.vp.as_float(), 0.0625)
+
+
+class VisionBlockPairingTests(unittest.TestCase):
+    """Vision bbox'larından etiket/değer eşlemesi (satır/kolon mantığı)."""
+
+    def test_label_pairs_with_same_row_value_not_adjacent_row(self) -> None:
+        blocks = [
+            ("Boru İç Çapı", 1.0, [0.185, 0.6872, 0.074, 0.0122]),
+            ("345,20", 1.0, [0.390, 0.6890, 0.039, 0.0087]),
+            ("Boru Et Kalınlığı", 1.0, [0.185, 0.6773, 0.099, 0.0087]),
+            ("5,20", 1.0, [0.390, 0.6773, 0.027, 0.0087]),
+            ("mm", 0.5, [0.458, 0.6875, 0.023, 0.0087]),
+            ("mm", 0.5, [0.458, 0.6977, 0.023, 0.0102]),
+        ]
+        text = ocr._vision_blocks_to_text(blocks)
+        report = ocr.parse_report(text)
+        self.assertAlmostEqual(report.pipe_id_mm.as_float(), 345.20)
+        self.assertAlmostEqual(report.wall_mm.as_float(), 5.20)
+
+    def test_column_pair_does_not_steal_right_column_value(self) -> None:
+        blocks = [
+            ("Test Bölüm No", 1.0, [0.183, 0.7355, 0.088, 0.0087]),
+            ("BÖLÜM 5", 1.0, [0.390, 0.7364, 0.056, 0.0097]),
+            ("Tarih", 1.0, [0.595, 0.7369, 0.035, 0.0073]),
+            ("05.10.2026", 1.0, [0.801, 0.7369, 0.064, 0.0073]),
+        ]
+        report = ocr.parse_report(ocr._vision_blocks_to_text(blocks))
+        self.assertEqual(report.section_id.value, "BÖLÜM 5")
+        self.assertEqual(report.date.value, "2026-10-05")
+
+    def test_unit_blocks_are_never_values(self) -> None:
+        blocks = [
+            ("Boru Dış Çapı", 1.0, [0.185, 0.6986, 0.080, 0.0111]),
+            ("mm", 0.5, [0.458, 0.6977, 0.023, 0.0102]),
+            ("355,60", 1.0, [0.390, 0.7006, 0.041, 0.0087]),
+        ]
+        report = ocr.parse_report(ocr._vision_blocks_to_text(blocks))
+        self.assertAlmostEqual(report.pipe_od_mm.as_float(), 355.60)
 
 
 if __name__ == "__main__":

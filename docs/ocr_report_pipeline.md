@@ -42,8 +42,8 @@ zaman yetkili personel tarafindan verilir.
 ```text
 PDF -> pypdf/pdfplumber metin katmani -> yeterliyse -> alan cikarimi
                                  |
-                                 +-- yetersizse -> raster -> Tesseract -> alan cikarimi
-Gorsel (JPG/PNG/TIFF) -> raster -> Tesseract -> alan cikarimi
+                                 +-- yetersizse -> raster -> Tesseract / macOS Vision -> alan cikarimi
+Gorsel (JPG/PNG/TIFF) -> raster -> Tesseract / macOS Vision -> alan cikarimi
 ```
 
 Gerekce:
@@ -68,14 +68,35 @@ Ikisi de yalnizca gomulu metni okur; taranmis PDF'te metin uretmez.
 
 | Motor | Lisans | Paket/dağıtım boyutu | Turkce | Tablo | Offline | Windows/macOS | Degerlendirme |
 |---|---|---|---|---|---|---|---|
-| **Tesseract** (`pytesseract`) | Apache-2.0 | Tesseract ~30-100 MB + dil paketleri; `pytesseract` ~50 KB | `tur` traineddata ile iyi; `eng` ile idare eder | Zayif; satir bazli okur, tablo yapisi vermez | Evet | Windows'ta UB Mannheim kurulumu, macOS'ta Homebrew; harici binary gerekir | **Varsayilan opsiyonel motor** |
+| **macOS Vision** (`ocrmac`) | Apple SDK | Küçük sarmalayıcı; sistem motoru | `tr-TR` dil tercihi ile iyi | Blok bazli `bbox` verir; satir/kolon eslemesi uygulama tarafinda | Evet | Yalnizca macOS 11+ | **macOS'ta varsayilan** |
+| **Tesseract** (`pytesseract`) | Apache-2.0 | Tesseract ~30-100 MB + dil paketleri; `pytesseract` ~50 KB | `tur` traineddata ile iyi; `eng` ile idare eder | Zayif; satir bazli okur, tablo yapisi vermez | Evet | Windows'ta UB Mannheim kurulumu, macOS'ta Homebrew; harici binary gerekir | **Windows/varsayilan opsiyonel motor** |
 | **PaddleOCR** | Apache-2.0 | PaddlePaddle + modeller ~400 MB-1 GB+ | Model kapsami surumle dogrulanmali | PP-Structure ile tablo destegi var | Evet (modeller indirildikten sonra) | PyInstaller ile paketlemesi zahmetli | Gelecek fazda degerlendirme |
 | **EasyOCR** | Apache-2.0 | PyTorch ile birlikte ~1-2 GB | `tr` destegi var | Yok; layout sonradan kurulmalidir | Ilk model indirmesi haric evet | Paket boyutu ve GPU/CPU dagitimi zor | Bu fazda onerilmez |
 | Bulut OCR (Google/Azure) | Ticari | Kucuk istemci | Cok iyi | Degisken | **Hayir** | Kolay | KVKK/veri gizliligi nedeniyle **reddedildi** |
 
-**Karar:** Bu fazda Tesseract opsiyonel motor olarak baglanir; PaddleOCR ve
-EasyOCR ayni `_run_tesseract` benzeri arayuzun arkasina sonradan eklenebilir.
-Bulut OCR kurumsal veri gizliligi politikasi nedeniyle kapsam disidir.
+**Karar:** Motor secimi `HYDRO_OCR_ENGINE=auto|tesseract|vision` ile yapilir.
+
+- `auto` (varsayilan): macOS'ta `ocrmac` varsa Vision, degilse Tesseract.
+- `ocr_engine_name()` aktif motoru (`vision` / `tesseract` / `""`) dondurur;
+  `GET /api/ocr/status` bu bilgiyi UI'ya tasir.
+- PaddleOCR ve EasyOCR ayni `_run_*` arayuzunun arkasina sonradan eklenebilir.
+- Bulut OCR kurumsal veri gizliligi politikasi nedeniyle kapsam disidir.
+
+**Vision blok eslemesi.** Vision her metin blogunu `[x, y, w, h]` normalize
+kutusuyla dondurur (y ekseni alttan). Kurumsal formlarda etiket ve deger
+ayri hucrelerde durdugu icin:
+
+1. Bloklar dar dikey toleransla (`_VISION_ROW_TOLERANCE = 0.005`) **form
+   satirlarina** ayrilir. Daha genis tolerans komsu satirin degerini
+   etikete baglar (ornegin "Boru Ic Capi" -> bir alt satirdaki "5,20").
+2. Her satirda etiketler, sagindaki en yakin **kullanilmamis** degere
+   baglanir (`_VISION_MAX_GAP = 0.75`). Bir sonraki kisa etiket
+   (`_VISION_SHORT_LABEL_MAX = 28`) sinir kabul edilir; boylece sol kolon
+   etiketi sag kolonun degerini calmaz.
+3. Yalnizca birim olan bloklar (`mm`, `(bar)`, `(1/bar)`, `%` …) ne etiket
+   ne deger sayilir.
+4. Sonuc `etiket : deger` satirlari olarak mevcut satir tabanli parser'a
+   verilir; parser degismeden calisir.
 
 ### 2.4 Alan cikarimi: etiket + regex, sablon esleme degil
 
@@ -152,21 +173,32 @@ Her alan `ExtractedField` olarak saklanir:
 
 | Anahtar | Etiket | Birim | Zorunlu | Kaynak |
 |---|---|---|---|---|
-| `report_no` | Rapor No | - | Hayir | Form basligi |
+| `report_no` | Rapor No | - | Hayir | Form basligi / alt bilgi |
 | `date` | Tarih | ISO tarih | Hayir | Form basligi |
 | `operator` | Operator | - | Hayir | Form basligi |
 | `section_id` | Bolum No | - | Hayir | Form basligi |
+| `start_kp` | Baslangic noktasi | `K+MMM` | Opsiyonel | 1.Baslik Yeri / KP |
+| `end_kp` | Bitis noktasi | `K+MMM` | Opsiyonel | 2.Baslik Yeri / KP |
 | `pipe_od_mm` | Dis cap | `mm` | **Evet** | Geometri |
+| `pipe_id_mm` | Ic cap | `mm` | Opsiyonel | Geometri |
 | `wall_mm` | Et kalinligi | `mm` | **Evet** | Geometri |
-| `length_m` | Hat uzunlugu | `m` | **Evet** | Geometri |
+| `length_m` | Test bolumu boyu | `m` | **Evet** | Geometri |
+| `section_volume_m3` | Test bolumu hacmi | `m³` | Opsiyonel | Geometri |
+| `max_operating_pressure_bar` | Maks. isletme basinci | `bar` | Opsiyonel | Test |
 | `test_pressure_bar` | Test basinci | `bar` | **Evet** | Test |
+| `smys_mpa` | Boru akma dayanimi | `MPa` | Opsiyonel | Test |
 | `air_test.vp` | Hava testi Vp | `m³` | Onerilen | Madde 13 |
 | `air_test.vpa` | Hava testi Vpa | `m³` | Onerilen | Madde 13 |
+| `air_test.vt` | Geometrik hacim | `m³` | Opsiyonel | Madde 13 |
+| `air_test.k` | Katsayi K | - | Opsiyonel | Madde 13 |
+| `air_test.ratio` | `(Vpa/Vp)-1` | - | Opsiyonel | Madde 13 |
 | `air_test.a` | Hava testi A | `10^-6/bar` | Opsiyonel | Madde 13 |
 | `pressure_test.t_initial` | Tilk | `°C` | Onerilen | Madde 15.2 |
 | `pressure_test.t_final` | Tson | `°C` | Onerilen | Madde 15.2 |
 | `pressure_test.delta_t` | dT | `°C` | Onerilen | Madde 15.2 |
-| `pressure_test.pa` | Pa | `bar` | Onerilen | Madde 15.2 |
+| `pressure_test.pa` | Pa (olculen basinc degisimi) | `bar` | Onerilen | Madde 15.2 |
+| `pressure_test.p_delta` | dP (sicaklik kaynakli) | `bar` | Opsiyonel | Madde 15.2 |
+| `pressure_test.pl` | Izin verilebilir basinc degisimi | `bar` | Opsiyonel | Madde 15.2 |
 | `pressure_test.a` | Basinc testi A | `10^-6/bar` | Opsiyonel | Madde 15.2 |
 | `pressure_test.b` | Basinc testi B | `10^-6/°C` | Opsiyonel | Madde 15.2 |
 | `result` | Sonuc | `PASS`/`FAIL` | Onerilen | Form sonu |
@@ -319,12 +351,32 @@ Opsiyonel OCR ve tablo destegi:
 python3 -m pip install -r requirements-ocr.txt
 ```
 
-`requirements-ocr.txt` icinde `pypdf`, `pdfplumber`, `pytesseract`, `Pillow`
-ve opsiyonel PDF rasterlestirme (`PyMuPDF` veya `pdf2image`) ayri basliklar
-altinda listelenir. Bu bagimliliklar uygulamanin zorunlu calisma kosulu
-degildir; yoksa servis metin katmani ile devam eder.
+`requirements-ocr.txt` icinde `pypdf`, `pdfplumber`, `pytesseract`, `Pillow`,
+`ocrmac` (macOS) ve opsiyonel PDF rasterlestirme (`PyMuPDF` veya `pdf2image`)
+ayri basliklar altinda listelenir. Bu bagimliliklar uygulamanin zorunlu
+calisma kosulu degildir; yoksa servis metin katmani ile devam eder.
 
-### 9.2 Tesseract binary
+Motor secimi ve sayfa limitleri ortam degiskenleriyle ayarlanir:
+
+| Degisken | Varsayilan | Aciklama |
+|---|---|---|
+| `HYDRO_OCR_ENGINE` | `auto` | `auto` / `tesseract` / `vision` |
+| `HYDRO_OCR_LANG` | `tur+eng` | Tesseract dil paketleri |
+| `HYDRO_OCR_MAX_PAGES` | 30 | OCR'a verilen sayfa sayisi |
+
+### 9.2 macOS Vision (onerilen, macOS 11+)
+
+```bash
+python3 -m pip install ocrmac
+```
+
+- Ek binary gerekmez; Apple Vision cercevesini kullanir.
+- Dil tercihi `tr-TR`, `en-US`; `ocrmac` 1.0.1 ile dogrulandi.
+- Blok `bbox` bilgisi dondurur; etiket/deger eslemesi uygulama tarafinda
+  yapilir (§2.3).
+- Etkin mi: `GET /api/ocr/status` -> `engine.name == "vision"`.
+
+### 9.3 Tesseract binary
 
 `pytesseract` yalnizca bir sarmalayicidir; **Tesseract'in kendisi** ayri
 kurulmalidir.
@@ -351,7 +403,7 @@ Dil secimi:
 - `HYDRO_OCR_LANG` ortam degiskeni ile override edilebilir.
 - `tur` yoksa `eng` ile devam edilir ve sonuca uyari eklenir.
 
-### 9.3 Dagitim notlari
+### 9.4 Dagitim notlari
 
 - PyInstaller paketinde `pypdf`, `PIL`, `pytesseract` icin hidden import
   gerekebilir.
@@ -458,6 +510,7 @@ boylece kullanici taranmis PDF yuklediginde neden alan okunamadigini anlar.
 ## 11. Testler
 
 ```bash
+python3 -m pytest tests/test_report_ocr.py -q    # 53 passed, 1 skipped
 python3 -m unittest discover -s tests -p "test_report_ocr.py"
 ruff check hidrostatik_test/domain/report_schema.py \
   hidrostatik_test/services/report_ocr.py tools/ocr_report.py tests/test_report_ocr.py
@@ -472,6 +525,10 @@ Test kapsami:
 - Sifreli PDF, bos PDF, bozuk goruntu, desteklenmeyen uzanti, buyuk dosya.
 - Toleransli karsilastirma: eslesme, tolerans ici, tolerans disi, eksik
   alan.
+- **Gercek form fixture'lari** (`RealFormOcrFixtureTests`): ERCIS sayfa 8
+  (hava) ve 11 (basinc) Vision ciktilari; KP araligi, hacim, K, oran, PA/ΔP.
+- **Vision blok eslemesi** (`VisionBlockPairingTests`): ayni satirdaki
+  etiket/deger, sol-sag kolon ayrimi, birim bloklarinin deger sayilmamasi.
 - OCR bagimliligi yoksa testler skip nedeni gosterir; agir OCR cagrisi
   yapilmaz (Tesseract cagrisi mock'lanir).
 
@@ -479,17 +536,24 @@ Test kapsami:
 
 ## 12. Sinirlamalar ve Bilinen Riskler
 
-1. **Tablolu formlar**: Ayni satirda birden fazla etiket varsa yalnizca ilk
-   etiket okunur. Gercek formlarda etiket-deger satirlari tercih edilmelidir.
+1. **Tablolu formlar**: Metin katmanli PDF'lerde ayni satirda birden fazla
+   etiket varsa satir tabanli parser sirali okur. macOS Vision'da ise
+   bloklar `bbox` ile satir/kolon eslemesine sokuldugu icin sol/sag kolon
+   ayri ayri okunur (bkz. §2.3). Tesseract'te bu esleme yoktur; taranmis
+   tablolu formlarda alan karisabilir.
 2. **A katsayisinin iki kullanimi**: A hem hava hem basinc testinde gecer.
-   Bolum basliklari yoksa ilk A hava, ikinci A basinc testine atanir; tek A
-   varsa yalnizca hava testine atanir. Formda "A (basinc)" veya bolum
-   basligi bulunmalidir.
+   Bolum basliklari varsa hava formundaki `pressure_test.*` alanlari
+   yazilmaz; bolum basligi yoksa ilk A hava, ikinci A basinc testine
+   atanir. Ayni formda `Pa/PA` ikinci kez gorulurse konum geregi
+   `pressure_test.p_delta` kabul edilir (ilk `Pa` = olculen basinc
+   degisimi).
 3. **3 haneli nokta ondaligi**: `118.798` gibi degerler binlik olarak
    yorumlanabilir; uyari uretilir ve insan onayi gerekir.
 4. **El yazisi**: Desteklenmez. Tesseract el yazisinda guvenilir degildir.
-5. **Tablo yapisi**: OCR satir sirasini korur ama hucresel iliskiyi
-   vermez; karmasik formlarda alan karisabilir.
+5. **Tablo yapisi**: Vision blok eslemesi satir/kolon iliskisini yaklasik
+   olarak verir; cok birlesik hucreli veya serbest yerlesimli formlarda
+   alan karisabilir. Tesseract satir sirasini korur ama hucresel iliskiyi
+   vermez.
 6. **Donuk/dusuk cozunurluklu taramalar**: OCR basarisiz olabilir; 200-300
    DPI ve duz tarama onerilir.
 7. **Imza/kase**: Dogrulanmaz; hukuki gecerlilik icin ayri surec gerekir.
@@ -505,58 +569,58 @@ Test kapsami:
 
 ---
 
-## 13. Gercek Ornek Raporlarda Ihtiyac Duyulan Bilgiler
+## 13. Gercek Ornek Raporlar (temin edildi)
 
-Asagidaki bilgiler, alan sozlugunu ve toleranslari gercek formlara gore
-kesinlestirmek icin gereklidir:
+Asagidaki girdiler **temin edildi ve kalibre edildi** (2026-11-16). Ayrintili
+envanter, gercek degerler ve OCR tuzaklari: `docs/spec/report_forms.md`.
 
-1. **Ornek dosyalar**: Her form turu icin en az 2 ornek (PDF + JPG/PNG):
-   - BOT-FRM-CDB-001-015 Hidrostatik Test Verileri
-   - BOT-FRM-CDB-001-020 Hava Icerik Testi Kabul Raporu
-   - BOT-FRM-CDB-001-021 Basinc Testi Raporu
-   - BOT-FRM-CDB-001-022 Basinc Testi Kabul Raporu
-   - Varsa 016/017/018/019/024/025/026/027 formlari.
-2. **Belge turu**: PDF metin katmani mi, taranmis mi, telefon fotografi mi?
-   Taranmissa DPI, renk/grayscale, donuk sayfa var mi?
-3. **Dil ve revizyon**: Turkce/Ingilizce, form revizyon numarasi, elle
-   doldurulmus alan var mi?
-4. **Etiket metinleri**: Formda basili etiketlerin **birebir** yazimi
-   (ornek: "Dis Cap" mi "Boru Dis Capi" mi; "Pa" mi "Basinc Dususu" mu).
-5. **Birim yazimlari**: A/B icin `1/K`, `1/bar`, `10^-6/bar`, `micro/bar`
-   kullanimi; basinc icin `bar`/`barg`; hacim icin `L`/`m³`.
-6. **Tarih ve sayi formati**: `15.11.2026` mi `15/11/2026` mi; ondalik
-   virgul mu nokta mi; binlik ayirici kullaniliyor mu?
-7. **Tablolar**: Cok kolonlu, birlesik hucreli veya satir atlamali
-   tablolar var mi? Ornek kirpimlar.
-8. **Hesaplanan degerler**: Formda `Vp`, `Vpa`, `dT`, `Pa` ve A/B hazir
-   yazili mi, yoksa yalnizca ham olcumler mi var?
-9. **Kabul sonucu**: Formda `PASS/FAIL`, `Kabul/Ret`, imza/kase alanlari
-   nasil yer aliyor?
-10. **Kurumsal karar kurali**: Hangi fark "uyusmazlik" sayilir; toleranslar
-    sartnameden mi, kurum ici prosedurden mi geliyor?
-11. **KVKK**: Orneklerin anonimlestirilmesi, saklama suresi ve paylasim
-    izni.
-12. **Teknik ortam**: Hedef Windows/macOS surumleri, Tesseract kurulum
-    yetkisi, `tur` dil paketi mevcut mu, dosya boyutu/sayfa limitleri.
-13. **Sifreli PDF**: Sahada sifre korumali PDF kullaniliyor mu; sifre
-    isteme akisi gerekli mi?
-14. **Arsiv**: Onaylanan raporlar nerede saklanacak; ham OCR metni ve
-    guven skoru denetim izinde tutulacak mi?
+| Girdi | Kaynak | Durum |
+|---|---|---|
+| Resmi form sablonlari | `BOT-FRM-İNB-001-0{15..23}*.xls` (9 adet) | Alan sozlugu cikarildi |
+| Taranmis saha raporu | `ERCİŞ - H.TEST RAPORLARI.pdf` (74 sayfa, metin katmani yok) | Vision ile tamami OCR edildi |
+| Metin katmanli plan-profil | `Kağızman DGBH Hidrostatik Test Profili-Model A0.pdf` | Test bolumu taslagi uretimi |
 
-Bu bilgiler gelmeden alan sozlugu ve toleranslar **kesin** kabul
-edilmemelidir; mevcut uygulama sartname metni ve tipik saha degerlerine
-gore makul varsayimlarla calisir.
+Dogrulanan davranislar:
+
+- Form numarasi (`BOT-FRM-CDB-001-0xx`) sayfa altindan okunur; sablon **dosya
+  adlari** `İNB` yazsa da basili numara `CDB`dir.
+- Sayi bicimi `3.722,21`, tarih `19.10.2026`, KP `25+404` (`K+MMM`).
+- `Test Bölüm Boyu` (boru metresi) ile `ΔKP` birebir esit degildir;
+  fitting/elbow farki 3-25 m olabilir (bkz. `docs/spec/report_forms.md` §6).
+- Hava formunda `Ölçülen Basınç Değişimi` basinc adimidir (ornegin `1,00 bar`);
+  basinc testi `Pa` alaniyla karistirilmaz.
+- Basinc formunda `ΔP` bazi taramalarda `PA`/`AP` okunur; ikinci `Pa`
+  konum geregi `p_delta` olur.
+
+Acik kalan dis girdiler:
+
+1. **Kurum onayli revizyonlar**: sablonlarin guncel `.xls` revizyonlari ve
+   form numarasi teyidi.
+2. **Anonimlestirme/paylasim izni**: gercek orneklerin test/dokuman amaciyla
+   kullanimi (mevcut calisma kullanici onayiyla yapildi).
+3. **Tolerans kaynagi**: hangi farkin "uyusmazlik" sayildigi sartnameden mi,
+   kurum ici prosedurden mi geliyor?
+4. **Kabul akisi**: onaylanan raporlarin arsiv konumu, ham OCR metni ve guven
+   skorunun denetim izinde tutulup tutulmayacagi.
+5. **Teknik ortam**: Windows hedef makinelerde Tesseract kurulum yetkisi ve
+   `tur` dil paketi mevcut mu?
+
+Bu maddeler gelmeden alan sozlugu ve toleranslar **kesin** kabul
+edilmemelidir; mevcut uygulama sartname metni ve gercek formlara gore
+kalibre edilmis makul varsayimlarla calisir.
 
 ---
 
 ## 14. Sonraki Adimlar
 
-1. Gercek form ornekleriyle `FIELD_ALIASES` genisletmesi ve regresyon
-   testleri.
-2. UI onay tablosu ve arka plan is parcacigi entegrasyonu.
+1. Kalan form turleri (temizlik, su dolum, dengeleme, mukavemet, bosalma)
+   icin alan sozlugu ve regresyon fixture'lari.
+2. 74 sayfalik gercek OCR ciktisi uzerinde toplu alan dogruluk raporu ve
+   hatali sayfalarin (ornegin cok uzun bolumler) gozden gecirilmesi.
 3. `build_calculated_payload(session)` ile uygulama hesaplarinin tek
-   noktadan beslenmesi.
-4. Tesseract yerine/yaninda PaddleOCR degerlendirmesi (ayni arayuz
+   noktadan beslenmesi (web tarafinda kismen var).
+4. Masaustu UI'da onay tablosu ve arka plan is parcacigi entegrasyonu.
+5. Tesseract yerine/yaninda PaddleOCR degerlendirmesi (ayni arayuz
    arkasinda).
-5. Guven skoru kalibrasyonu ve alan bazli hata istatistikleri.
-6. Denetim izi: ham metin, guven, onaylayan kullanici, zaman damgasi.
+6. Guven skoru kalibrasyonu ve alan bazli hata istatistikleri.
+7. Denetim izi: ham metin, guven, onaylayan kullanici, zaman damgasi.

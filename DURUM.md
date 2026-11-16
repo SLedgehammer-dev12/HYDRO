@@ -19,10 +19,10 @@
 | Proje / Test Bölümü (Section) DB | Çalışıyor | `projects` + `sessions.project_id` + `inputs.section_meta` |
 | KP sürekliliği + Segment denetimi | Tamamlandı | `lib/kp.ts`, Geometri & Saha sayfası |
 | Plan-Profil PDF tarama | Çalışıyor (metin katmanı) | `POST /api/projects/plan-profile/scan` |
-| OCR rapor kontrolü | Çalışıyor (iskelet + onay) | Yükleme, alan/uyuşmazlık, onay, JSON |
+| OCR rapor kontrolü | Çalışıyor (macOS Vision) | `ocrmac`, bbox eşleme, onay, gerçek form kalibrasyonu |
 | Docker / dağıtım | Hazır | `webapp/Dockerfile`, `docker-compose.yml` |
 
-**Durum:** MVP tamam. Kalan işler ağırlıklı olarak OCR kalibrasyonu, üretim sertleştirmesi (auth, migration, kod bölme) ve kurum onayı bekleyen veri işleri.
+**Durum:** MVP tamam. Kalan işler ağırlıklı olarak üretim sertleştirmesi (auth, migration, kod bölme) ve kurum onayı bekleyen veri işleri.
 
 ---
 
@@ -42,8 +42,11 @@
 - Güncelleme: Ed25519 imza fail-closed, `HYDRO_UPDATE_PRIVATE_KEY` CI secret'ı.
 - UI ergonomisi: her zaman görünür karar şeridi, zorunlu alan kapısı, klavye kısayolları,
   panel bazlı kaydırma, birim/terminoloji standardı, küçük ekran davranışı.
-- OCR rapor kontrolü: PDF metin katmanı + opsiyonel Tesseract, alan/uyuşmazlık, insan onayı,
+- OCR rapor kontrolü: PDF metin katmanı + Tesseract/macOS Vision, alan/uyuşmazlık, insan onayı,
   JSON çıktı, CLI (`tools/ocr_report.py`) ve UI.
+- **OCR kalibrasyonu (gerçek formlar):** 9 resmî `.xls` şablonu ve 74 sayfalık ERCİŞ raporu
+  Vision ile okundu. Bbox tabanlı satır/kolon eşleme, bulanık etiket eşleşmesi, formül satırı
+  ayıklama, hava/basınç bölüm ayrımı. Ayrıntı: `docs/spec/report_forms.md`.
 - Paketleme/CI: `.zip` + çift checksum, tag↔sürüm kapısı, ruff/mypy yapılandırması.
 
 ### 2.2 Web uygulaması
@@ -75,7 +78,8 @@
 
 ## 3. Devam Eden / Sıradaki İş
 
-Yok — aktif çalışma kapatıldı, `kp.ts` segment denetimi commit'lendi.
+Aktif çalışma yok. OCR kalibrasyonu gerçek formlarla tamamlandı; sıradaki
+adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen işlerdir.
 
 Sıradaki mantıklı adımlar (öncelik sırasıyla):
 
@@ -91,7 +95,7 @@ Sıradaki mantıklı adımlar (öncelik sırasıyla):
 
 ### 4.1 Web / üretim sertleştirmesi (P1)
 
-- [ ] OCR mapping profile `pre_extract` / `post_map` uygulanması (profil CRUD var, alan eşleme verisi yok).
+- [x] OCR mapping profile `pre_extract` / `post_map` uygulanması (`pre_extract`: ek etiket adları; `post_map`: hedef yol geçersiz kılma).
 - [ ] OCR DB kuyruğu + worker + iptal (şu an analiz senkron).
 - [ ] Alembic üretim migrasyonu (`create_all` + hafif kolon migrasyonu yerine).
 - [ ] Auth / OIDC + iki kişi onay kuralı (MVP'de anonim `X-Session-ID`).
@@ -128,7 +132,7 @@ Sıradaki mantıklı adımlar (öncelik sırasıyla):
 
 | Konu | Beklenen |
 | --- | --- |
-| OCR kalibrasyonu | Gerçek saha rapor örnekleri: `BOT-FRM-CDB-001-015/020/021/022` (PDF/JPG, 2'şer adet) |
+| Resmî form revizyonu | Kurum onaylı güncel `.xls` revizyonları (OCR envanteri `docs/spec/report_forms.md`) |
 | B tablosu resmi kaynağı | Kurum içi ölçüm zinciri / resmi revizyon |
 | A/B tablosu kalıcı düzeltmesi | Kurum onaylı veri (şu an çalışma zamanı onarımı) |
 | Notarization | Kod imzalama sertifikası ve kurumsal anahtar yedeği/rotasyonu |
@@ -145,6 +149,9 @@ python3 -m pytest webapp/backend/tests -q                      # 97 passed
 
 # Masaüstü
 python3 -m unittest discover -s tests -p "test_*.py"           # 653 passed
+
+# OCR (gerçek form fixture'ları dahil)
+python3 -m pytest tests/test_report_ocr.py -q                  # 53 passed, 1 skipped
 
 # Frontend derleme
 cd webapp/frontend && npm run build                            # PASS
@@ -171,8 +178,11 @@ docker compose -f webapp/docker-compose.yml up --build
 - Demo proje ID'leri (`demo-*`) backend'e gönderilmez; `App.tsx` ve mutation hook'ları filtreler.
 - Ana bundle ~2.2 MB (three.js); kod bölme yapılana kadar build uyarısı normaldir.
 - `implementation_status.md` içindeki eski test sayıları (95) bu dosyayla hizalandı.
-- Plan-Profil tarama motoru yalnızca PDF metin katmanı veya Tesseract varsa çalışır;
-  paket yoksa yanıt `ocr.available=false` döner.
+- Plan-Profil tarama motoru PDF metin katmanı veya Tesseract/macOS Vision varsa çalışır;
+  hiçbiri yoksa yanıt `ocr.available=false` döner.
+- OCR'da etiket/değer eşlemesi bbox tabanlıdır; dikey tolerans (`0.005`) satır
+  aralığına göre kalibre edildi. Değiştirilirse `tests/test_report_ocr.py`
+  içindeki gerçek form fixture'ları ve `VisionBlockPairingTests` kırılır.
 
 ---
 
@@ -184,6 +194,7 @@ docker compose -f webapp/docker-compose.yml up --build
 | `tasks/remediation.md` | Denetim remediasyonu + faz planı, işaretli maddeler |
 | `docs/remediation_report.md` | Remediasyon sonuç özeti ve kanıt tablosu |
 | `docs/continuity.md` | Masaüstü süreklilik/karar geçmişi |
+| `docs/spec/report_forms.md` | Resmî form envanteri, gerçek saha değerleri, OCR kalibrasyonu |
 | `docs/ui_ergonomics.md` | Masaüstü ergonomi kararları |
 | `docs/codebase_map.md` | Üretilen kod haritası |
 | `webapp/docs/implementation_status.md` | Web uygulaması durumu ve doğrulama |

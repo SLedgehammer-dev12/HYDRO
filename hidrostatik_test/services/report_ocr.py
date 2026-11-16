@@ -13,18 +13,20 @@ Katmanlar:
 4. :func:`analyze_report` - tek giris noktasi; guven skoru, uyarilar ve
    insan onayi bayragi ile :class:`OcrAnalysisResult` dondurur.
 
-Agir OCR bagimliliklari (``pytesseract``, ``Pillow``, ``PyMuPDF``) zorunlu
-degildir; yoksa metin katmani ile devam edilir ve anlasilir bir
+Agir OCR bagimliliklari (``pytesseract``, ``ocrmac``, ``Pillow``, ``PyMuPDF``)
+zorunlu degildir; yoksa metin katmani ile devam edilir ve anlasilir bir
 :class:`ReportOcrError` uretilir.
 """
 
 from __future__ import annotations
 
+import difflib
 import importlib
 import importlib.util
 import io
 import os
 import re
+import sys
 from dataclasses import dataclass, replace
 from datetime import date as _date
 from pathlib import Path
@@ -410,13 +412,7 @@ def _join_warning(existing: str, new: str) -> str:
     return f"{existing} {new}"
 
 
-def ocr_available() -> bool:
-    """Return ``True`` when Tesseract and Pillow are usable.
-
-    ``pytesseract`` paketi kurulu olsa bile ``tesseract`` calistirilabilir
-    dosyasi yoksa ``False`` doner. Testler bu fonksiyonla skip karari verir.
-    """
-
+def _tesseract_available() -> bool:
     if importlib.util.find_spec("pytesseract") is None:
         return False
     if importlib.util.find_spec("PIL") is None:
@@ -429,30 +425,161 @@ def ocr_available() -> bool:
     return True
 
 
+def vision_available() -> bool:
+    """Return ``True`` when the macOS Vision engine (``ocrmac``) is usable."""
+
+    if sys.platform != "darwin":
+        return False
+    if importlib.util.find_spec("ocrmac") is None:
+        return False
+    try:
+        import Vision  # noqa: F401  # type: ignore[import-not-found]
+        from ocrmac import ocrmac  # noqa: F401  # type: ignore[import-not-found]
+    except Exception:
+        return False
+    return True
+
+
+def ocr_available() -> bool:
+    """Return ``True`` when at least one OCR engine is usable.
+
+    Sirasiyla Tesseract (tum platformlar) ve macOS Vision (``ocrmac``)
+    denenir. Ikisi de yoksa taranmis belgeler okunamaz.
+    """
+
+    return _tesseract_available() or vision_available()
+
+
+def _resolve_ocr_engine() -> str:
+    """Return ``"tesseract"``, ``"vision"`` or ``""``.
+
+    ``HYDRO_OCR_ENGINE`` ile zorlanabilir: ``auto`` (varsayilan),
+    ``tesseract`` veya ``vision``.
+    """
+
+    requested = os.environ.get("HYDRO_OCR_ENGINE", "auto").strip().casefold()
+    if requested == "tesseract":
+        return "tesseract" if _tesseract_available() else ""
+    if requested == "vision":
+        return "vision" if vision_available() else ""
+    if _tesseract_available():
+        return "tesseract"
+    if vision_available():
+        return "vision"
+    return ""
+
+
+def ocr_engine_name() -> str:
+    """Return the active OCR engine name: ``tesseract``, ``vision`` or ``""``."""
+
+    return _resolve_ocr_engine()
+
+
 def ocr_status() -> str:
     """Return a short human-readable OCR availability note."""
 
-    if ocr_available():
+    engine = _resolve_ocr_engine()
+    if engine == "tesseract":
         return "OCR hazir (Tesseract + Pillow)."
+    if engine == "vision":
+        return "OCR hazir (macOS Vision, ocrmac)."
     if importlib.util.find_spec("pytesseract") is None:
+        if sys.platform == "darwin":
+            return "OCR yok: pytesseract/ocrmac kurulu degil (requirements-ocr.txt)."
         return "OCR yok: pytesseract kurulu degil (requirements-ocr.txt)."
     if importlib.util.find_spec("PIL") is None:
         return "OCR yok: Pillow kurulu degil (requirements-ocr.txt)."
+    if sys.platform == "darwin":
+        return "OCR yok: tesseract calistirilabilir dosyasi ve macOS Vision kullanilamadi."
     return "OCR yok: tesseract calistirilabilir dosyasi bulunamadi."
 
 
 def _ocr_prerequisites_available() -> bool:
-    return (
-        importlib.util.find_spec("pytesseract") is not None
-        and importlib.util.find_spec("PIL") is not None
-    )
+    return ocr_available()
+
+
+def _max_ocr_pages() -> int:
+    raw = os.environ.get("HYDRO_OCR_MAX_PAGES", "").strip()
+    if raw:
+        try:
+            value = int(raw)
+        except ValueError:
+            value = MAX_OCR_PAGES
+        return max(1, min(value, MAX_PDF_PAGES))
+    return MAX_OCR_PAGES
 
 
 def _ocr_pdf_pages(path: Path) -> list[PageText]:
+    engine = _resolve_ocr_engine()
+    if engine == "vision":
+        return _ocr_pdf_pages_with_vision(path)
+    if engine != "tesseract":
+        raise ReportOcrError(
+            "Taranmis PDF icin OCR motoru bulunamadi (Tesseract veya macOS Vision).",
+            ERROR_OCR_UNAVAILABLE,
+        )
+
     images = _render_pdf_pages(path)
     pages: list[PageText] = []
     for index, image in enumerate(images):
         text, confidence, warning = _run_tesseract(image)
+        pages.append(
+            PageText(
+                page_number=index + 1,
+                text=text,
+                source=TEXT_SOURCE_OCR,
+                confidence=confidence,
+                warning=warning,
+            )
+        )
+    return pages
+
+
+def _ocr_pdf_pages_with_vision(path: Path) -> list[PageText]:
+    """OCR PDF pages with the macOS Vision framework.
+
+    PyMuPDF varsa sayfalar tek tek rasterlestirilir (bellek dostu); yoksa
+    ``pdf2image`` ciktisi kullanilir.
+    """
+
+    max_pages = _max_ocr_pages()
+    if importlib.util.find_spec("fitz") is not None:
+        fitz = importlib.import_module("fitz")
+        try:
+            document = fitz.open(str(path))
+        except Exception as exc:
+            raise ReportOcrError(
+                "PDF OCR icin acilamadi.", ERROR_CORRUPT_DOCUMENT, detail=str(exc)
+            ) from exc
+        pages: list[PageText] = []
+        try:
+            for index in range(min(len(document), max_pages)):
+                pixmap = document[index].get_pixmap(dpi=200)
+                image = Image.open(io.BytesIO(pixmap.tobytes("png")))
+                text, confidence, warning = _run_vision(image)
+                pages.append(
+                    PageText(
+                        page_number=index + 1,
+                        text=text,
+                        source=TEXT_SOURCE_OCR,
+                        confidence=confidence,
+                        warning=warning,
+                    )
+                )
+        except ReportOcrError:
+            raise
+        except Exception as exc:
+            raise ReportOcrError(
+                "PDF sayfasi goruntuye cevrilemedi.", ERROR_CORRUPT_DOCUMENT, detail=str(exc)
+            ) from exc
+        finally:
+            document.close()
+        return pages
+
+    images = _render_pdf_pages(path)[:max_pages]
+    pages = []
+    for index, image in enumerate(images):
+        text, confidence, warning = _run_vision(image)
         pages.append(
             PageText(
                 page_number=index + 1,
@@ -476,7 +603,7 @@ def _render_pdf_pages(path: Path) -> list[Any]:
         try:
             return list(
                 pdf2image.convert_from_path(
-                    str(path), dpi=200, first_page=1, last_page=MAX_OCR_PAGES
+                    str(path), dpi=200, first_page=1, last_page=_max_ocr_pages()
                 )
             )
         except Exception as exc:
@@ -505,7 +632,7 @@ def _render_pdf_pages_with_fitz(path: Path) -> list[Any]:
 
     images: list[Any] = []
     try:
-        page_count = min(len(document), MAX_OCR_PAGES)
+        page_count = min(len(document), _max_ocr_pages())
         for index in range(page_count):
             pixmap = document[index].get_pixmap(dpi=200)
             images.append(Image.open(io.BytesIO(pixmap.tobytes("png"))))
@@ -519,13 +646,19 @@ def _render_pdf_pages_with_fitz(path: Path) -> list[Any]:
 
 
 def _ocr_image_page(path: Path) -> PageText:
-    if importlib.util.find_spec("PIL") is None or importlib.util.find_spec("pytesseract") is None:
+    engine = _resolve_ocr_engine()
+    if engine == "vision":
+        image = _load_image(path)
+        text, confidence, warning = _run_vision(image)
+    elif engine == "tesseract":
+        image = _load_image(path)
+        text, confidence, warning = _run_tesseract(image)
+    else:
         raise ReportOcrError(
-            "Goruntu OCR icin pytesseract ve Pillow gerekli (requirements-ocr.txt).",
+            "Goruntu OCR icin pytesseract/Pillow veya macOS Vision (ocrmac) gerekli "
+            "(requirements-ocr.txt).",
             ERROR_DEPENDENCY_MISSING,
         )
-    image = _load_image(path)
-    text, confidence, warning = _run_tesseract(image)
     if not text.strip():
         raise ReportOcrError(
             "Goruntuden metin okunamadi; belge okunaksiz veya bos olabilir.",
@@ -629,6 +762,230 @@ def _run_tesseract(image: Any) -> tuple[str, float | None, str]:
     return text, mean_confidence, warning
 
 
+_VISION_LANGUAGES: Final[tuple[str, ...]] = ("tr-TR", "en-US")
+
+#: Vision kutularini ayni form satirinda kabul etmek icin dikey tolerans
+#: (sayfa yuksekliginin orani). Form satirlari ~0.011 araliklarla
+#: yerlesir; 0.005'ten buyuk bir tolerans komsu satirin degerini
+#: etikete baglar (ornegin "Boru Ic Capi" -> bir alt satirdaki "5,20").
+_VISION_ROW_TOLERANCE: Final[float] = 0.005
+#: Etiket ile deger arasinda kabul edilen en buyuk yatay bosluk. Genis
+#: parametre tablolarinda deger sutunu sayfanin sagina yaslanir.
+_VISION_MAX_GAP: Final[float] = 0.75
+#: Bu uzunluktan kisa etiketler "gercek etiket" sayilir; bir degerin
+#: onlarin otesine baglanmasi ayni satirdaki baska alanin degerini
+#: calmasina yol acar (ornegin "Test Bolum No" -> "Tarih" degeri).
+_VISION_SHORT_LABEL_MAX: Final[int] = 28
+
+
+_VISION_UNIT_ONLY_RE: Final[re.Pattern[str]] = re.compile(
+    r"^\(?\s*(?:mm|cm|m|km|in|inch|ft|bar|barg|bara|psi|kpa|mpa|°c|ºc|c|m3|m³|m\^3|l|lt|ml|%|"
+    r"1/bar|1/k|1/°c|10\^-?6/bar|10\^?-?6/°c)\s*\)?$",
+    re.IGNORECASE,
+)
+_VISION_NUMERIC_RE: Final[re.Pattern[str]] = re.compile(r"[\d.,:'+\-/\s]+")
+_VISION_CODE_RE: Final[re.Pattern[str]] = re.compile(r"[A-ZÇĞİÖŞÜ]{1,8}[-\s]?\d{1,8}")
+_VISION_DATE_RE: Final[re.Pattern[str]] = re.compile(r"\d{1,2}[./]\d{1,2}[./]\d{2,4}")
+_VISION_KP_RE: Final[re.Pattern[str]] = re.compile(r"\d{1,4}\+\d{2,3}(?:[.,]\d+)?")
+_VISION_WORD_NUMBER_RE: Final[re.Pattern[str]] = re.compile(r"[A-ZÇĞİÖŞÜa-zçğıöşü]{2,14}\s+\d{1,6}")
+_VISION_PAREN_UNIT_RE: Final[re.Pattern[str]] = re.compile(r"^\([^)]{0,10}\)$")
+
+
+def _looks_like_value(text: str) -> bool:
+    """True when a Vision block is likely a field value, not a label/description."""
+
+    stripped = text.strip()
+    if not stripped or len(stripped) > 26:
+        return False
+    if _VISION_UNIT_ONLY_RE.match(stripped):
+        return False
+    upper = stripped.upper()
+    if upper in {"PASS", "FAIL", "KABUL", "RED"}:
+        return True
+    if _VISION_NUMERIC_RE.fullmatch(stripped):
+        return True
+    if _VISION_DATE_RE.fullmatch(stripped) or _VISION_KP_RE.fullmatch(stripped):
+        return True
+    if _VISION_CODE_RE.fullmatch(stripped):
+        return True
+    if _VISION_WORD_NUMBER_RE.fullmatch(stripped):
+        return True
+    digits = sum(char.isdigit() for char in stripped)
+    return bool(digits) and digits / len(stripped) >= 0.5
+
+
+def _looks_like_label(text: str) -> bool:
+    """True when a Vision block is likely a field label."""
+
+    stripped = text.strip()
+    if not stripped or len(stripped) > 70:
+        return False
+    if _VISION_UNIT_ONLY_RE.match(stripped):
+        return False
+    if _VISION_NUMERIC_RE.fullmatch(stripped):
+        return False
+    return any(char.isalpha() for char in stripped)
+
+
+def _vision_row_bands(
+    items: Sequence[dict[str, Any]],
+) -> list[list[dict[str, Any]]]:
+    """Group Vision blocks into form rows using tight vertical tolerance."""
+
+    bands: list[list[dict[str, Any]]] = []
+    for item in sorted(items, key=lambda entry: -entry["y"]):
+        if bands:
+            anchor = bands[-1][0]["y"]
+            if abs(item["y"] - anchor) <= _VISION_ROW_TOLERANCE:
+                bands[-1].append(item)
+                continue
+        bands.append([item])
+    for band in bands:
+        band.sort(key=lambda entry: entry["x"])
+    return bands
+
+
+def _vision_pair_row(
+    band: Sequence[dict[str, Any]],
+) -> list[tuple[dict[str, Any], dict[str, Any] | None]]:
+    """Pair labels with their values inside one form row.
+
+    Form satirinda birden fazla etiket/deger cifti olabilir (sol ve sag
+    kolon). Her etikete, sagindaki en yakin ve henuz kullanilmamis deger
+    atanir. Bir etiketin sagindaki *kisa* baska bir etiketin otesine
+    gecen deger aday degildir; aksi halde "Test Bolum No" satirindaki
+    "Tarih" degerini calar.
+    """
+
+    labels = [
+        entry
+        for entry in band
+        if _looks_like_label(entry["text"]) and not _looks_like_value(entry["text"])
+    ]
+    values = [entry for entry in band if _looks_like_value(entry["text"])]
+    used: set[int] = set()
+    pairs: list[tuple[dict[str, Any], dict[str, Any] | None]] = []
+
+    for label in labels:
+        label_end = label["x"] + label["w"]
+        blockers = [
+            other["x"]
+            for other in labels
+            if other is not label
+            and other["x"] > label["x"]
+            and len(other["text"]) <= _VISION_SHORT_LABEL_MAX
+            and not _VISION_PAREN_UNIT_RE.match(other["text"].strip())
+        ]
+        limit = min(blockers) if blockers else float("inf")
+
+        best: tuple[float, dict[str, Any]] | None = None
+        for value in values:
+            if id(value) in used:
+                continue
+            if value["x"] < label_end - 0.02:
+                continue
+            if value["x"] >= limit:
+                continue
+            gap = value["x"] - label_end
+            if gap > _VISION_MAX_GAP:
+                continue
+            if best is None or gap < best[0]:
+                best = (gap, value)
+        if best is None:
+            pairs.append((label, None))
+        else:
+            used.add(id(best[1]))
+            pairs.append((label, best[1]))
+    return pairs
+
+
+def _vision_blocks_to_text(blocks: Sequence[tuple[str, float, Sequence[float]]]) -> str:
+    """Build label/value lines from Vision blocks using their bounding boxes.
+
+    Kurumsal formlarda etiket ve deger ayri hucrelerdedir; Vision bunlari
+    ayri metin bloklari olarak dondurur. Bloklar once form satirlarina
+    (dar dikey tolerans) ayrilir, sonra her satirda etiketler sag
+    taraflarindaki degerlerle ``etiket : deger`` biciminde eslesir.
+    Boylece mevcut satir tabanli alan ayristirici degismeden calisir.
+    """
+
+    items = [
+        {
+            "text": str(text).strip(),
+            "confidence": float(confidence),
+            "x": float(box[0]),
+            "y": float(box[1]),
+            "w": float(box[2]),
+            "h": float(box[3]),
+        }
+        for text, confidence, box in blocks
+        if str(text).strip() and len(box) >= 4
+    ]
+    if not items:
+        return ""
+
+    lines: list[str] = []
+    for band in _vision_row_bands(items):
+        emitted: set[int] = set()
+        for label, value in _vision_pair_row(band):
+            emitted.add(id(label))
+            if value is not None:
+                emitted.add(id(value))
+                lines.append(f"{label['text']} : {value['text']}")
+            else:
+                lines.append(label["text"])
+        for item in band:
+            if id(item) in emitted:
+                continue
+            lines.append(item["text"])
+
+    return "\n".join(lines)
+
+
+def _run_vision(image: Any) -> tuple[str, float | None, str]:
+    """OCR one page with the macOS Vision framework (``ocrmac``)."""
+
+    try:
+        from ocrmac import ocrmac  # type: ignore[import-not-found]
+    except ImportError as exc:  # pragma: no cover - onceden kontrol edilir
+        raise ReportOcrError("OCR icin ocrmac gerekli.", ERROR_OCR_UNAVAILABLE) from exc
+
+    from PIL import Image  # noqa: PLC0415 - opsiyonel bagimlilik, tembel import
+
+    if not isinstance(image, Image.Image):
+        image = Image.open(image)
+
+    warning = ""
+    try:
+        blocks = ocrmac.OCR(
+            image,
+            recognition_level="accurate",
+            language_preference=list(_VISION_LANGUAGES),
+        ).recognize()
+    except ValueError:
+        # Dil listesi bu macOS surumunde desteklenmiyorsa varsayilanla dene.
+        try:
+            blocks = ocrmac.OCR(image, recognition_level="accurate").recognize()
+        except Exception as exc:
+            raise ReportOcrError(
+                "macOS Vision OCR calistirilamadi.",
+                ERROR_OCR_UNAVAILABLE,
+                detail=str(exc),
+            ) from exc
+        warning = "macOS Vision Turkce dil tercihini kabul etmedi; varsayilan dil kullanildi."
+    except Exception as exc:
+        raise ReportOcrError(
+            "macOS Vision OCR calistirilamadi.",
+            ERROR_OCR_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+    text = _vision_blocks_to_text(blocks)
+    confidences = [float(confidence) for _, confidence, _ in blocks]
+    mean_confidence = (sum(confidences) / len(confidences)) if confidences else None
+    return text, mean_confidence, warning
+
+
 # ---------------------------------------------------------------------------
 # Metin normalizasyonu ve alan cikarimi
 # ---------------------------------------------------------------------------
@@ -667,34 +1024,54 @@ _FOLD_TABLE = str.maketrans(
 #: Kanonik alan -> (kanonik birim, boyut turu)
 _KEY_UNITS: Final[dict[str, tuple[str, str]]] = {
     "pipe_od_mm": ("mm", "length"),
+    "pipe_id_mm": ("mm", "length"),
     "wall_mm": ("mm", "length"),
     "length_m": ("m", "length"),
+    "section_volume_m3": (UNIT_M3, "volume"),
+    "max_operating_pressure_bar": (UNIT_BAR, "pressure"),
+    "smys_mpa": ("MPa", "pressure"),
     "test_pressure_bar": (UNIT_BAR, "pressure"),
     "air_test.vp": (UNIT_M3, "volume"),
     "air_test.vpa": (UNIT_M3, "volume"),
+    "air_test.vt": (UNIT_M3, "volume"),
+    "air_test.k": ("-", "ratio"),
+    "air_test.ratio": ("-", "ratio"),
     "air_test.a": (UNIT_MICRO_PER_BAR, "compressibility"),
     "pressure_test.t_initial": (UNIT_CELSIUS, "temperature"),
     "pressure_test.t_final": (UNIT_CELSIUS, "temperature"),
     "pressure_test.delta_t": (UNIT_CELSIUS, "temperature_delta"),
+    "pressure_test.p_delta": (UNIT_BAR, "pressure"),
     "pressure_test.pa": (UNIT_BAR, "pressure"),
+    "pressure_test.pl": (UNIT_BAR, "pressure"),
     "pressure_test.a": (UNIT_MICRO_PER_BAR, "compressibility"),
     "pressure_test.b": (UNIT_MICRO_PER_C, "expansion"),
 }
 
-_STRING_FIELDS: Final[frozenset[str]] = frozenset({"report_no", "operator", "section_id", "notes"})
+_STRING_FIELDS: Final[frozenset[str]] = frozenset(
+    {"report_no", "operator", "section_id", "start_kp", "end_kp", "notes"}
+)
 
 _PLAUSIBLE_RANGES: Final[dict[str, tuple[float, float]]] = {
     "pipe_od_mm": (10.0, 3000.0),
+    "pipe_id_mm": (5.0, 3000.0),
     "wall_mm": (0.5, 100.0),
     "length_m": (0.5, 5_000_000.0),
+    "section_volume_m3": (0.0, 1_000_000.0),
+    "max_operating_pressure_bar": (0.0, 1000.0),
+    "smys_mpa": (50.0, 1000.0),
     "test_pressure_bar": (0.0, 1000.0),
     "air_test.vp": (0.0, 100_000.0),
     "air_test.vpa": (0.0, 100_000.0),
+    "air_test.vt": (0.0, 1_000_000.0),
+    "air_test.k": (0.8, 1.2),
+    "air_test.ratio": (0.0, 1.0),
     "air_test.a": (1.0, 200.0),
     "pressure_test.t_initial": (-60.0, 120.0),
     "pressure_test.t_final": (-60.0, 120.0),
     "pressure_test.delta_t": (-60.0, 60.0),
+    "pressure_test.p_delta": (-100.0, 100.0),
     "pressure_test.pa": (0.0, 100.0),
+    "pressure_test.pl": (0.0, 100.0),
     "pressure_test.a": (1.0, 200.0),
     "pressure_test.b": (-500.0, 500.0),
 }
@@ -804,11 +1181,17 @@ def _alias_pattern(alias: str) -> str:
     return escaped.replace(r"\ ", r"\s+")
 
 
-def _build_alias_patterns() -> tuple[tuple[re.Pattern[str], str], ...]:
+def _build_alias_patterns(
+    extra: dict[str, Sequence[str]] | None = None,
+) -> tuple[tuple[re.Pattern[str], str], ...]:
     entries: list[tuple[int, re.Pattern[str], str]] = []
     seen: set[tuple[str, str]] = set()
+    merged: dict[str, Sequence[str]] = {key: list(aliases) for key, aliases in FIELD_ALIASES.items()}
+    for key, aliases in (extra or {}).items():
+        merged.setdefault(key, [])
+        merged[key] = [*merged[key], *aliases]
 
-    for key, aliases in FIELD_ALIASES.items():
+    for key, aliases in merged.items():
         for alias in aliases:
             folded = _fold(alias)
             if (key, folded.casefold()) in seen:
@@ -824,6 +1207,30 @@ def _build_alias_patterns() -> tuple[tuple[re.Pattern[str], str], ...]:
 
 
 _ALIAS_PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = _build_alias_patterns()
+
+#: Uzun etiketler icin bulanik eslesme esigi (OCR yazim hatalari).
+_FUZZY_MIN_RATIO: Final[float] = 0.88
+_FUZZY_ALIASES: Final[tuple[tuple[str, str], ...]] = tuple(
+    (folded, key)
+    for key, aliases in FIELD_ALIASES.items()
+    for alias in aliases
+    for folded in (_fold(alias).casefold(),)
+    if len(folded) >= 10
+)
+
+
+def _build_fuzzy_aliases(
+    extra: dict[str, Sequence[str]] | None = None,
+) -> tuple[tuple[str, str], ...]:
+    if not extra:
+        return _FUZZY_ALIASES
+    merged = [(folded, key) for folded, key in _FUZZY_ALIASES]
+    for key, aliases in extra.items():
+        for alias in aliases:
+            folded = _fold(alias).casefold()
+            if len(folded) >= 10:
+                merged.append((folded, key))
+    return tuple(merged)
 
 
 def parse_number(raw: str) -> float:
@@ -1004,12 +1411,21 @@ class _Candidate:
     section: str
 
 
-def parse_report(text_pages: Sequence[PageText] | str) -> HydrotestReport:
+def parse_report(
+    text_pages: Sequence[PageText] | str,
+    *,
+    extra_aliases: dict[str, Sequence[str]] | None = None,
+) -> HydrotestReport:
     """Parse a hydrostatic test report from text pages.
 
     ``text_pages`` yerine dogrudan bir metin de verilebilir; bu gelistirme
-    ve test kolayligi icindir.
+    ve test kolayligi icindir. ``extra_aliases`` ile harici bir esleme
+    profili (ornegin web uygulamasindaki ``pre_extract`` profili) ek
+    etiket adlari tanimlayabilir.
     """
+
+    patterns = _build_alias_patterns(extra_aliases) if extra_aliases else _ALIAS_PATTERNS
+    fuzzy_aliases = _build_fuzzy_aliases(extra_aliases)
 
     pages = (
         [PageText(page_number=1, text=text_pages, source=TEXT_SOURCE_LAYER)]
@@ -1032,6 +1448,7 @@ def parse_report(text_pages: Sequence[PageText] | str) -> HydrotestReport:
 
     for page in pages:
         section = ""
+        pa_seen = 0
         page_text = page.text[:MAX_TEXT_CHARS]
         for raw_line in page_text.splitlines():
             folded = _fold(raw_line)
@@ -1043,12 +1460,22 @@ def parse_report(text_pages: Sequence[PageText] | str) -> HydrotestReport:
                 section = section_kind
                 continue
 
-            matched = _match_field_line(folded)
+            matched = _match_field_line(folded, patterns, fuzzy_aliases)
             if matched is None:
                 continue
             key, rest_start = matched
             rest = raw_line[rest_start:].strip()
             if not rest:
+                continue
+            if key not in _STRING_FIELDS:
+                rest = _trailing_value(rest)
+                if not rest:
+                    continue
+
+            # Hava icerik formunda "Olculen Basinc Degisimi" farkli bir
+            # buyukluktur (testin basinc adimi); basinc testi alanlarina
+            # yazilmamalidir.
+            if section == "air" and key.startswith("pressure_test."):
                 continue
 
             if key in {"air_test.a", "pressure_test.a"}:
@@ -1060,6 +1487,14 @@ def parse_report(text_pages: Sequence[PageText] | str) -> HydrotestReport:
                 else:
                     key = "air_test.a"
                 a_seen[effective_section] += 1
+
+            if key == "pressure_test.pa":
+                # Resmi basinc testi formunda once "Olculen Basinc
+                # Degisimi" (PA), ardindan sicaklik kaynakli "dP" satiri
+                # gelir. Ikinci "Pa/PA" satiri dP olarak yorumlanir.
+                if pa_seen:
+                    key = "pressure_test.p_delta"
+                pa_seen += 1
 
             order += 1
             extracted = _build_field(key, rest, page, warnings, source=page.source)
@@ -1083,25 +1518,50 @@ def parse_report(text_pages: Sequence[PageText] | str) -> HydrotestReport:
     for key, group in grouped.items():
         values[key] = _resolve_candidates(key, group, warnings)
 
+    if "result" not in values:
+        verdict = _find_verdict(pages)
+        if verdict is not None:
+            values["result"] = verdict
+            warnings.append(
+                "Rapor sonucu serbest metinden cikarildi (kabul/red cumlesi); "
+                "insan onayi gerekli."
+            )
+
+    if "report_no" not in values:
+        form_no = _find_form_number(pages)
+        if form_no is not None:
+            values["report_no"] = form_no
+
     report = HydrotestReport(
         report_no=values.get("report_no"),
         date=values.get("date"),
         operator=values.get("operator"),
         section_id=values.get("section_id"),
+        start_kp=values.get("start_kp"),
+        end_kp=values.get("end_kp"),
         pipe_od_mm=values.get("pipe_od_mm"),
+        pipe_id_mm=values.get("pipe_id_mm"),
         wall_mm=values.get("wall_mm"),
         length_m=values.get("length_m"),
+        section_volume_m3=values.get("section_volume_m3"),
+        max_operating_pressure_bar=values.get("max_operating_pressure_bar"),
+        smys_mpa=values.get("smys_mpa"),
         test_pressure_bar=values.get("test_pressure_bar"),
         air_test=AirTestFields(
             vp=values.get("air_test.vp"),
             vpa=values.get("air_test.vpa"),
+            vt=values.get("air_test.vt"),
+            k=values.get("air_test.k"),
+            ratio=values.get("air_test.ratio"),
             a=values.get("air_test.a"),
         ),
         pressure_test=PressureTestFields(
             t_initial=values.get("pressure_test.t_initial"),
             t_final=values.get("pressure_test.t_final"),
             delta_t=values.get("pressure_test.delta_t"),
+            p_delta=values.get("pressure_test.p_delta"),
             pa=values.get("pressure_test.pa"),
+            pl=values.get("pressure_test.pl"),
             a=values.get("pressure_test.a"),
             b=values.get("pressure_test.b"),
         ),
@@ -1112,12 +1572,123 @@ def parse_report(text_pages: Sequence[PageText] | str) -> HydrotestReport:
     return report
 
 
-def _match_field_line(folded_line: str) -> tuple[str, int] | None:
-    for pattern, key in _ALIAS_PATTERNS:
+_VERDICT_PASS_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:test\s+)?kabul\s+(?:edilmistir|edildi)\b", re.IGNORECASE
+)
+_VERDICT_FAIL_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:test\s+)?(?:kabul\s+edilmemistir|kabul\s+edilmedi|reddedilmistir|reddedildi|basarisiz)\b",
+    re.IGNORECASE,
+)
+_FORM_NO_RE: Final[re.Pattern[str]] = re.compile(
+    r"\bBOT[-\s]?FRM[-\s]?[A-Z]{2,4}[-\s]?\d{3}[-\s]?\d{3}\b", re.IGNORECASE
+)
+
+
+def _find_verdict(pages: Sequence[PageText]) -> ExtractedField | None:
+    """Find a PASS/FAIL verdict written as a sentence instead of a label."""
+
+    for page in pages:
+        for raw_line in page.text.splitlines():
+            folded = _fold(raw_line).casefold()
+            if _VERDICT_FAIL_RE.search(folded):
+                return ExtractedField(
+                    value="FAIL",
+                    unit="",
+                    confidence=0.55,
+                    raw_text=_clean_text(raw_line),
+                    page=page.page_number,
+                )
+            if _VERDICT_PASS_RE.search(folded):
+                return ExtractedField(
+                    value="PASS",
+                    unit="",
+                    confidence=0.55,
+                    raw_text=_clean_text(raw_line),
+                    page=page.page_number,
+                )
+    return None
+
+
+def _find_form_number(pages: Sequence[PageText]) -> ExtractedField | None:
+    """Use the printed form number (``BOT-FRM-...``) as a fallback report no."""
+
+    for page in pages:
+        match = _FORM_NO_RE.search(page.text)
+        if match is not None:
+            return ExtractedField(
+                value=_clean_text(match.group(0)).upper(),
+                unit="",
+                confidence=0.6,
+                raw_text=match.group(0),
+                page=page.page_number,
+            )
+    return None
+
+
+_FORMULA_OPERATORS: Final[tuple[str, ...]] = ("x", "X", "×", "*", "+", "/")
+
+
+def _looks_like_expression(text: str) -> bool:
+    """True for formula fragments like ``( 0.884 x (ri/S) +A)``."""
+
+    stripped = text.strip()
+    # KP ("25+404"), tarih ve negatif ondalik degerler ifade degildir.
+    if _VISION_KP_RE.fullmatch(stripped) or _VISION_DATE_RE.fullmatch(stripped):
+        return False
+    if "(" not in text or ")" not in text:
+        return False
+    if not _NUMBER_RE.findall(text):
+        return False
+    return any(op in text for op in _FORMULA_OPERATORS)
+
+
+def _trailing_value(rest: str) -> str:
+    """Form satirinda aciklama ile deger ayni satirdayken degeri ayikla.
+
+    Ornek: ``Vp = Basinci 1 Bar Degistirmek Icin Gerekli ... (m3) = 0,0625``
+    veya ``(PA-ΔP) = -0,035``. Yalnizca son ``=`` isaretinden sonra tek bir
+    sayi varsa ve bu parca kisaysa deger kabul edilir; formül satirlari
+    (``Vp = (0,884 x ...)``) elenir.
+    """
+
+    if "=" in rest:
+        head, _, tail = rest.rpartition("=")
+        tail = tail.strip()
+        if not tail or len(tail) > 32 or len(head.strip()) < 3:
+            return ""
+        if len(_NUMBER_RE.findall(tail)) != 1:
+            return ""
+        return tail
+
+    if _looks_like_expression(rest):
+        return ""
+    return rest
+
+
+def _match_field_line(
+    folded_line: str,
+    patterns: Sequence[tuple[re.Pattern[str], str]] | None = None,
+    fuzzy_aliases: Sequence[tuple[str, str]] | None = None,
+) -> tuple[str, int] | None:
+    for pattern, key in patterns or _ALIAS_PATTERNS:
         match = pattern.match(folded_line)
         if match is not None:
             return key, match.start("rest")
-    return None
+
+    # OCR kaynakli kucuk yazim hatalari (ornegin "Test Bölüm acmi" ->
+    # "Test Bölüm Hacmi") icin uzun etiketlerde sinirli bulanik eslesme.
+    fuzzy_match = re.match(r"^\s*(?P<label>[^:=]{8,70}?)\s*[:=]\s*(?P<rest>.*)$", folded_line)
+    if fuzzy_match is None:
+        return None
+    label = fuzzy_match.group("label").strip().casefold()
+    best: tuple[float, str] | None = None
+    for alias, key in fuzzy_aliases or _FUZZY_ALIASES:
+        ratio = difflib.SequenceMatcher(None, label, alias).ratio()
+        if ratio >= _FUZZY_MIN_RATIO and (best is None or ratio > best[0]):
+            best = (ratio, key)
+    if best is None:
+        return None
+    return best[1], fuzzy_match.start("rest")
 
 
 def _build_field(
@@ -1217,6 +1788,13 @@ def _build_numeric_field(
                 "A katsayisi 1/K olarak etiketlenmis; NGTL 5007 madde 15.2'ye "
                 "gore 1/bar kabul edildi (sartname icindeki birim celiskisi)."
             )
+        if value >= 1.0 and detected_unit in {"1/bar", "1/K", "1/k"}:
+            warnings.append(
+                f"{FIELD_LABELS.get(key, key)} formda 1/bar veya 1/K yazilmis ancak "
+                f"deger mikro olcekte ({value:g}); 10^-6 biriminde kabul edildi."
+            )
+        confidence += 0.02
+    elif kind == "ratio":
         confidence += 0.02
     elif kind == "temperature_delta":
         if detected_unit:
@@ -1675,12 +2253,14 @@ def has_blocking_discrepancies(discrepancies: Sequence[Discrepancy]) -> bool:
 def analyze_report(
     path: str | os.PathLike[str],
     calculated: dict[str, Any] | None = None,
+    *,
+    extra_aliases: dict[str, Sequence[str]] | None = None,
 ) -> OcrAnalysisResult:
     """Extract, parse, validate and (optionally) compare one report."""
 
     resolved = validate_input_path(path)
     pages = extract_text(resolved)
-    report = parse_report(pages)
+    report = parse_report(pages, extra_aliases=extra_aliases)
 
     issues = tuple(validate_report(report))
     warnings = list(report.warnings)
@@ -1747,9 +2327,11 @@ __all__ = [
     "has_blocking_discrepancies",
     "normalize_result",
     "ocr_available",
+    "ocr_engine_name",
     "ocr_status",
     "parse_date",
     "parse_number",
     "parse_report",
     "validate_input_path",
+    "vision_available",
 ]

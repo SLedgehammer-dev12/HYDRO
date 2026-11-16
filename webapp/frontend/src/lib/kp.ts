@@ -545,8 +545,16 @@ export function evaluateSegmentConsistency(params: {
     targetSectionLengthM !== null
       ? Math.round((totalSegmentLengthM - targetSectionLengthM) * 100) / 100
       : null;
+  // Gerçek sahada "Bölüm Uzunluğu" (boru metresi) ile KP aralığı
+  // fitting/elbow farkı kadar ayrışır (örn. 3.722,21 m vs 3.697 m).
+  // Bu yüzden toplam uzunluk denetimi max(0,5 m, %0,5) tolerans kullanır;
+  // ardışık KP sürekliliği ise 0,5 m'de kalır.
+  const sectionLengthToleranceM =
+    targetSectionLengthM === null
+      ? KP_TOLERANCE_M
+      : Math.max(KP_TOLERANCE_M, targetSectionLengthM * 0.005);
   const lengthMatchesSection =
-    deltaLengthM === null ? true : Math.abs(deltaLengthM) <= KP_TOLERANCE_M;
+    deltaLengthM === null ? true : Math.abs(deltaLengthM) <= sectionLengthToleranceM;
 
   if (!lengthMatchesSection && deltaLengthM !== null && targetSectionLengthM !== null) {
     const absDiff = Math.round(Math.abs(deltaLengthM));
@@ -579,7 +587,11 @@ export function evaluateSegmentConsistency(params: {
   } else if (targetSectionLengthM !== null) {
     status = "pass";
     badgeLabel = "Σ Segment = Section";
-    headline = `${segments.length} segmentin toplam uzunluğu (${totalSegmentLengthM} m), Test Bölümü (Section) aralığı KP ${sectionStartKp} → ${sectionEndKp} (${Math.round(targetSectionLengthM)} m) ile birebir eşleşiyor.`;
+    const diffM = Math.abs(deltaLengthM ?? 0);
+    headline =
+      diffM <= KP_TOLERANCE_M
+        ? `${segments.length} segmentin toplam uzunluğu (${totalSegmentLengthM} m), Test Bölümü (Section) aralığı KP ${sectionStartKp} → ${sectionEndKp} (${Math.round(targetSectionLengthM)} m) ile birebir eşleşiyor.`
+        : `${segments.length} segmentin toplam uzunluğu (${totalSegmentLengthM} m), Test Bölümü (Section) aralığı KP ${sectionStartKp} → ${sectionEndKp} (${Math.round(targetSectionLengthM)} m) ile uyumlu; fark ${diffM.toFixed(1)} m (izin verilen ±${sectionLengthToleranceM.toFixed(1)} m).`;
   } else {
     status = "pass";
     badgeLabel = `${segments.length} segment hazır`;

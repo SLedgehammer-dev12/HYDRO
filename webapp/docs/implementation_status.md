@@ -16,13 +16,15 @@ Dal: `feat/ergonomics-ocr`
 | Oturum | Calisiyor | SQLite, revision/ETag, snapshot, audit |
 | Raporlar | Calisiyor | TXT/PDF/XLSX indirme |
 | 3D saha | Calisiyor | Segmentler, kot, ekipman, pig, akis, kesit, presetler, `SceneHtml` DOM etiket katmani |
-| OCR | Calisiyor (metin katmani) | Yukleme, alan/uyusmazlik, onay iskeleti, JSON |
+| OCR | Calisiyor (macOS Vision + metin katmani) | Yukleme, bbox tabanli etiket/deger esleme, alan/uyusmazlik, onay, JSON; 9 resmi `.xls` + 74 sayfalik gercek raporla kalibre |
+| OCR mapping profile | Calisiyor | `pre_extract` ek etiket adlari, `post_map` hedef yol gecersiz kilma |
 | Docker | Hazir | `webapp/Dockerfile`, `docker-compose.yml` |
 
 ## Dogrulama
 
 ```bash
 python3 -m pytest webapp/backend/tests -q          # 97 passed
+python3 -m pytest tests/test_report_ocr.py -q      # 53 passed, 1 skipped
 python3 -m unittest discover -s tests -p "test_*.py"  # 653 passed
 cd webapp/frontend && npm run build                # PASS
 cd webapp/frontend && HYDRO_APP_URL=http://127.0.0.1:8095 node scripts/verify-tabs.mjs  # 11/11 PASS
@@ -35,6 +37,8 @@ Canli smoke:
 - Oturum kaydedildi (rev 2) ve SQLite'ta gorundu
 - PDF (46 KB, 2 sayfa), XLSX (6.7 KB), TXT export alindi
 - OCR sentetik PDF: `pdf-text-layer`, 1 sayfa, %90 guven, 14 karsilastirma
+- OCR gercek form (ERCIS, sayfa 8/11): `vision`, tum hava/basinc alanlari ve KP araligi dogru
+- `GET /api/ocr/status`: `engine.name=vision`, diller `tr-TR,en-US`
 - 3D sahne: 3 segment, 5 ekipman, pig/akis/kesit
 
 ## Calistirma
@@ -72,9 +76,9 @@ docker compose -f webapp/docker-compose.yml up --build
 
 ## Bilinen Eksikler / Sonraki Faz
 
-1. **Rapor formati (yarin):** OCR mapping profile `pre_extract`/`post_map` uygulanmiyor;
-   profil CRUD var, alan esleme verisi eklenecek.
-2. **OCR kuyrugu:** analiz senkron; DB kuyrugu + worker + iptal sonraki adim.
+1. **OCR kuyrugu:** analiz senkron; DB kuyrugu + worker + iptal sonraki adim.
+2. **OCR form kapsami:** hava icerik ve basinc kabul formlari kalibre; temizlik/su dolum/
+   dengeleme/mukavemet/bosalma formlari icin alan sozlugu henuz yok.
 3. **Alembic:** tablolar `create_all` + hafif kolon migrasyonu (`init_db`); uretim migration'i eklenmeli.
 4. **Auth/OIDC ve iki-kisi kurali:** MVP'de yok.
 5. **Postgres:** kod uyumlu, `psycopg` kurulu degil; runtime testi yapilmadi.

@@ -45,17 +45,28 @@ FIELD_LABELS: Final[dict[str, str]] = {
     "date": "Tarih",
     "operator": "Operator",
     "section_id": "Bolum No",
+    "start_kp": "Bolum baslangic KP",
+    "end_kp": "Bolum bitis KP",
     "pipe_od_mm": "Dis cap",
+    "pipe_id_mm": "Ic cap",
     "wall_mm": "Et kalinligi",
     "length_m": "Hat uzunlugu",
+    "section_volume_m3": "Test bolumu hacmi",
+    "max_operating_pressure_bar": "Maksimum isletme basinci",
+    "smys_mpa": "Boru akma dayanimi (SMYS)",
     "test_pressure_bar": "Test basinci",
     "air_test.vp": "Hava testi Vp",
     "air_test.vpa": "Hava testi Vpa",
+    "air_test.vt": "Hava testi Vt",
+    "air_test.k": "Hava testi K",
+    "air_test.ratio": "Hava icerik orani ((Vpa/Vp)-1)",
     "air_test.a": "Hava testi A",
     "pressure_test.t_initial": "Baslangic sicakligi",
     "pressure_test.t_final": "Bitis sicakligi",
     "pressure_test.delta_t": "Sicaklik farki (dT)",
+    "pressure_test.p_delta": "Sicaklik kaynakli basinc degisimi (dP)",
     "pressure_test.pa": "Basinc dususu (Pa)",
+    "pressure_test.pl": "Izin verilen basinc degisimi (PL)",
     "pressure_test.a": "Basinc testi A",
     "pressure_test.b": "Basinc testi B",
     "result": "Sonuc",
@@ -92,15 +103,35 @@ FIELD_ALIASES: Final[dict[str, tuple[str, ...]]] = {
         "Tester",
     ),
     "section_id": (
+        "Test Bölüm No",
+        "Test Bolum No",
         "Bölüm No",
         "Bolum No",
-        "Bölüm",
         "Kesim No",
         "Hat Kesimi",
         "Section No",
         "Section",
         "Segment No",
-        "Segment",
+    ),
+    "start_kp": (
+        "Test Bölümünün Başlangıç Noktası",
+        "Başlangıç Noktası",
+        "Başlangıç KP",
+        "Baslangic KP",
+        "1.Başlık Yeri",
+        "1. Başlık Yeri",
+        "Start KP",
+        "Start Chainage",
+    ),
+    "end_kp": (
+        "Test Bölümünün Bitiş Noktası",
+        "Bitiş Noktası",
+        "Bitiş KP",
+        "Bitis KP",
+        "2.Başlık Yeri",
+        "2. Başlık Yeri",
+        "End KP",
+        "End Chainage",
     ),
     "pipe_od_mm": (
         "Boru Dış Çapı",
@@ -114,6 +145,8 @@ FIELD_ALIASES: Final[dict[str, tuple[str, ...]]] = {
         "Cap",
     ),
     "wall_mm": (
+        "Boru Et Kalınlığı",
+        "Boru Et Kalinligi",
         "Et Kalınlığı",
         "Et Kalinligi",
         "Duvar Kalınlığı",
@@ -124,15 +157,58 @@ FIELD_ALIASES: Final[dict[str, tuple[str, ...]]] = {
         "Cidar",
         "WT",
     ),
+    "pipe_id_mm": (
+        "Boru İç Çapı",
+        "Boru Ic Capi",
+        "İç Çap",
+        "Ic Cap",
+        "Inner Diameter",
+        "Inside Diameter",
+        "Pipe ID",
+    ),
     "length_m": (
+        "Test Bölüm Boyu",
+        "Test Bolum Boyu",
+        "Test Bölümü Boyu",
+        "Bölüm Uzunluğu",
+        "Bolum Uzunlugu",
         "Test Uzunluğu",
         "Hat Uzunluğu",
-        "Bölüm Uzunluğu",
         "Test Length",
         "Uzunluk",
         "Length",
     ),
+    "section_volume_m3": (
+        "Test Bölüm Hacmi",
+        "Test Bolum Hacmi",
+        "Test Bölümü Hacmi",
+        "Bölüm Hacmi",
+        "Geometrik Hacim",
+        "Vt",
+        "V t",
+    ),
+    "max_operating_pressure_bar": (
+        "Maksimum İşletme Basıncı",
+        "Maks. İşletme Basıncı",
+        "Maksimum Isletme Basinci",
+        "Maks. Isletme Basinci",
+        "Maximum İşletme Basıncı",
+        "İşletme Basıncı",
+        "MAOP",
+    ),
+    "smys_mpa": (
+        "Boru Akma Dayanımı (SMYS)",
+        "Boru Akma Dayanımı",
+        "Boru Akma Dayanimi",
+        "Akma Dayanımı",
+        "SMYS",
+    ),
     "test_pressure_bar": (
+        "Maksimum Test Basıncı",
+        "Maks. Test Basıncı",
+        "Maximum Test Basıncı",
+        "Maksimum Test Basinci",
+        "Maks. Test Basinci",
         "Hidrostatik Test Basıncı",
         "Mukavemet Basıncı",
         "Test Basıncı",
@@ -157,7 +233,28 @@ FIELD_ALIASES: Final[dict[str, tuple[str, ...]]] = {
         "Actual Volume",
         "Vpa",
     ),
+    "air_test.vt": (
+        "Test Bölümünün Geometrik Hacmi",
+        "Geometrik Hacmi",
+        "Hava testi Vt",
+    ),
+    "air_test.k": (
+        "Katsayı,Dikişsiz Borular İçin 1,Kaynaklı Borular İçin 1,02",
+        "Katsayı, Dikişsiz Borular İçin 1, Kaynaklı Borular İçin 1,02",
+        "K katsayısı",
+        "Katsayı (K)",
+    ),
+    "air_test.ratio": (
+        "(Vpa/Vp)-1",
+        "(Vpa/Vp) - 1",
+        "Vpa/Vp",
+        "Hava içerik oranı",
+        "Air content ratio",
+    ),
     "air_test.a": (
+        "Suyun İzotermal Sıkıştırılabilirlik Katsayısı",
+        "Suyun İzotermal Sıkışabilirlik Katsayısı",
+        "Sıkıştırılabilirlik Katsayısı",
         "A (hava)",
         "A",
     ),
@@ -178,6 +275,8 @@ FIELD_ALIASES: Final[dict[str, tuple[str, ...]]] = {
         "T2",
     ),
     "pressure_test.delta_t": (
+        "Testin Başı ve Sonunda Su Sıcaklığında Oluşan Değişim",
+        "Testin Basinda ve Sonunda Su Sicakliginda Olusan Degisim",
         "Sıcaklık Farkı",
         "Temperature Difference",
         "Temperature Change",
@@ -185,17 +284,38 @@ FIELD_ALIASES: Final[dict[str, tuple[str, ...]]] = {
         "ΔT",
         "dT",
     ),
+    "pressure_test.p_delta": (
+        "Sıcaklık Değişiminden Kaynaklanan Basınç Değişimi",
+        "Sicaklik Degisiminden Kaynaklanan Basinc Degisimi",
+        "Sıcaklık Kaynaklı Basınç Değişimi",
+        "ΔP",
+        "dP",
+        "AP",
+    ),
+    "pressure_test.pl": (
+        "Test Boyunca İzin Verilebilir Basınç Değişimi",
+        "İzin Verilebilir Basınç Değişimi",
+        "Izin Verilebilir Basinc Degisimi",
+        "PL",
+    ),
     "pressure_test.pa": (
+        "Ölçülen Basınç Değişimi",
+        "Olculen Basinc Degisimi",
         "Basınç Düşüşü",
         "Basınç Farkı",
         "Pressure Drop",
         "Pa",
     ),
     "pressure_test.a": (
+        "Suyun İzotermal Sıkıştırılabilirlik Katsayısı",
+        "Suyun İzotermal Sıkışabilirlik Katsayısı",
+        "Sıkıştırılabilirlik Katsayısı",
         "A (basınç)",
         "A",
     ),
     "pressure_test.b": (
+        "Su ve Çeliğin Isıl Genleşme Katsayıları Arasındaki Fark",
+        "Isıl Genleşme Katsayıları Arasındaki Fark",
         "B Katsayısı",
         "B Coefficient",
         "B",
@@ -244,7 +364,18 @@ RECOMMENDED_FIELDS: Final[tuple[str, ...]] = (
 OPTIONAL_FIELDS: Final[tuple[str, ...]] = (
     "operator",
     "section_id",
+    "start_kp",
+    "end_kp",
+    "pipe_id_mm",
+    "section_volume_m3",
+    "max_operating_pressure_bar",
+    "smys_mpa",
+    "air_test.vt",
+    "air_test.k",
+    "air_test.ratio",
     "air_test.a",
+    "pressure_test.p_delta",
+    "pressure_test.pl",
     "pressure_test.a",
     "pressure_test.b",
     "notes",
@@ -501,12 +632,18 @@ class AirTestFields:
 
     vp: ExtractedField | None = None
     vpa: ExtractedField | None = None
+    vt: ExtractedField | None = None
+    k: ExtractedField | None = None
+    ratio: ExtractedField | None = None
     a: ExtractedField | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "vp": self.vp.to_dict() if self.vp else None,
             "vpa": self.vpa.to_dict() if self.vpa else None,
+            "vt": self.vt.to_dict() if self.vt else None,
+            "k": self.k.to_dict() if self.k else None,
+            "ratio": self.ratio.to_dict() if self.ratio else None,
             "a": self.a.to_dict() if self.a else None,
         }
 
@@ -516,6 +653,9 @@ class AirTestFields:
         return cls(
             vp=ExtractedField.from_dict(data.get("vp")),
             vpa=ExtractedField.from_dict(data.get("vpa")),
+            vt=ExtractedField.from_dict(data.get("vt")),
+            k=ExtractedField.from_dict(data.get("k")),
+            ratio=ExtractedField.from_dict(data.get("ratio")),
             a=ExtractedField.from_dict(data.get("a")),
         )
 
@@ -527,7 +667,9 @@ class PressureTestFields:
     t_initial: ExtractedField | None = None
     t_final: ExtractedField | None = None
     delta_t: ExtractedField | None = None
+    p_delta: ExtractedField | None = None
     pa: ExtractedField | None = None
+    pl: ExtractedField | None = None
     a: ExtractedField | None = None
     b: ExtractedField | None = None
 
@@ -536,7 +678,9 @@ class PressureTestFields:
             "t_initial": self.t_initial.to_dict() if self.t_initial else None,
             "t_final": self.t_final.to_dict() if self.t_final else None,
             "delta_t": self.delta_t.to_dict() if self.delta_t else None,
+            "p_delta": self.p_delta.to_dict() if self.p_delta else None,
             "pa": self.pa.to_dict() if self.pa else None,
+            "pl": self.pl.to_dict() if self.pl else None,
             "a": self.a.to_dict() if self.a else None,
             "b": self.b.to_dict() if self.b else None,
         }
@@ -548,7 +692,9 @@ class PressureTestFields:
             t_initial=ExtractedField.from_dict(data.get("t_initial")),
             t_final=ExtractedField.from_dict(data.get("t_final")),
             delta_t=ExtractedField.from_dict(data.get("delta_t")),
+            p_delta=ExtractedField.from_dict(data.get("p_delta")),
             pa=ExtractedField.from_dict(data.get("pa")),
+            pl=ExtractedField.from_dict(data.get("pl")),
             a=ExtractedField.from_dict(data.get("a")),
             b=ExtractedField.from_dict(data.get("b")),
         )
@@ -580,9 +726,15 @@ class HydrotestReport:
     date: ExtractedField | None = None
     operator: ExtractedField | None = None
     section_id: ExtractedField | None = None
+    start_kp: ExtractedField | None = None
+    end_kp: ExtractedField | None = None
     pipe_od_mm: ExtractedField | None = None
+    pipe_id_mm: ExtractedField | None = None
     wall_mm: ExtractedField | None = None
     length_m: ExtractedField | None = None
+    section_volume_m3: ExtractedField | None = None
+    max_operating_pressure_bar: ExtractedField | None = None
+    smys_mpa: ExtractedField | None = None
     test_pressure_bar: ExtractedField | None = None
     air_test: AirTestFields = field(default_factory=AirTestFields)
     pressure_test: PressureTestFields = field(default_factory=PressureTestFields)
@@ -629,9 +781,21 @@ class HydrotestReport:
             "date": self.date.to_dict() if self.date else None,
             "operator": self.operator.to_dict() if self.operator else None,
             "section_id": self.section_id.to_dict() if self.section_id else None,
+            "start_kp": self.start_kp.to_dict() if self.start_kp else None,
+            "end_kp": self.end_kp.to_dict() if self.end_kp else None,
             "pipe_od_mm": self.pipe_od_mm.to_dict() if self.pipe_od_mm else None,
+            "pipe_id_mm": self.pipe_id_mm.to_dict() if self.pipe_id_mm else None,
             "wall_mm": self.wall_mm.to_dict() if self.wall_mm else None,
             "length_m": self.length_m.to_dict() if self.length_m else None,
+            "section_volume_m3": (
+                self.section_volume_m3.to_dict() if self.section_volume_m3 else None
+            ),
+            "max_operating_pressure_bar": (
+                self.max_operating_pressure_bar.to_dict()
+                if self.max_operating_pressure_bar
+                else None
+            ),
+            "smys_mpa": self.smys_mpa.to_dict() if self.smys_mpa else None,
             "test_pressure_bar": (
                 self.test_pressure_bar.to_dict() if self.test_pressure_bar else None
             ),
@@ -651,9 +815,17 @@ class HydrotestReport:
             date=ExtractedField.from_dict(data.get("date")),
             operator=ExtractedField.from_dict(data.get("operator")),
             section_id=ExtractedField.from_dict(data.get("section_id")),
+            start_kp=ExtractedField.from_dict(data.get("start_kp")),
+            end_kp=ExtractedField.from_dict(data.get("end_kp")),
             pipe_od_mm=ExtractedField.from_dict(data.get("pipe_od_mm")),
+            pipe_id_mm=ExtractedField.from_dict(data.get("pipe_id_mm")),
             wall_mm=ExtractedField.from_dict(data.get("wall_mm")),
             length_m=ExtractedField.from_dict(data.get("length_m")),
+            section_volume_m3=ExtractedField.from_dict(data.get("section_volume_m3")),
+            max_operating_pressure_bar=ExtractedField.from_dict(
+                data.get("max_operating_pressure_bar")
+            ),
+            smys_mpa=ExtractedField.from_dict(data.get("smys_mpa")),
             test_pressure_bar=ExtractedField.from_dict(data.get("test_pressure_bar")),
             air_test=AirTestFields.from_dict(data.get("air_test")),
             pressure_test=PressureTestFields.from_dict(data.get("pressure_test")),
