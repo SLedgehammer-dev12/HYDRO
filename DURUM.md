@@ -4,7 +4,7 @@
 >
 > **Son güncelleme:** 2026-11-16
 > **Dal:** `feat/ergonomics-ocr`
-> **Son commit:** `828b563` — segment (alt parça) kontrolü ve Section uzunluğu uyumluluğu
+> **Son commit:** `fef2ae4` — OCR gerçek form kalibrasyonu (Vision), bbox eşleme, eşleme profili, göreli segment toleransı
 
 ---
 
