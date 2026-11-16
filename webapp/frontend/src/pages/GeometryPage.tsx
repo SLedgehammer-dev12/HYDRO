@@ -1,17 +1,20 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   ArrowDown,
   ArrowRight,
   ArrowUp,
   CheckCircle2,
   ClipboardList,
   Database,
+  GitCompareArrows,
   Layers,
   Mountain,
   Plus,
   Ruler,
   Trash2,
   Wand2,
+  XCircle,
 } from "lucide-react";
 import { PageHeader } from "../components/layout/PageHeader";
 import { SectionIdentityCard } from "../components/SectionIdentityCard";
@@ -25,8 +28,17 @@ import { FieldPage } from "./FieldPage";
 import { useCatalog, useCalculateGeometry, useMeta } from "../hooks/queries";
 import { useAppStore } from "../store/useAppStore";
 import { PUMP_LABELS } from "../lib/constants";
-import { fmt, formatInput, num, parseNumber } from "../lib/format";
+import { fmt, formatInput, num, parseNumber, dateTime, relativeTime } from "../lib/format";
 import { computeGeometry, sectionsFromInputs } from "../lib/mock";
+import {
+  evaluateProjectKpContinuity,
+  evaluateSegmentConsistency,
+  formatKp,
+  formatKpLocation,
+  normalizeKpText,
+  parseKpMeters,
+  resolveSectionMeta,
+} from "../lib/kp";
 import type { GeometryIn } from "../lib/types";
 
 function SegmentNumberCell({
@@ -149,7 +161,32 @@ export function GeometryPage() {
     });
   }
 
+  const totalLength = geometry?.total_length_m ?? 0;
+  const totalVolume = geometry?.internal_volume_m3 ?? 0;
+
+  /* Segment kontrolü: Σ Segment Uzunluğu == Section (ΔKP) ve istasyon/geometri doğruluğu */
+  const segmentSummary = useMemo(
+    () =>
+      evaluateSegmentConsistency({
+        segments: inputs.segments,
+        sectionMeta: inputs.section_meta,
+        fallbackLengthM: inputs.geometry.length_m,
+      }),
+    [inputs.segments, inputs.section_meta, inputs.geometry.length_m],
+  );
+
+  const segmentLengthTone =
+    segmentSummary.status === "fail" ? "fail" : segmentSummary.status === "warning" ? "warning" : "pass";
+
   function validateGeometry() {
+    if (segmentSummary.status === "fail") {
+      pushToast(
+        "error",
+        "Segment kontrolü engelleyevi",
+        segmentSummary.headline || "Segmentleri Section KP aralığıyla eşleştirin.",
+      );
+      return;
+    }
     if (!sections.length) {
       pushToast("error", "Geometri eksik", "Önce dış çap, et kalınlığı ve uzunluk girin.");
       return;
@@ -172,9 +209,6 @@ export function GeometryPage() {
     });
   }
 
-  const totalLength = geometry?.total_length_m ?? 0;
-  const totalVolume = geometry?.internal_volume_m3 ?? 0;
-
   return (
     <div className="space-y-5">
       <PageHeader
@@ -186,11 +220,13 @@ export function GeometryPage() {
             <Badge tone={sections.length ? "pass" : "warning"}>
               {sections.length ? `${sections.length} kesit hazır` : "Kesit eksik"}
             </Badge>
-            {inputs.segments.length ? (
-              <Badge tone="info">Segment modu</Badge>
-            ) : (
-              <Badge tone="neutral">Tek kesit modu</Badge>
-            )}
+            <Badge tone={segmentLengthTone}>
+              {segmentSummary.hasSegments
+                ? segmentSummary.badgeLabel
+                : segmentSummary.status === "neutral"
+                  ? "Tek tip boru modu"
+                  : "Segment modu"}
+            </Badge>
             <span className="text-[10.5px] text-[var(--text-faint)]">
               {geometry ? `${fmt.m(totalLength, 0)} · ${fmt.m3Short(totalVolume)}` : "—"}
             </span>
@@ -364,11 +400,13 @@ export function GeometryPage() {
                   <th scope="col" className="num">L (m)</th>
                   <th scope="col" className="num">İstasyon (m)</th>
                   <th scope="col" className="num">Vt (m³)</th>
+                  <th scope="col" className="num">KP Aralığı</th>
                   <th scope="col"><span className="sr-only">İşlemler</span></th>
                 </tr>
               </thead>
               <tbody>
                 {inputs.segments.map((segment, index) => {
+                  const row = segmentSummary.rows[index];
                   const invalid =
                     segment.outside_diameter_mm !== null &&
                     segment.wall_thickness_mm !== null &&
@@ -428,6 +466,24 @@ export function GeometryPage() {
                       </td>
                       <td className="num text-[var(--text-faint)]">{num(segment.start_station_m, 0)}</td>
                       <td className="num">{volume !== null ? num(volume, 3) : "—"}</td>
+                      <td className="num font-mono text-[10px]">
+                        {row ? `${row.startKp} → ${row.endKp}` : "—"}
+                      </td>
+                      <td>
+                        {row ? (
+                          <Badge
+                            tone={row.status === "fail" ? "fail" : row.status === "warning" ? "warning" : "pass"}
+                          >
+                            {row.status === "fail"
+                              ? "HATA"
+                              : row.status === "warning"
+                                ? "UYARI"
+                                : "OK"}
+                          </Badge>
+                        ) : (
+                          <span className="text-[var(--text-faint)] text-[10px]">—</span>
+                        )}
+                      </td>
                       <td>
                         <div className="flex items-center justify-end gap-0.5">
                           <button
@@ -477,6 +533,35 @@ export function GeometryPage() {
           </div>
         )}
         {wtError ? <p className="mt-2 text-[11px] text-[var(--danger)]">{wtError}</p> : null}
+        {segmentSummary.hasSegments && segmentSummary.issues.length > 0 ? (
+          <div className="mt-3 space-y-1">
+            <InlineNotice
+              tone={segmentSummary.status === "fail" ? "danger" : "warning"}
+              icon={GitCompareArrows}
+              title={`Segment Denetimi: ${segmentSummary.headline}`}
+            >
+              {segmentSummary.issues.map((issue, i) => (
+                <p key={i} className="mt-1 text-[10.5px] leading-snug text-[var(--text-muted)]">
+                  {issue}
+                </p>
+              ))}
+            </InlineNotice>
+          </div>
+        ) : segmentSummary.hasSegments ? (
+          <div className="mt-3 flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-[11.5px]">
+            <CheckCircle2 size={13} className="tone-pass shrink-0" aria-hidden />
+            <span className="text-[var(--text)]">
+              {segmentSummary.headline}
+              {segmentSummary.deltaLengthM !== null &&
+                segmentSummary.deltaLengthM !== 0 &&
+                segmentSummary.deltaLengthM !== null && (
+                  <>
+                    (ΔKP:{segmentSummary.deltaLengthM > 0 ? "+" : ""}{num(segmentSummary.deltaLengthM, 0)} m)
+                  </>
+                )}
+            </span>
+          </div>
+        ) : null}
       </SectionCard>
 
       <SectionCard

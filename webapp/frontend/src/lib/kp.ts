@@ -1,4 +1,4 @@
-import type { SectionMeta, SessionListItem } from "./types";
+import type { SegmentRow, SectionMeta, SessionListItem } from "./types";
 
 /**
  * Boru hattı KP (Kilometre Point / Chainage) ayrıştırıcı, biçimleyici ve
@@ -133,6 +133,44 @@ export interface ProjectKpContinuitySummary {
   status: "pass" | "warning" | "fail" | "pending";
   headline: string;
   issues: string[];
+  /** Tüm section'ların uzunlukları toplamı (Σ Section) */
+  totalSectionsLengthM: number;
+  /** İlk section başlangıç KP ile son section bitiş KP arasındaki toplam boru hattı boyu */
+  pipelineSpanM: number | null;
+  /** Σ Section == Boru hattı toplam boyu kontrolü */
+  sumMatchesPipeline: boolean;
+}
+
+export interface SegmentRowCheck {
+  id: string;
+  index: number;
+  startStationM: number;
+  endStationM: number;
+  startKp: string;
+  endKp: string;
+  lengthM: number;
+  volumeM3: number | null;
+  stationMatch: boolean;
+  dimensionValid: boolean;
+  status: "pass" | "warning" | "fail";
+  note: string;
+}
+
+export interface SegmentConsistencySummary {
+  hasSegments: boolean;
+  sectionStartM: number;
+  sectionEndM: number | null;
+  sectionStartKp: string;
+  sectionEndKp: string;
+  targetSectionLengthM: number | null;
+  totalSegmentLengthM: number;
+  deltaLengthM: number | null;
+  lengthMatchesSection: boolean;
+  status: "pass" | "warning" | "fail" | "neutral";
+  badgeLabel: string;
+  headline: string;
+  issues: string[];
+  rows: SegmentRowCheck[];
 }
 
 const KP_TOLERANCE_M = 0.5;
@@ -335,28 +373,48 @@ export function evaluateProjectKpContinuity(sections: SessionListItem[]): Projec
   });
 
   const missingCount = Object.values(byId).filter((item) => item.state === "missing").length;
+  const totalSectionsLengthM = Math.round(
+    Object.values(byId).reduce((sum, item) => sum + (item.lengthM && item.lengthM > 0 ? item.lengthM : 0), 0) * 100,
+  ) / 100;
+
+  const validOrdered = ordered.filter((item) => item.startM !== null && item.endM !== null && item.endM > item.startM);
+  const pipelineSpanM =
+    validOrdered.length > 0
+      ? Math.round(((validOrdered[validOrdered.length - 1].endM ?? 0) - (validOrdered[0].startM ?? 0)) * 100) / 100
+      : null;
+  const sumMatchesPipeline =
+    pipelineSpanM !== null && missingCount === 0
+      ? Math.abs(totalSectionsLengthM - pipelineSpanM) <= KP_TOLERANCE_M
+      : false;
+
+  if (pipelineSpanM !== null && missingCount === 0 && !sumMatchesPipeline) {
+    const diff = Math.round(totalSectionsLengthM - pipelineSpanM);
+    issues.push(
+      `Section uzunlukları toplamı (${totalSectionsLengthM} m) ile boru hattı KP aralığı (${pipelineSpanM} m) eşleşmiyor (${diff > 0 ? `+${diff}` : diff} m fark).`,
+    );
+  }
 
   let status: ProjectKpContinuitySummary["status"] = "pass";
   let headline = "";
 
   if (ordered.length === 0) {
     status = "pending";
-    headline = "Projede henüz kesit kaydı yok.";
+    headline = "Projede henüz Test Bölümü (Section) kaydı yok.";
   } else if (issues.length > 0) {
     status = "fail";
-    headline = `${issues.length} kesitte KP süreklilik uyuşmazlığı tespit edildi.`;
+    headline = `${issues.length} noktada KP süreklilik veya toplam uzunluk uyuşmazlığı tespit edildi.`;
   } else if (missingCount > 0) {
     status = "warning";
-    headline = `${missingCount} kesitte başlangıç/bitiş KP bilgisi henüz girilmedi.`;
+    headline = `${missingCount} Test Bölümünde (Section) başlangıç/bitiş KP bilgisi henüz girilmedi.`;
   } else if (ordered.length === 1) {
     const only = ordered[0];
     status = "pass";
-    headline = `Tek kesit kayıtlı: KP ${only.startKp} → ${only.endKp} (${Math.round((only.endM ?? 0) - (only.startM ?? 0))} m).`;
+    headline = `Tek Test Bölümü (Section) kayıtlı: KP ${only.startKp} → ${only.endKp} (${Math.round((only.endM ?? 0) - (only.startM ?? 0))} m).`;
   } else {
     const first = ordered[0];
     const last = ordered[ordered.length - 1];
     status = "pass";
-    headline = `Tüm ardışık kesitlerin (${ordered.length} kesit) bitiş ve başlangıç KP noktaları uç uca eşleşiyor: KP ${first.startKp} → ${last.endKp}.`;
+    headline = `Tüm Test Bölümleri (${ordered.length} Section) uç uca eşleşiyor ve toplamları boru hattı boyuna eşit: KP ${first.startKp} → ${last.endKp} (Σ = ${Math.round(totalSectionsLengthM)} m).`;
   }
 
   return {
@@ -365,5 +423,183 @@ export function evaluateProjectKpContinuity(sections: SessionListItem[]): Projec
     status,
     headline,
     issues,
+    totalSectionsLengthM,
+    pipelineSpanM,
+    sumMatchesPipeline,
+  };
+}
+
+/**
+ * Bir Test Bölümü (Section) içindeki alt boru parçalarının (Segment) kontrolü:
+ *  1) Σ Segment Uzunluğu == Section Uzunluğu (ΔKP veya geometry.length_m)
+ *  2) Ardışık segmentlerin istasyon ve KP sürekliliği (Section Başlangıç KP -> Section Bitiş KP)
+ *  3) Her segmentin OD / WT / Uzunluk fiziksel geçerliliği
+ */
+export function evaluateSegmentConsistency(params: {
+  segments: SegmentRow[];
+  sectionMeta: SectionMeta;
+  fallbackLengthM: number | null;
+}): SegmentConsistencySummary {
+  const { segments, sectionMeta, fallbackLengthM } = params;
+  const kpStartM = parseKpMeters(sectionMeta.start_kp);
+  const kpEndM = parseKpMeters(sectionMeta.end_kp);
+  const sectionStartM = kpStartM ?? 0;
+  const kpSpanM =
+    kpStartM !== null && kpEndM !== null && kpEndM > kpStartM ? kpEndM - kpStartM : null;
+  const targetSectionLengthM = kpSpanM ?? (fallbackLengthM && fallbackLengthM > 0 ? fallbackLengthM : null);
+  const sectionEndM =
+    kpEndM ?? (targetSectionLengthM !== null ? sectionStartM + targetSectionLengthM : null);
+  const sectionStartKp = formatKp(sectionStartM);
+  const sectionEndKp = sectionEndM !== null ? formatKp(sectionEndM) : "";
+
+  if (segments.length === 0) {
+    return {
+      hasSegments: false,
+      sectionStartM,
+      sectionEndM,
+      sectionStartKp,
+      sectionEndKp,
+      targetSectionLengthM,
+      totalSegmentLengthM: 0,
+      deltaLengthM: null,
+      lengthMatchesSection: true,
+      status: "neutral",
+      badgeLabel: "Tek tip boru modu",
+      headline:
+        "Segment girilmedi; bu Test Bölümü (Section) boyunca dış çap ve et kalınlığı sabit kabul edilir.",
+      issues: [],
+      rows: [],
+    };
+  }
+
+  const issues: string[] = [];
+  const rows: SegmentRowCheck[] = [];
+  let runningM = 0;
+
+  segments.forEach((seg, index) => {
+    const len = seg.length_m && seg.length_m > 0 ? seg.length_m : 0;
+    const expectedStartM = runningM;
+    const recordedStartM = seg.start_station_m ?? expectedStartM;
+    const stationMatch = Math.abs(recordedStartM - expectedStartM) <= KP_TOLERANCE_M;
+
+    const absStartM = sectionStartM + expectedStartM;
+    const absEndM = absStartM + len;
+    const startKp = formatKp(absStartM);
+    const endKp = formatKp(absEndM);
+
+    const od = seg.outside_diameter_mm;
+    const wt = seg.wall_thickness_mm;
+    const dimensionValid =
+      od !== null &&
+      od > 0 &&
+      wt !== null &&
+      wt > 0 &&
+      wt * 2 < od &&
+      seg.length_m !== null &&
+      seg.length_m > 0;
+
+    const volumeM3 =
+      dimensionValid && od !== null && wt !== null
+        ? Math.PI * ((od / 2 - wt) / 1000) ** 2 * len
+        : null;
+
+    let status: SegmentRowCheck["status"] = "pass";
+    let note = `KP ${startKp} → ${endKp}`;
+
+    if (!dimensionValid) {
+      status = "fail";
+      if (!seg.length_m || seg.length_m <= 0) {
+        note = "Segment uzunluğu > 0 olmalıdır.";
+      } else if (!od || od <= 0 || !wt || wt <= 0) {
+        note = "OD ve WT > 0 olmalıdır.";
+      } else {
+        note = "2·WT < OD olmalıdır (et kalınlığı dış yarıçapı aşamaz).";
+      }
+      issues.push(`Segment #${index + 1}: ${note}`);
+    } else if (!stationMatch) {
+      status = "warning";
+      note = `İstasyon kayması: beklenen ${Math.round(expectedStartM)} m, kayıtlı ${Math.round(recordedStartM)} m.`;
+      issues.push(`Segment #${index + 1}: ${note}`);
+    }
+
+    rows.push({
+      id: seg.id,
+      index,
+      startStationM: expectedStartM,
+      endStationM: expectedStartM + len,
+      startKp,
+      endKp,
+      lengthM: len,
+      volumeM3,
+      stationMatch,
+      dimensionValid,
+      status,
+      note,
+    });
+
+    runningM += len;
+  });
+
+  const totalSegmentLengthM = Math.round(runningM * 100) / 100;
+  const deltaLengthM =
+    targetSectionLengthM !== null
+      ? Math.round((totalSegmentLengthM - targetSectionLengthM) * 100) / 100
+      : null;
+  const lengthMatchesSection =
+    deltaLengthM === null ? true : Math.abs(deltaLengthM) <= KP_TOLERANCE_M;
+
+  if (!lengthMatchesSection && deltaLengthM !== null && targetSectionLengthM !== null) {
+    const absDiff = Math.round(Math.abs(deltaLengthM));
+    const endSegmentKp = formatKp(sectionStartM + totalSegmentLengthM);
+    if (deltaLengthM < 0) {
+      issues.unshift(
+        `Segment uzunlukları toplamı (${totalSegmentLengthM} m · bitiş KP ${endSegmentKp}), bu Test Bölümünün (Section) uzunluğundan (${targetSectionLengthM} m${sectionEndKp ? ` · bitiş KP ${sectionEndKp}` : ""}) ${absDiff} m eksik.`,
+      );
+    } else {
+      issues.unshift(
+        `Segment uzunlukları toplamı (${totalSegmentLengthM} m · bitiş KP ${endSegmentKp}), bu Test Bölümünün (Section) uzunluğunu (${targetSectionLengthM} m${sectionEndKp ? ` · bitiş KP ${sectionEndKp}` : ""}) +${absDiff} m aşıyor.`,
+      );
+    }
+  }
+
+  let status: SegmentConsistencySummary["status"] = "pass";
+  let badgeLabel = "Segmentler Section ile uyumlu";
+  let headline = "";
+
+  if (issues.length > 0) {
+    status = "fail";
+    if (!lengthMatchesSection && deltaLengthM !== null) {
+      const absDiff = Math.round(Math.abs(deltaLengthM));
+      badgeLabel =
+        deltaLengthM < 0 ? `Section'dan ${absDiff} m eksik` : `Section'ı +${absDiff} m aşıyor`;
+    } else {
+      badgeLabel = "Segment hatası var";
+    }
+    headline = issues[0];
+  } else if (targetSectionLengthM !== null) {
+    status = "pass";
+    badgeLabel = "Σ Segment = Section";
+    headline = `${segments.length} segmentin toplam uzunluğu (${totalSegmentLengthM} m), Test Bölümü (Section) aralığı KP ${sectionStartKp} → ${sectionEndKp} (${Math.round(targetSectionLengthM)} m) ile birebir eşleşiyor.`;
+  } else {
+    status = "pass";
+    badgeLabel = `${segments.length} segment hazır`;
+    headline = `${segments.length} segment tanımlı · toplam uzunluk ${totalSegmentLengthM} m (KP ${sectionStartKp} → ${formatKp(sectionStartM + totalSegmentLengthM)}).`;
+  }
+
+  return {
+    hasSegments: true,
+    sectionStartM,
+    sectionEndM,
+    sectionStartKp,
+    sectionEndKp,
+    targetSectionLengthM,
+    totalSegmentLengthM,
+    deltaLengthM,
+    lengthMatchesSection,
+    status,
+    badgeLabel,
+    headline,
+    issues,
+    rows,
   };
 }
