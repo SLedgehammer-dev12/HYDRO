@@ -103,7 +103,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements-dev.txt
+          python -m pip install -r requirements-dev.txt -r requirements-ocr.txt -r webapp/requirements-web.txt
 
       # UI testleri atlanmasin: Tkinter sanal ekranda calisir.
       - name: Run tests under Xvfb
@@ -113,6 +113,10 @@ jobs:
       - name: Coverage gate
         run: |
           python -m coverage report
+
+      - name: Run web backend tests
+        run: |
+          python -m pytest webapp/backend/tests -q
 
   build-windows:
     name: Windows build
@@ -349,9 +353,241 @@ jobs:
             ${{ steps.assets.outputs.notes }}
           retention-days: 7
 
+  build-web-macos:
+    name: Web macOS M1+ build (DMG)
+    needs: [ version_gate, test, signing_key_check ]
+    runs-on: macos-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: 'npm'
+          cache-dependency-path: webapp/frontend/package-lock.json
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt -r requirements-ocr.txt -r webapp/requirements-web.txt
+
+      - name: Prepare update signing key
+        shell: bash
+        env:
+          HYDRO_UPDATE_PRIVATE_KEY: ${{ secrets.HYDRO_UPDATE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${HYDRO_UPDATE_PRIVATE_KEY:-}" ]; then
+            echo "::error::HYDRO_UPDATE_PRIVATE_KEY secret tanimli degil; imzasiz release yayinlanmaz."
+            exit 1
+          fi
+          key_dir="$HOME/.config/hydro"
+          mkdir -p "$key_dir"
+          chmod 700 "$key_dir"
+          printf '%s\n' "$HYDRO_UPDATE_PRIVATE_KEY" > "$key_dir/update_signing_key.pem"
+          chmod 600 "$key_dir/update_signing_key.pem"
+
+      - name: Build HYDRO Web macOS arm64 DMG
+        run: |
+          chmod +x ./build_web_dmg.sh
+          ./build_web_dmg.sh
+
+      - name: Verify web macOS artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ needs.version_gate.outputs.app_version }}"
+          base="HydroWeb-v${version}-macos-arm64"
+          dmg="release/${base}.dmg"
+          sig="release/${base}.dmg.sig"
+          sha="release/${base}.sha256.txt"
+          dmg_sha="release/${base}.dmg.sha256.txt"
+          notes="release/${base}-RELEASE-NOTES.md"
+
+          for path in "$dmg" "$sig" "$sha" "$dmg_sha" "$notes"; do
+            if [ ! -f "$path" ]; then echo "ERROR: eksik web macOS artefakt: $path"; exit 1; fi
+          done
+
+          hdiutil verify "$dmg"
+          archs=$(lipo -archs "dist/HydroWeb.app/Contents/MacOS/HydroWeb" || true)
+          if [[ " $archs " != *" arm64 "* ]]; then
+            echo "ERROR: HydroWeb arm64 degil ($archs)."
+            exit 1
+          fi
+
+          actual=$(shasum -a 256 "$dmg" | awk '{print $1}')
+          for file in "$sha" "$dmg_sha"; do
+            recorded=$(awk '{print $1}' "$file")
+            if [ "$recorded" != "$actual" ]; then echo "ERROR: $(basename "$file") hash uyusmuyor."; exit 1; fi
+          done
+          python3 tools/update_signing.py verify "$dmg" "$sig"
+          echo "Web macOS DMG ve Ed25519 imzasi dogrulandi: $(basename "$dmg") ($archs)"
+
+      - name: Remove update signing key
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$HOME/.config/hydro/update_signing_key.pem"
+
+      - name: Resolve web macOS assets
+        id: assets
+        shell: bash
+        run: |
+          base="HydroWeb-v${{ needs.version_gate.outputs.app_version }}-macos-arm64"
+          echo "dmg=release/${base}.dmg" >> "$GITHUB_OUTPUT"
+          echo "sig=release/${base}.dmg.sig" >> "$GITHUB_OUTPUT"
+          echo "sha=release/${base}.sha256.txt" >> "$GITHUB_OUTPUT"
+          echo "dmg_sha=release/${base}.dmg.sha256.txt" >> "$GITHUB_OUTPUT"
+          echo "notes=release/${base}-RELEASE-NOTES.md" >> "$GITHUB_OUTPUT"
+
+      - name: Upload web macOS assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-macos-assets
+          path: |
+            ${{ steps.assets.outputs.dmg }}
+            ${{ steps.assets.outputs.sig }}
+            ${{ steps.assets.outputs.sha }}
+            ${{ steps.assets.outputs.dmg_sha }}
+            ${{ steps.assets.outputs.notes }}
+          retention-days: 7
+
+  build-web-windows:
+    name: Web Windows x64 build (Setup EXE + Portable ZIP)
+    needs: [ version_gate, test, signing_key_check ]
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: 'npm'
+          cache-dependency-path: webapp/frontend/package-lock.json
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r .\requirements-dev.txt -r .\requirements-ocr.txt -r .\webapp\requirements-web.txt
+
+      - name: Prepare update signing key
+        shell: pwsh
+        env:
+          HYDRO_UPDATE_PRIVATE_KEY: ${{ secrets.HYDRO_UPDATE_PRIVATE_KEY }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:HYDRO_UPDATE_PRIVATE_KEY)) {
+            Write-Error "HYDRO_UPDATE_PRIVATE_KEY secret tanimli degil; imzasiz release yayinlanmaz."
+            exit 1
+          }
+          $keyDir = Join-Path $env:USERPROFILE ".config\hydro"
+          New-Item -ItemType Directory -Path $keyDir -Force | Out-Null
+          $keyPath = Join-Path $keyDir "update_signing_key.pem"
+          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllText($keyPath, $env:HYDRO_UPDATE_PRIVATE_KEY.TrimEnd() + "`n", $utf8NoBom)
+
+      - name: Build HYDRO Web Windows Setup EXE and Portable ZIP
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\build_web_exe.ps1
+
+      - name: Verify web Windows artifacts
+        shell: pwsh
+        run: |
+          $version = "${{ needs.version_gate.outputs.app_version }}"
+          $baseName = "HydroWeb-v$version-windows-x64"
+          $setupExe = Join-Path .\release "$baseName-setup.exe"
+          $setupSig = Join-Path .\release "$baseName-setup.exe.sig"
+          $setupSha = Join-Path .\release "$baseName-setup.exe.sha256.txt"
+          $portableZip = Join-Path .\release "$baseName-portable.zip"
+          $portableSig = Join-Path .\release "$baseName-portable.zip.sig"
+          $portableSha = Join-Path .\release "$baseName-portable.zip.sha256.txt"
+          $notes = Join-Path .\release "$baseName-RELEASE-NOTES.md"
+
+          foreach ($path in @($setupExe, $setupSig, $setupSha, $portableZip, $portableSig, $portableSha, $notes)) {
+            if (-not (Test-Path -LiteralPath $path)) { throw "Eksik web Windows artefakt: $path" }
+          }
+
+          $exeSize = (Get-Item -LiteralPath $setupExe).Length
+          if ($exeSize -lt 15MB) {
+            throw "Setup EXE cok kucuk ($exeSize bytes)."
+          }
+
+          foreach ($pair in @(@($setupExe, $setupSha), @($portableZip, $portableSha))) {
+            $actual = (Get-FileHash -LiteralPath $pair[0] -Algorithm SHA256).Hash.ToLower()
+            $recorded = ((Get-Content -LiteralPath $pair[1] -Raw).Trim() -split '\s+')[0].ToLower()
+            if ($recorded -ne $actual) {
+              throw "$($pair[1]) icindeki hash uyusmuyor."
+            }
+          }
+
+          python tools\update_signing.py verify $setupExe $setupSig
+          if ($LASTEXITCODE -ne 0) { throw "Setup EXE imzasi dogrulanamadi." }
+          python tools\update_signing.py verify $portableZip $portableSig
+          if ($LASTEXITCODE -ne 0) { throw "Portable ZIP imzasi dogrulanamadi." }
+
+          Write-Host "Web Windows Setup EXE ($('{0:N0}' -f ($exeSize / 1MB)) MB) ve Portable ZIP dogrulandi."
+
+      - name: Remove update signing key
+        if: always()
+        shell: pwsh
+        run: |
+          $keyPath = Join-Path $env:USERPROFILE ".config\hydro\update_signing_key.pem"
+          if (Test-Path -LiteralPath $keyPath) { Remove-Item -LiteralPath $keyPath -Force }
+
+      - name: Resolve web Windows assets
+        id: assets
+        shell: pwsh
+        run: |
+          $version = "${{ needs.version_gate.outputs.app_version }}"
+          $baseName = "HydroWeb-v$version-windows-x64"
+          "setup_exe=$(Join-Path .\release "$baseName-setup.exe")" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "setup_sig=$(Join-Path .\release "$baseName-setup.exe.sig")" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "setup_sha=$(Join-Path .\release "$baseName-setup.exe.sha256.txt")" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "portable_zip=$(Join-Path .\release "$baseName-portable.zip")" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "portable_sig=$(Join-Path .\release "$baseName-portable.zip.sig")" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "portable_sha=$(Join-Path .\release "$baseName-portable.zip.sha256.txt")" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "notes=$(Join-Path .\release "$baseName-RELEASE-NOTES.md")" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Upload web Windows assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-windows-assets
+          path: |
+            ${{ steps.assets.outputs.setup_exe }}
+            ${{ steps.assets.outputs.setup_sig }}
+            ${{ steps.assets.outputs.setup_sha }}
+            ${{ steps.assets.outputs.portable_zip }}
+            ${{ steps.assets.outputs.portable_sig }}
+            ${{ steps.assets.outputs.portable_sha }}
+            ${{ steps.assets.outputs.notes }}
+          retention-days: 7
+
   publish-release:
     name: GitHub release yayinla
-    needs: [ version_gate, build-windows, build-macos, signing_key_check ]
+    needs: [ version_gate, build-windows, build-macos, build-web-windows, build-web-macos, signing_key_check ]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -370,7 +606,7 @@ jobs:
       - name: Install signature verification dependency
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "cryptography>=42,<46"
+          python -m pip install "cryptography>=42,<49"
 
       - name: Download Windows assets
         uses: actions/download-artifact@v4
@@ -384,42 +620,69 @@ jobs:
           name: macos-assets
           path: macos-release
 
+      - name: Download web Windows assets
+        uses: actions/download-artifact@v4
+        with:
+          name: web-windows-assets
+          path: web-windows-release
+
+      - name: Download web macOS assets
+        uses: actions/download-artifact@v4
+        with:
+          name: web-macos-assets
+          path: web-macos-release
+
       # Indirilen artefaktlarin bozulmadigini yayin oncesi dogrula.
       - name: Verify downloaded checksums
         run: |
           set -euo pipefail
-          cd windows-release
-          for file in *.zip.sha256.txt *.sha256.txt; do
-            [ -f "$file" ] || continue
-            sha256sum -c "$file"
-          done
-          cd ../macos-release
-          for file in *.dmg.sha256.txt *.sha256.txt; do
-            [ -f "$file" ] || continue
-            sha256sum -c "$file"
+          for dir in windows-release macos-release web-windows-release web-macos-release; do
+            (
+              cd "$dir"
+              checked=0
+              for file in *.sha256.txt; do
+                [ -f "$file" ] || continue
+                sha256sum -c "$file"
+                checked=$((checked + 1))
+              done
+              if [ "$checked" -eq 0 ]; then
+                echo "ERROR: $dir icinde checksum dosyasi yok"
+                exit 1
+              fi
+            )
           done
 
       # Imzasi dogrulanmayan artefakt yayinlanmaz (fail-closed).
       - name: Verify update signatures
         run: |
           set -euo pipefail
-          for artifact in windows-release/*.zip macos-release/*.dmg; do
+          for artifact in \
+            windows-release/*.zip \
+            macos-release/*.dmg \
+            web-windows-release/*-setup.exe \
+            web-windows-release/*-portable.zip \
+            web-macos-release/*.dmg; do
+            [ -f "$artifact" ] || { echo "ERROR: eksik artefakt: $artifact"; exit 1; }
             python tools/update_signing.py verify "$artifact"
           done
 
       - name: Create unified release notes
         run: |
           {
-            echo "# Hidrostatik Test Degerlendirme v${{ needs.version_gate.outputs.app_version }}"
+            echo "# Hidrostatik Test Degerlendirme & HYDRO Web v${{ needs.version_gate.outputs.app_version }}"
             echo ""
             echo "## Yenilikler (Changelog)"
             echo "En guncel yenilikler ve tum surum gecmisi icin [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) dosyasina bakin."
             echo ""
-            echo "## Windows"
+            echo "## HYDRO Web Surumu (macOS M1+ arm64 & Windows x64)"
+            echo ""
+            sed -e '1d' web-macos-release/*-RELEASE-NOTES.md
+            echo ""
+            sed -e '1d' web-windows-release/*-RELEASE-NOTES.md
+            echo ""
+            echo "## Klasik Masaustu Surumu (Windows & macOS)"
             echo ""
             sed -e '1d' windows-release/*-RELEASE-NOTES.md
-            echo ""
-            echo "## macOS"
             echo ""
             sed -e '1d' macos-release/*-RELEASE-NOTES.md
           } > unified-notes.md
@@ -428,6 +691,15 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
+            web-windows-release/*-setup.exe
+            web-windows-release/*-portable.zip
+            web-windows-release/*.sig
+            web-windows-release/*.sha256.txt
+            web-windows-release/*-RELEASE-NOTES.md
+            web-macos-release/*.dmg
+            web-macos-release/*.sig
+            web-macos-release/*.sha256.txt
+            web-macos-release/*-RELEASE-NOTES.md
             windows-release/*.zip
             windows-release/*.sig
             windows-release/*.sha256.txt

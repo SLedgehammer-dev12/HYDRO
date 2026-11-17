@@ -23,13 +23,58 @@ Environment variables (all optional):
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-WEBAPP_DIR = Path(__file__).resolve().parents[3]
-REPO_ROOT = WEBAPP_DIR.parent
-DEFAULT_DATA_DIR = WEBAPP_DIR / "data"
-DEFAULT_FRONTEND_DIST = WEBAPP_DIR / "frontend" / "dist"
+_IS_FROZEN = bool(getattr(sys, "frozen", False))
+if _IS_FROZEN:
+    _FROZEN_ROOT = Path(
+        getattr(sys, "_MEIPASS", None) or Path(sys.executable).resolve().parent
+    ).resolve()
+    WEBAPP_DIR = _FROZEN_ROOT
+    REPO_ROOT = _FROZEN_ROOT
+else:
+    WEBAPP_DIR = Path(__file__).resolve().parents[3]
+    REPO_ROOT = WEBAPP_DIR.parent
+
+
+def _default_data_dir() -> Path:
+    """Resolve mutable application data directory (safe outside read-only frozen bundles)."""
+    if getattr(sys, "frozen", False):
+        if sys.platform == "darwin":
+            return Path.home() / "Library" / "Application Support" / "HYDRO-Web"
+        if sys.platform == "win32":
+            base = os.environ.get("LOCALAPPDATA")
+            if base and base.strip():
+                return Path(base.strip()) / "HYDRO-Web"
+            return Path.home() / "AppData" / "Local" / "HYDRO-Web"
+        xdg = os.environ.get("XDG_DATA_HOME")
+        if xdg and xdg.strip():
+            return Path(xdg.strip()) / "hydro-web"
+        return Path.home() / ".local" / "share" / "hydro-web"
+    return WEBAPP_DIR / "data"
+
+
+def _default_frontend_dist() -> Path:
+    """Resolve static frontend bundle directory for source and PyInstaller frozen builds."""
+    if getattr(sys, "frozen", False):
+        candidates: list[Path] = []
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(Path(meipass) / "webapp_frontend_dist")
+        exe_dir = Path(sys.executable).resolve().parent
+        candidates.append(exe_dir / "webapp_frontend_dist")
+        candidates.append(exe_dir / "_internal" / "webapp_frontend_dist")
+        for candidate in candidates:
+            if (candidate / "index.html").is_file():
+                return candidate
+        return candidates[0]
+    return WEBAPP_DIR / "frontend" / "dist"
+
+
+DEFAULT_DATA_DIR = _default_data_dir()
+DEFAULT_FRONTEND_DIST = _default_frontend_dist()
 
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 _FALSE_VALUES = {"0", "false", "no", "off"}
@@ -76,8 +121,8 @@ class Settings:
     host: str = "127.0.0.1"
     port: int = 8080
     database_url: str = ""
-    data_dir: Path = DEFAULT_DATA_DIR
-    frontend_dist: Path = DEFAULT_FRONTEND_DIST
+    data_dir: Path = field(default_factory=_default_data_dir)
+    frontend_dist: Path = field(default_factory=_default_frontend_dist)
     cors_origins: tuple[str, ...] = ()
     max_upload_mb: int = 500
     ocr_enabled: bool = True
@@ -119,11 +164,11 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
-        data_dir = Path(_env("HYDRO_DATA_DIR") or DEFAULT_DATA_DIR)
-        frontend_dist = Path(_env("HYDRO_FRONTEND_DIST") or DEFAULT_FRONTEND_DIST)
+        data_dir = Path(_env("HYDRO_DATA_DIR") or _default_data_dir())
+        frontend_dist = Path(_env("HYDRO_FRONTEND_DIST") or _default_frontend_dist())
         database_url = _env(
             "HYDRO_DATABASE_URL", "HYDRO_DB_URL", "DATABASE_URL"
-        ) or _default_database_url(data_dir.resolve())
+        ) or _default_database_url(data_dir.expanduser().resolve())
         raw_origins = _env("HYDRO_CORS_ORIGINS") or ""
         origins = tuple(item.strip() for item in raw_origins.split(",") if item.strip())
         return cls(
@@ -151,8 +196,10 @@ class Settings:
 def ensure_repo_on_path() -> None:
     """Make ``hidrostatik_test`` importable without ``pip install -e .``."""
 
-    import sys
-
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass and str(meipass) not in sys.path:
+            sys.path.insert(0, str(meipass))
     root = str(REPO_ROOT)
     if root not in sys.path:
         sys.path.insert(0, root)
@@ -164,5 +211,7 @@ __all__ = [
     "REPO_ROOT",
     "Settings",
     "WEBAPP_DIR",
+    "_default_data_dir",
+    "_default_frontend_dist",
     "ensure_repo_on_path",
 ]
