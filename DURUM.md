@@ -3,8 +3,8 @@
 > Tek kaynak özet. Ayrıntı için "Ayrıntılı notlar" bölümündeki dosyalara bakın.
 >
 > **Son güncelleme:** 2026-11-17
-> **Dal:** `feat/ergonomics-ocr`
-> **Son commit:** `fef2ae4` — OCR gerçek form kalibrasyonu (Vision), bbox eşleme, eşleme profili, göreli segment toleransı
+> **Dal:** `feat/ergonomics-ocr` -> `main` (`v1.8.0`)
+> **Son commit:** `4f6325c` — HYDRO Web macOS arm64 DMG & Windows Setup EXE paketleme + CI release workflow (`v1.8.0` öncesi)
 
 ---
 
@@ -13,14 +13,15 @@
 | Alan | Durum | Kanıt |
 | --- | --- | --- |
 | Masaüstü uygulaması | Çalışıyor, kararlı | 668 unittest PASS (`skipped=1`) |
-| Web backend (FastAPI) | Çalışıyor | 125 pytest PASS |
-| Web frontend (React 19) | Çalışıyor | `npm run build` PASS, 11/11 sekme smoke |
+| Web backend (FastAPI) | Çalışıyor | 131 pytest PASS |
+| Web frontend (React 19) | Çalışıyor | `npm run typecheck` + `npm run build` PASS, 11/11 sekme smoke |
+| Bağımsız Web paketleme | Hazır (`v1.8.0`) | `HydroWeb.spec`, `build_web_dmg.sh` (`arm64`, `--self-test` PASS), `build_web_exe.ps1` + `installer/hydro_web.iss` |
 | Domain parity | Masaüstü ile aynı kaynak | `hidrostatik_test.domain` doğrudan import edilir |
 | Proje / Test Bölümü (Section) DB | Çalışıyor | `projects` + `sessions.project_id` + `inputs.section_meta` |
 | KP sürekliliği + Segment denetimi | Tamamlandı | `lib/kp.ts`, Geometri & Saha sayfası |
 | Plan-Profil PDF / CAD tarama | Çalışıyor (PDF + DWG/DXF) | `POST /api/projects/plan-profile/scan` |
 | OCR rapor kontrolü | Çalışıyor (Vision + Excel) | `ocrmac`, `.xlsx`/`.xls`, `commit-dossier` proje/bölüm kaydı, tekil onay/uygulama |
-| Docker / dağıtım | Hazır | `webapp/Dockerfile`, `docker-compose.yml` |
+| Docker / dağıtım | Hazır | `webapp/Dockerfile`, `docker-compose.yml`, `.github/workflows/release.yml` |
 
 **Durum:** MVP tamam. Kalan işler ağırlıklı olarak üretim sertleştirmesi (auth, migration, kod bölme) ve kurum onayı bekleyen veri işleri.
 
@@ -72,7 +73,8 @@
 - Plan-Profil PDF tarama: metin katmanı/OCR ile taslak test bölümleri, düzenlenebilir tablo, toplu kaydet.
 - 3D sahne: zemin, segmentler, ekipman, pig, akış, kesit, kamera presetleri, `SceneHtml` DOM etiket katmanı.
 - Sekme başlıkları ve ana aksiyon butonları büyütüldü (25/30 px başlık, `btn-lg`).
-- Dockerfile, docker-compose, README, kod haritası.
+- Bağımsız masaüstü Web dağıtımı (`v1.8.0`): `webapp/desktop_launcher.py` (yerel FastAPI + statik React + durum/durdurma penceresi + `--self-test`), `HydroWeb.spec`, macOS M1+ `arm64` `.dmg` (`build_web_dmg.sh`), Windows x64 Inno Setup kurulum `.exe` + taşınabilir `.zip` (`installer/hydro_web.iss`, `build_web_exe.ps1`).
+- Dockerfile, docker-compose, README, kod haritası, GitHub Actions `release.yml`.
 
 ---
 
@@ -140,7 +142,7 @@ Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen iş
 | B tablosu resmi kaynağı | Kurum içi ölçüm zinciri / resmi revizyon |
 | A/B tablosu kalıcı düzeltmesi | Kurum onaylı veri (şu an çalışma zamanı onarımı) |
 | Notarization | Kod imzalama sertifikası ve kurumsal anahtar yedeği/rotasyonu |
-| Release CI | `HYDRO_UPDATE_PRIVATE_KEY` secret'ı yoksa release kasıtlı durur (fail-closed) |
+| Release CI | `HYDRO_UPDATE_PRIVATE_KEY` secret'ı ayarlandığında tam otomatik; yerel doğrulama için Ed25519 anahtarı `~/.config/hydro/` |
 | Postgres | `psycopg` kurulumu + test ortamı |
 
 ---
@@ -149,7 +151,7 @@ Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen iş
 
 ```bash
 # Web backend
-python3 -m pytest webapp/backend/tests -q                      # 125 passed
+python3 -m pytest webapp/backend/tests -q                      # 131 passed
 
 # Masaüstü
 python3 -m unittest discover -s tests -p "test_*.py"           # 668 passed (1 skipped)
@@ -158,7 +160,7 @@ python3 -m unittest discover -s tests -p "test_*.py"           # 668 passed (1 s
 python3 -m pytest tests/test_report_ocr.py -q                  # 62 passed, 1 skipped
 
 # Frontend derleme
-cd webapp/frontend && npm run build                            # PASS
+cd webapp/frontend && npm run typecheck && npm run build       # PASS
 
 # Sekme smoke (uygulama 8099'da izole DB ile çalışırken)
 cd webapp/frontend && HYDRO_APP_URL=http://127.0.0.1:8099 \

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import uuid
 
+from hidrostatik_test import APP_VERSION
+
 
 def test_health_ok(client):
     response = client.get("/api/health")
@@ -26,7 +28,7 @@ def test_health_strict_never_500(client):
 
 def test_meta_contract_fields(client):
     body = client.get("/api/meta").json()
-    assert body["app"]["version"] == "1.7.3"
+    assert body["app"]["version"] == APP_VERSION
     assert body["spec"]["code"].startswith("4-NGTL")
     assert body["engine"]["decision_statuses"] == [
         "BEKLIYOR",

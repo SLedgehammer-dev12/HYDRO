@@ -1,7 +1,22 @@
 # Changelog
 
-## Unreleased - 2026-11-15
+## 1.8.0 - 2026-11-17
 
+- **OCR Dosya & Proje Eşleme + Otomatik Form/Hesap Hattı (`DOSSIER_SCHEMA_VERSION = 3`)**:
+  - Çoklu BOTAŞ test dosyalarının, Hizan mühendislik hesap sayfalarının, `.xlsx`/`.xls`
+    raporlarının ve tekil test raporlarının doğrudan proje/bölüm bazlı kaydı (`commit-dossier`).
+  - Mevcut projelerde bulanık ad eşlemesi (`>= %70`), KP aralığı (`±5 m`) bazlı kesit eşlemesi,
+    eşleşme yoksa otomatik yeni proje + test bölümleri + 11 zorunlu `BOT-FRM` form slotu oluşturma.
+  - Kümülatif hesaplama (`profile`, `air`, `pressure`, `pig`), 11 operasyonel kontrol ve katı
+    şartname sınırları (`Vpa < 1.06 * Vp`, `PL = 0.30 bar`, `%0.2` basınçlandırma sapması, `24.0 saat`).
+  - Demo/örnek verilerin çevrimiçi boş oturumlara sızmasını engelleyen izole başlangıç (`createEmptyInputs`).
+- **HYDRO Web Bağımsız Masaüstü Paketleme ve Dağıtım (macOS M1+ & Windows)**:
+  - `webapp/desktop_launcher.py` ve `HydroWeb.spec`: gömülü FastAPI + derlenmiş React arayüzünü yerel
+    olarak başlatıp varsayılan tarayıcıda açan, durum/durdurma kontrollü bağımsız masaüstü paketi.
+  - macOS Apple Silicon (`arm64`, M1/M2/M3/M4+) için `build_web_dmg.sh` (`HydroWeb-v1.8.0-macos-arm64.dmg`).
+  - Windows x64 için Inno Setup kurulum sihirbazı (`installer/hydro_web.iss`,
+    `HydroWeb-v1.8.0-windows-x64-setup.exe`) ve taşınabilir `.zip` (`build_web_exe.ps1`).
+  - `--self-test` canlı ikili dosya doğrulama kapısı, Ed25519 imza ve GitHub Actions `release.yml` entegrasyonu.
 - **Kapsamli denetim remedasyonu (audit remediation)**:
   - Domain: negatif B kabulu, `nan/inf` dogrulamasi, tam `%6` sinirinda FAIL,
     termal denge icin ardışık 4 saatlik pencereler, tek tarafli `%0.2` kontrolu,

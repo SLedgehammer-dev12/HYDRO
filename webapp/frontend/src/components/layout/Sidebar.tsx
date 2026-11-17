@@ -133,7 +133,7 @@ export function Sidebar() {
         <p className="mt-1.5 text-[10px] leading-relaxed text-[var(--text-faint)]">
           {meta?.spec.code ?? "4-NGTL 0-GN-P-002-5007 R4"}
           <br />
-          Sürüm {meta?.app.version ?? "1.7.3"}
+          Sürüm {meta?.app.version ?? "1.8.0"}
         </p>
       </div>
     </nav>
