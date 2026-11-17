@@ -3,8 +3,8 @@
 > Tek kaynak özet. Ayrıntı için "Ayrıntılı notlar" bölümündeki dosyalara bakın.
 >
 > **Son güncelleme:** 2026-11-17
-> **Dal:** `feat/ergonomics-ocr` -> `main` (`v1.8.0`)
-> **Son commit:** `4f6325c` — HYDRO Web macOS arm64 DMG & Windows Setup EXE paketleme + CI release workflow (`v1.8.0` öncesi)
+> **Dal:** `main` (`v1.8.0`)
+> **Son commit:** `2e17bac` — CI runner uyumsuzlukları (`_ocr_image_page`, SQLite bağlantı kapanışı, sanal ekran ve Windows NTFS izin kontrolü) + `ezdxf` Web bağımlılığı
 
 ---
 

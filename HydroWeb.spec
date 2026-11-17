@@ -117,6 +117,7 @@ hiddenimports = [
     'defusedxml',
     'reportlab',
     'xlrd',
+    'ezdxf',
 ]
 
 _SUBMODULE_PACKAGES = [
@@ -152,7 +153,7 @@ if sys.platform == 'darwin':
 for _pkg in _SUBMODULE_PACKAGES:
     hiddenimports.extend(_safe_collect_submodules(_pkg))
 
-for _data_pkg in ('pdfminer', 'pypdfium2', 'pypdfium2_raw', 'certifi'):
+for _data_pkg in ('pdfminer', 'pypdfium2', 'pypdfium2_raw', 'certifi', 'ezdxf'):
     datas.extend(_safe_collect_data_files(_data_pkg))
 
 for _full_pkg in ('pypdfium2', 'pypdfium2_raw') + (('ocrmac',) if sys.platform == 'darwin' else ()):
