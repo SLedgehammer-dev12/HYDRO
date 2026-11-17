@@ -264,9 +264,20 @@ function New-ReleaseArchive {
         [bool]$IncludeBaseDirectory = $false
     )
 
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
     $resolvedSource = (Resolve-Path -LiteralPath $SourcePath).Path
     $maxAttempts = 8
+    $includeBaseFlag = if ($IncludeBaseDirectory) { "1" } else { "0" }
+    $zipScript = @"
+import pathlib, sys, zipfile
+src = pathlib.Path(sys.argv[1]).resolve()
+dst = pathlib.Path(sys.argv[2]).resolve()
+include_base = sys.argv[3] == '1'
+base = src.parent if include_base else src
+with zipfile.ZipFile(dst, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
+    for item in sorted(src.rglob('*')):
+        if item.is_file():
+            zf.write(item, item.relative_to(base).as_posix())
+"@
 
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         try {
@@ -274,12 +285,10 @@ function New-ReleaseArchive {
                 Remove-Item -LiteralPath $DestinationPath -Force -ErrorAction SilentlyContinue
             }
 
-            [System.IO.Compression.ZipFile]::CreateFromDirectory(
-                $resolvedSource,
-                $DestinationPath,
-                [System.IO.Compression.CompressionLevel]::Optimal,
-                $IncludeBaseDirectory
-            )
+            & $PythonExe -c $zipScript $resolvedSource $DestinationPath $includeBaseFlag
+            if ($LASTEXITCODE -ne 0) {
+                throw "Python zipfile cikti kodu: $LASTEXITCODE"
+            }
             return
         } catch {
             if ($attempt -eq $maxAttempts) {

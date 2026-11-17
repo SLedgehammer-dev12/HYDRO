@@ -200,8 +200,8 @@ function Resolve-IsccPath {
 }
 
 $appVersion = Get-MetadataValue "APP_VERSION"
-$publisherName = Get-MetadataValue "APP_PUBLISHER"
-$copyrightNotice = Get-MetadataValue "APP_COPYRIGHT"
+$publisherName = Get-MetadataValue "PUBLISHER_NAME"
+$copyrightNotice = Get-MetadataValue "COPYRIGHT_NOTICE"
 $runId = [DateTime]::UtcNow.ToString("yyyyMMdd-HHmmss")
 
 Write-Host "HYDRO Web Windows build hazirlaniyor (v$appVersion)..."
@@ -262,7 +262,7 @@ if (-not (Test-Path -LiteralPath $exePath)) {
 }
 
 Write-Host "Paketli HydroWeb.exe --self-test calistiriliyor..."
-$selfTestProc = Start-Process -FilePath $exePath -ArgumentList "--self-test" -NoNewWindow -Wait -PassThru
+$selfTestProc = Start-Process -FilePath $exePath -ArgumentList "--self-test" -Wait -PassThru
 if ($selfTestProc.ExitCode -ne 0) {
     throw "HydroWeb.exe --self-test basarisiz (exit code $($selfTestProc.ExitCode))."
 }
@@ -276,16 +276,22 @@ $stageHydroWebDir = Join-Path $stageZipRoot "HydroWeb"
 New-Item -ItemType Directory -Path $stageHydroWebDir -Force | Out-Null
 Copy-Item -Path (Join-Path $distDir "*") -Destination $stageHydroWebDir -Recurse -Force
 
-Add-Type -AssemblyName System.IO.Compression.FileSystem
 if (Test-Path -LiteralPath $portableZipPath) {
     Remove-Item -LiteralPath $portableZipPath -Force
 }
-[System.IO.Compression.ZipFile]::CreateFromDirectory(
-    $stageZipRoot,
-    $portableZipPath,
-    [System.IO.Compression.CompressionLevel]::Optimal,
-    $false
-)
+$zipScript = @"
+import pathlib, sys, zipfile
+root = pathlib.Path(sys.argv[1]).resolve()
+out = pathlib.Path(sys.argv[2]).resolve()
+with zipfile.ZipFile(out, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
+    for p in sorted(root.rglob('*')):
+        if p.is_file():
+            zf.write(p, p.relative_to(root).as_posix())
+"@
+& $PythonExe -c $zipScript $stageZipRoot $portableZipPath
+if ($LASTEXITCODE -ne 0) {
+    throw "Portable ZIP olusturulamadi (exit code $LASTEXITCODE)."
+}
 Remove-Item -LiteralPath $stageZipRoot -Recurse -Force -ErrorAction SilentlyContinue
 
 # --- Inno Setup Kurulum EXE -------------------------------------------------
@@ -318,7 +324,7 @@ $installedExe = Join-Path $smokeInstallDir "HydroWeb.exe"
 if (-not (Test-Path -LiteralPath $installedExe)) {
     throw "Kurulan dizinde HydroWeb.exe bulunamadi: $installedExe"
 }
-$installedTestProc = Start-Process -FilePath $installedExe -ArgumentList "--self-test" -NoNewWindow -Wait -PassThru
+$installedTestProc = Start-Process -FilePath $installedExe -ArgumentList "--self-test" -Wait -PassThru
 if ($installedTestProc.ExitCode -ne 0) {
     throw "Kurulan HydroWeb.exe --self-test basarisiz (exit code $($installedTestProc.ExitCode))."
 }
@@ -357,7 +363,7 @@ $notes = @"
 - Ed25519 Signatures: $setupSigName, $portableSigName
 
 ## Installation (Windows 10/11 x64)
-1. \`$([System.IO.Path]::GetFileName($setupExePath))\` kurulum dosyasini calistirin (veya portable zip'i acip \`HydroWeb\HydroWeb.exe\` calistirin).
+1. ``$([System.IO.Path]::GetFileName($setupExePath))`` kurulum dosyasini calistirin (veya portable zip'i acip ``HydroWeb\HydroWeb.exe`` calistirin).
 2. SmartScreen uyarisi cikarsa "Daha fazla bilgi" -> "Yine de calistir" secin.
 3. Uygulama yerel sunucuyu baslatip varsayilan tarayicinizda HYDRO Web arayuzunu otomatik acar.
 "@

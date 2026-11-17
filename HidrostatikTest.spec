@@ -50,6 +50,30 @@ def _target_arch():
 
     archs = set(completed.stdout.split())
     if {'arm64', 'x86_64'}.issubset(archs):
+        for mod_name in (
+            'CoolProp.CoolProp',
+            'PIL._imaging',
+            'PIL._webp',
+            'numpy._core._multiarray_umath',
+            'numpy.core._multiarray_umath',
+        ):
+            spec = importlib.util.find_spec(mod_name)
+            origin = getattr(spec, 'origin', None) if spec is not None else None
+            if not origin:
+                continue
+            ext_completed = subprocess.run(
+                ['lipo', '-archs', origin],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            ext_archs = set(ext_completed.stdout.split())
+            if ext_archs and not {'arm64', 'x86_64'}.issubset(ext_archs):
+                print(
+                    '[HidrostatikTest.spec] Bagimli C eklentisi universal2 degil '
+                    f'({mod_name}: {sorted(ext_archs)}); yerel mimari kullanilacak.'
+                )
+                return None
         return 'universal2'
 
     print(

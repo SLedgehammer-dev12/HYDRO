@@ -4,7 +4,7 @@
 >
 > **Son güncelleme:** 2026-11-17
 > **Dal:** `main` (`v1.8.0`)
-> **Son commit:** `2e17bac` — CI runner uyumsuzlukları (`_ocr_image_page`, SQLite bağlantı kapanışı, sanal ekran ve Windows NTFS izin kontrolü) + `ezdxf` Web bağımlılığı
+> **Son commit:** `ee4cdb3` — `ezdxf` Web bağımlılığı + Windows metadata/ZIP & macOS universal2 mimari düzeltmesi
 
 ---
 
