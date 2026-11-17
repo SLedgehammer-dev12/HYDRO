@@ -1397,29 +1397,47 @@ def _extract_sideways_cad_plan_profile(
     max_elevation_diff_m: float | None = None,
 ) -> dict[str, Any] | None:
     """Dikey (portre) sayfaya 90 derece yan basılmış vektörel CAD paftasını döndürüp OCR + vektörle okur."""
-    if importlib.util.find_spec("fitz") is None:
+    drawings: list[Any] = []
+    if importlib.util.find_spec("fitz") is not None:
+        fitz = importlib.import_module("fitz")
+        try:
+            doc = fitz.open(pdf_path)
+        except Exception:
+            return None
+        try:
+            if len(doc) < 1:
+                return None
+            page = doc[0]
+            rect = page.rect
+            if rect.height <= rect.width * 1.1:
+                return None
+            embedded = (page.get_text("text") or "").strip()
+            if len(embedded) >= 40:
+                return None
+            page_count = len(doc)
+            page_width = float(rect.width)
+            drawings = page.get_drawings()
+        finally:
+            doc.close()
+    elif importlib.util.find_spec("pypdf") is not None:
+        pypdf = importlib.import_module("pypdf")
+        try:
+            reader = pypdf.PdfReader(pdf_path)
+            if len(reader.pages) < 1:
+                return None
+            page0 = reader.pages[0]
+            page_width = float(page0.mediabox.width)
+            page_height = float(page0.mediabox.height)
+            if page_height <= page_width * 1.1:
+                return None
+            embedded = (page0.extract_text() or "").strip()
+            if len(embedded) >= 40:
+                return None
+            page_count = len(reader.pages)
+        except Exception:
+            return None
+    else:
         return None
-    fitz = importlib.import_module("fitz")
-
-    try:
-        doc = fitz.open(pdf_path)
-    except Exception:
-        return None
-    try:
-        if len(doc) < 1:
-            return None
-        page = doc[0]
-        rect = page.rect
-        if rect.height <= rect.width * 1.1:
-            return None
-        embedded = (page.get_text("text") or "").strip()
-        if len(embedded) >= 40:
-            return None
-        page_count = len(doc)
-        page_width = float(rect.width)
-        drawings = page.get_drawings()
-    finally:
-        doc.close()
 
     rotate_deg = 270
     rotated_page = ocr_pdf_page_rotated(pdf_path, page_index=0, rotate_deg=270, zoom=3.2)

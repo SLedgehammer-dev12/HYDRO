@@ -3,8 +3,8 @@
 > Tek kaynak özet. Ayrıntı için "Ayrıntılı notlar" bölümündeki dosyalara bakın.
 >
 > **Son güncelleme:** 2026-11-17
-> **Dal:** `main` (`v1.8.0`)
-> **Son commit:** `ee4cdb3` — `ezdxf` Web bağımlılığı + Windows metadata/ZIP & macOS universal2 mimari düzeltmesi
+> **Dal:** `main` (`v1.8.1`)
+> **Son commit:** `174c02a` — `v1.8.0` release; sırada `v1.8.1` (`pypdfium2` + macOS `Quartz` rasterizer ve Windows bundled Tesseract)
 
 ---
 
@@ -12,10 +12,10 @@
 
 | Alan | Durum | Kanıt |
 | --- | --- | --- |
-| Masaüstü uygulaması | Çalışıyor, kararlı | 669 unittest PASS (`skipped=1`) |
+| Masaüstü uygulaması | Çalışıyor, kararlı | 672 unittest PASS (`skipped=1`) |
 | Web backend (FastAPI) | Çalışıyor | 131 pytest PASS |
 | Web frontend (React 19) | Çalışıyor | `npm run typecheck` + `npm run build` PASS, 11/11 sekme smoke |
-| Bağımsız Web paketleme | Hazır (`v1.8.0`) | `HydroWeb.spec`, `build_web_dmg.sh` (`arm64`, `--self-test` PASS), `build_web_exe.ps1` + `installer/hydro_web.iss` |
+| Bağımsız Web paketleme | Hazır (`v1.8.1`) | `HydroWeb.spec`, `build_web_dmg.sh` (`arm64`, taranmış PDF `--self-test` PASS), `build_web_exe.ps1` + `installer/hydro_web.iss` |
 | Domain parity | Masaüstü ile aynı kaynak | `hidrostatik_test.domain` doğrudan import edilir |
 | Proje / Test Bölümü (Section) DB | Çalışıyor | `projects` + `sessions.project_id` + `inputs.section_meta` |
 | KP sürekliliği + Segment denetimi | Tamamlandı | `lib/kp.ts`, Geometri & Saha sayfası |
@@ -129,7 +129,7 @@ Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen iş
 - [ ] Rapor kimliği alanları (`report_no`, `operator`, `date`).
 - [ ] Masaüstü JSON içe aktarma: `POST /api/import/desktop-snapshot`.
 - [ ] Eşzamanlı düzenleme: `revision` + `If-Match`, çakışmada 409 + diff.
-- [ ] Taranmış (metin katmanı olmayan) PDF için rasterizer — lisans onayı gerekiyor.
+- [x] Taranmış (metin katmanı olmayan) PDF için rasterizer (`pypdfium2` Apache-2.0/BSD-3-Clause + macOS `Quartz` + Windows taşınabilir Tesseract).
 - [ ] Segment bazlı SMYS/kalite (şu an tek kalite tüm hat için).
 
 ---
@@ -154,10 +154,10 @@ Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen iş
 python3 -m pytest webapp/backend/tests -q                      # 131 passed
 
 # Masaüstü
-python3 -m unittest discover -s tests -p "test_*.py"           # 669 passed (1 skipped)
+python3 -m unittest discover -s tests -p "test_*.py"           # 672 passed (1 skipped)
 
 # OCR (gerçek form fixture'ları dahil)
-python3 -m pytest tests/test_report_ocr.py -q                  # 63 passed, 1 skipped
+python3 -m pytest tests/test_report_ocr.py -q                  # 66 passed, 1 skipped
 
 # Frontend derleme
 cd webapp/frontend && npm run typecheck && npm run build       # PASS

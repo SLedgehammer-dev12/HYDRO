@@ -1,7 +1,8 @@
 param(
     [string]$PythonExe = "python",
     [switch]$SkipFrontendBuild,
-    [switch]$SkipSigning
+    [switch]$SkipSigning,
+    [switch]$SkipTesseractBundle
 )
 
 $ErrorActionPreference = "Stop"
@@ -199,6 +200,97 @@ function Resolve-IsccPath {
     throw "Inno Setup 6 (ISCC.exe) bulunamadi."
 }
 
+function Resolve-TesseractExe {
+    $candidates = @(
+        "${env:ProgramFiles}\Tesseract-OCR\tesseract.exe",
+        "${env:ProgramFiles(x86)}\Tesseract-OCR\tesseract.exe",
+        "${env:LOCALAPPDATA}\Programs\Tesseract-OCR\tesseract.exe"
+    )
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate)) {
+            return $candidate
+        }
+    }
+    $choco = Get-Command choco -ErrorAction SilentlyContinue
+    if ($choco) {
+        Write-Host "Tesseract OCR bulunamadi; Chocolatey ile kuruluyor..."
+        & $choco.Source install tesseract -y --no-progress | Out-Host
+        foreach ($candidate in $candidates) {
+            if ($candidate -and (Test-Path -LiteralPath $candidate)) {
+                return $candidate
+            }
+        }
+    }
+    $cmd = Get-Command tesseract -ErrorAction SilentlyContinue
+    if ($cmd) {
+        return $cmd.Source
+    }
+    throw "Windows paketi icin Tesseract OCR binary bulunamadi."
+}
+
+function Install-BundledTesseract {
+    param([string]$TargetDir)
+
+    if ($SkipTesseractBundle) {
+        Write-Warning "Tesseract paketlemesi atlandi (-SkipTesseractBundle)."
+        return
+    }
+
+    $tessExeSrc = Resolve-TesseractExe
+    $srcDir = Split-Path -Parent $tessExeSrc
+    $targetTessdata = Join-Path $TargetDir "tessdata"
+    New-Item -ItemType Directory -Path $targetTessdata -Force | Out-Null
+
+    Write-Host "Portable Tesseract paketleniyor: $srcDir -> $TargetDir"
+    Copy-Item -LiteralPath $tessExeSrc -Destination (Join-Path $TargetDir "tesseract.exe") -Force
+    Get-ChildItem -LiteralPath $srcDir -Filter "*.dll" -File -ErrorAction SilentlyContinue | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $TargetDir $_.Name) -Force
+    }
+    $srcTessdata = Join-Path $srcDir "tessdata"
+    if (Test-Path -LiteralPath $srcTessdata) {
+        Copy-Item -Path (Join-Path $srcTessdata "*") -Destination $targetTessdata -Recurse -Force
+    }
+
+    foreach ($lang in @("tur", "eng")) {
+        $destData = Join-Path $targetTessdata "$lang.traineddata"
+        $needsDownload = -not (Test-Path -LiteralPath $destData) -or ((Get-Item -LiteralPath $destData).Length -lt 500KB)
+        if ($needsDownload) {
+            $url = "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/$lang.traineddata"
+            Write-Host "Tesseract $lang.traineddata indiriliyor..."
+            $downloaded = $false
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+                try {
+                    Invoke-WebRequest -Uri $url -OutFile $destData -UseBasicParsing
+                    if ((Test-Path -LiteralPath $destData) -and ((Get-Item -LiteralPath $destData).Length -ge 500KB)) {
+                        $downloaded = $true
+                        break
+                    }
+                } catch {
+                    Write-Warning "Indirme denemesi $attempt/3 basarisiz ($lang): $_"
+                }
+                Start-Sleep -Seconds 2
+            }
+            if (-not $downloaded) {
+                throw "Tesseract $lang.traineddata indirilemedi veya boyut < 500KB: $destData"
+            }
+        }
+    }
+
+    $bundledExe = Join-Path $TargetDir "tesseract.exe"
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $langOutput = & $bundledExe --tessdata-dir $targetTessdata --list-langs 2>&1
+    $exitCode = $LASTEXITCODE
+    $ErrorActionPreference = $prevPref
+    if ($exitCode -ne 0) {
+        throw "Paketli Tesseract calismadi (exit code $exitCode): $langOutput"
+    }
+    if (-not ($langOutput -match "\btur\b")) {
+        throw "Paketli Tesseract icinde 'tur' dili bulunamadi: $langOutput"
+    }
+    Write-Host "Portable Tesseract (tur+eng) dogrulandi: $bundledExe"
+}
+
 $appVersion = Get-MetadataValue "APP_VERSION"
 $publisherName = Get-MetadataValue "PUBLISHER_NAME"
 $copyrightNotice = Get-MetadataValue "COPYRIGHT_NOTICE"
@@ -260,6 +352,8 @@ $exePath = Join-Path $distDir "HydroWeb.exe"
 if (-not (Test-Path -LiteralPath $exePath)) {
     throw "Beklenen HydroWeb.exe olusmadi: $exePath"
 }
+
+Install-BundledTesseract -TargetDir (Join-Path $distDir "tesseract")
 
 Write-Host "Paketli HydroWeb.exe --self-test calistiriliyor..."
 $selfTestProc = Start-Process -FilePath $exePath -ArgumentList "--self-test" -Wait -PassThru

@@ -139,7 +139,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r .\requirements-dev.txt
+          python -m pip install -r .\requirements-dev.txt -r .\requirements-ocr.txt
 
       # Ozel anahtar yalnizca runner uzerinde, gecici kullanici profilinde tutulur.
       - name: Prepare update signing key
@@ -257,7 +257,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements-dev.txt
+          python -m pip install -r requirements-dev.txt -r requirements-ocr.txt
 
       - name: Prepare update signing key
         shell: bash

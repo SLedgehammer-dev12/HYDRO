@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.8.1 - 2026-11-17
+
+- **Taranmis PDF OCR Rasterizer & Paketli Tesseract Cozumu**:
+  - `requirements-ocr.txt` icine Apache-2.0/BSD-3-Clause lisansli `pypdfium2>=4,<6` eklendi;
+    `PyMuPDF`/`pdf2image` kurulu olmayan paketli dagitimlarda taranmis (metin katmani olmayan)
+    PDF dosyalari artik dogrudan sayfalar halinde goruntuye donusturulup OCR ile okunuyor.
+  - macOS uzerinde yerel `Quartz` (`CGPDFDocument`) yedek PDF rasterizer eklendi ve hem `report_ocr`
+    hem dondurulmus CAD pafta (`ocr_pdf_page_rotated` / `plan_profile`) akisina baglandi.
+  - Windows `HydroWeb` paketine taşınabilir Tesseract + `tur.traineddata` / `eng.traineddata`
+    otomatik gomuluyor ve `_resolve_tesseract_cmd` paket icindeki binary/tessdata'yi otomatik buluyor.
+  - `HydroWeb --self-test` artik gercek taranmis (yalnizca goruntu) PDF OCR dogrulamasini da iceriyor;
+    klasik masaustu dagitimlarina da `requirements-ocr.txt` ve `pypdfium2` eklendi.
+
 ## 1.8.0 - 2026-11-17
 
 - **OCR Dosya & Proje Eşleme + Otomatik Form/Hesap Hattı (`DOSSIER_SCHEMA_VERSION = 3`)**:

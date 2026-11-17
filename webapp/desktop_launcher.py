@@ -279,6 +279,39 @@ def _run_self_test(args: argparse.Namespace) -> int:
         if cmp_status != 200 or "institutional" not in cmp_data:
             raise AssertionError(f"/api/coefficients/compare basarisiz: {cmp_data}")
 
+        ocr_status_code, ocr_data = _http_json(f"{base_url}/api/ocr/status", timeout=5.0)
+        if ocr_status_code != 200:
+            raise AssertionError(f"/api/ocr/status basarisiz: {ocr_data}")
+        rasterizer_ok = bool((ocr_data.get("pdf_rasterizer") or {}).get("available"))
+        if not rasterizer_ok:
+            raise AssertionError(f"PDF rasterizer hazir degil: {ocr_data}")
+        ocr_ok = bool(ocr_data.get("available"))
+        if getattr(sys, "frozen", False) and not ocr_ok:
+            raise AssertionError(f"Frozen pakette OCR motoru hazir degil: {ocr_data}")
+
+        if ocr_ok and rasterizer_ok:
+            from PIL import Image, ImageDraw, ImageFont
+
+            from hidrostatik_test.services.report_ocr import extract_text
+
+            scanned_pdf = tmp_dir / "scanned_check.pdf"
+            img = Image.new("RGB", (1200, 400), "white")
+            draw = ImageDraw.Draw(img)
+            try:
+                font = ImageFont.load_default(size=48)
+            except TypeError:  # pragma: no cover - Pillow < 10.1
+                font = ImageFont.load_default()
+            draw.text(
+                (80, 120),
+                "HIDROSTATIK TEST RAPORU\nTEST BASINCI: 80 BAR",
+                fill="black",
+                font=font,
+            )
+            img.save(scanned_pdf, "PDF", resolution=200.0)
+            pages = extract_text(scanned_pdf)
+            if not pages or pages[0].source != "ocr" or "80" not in pages[0].text:
+                raise AssertionError(f"Taranmis PDF OCR dogrulamasi basarisiz: {pages!r}")
+
         frontend_exists = (settings.frontend_dist / "index.html").is_file()
         if getattr(sys, "frozen", False) and not frontend_exists:
             raise AssertionError(

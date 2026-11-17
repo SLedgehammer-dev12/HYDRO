@@ -396,9 +396,23 @@ function Invoke-PyInstallerBuild {
         "--exclude-module", "PySide6",
         "--exclude-module", "lxml",
         "--exclude-module", "pyarrow",
-        "--exclude-module", "iapws",
-        $entryPoint
+        "--exclude-module", "iapws"
     )
+
+    $hasPdfium = & $PythonExe -c "import importlib.util; print('1' if importlib.util.find_spec('pypdfium2') else '0')"
+    if ($LASTEXITCODE -eq 0 -and $hasPdfium.Trim() -eq "1") {
+        $pyinstallerArgs += @(
+            "--collect-all", "pypdfium2",
+            "--collect-all", "pypdfium2_raw",
+            "--collect-data", "pdfminer",
+            "--hidden-import", "pypdf",
+            "--hidden-import", "pdfplumber",
+            "--hidden-import", "xlrd",
+            "--hidden-import", "PIL",
+            "--hidden-import", "pytesseract"
+        )
+    }
+    $pyinstallerArgs += $entryPoint
 
     & $PythonExe @pyinstallerArgs
 

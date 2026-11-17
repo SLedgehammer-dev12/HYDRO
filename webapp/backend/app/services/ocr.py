@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import copy
-import importlib
-import importlib.util
 import json
 import os
 import threading
@@ -25,6 +23,7 @@ from hidrostatik_test.services.report_ocr import (
     ocr_available,
     ocr_engine_name,
     ocr_status,
+    pdf_rasterizer_status,
 )
 
 from ..core.config import Settings
@@ -185,13 +184,13 @@ def _engine_payload() -> dict[str, Any]:
 
 
 def _rasterizer_payload() -> dict[str, Any]:
-    for module, engine in (("fitz", "PyMuPDF"), ("pdf2image", "pdf2image")):
-        if importlib.util.find_spec(module) is not None:
-            return {"available": True, "engine": engine, "note": ""}
+    available, engine = pdf_rasterizer_status()
+    if available:
+        return {"available": True, "engine": engine, "note": ""}
     return {
         "available": False,
         "engine": None,
-        "note": "Taranmis PDF icin PyMuPDF veya pdf2image + Poppler gerekir.",
+        "note": "Taranmis PDF icin pypdfium2, PyMuPDF veya pdf2image + Poppler gerekir.",
     }
 
 

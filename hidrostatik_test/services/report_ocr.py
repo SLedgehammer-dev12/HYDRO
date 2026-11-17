@@ -27,13 +27,14 @@ import io
 import math
 import os
 import re
+import shutil
 import sys
 import zipfile
 from dataclasses import dataclass, replace
 from datetime import date as _date
 from datetime import datetime as _datetime
 from pathlib import Path
-from typing import Any, Final, Sequence
+from typing import Any, Final, Iterator, Sequence
 
 from hidrostatik_test.domain.report_schema import (
     FIELD_ALIASES,
@@ -795,6 +796,60 @@ def _join_warning(existing: str, new: str) -> str:
     return f"{existing} {new}"
 
 
+def _resolve_tesseract_cmd() -> Path | None:
+    """Locate a working Tesseract binary (explicit env, bundled app, standard installs, PATH)."""
+    env_cmd = os.environ.get("HYDRO_TESSERACT_CMD", "").strip()
+    if env_cmd:
+        candidate = Path(env_cmd).expanduser()
+        if candidate.is_file():
+            return candidate
+
+    exe_name = "tesseract.exe" if sys.platform == "win32" else "tesseract"
+    bases: list[Path] = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        bases.append(Path(meipass))
+    try:
+        bases.append(Path(sys.executable).resolve().parent)
+    except OSError:
+        pass
+
+    for base in bases:
+        for candidate in (
+            base / "tesseract" / exe_name,
+            base / "_internal" / "tesseract" / exe_name,
+        ):
+            if candidate.is_file():
+                return candidate
+
+    if sys.platform == "win32":
+        win_candidates = [
+            Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe"),
+            Path(r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"),
+        ]
+        local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+        if local_app_data:
+            win_candidates.append(
+                Path(local_app_data) / "Programs" / "Tesseract-OCR" / "tesseract.exe"
+            )
+        for candidate in win_candidates:
+            if candidate.is_file():
+                return candidate
+
+    found = shutil.which("tesseract")
+    return Path(found) if found else None
+
+
+def _configure_pytesseract(pytesseract_mod: Any) -> None:
+    cmd_path = _resolve_tesseract_cmd()
+    if cmd_path is None:
+        return
+    pytesseract_mod.pytesseract.tesseract_cmd = str(cmd_path)
+    tessdata_dir = cmd_path.parent / "tessdata"
+    if not os.environ.get("TESSDATA_PREFIX") and tessdata_dir.is_dir():
+        os.environ["TESSDATA_PREFIX"] = str(tessdata_dir)
+
+
 def _tesseract_available() -> bool:
     if importlib.util.find_spec("pytesseract") is None:
         return False
@@ -802,10 +857,28 @@ def _tesseract_available() -> bool:
         return False
     try:
         pytesseract = importlib.import_module("pytesseract")
+        _configure_pytesseract(pytesseract)
         pytesseract.get_tesseract_version()
     except Exception:
         return False
     return True
+
+
+def pdf_rasterizer_status() -> tuple[bool, str | None]:
+    """Return ``(available, engine_name)`` for rendering scanned PDF pages to images."""
+    if importlib.util.find_spec("fitz") is not None:
+        return True, "PyMuPDF"
+    if importlib.util.find_spec("pypdfium2") is not None:
+        return True, "pypdfium2"
+    if (
+        sys.platform == "darwin"
+        and importlib.util.find_spec("Quartz") is not None
+        and importlib.util.find_spec("CoreFoundation") is not None
+    ):
+        return True, "macOS Quartz"
+    if importlib.util.find_spec("pdf2image") is not None:
+        return True, "pdf2image"
+    return False, None
 
 
 def vision_available() -> bool:
@@ -892,6 +965,257 @@ def _max_ocr_pages() -> int:
     return MAX_OCR_PAGES
 
 
+def _iter_rendered_pdf_pages_with_fitz(
+    path: Path,
+    *,
+    start_page: int,
+    max_pages: int,
+    dpi: int,
+    rotate_deg: int,
+    image_mod: Any,
+) -> Iterator[Any]:
+    fitz = importlib.import_module("fitz")
+    try:
+        document = fitz.open(str(path))
+    except Exception as exc:
+        raise ReportOcrError(
+            "PDF OCR icin acilamadi.", ERROR_CORRUPT_DOCUMENT, detail=str(exc)
+        ) from exc
+
+    scale = dpi / 72.0
+    norm_rot = rotate_deg % 360
+    try:
+        end = min(len(document), start_page + max_pages)
+        for index in range(start_page, end):
+            page = document[index]
+            if norm_rot:
+                matrix = fitz.Matrix(scale, scale).prerotate(norm_rot)
+                pixmap = page.get_pixmap(matrix=matrix, alpha=False)
+            else:
+                pixmap = page.get_pixmap(dpi=dpi, alpha=False)
+            yield image_mod.open(io.BytesIO(pixmap.tobytes("png")))
+    except ReportOcrError:
+        raise
+    except Exception as exc:
+        raise ReportOcrError(
+            "PDF sayfasi goruntuye cevrilemedi.", ERROR_CORRUPT_DOCUMENT, detail=str(exc)
+        ) from exc
+    finally:
+        document.close()
+
+
+def _iter_rendered_pdf_pages_with_pypdfium2(
+    path: Path,
+    *,
+    start_page: int,
+    max_pages: int,
+    dpi: int,
+    rotate_deg: int,
+) -> Iterator[Any]:
+    pdfium = importlib.import_module("pypdfium2")
+    try:
+        document = pdfium.PdfDocument(str(path))
+    except Exception as exc:
+        msg = str(exc).lower()
+        code = ERROR_ENCRYPTED_PDF if "password" in msg else ERROR_CORRUPT_DOCUMENT
+        raise ReportOcrError("PDF OCR icin acilamadi.", code, detail=str(exc)) from exc
+
+    scale = dpi / 72.0
+    norm_rot = rotate_deg % 360
+    pdfium_rot = norm_rot if norm_rot in {0, 90, 180, 270} else 0
+    try:
+        end = min(len(document), start_page + max_pages)
+        for index in range(start_page, end):
+            page = document[index]
+            bitmap = None
+            try:
+                bitmap = page.render(scale=scale, rotation=pdfium_rot)
+                pil_img = bitmap.to_pil().copy()
+            finally:
+                if bitmap is not None:
+                    bitmap.close()
+                page.close()
+            if norm_rot and norm_rot != pdfium_rot:
+                pil_img = pil_img.rotate(-norm_rot, expand=True)
+            yield pil_img
+    except ReportOcrError:
+        raise
+    except Exception as exc:
+        raise ReportOcrError(
+            "PDF sayfasi pypdfium2 ile goruntuye cevrilemedi.",
+            ERROR_CORRUPT_DOCUMENT,
+            detail=str(exc),
+        ) from exc
+    finally:
+        document.close()
+
+
+def _iter_rendered_pdf_pages_with_quartz(
+    path: Path,
+    *,
+    start_page: int,
+    max_pages: int,
+    dpi: int,
+    rotate_deg: int,
+    image_mod: Any,
+) -> Iterator[Any]:
+    CoreFoundation = importlib.import_module("CoreFoundation")
+    Quartz = importlib.import_module("Quartz")
+
+    raw_path = os.fsencode(str(path))
+    url = CoreFoundation.CFURLCreateFromFileSystemRepresentation(
+        None, raw_path, len(raw_path), False
+    )
+    if url is None:
+        raise ReportOcrError("PDF dosya yolu okunamadi.", ERROR_INVALID_PATH)
+    document = Quartz.CGPDFDocumentCreateWithURL(url)
+    if document is None:
+        raise ReportOcrError("PDF OCR icin acilamadi.", ERROR_CORRUPT_DOCUMENT)
+    if not Quartz.CGPDFDocumentIsUnlocked(document) and not Quartz.CGPDFDocumentUnlockWithPassword(
+        document, b""
+    ):
+        raise ReportOcrError("PDF sifreli; sifre girilmeden rapor okunamaz.", ERROR_ENCRYPTED_PDF)
+
+    scale = dpi / 72.0
+    norm_rot = rotate_deg % 360
+    page_count = int(Quartz.CGPDFDocumentGetNumberOfPages(document))
+    end = min(page_count, start_page + max_pages)
+    cs = Quartz.CGColorSpaceCreateDeviceRGB()
+
+    for one_based in range(start_page + 1, end + 1):
+        page = Quartz.CGPDFDocumentGetPage(document, one_based)
+        if page is None:
+            continue
+        rect = Quartz.CGPDFPageGetBoxRect(page, Quartz.kCGPDFCropBox)
+        page_rot = int(Quartz.CGPDFPageGetRotationAngle(page) or 0) % 360
+        bw = rect.size.height * scale if page_rot in {90, 270} else rect.size.width * scale
+        bh = rect.size.width * scale if page_rot in {90, 270} else rect.size.height * scale
+        width = max(1, int(round(bw)))
+        height = max(1, int(round(bh)))
+
+        ctx = Quartz.CGBitmapContextCreate(
+            None,
+            width,
+            height,
+            8,
+            width * 4,
+            cs,
+            Quartz.kCGImageAlphaPremultipliedLast,
+        )
+        if ctx is None:
+            raise ReportOcrError("Quartz bitmap baglami olusturulamadi.", ERROR_CORRUPT_DOCUMENT)
+        Quartz.CGContextSetRGBFillColor(ctx, 1.0, 1.0, 1.0, 1.0)
+        Quartz.CGContextFillRect(ctx, Quartz.CGRectMake(0, 0, width, height))
+        tx = Quartz.CGPDFPageGetDrawingTransform(
+            page,
+            Quartz.kCGPDFCropBox,
+            Quartz.CGRectMake(0, 0, width, height),
+            0,
+            True,
+        )
+        Quartz.CGContextConcatCTM(ctx, tx)
+        Quartz.CGContextDrawPDFPage(ctx, page)
+        cg_img = Quartz.CGBitmapContextCreateImage(ctx)
+        if cg_img is None:
+            raise ReportOcrError("Quartz PDF goruntusu uretilemedi.", ERROR_CORRUPT_DOCUMENT)
+        data = Quartz.CGDataProviderCopyData(Quartz.CGImageGetDataProvider(cg_img))
+        bpr = Quartz.CGImageGetBytesPerRow(cg_img)
+        pil_img = image_mod.frombuffer(
+            "RGBA", (width, height), bytes(data), "raw", "RGBA", bpr, 1
+        ).convert("RGB")
+        if norm_rot:
+            pil_img = pil_img.rotate(-norm_rot, expand=True)
+        yield pil_img
+
+
+def _iter_rendered_pdf_pages(
+    path: Path,
+    *,
+    max_pages: int | None = None,
+    dpi: int = 200,
+    rotate_deg: int = 0,
+    start_page: int = 0,
+) -> Iterator[Any]:
+    """Stream rasterized PIL pages using the first available PDF rendering backend."""
+    if importlib.util.find_spec("PIL") is None:
+        raise ReportOcrError(
+            "Goruntu/PDF sayfasi islemek icin Pillow gerekli (requirements-ocr.txt).",
+            ERROR_DEPENDENCY_MISSING,
+        )
+    from PIL import Image  # noqa: PLC0415
+
+    limit = max_pages if max_pages is not None else _max_ocr_pages()
+    first = max(0, int(start_page))
+    norm_rot = rotate_deg % 360
+
+    if importlib.util.find_spec("fitz") is not None:
+        yield from _iter_rendered_pdf_pages_with_fitz(
+            path,
+            start_page=first,
+            max_pages=limit,
+            dpi=dpi,
+            rotate_deg=norm_rot,
+            image_mod=Image,
+        )
+        return
+
+    if importlib.util.find_spec("pypdfium2") is not None:
+        yield from _iter_rendered_pdf_pages_with_pypdfium2(
+            path,
+            start_page=first,
+            max_pages=limit,
+            dpi=dpi,
+            rotate_deg=norm_rot,
+        )
+        return
+
+    if (
+        sys.platform == "darwin"
+        and importlib.util.find_spec("Quartz") is not None
+        and importlib.util.find_spec("CoreFoundation") is not None
+    ):
+        yield from _iter_rendered_pdf_pages_with_quartz(
+            path,
+            start_page=first,
+            max_pages=limit,
+            dpi=dpi,
+            rotate_deg=norm_rot,
+            image_mod=Image,
+        )
+        return
+
+    if importlib.util.find_spec("pdf2image") is not None:
+        pdf2image = importlib.import_module("pdf2image")
+        try:
+            images = list(
+                pdf2image.convert_from_path(
+                    str(path),
+                    dpi=dpi,
+                    first_page=first + 1,
+                    last_page=first + limit,
+                )
+            )
+        except Exception as exc:
+            raise ReportOcrError(
+                "PDF sayfalari OCR icin goruntuye cevrilemedi.",
+                ERROR_CORRUPT_DOCUMENT,
+                detail=str(exc),
+            ) from exc
+        for image in images:
+            yield image.rotate(-norm_rot, expand=True) if norm_rot else image
+        return
+
+    raise ReportOcrError(
+        "Taranmis PDF'ler icin pypdfium2, PyMuPDF veya pdf2image gerekli (requirements-ocr.txt).",
+        ERROR_OCR_UNAVAILABLE,
+    )
+
+
+def _render_pdf_pages(path: Path) -> list[Any]:
+    """Rasterize PDF pages with the first available optional backend."""
+    return list(_iter_rendered_pdf_pages(path, max_pages=_max_ocr_pages(), dpi=200))
+
+
 def _ocr_pdf_pages(path: Path) -> list[PageText]:
     engine = _resolve_ocr_engine()
     if engine == "vision":
@@ -902,9 +1226,10 @@ def _ocr_pdf_pages(path: Path) -> list[PageText]:
             ERROR_OCR_UNAVAILABLE,
         )
 
-    images = _render_pdf_pages(path)
     pages: list[PageText] = []
-    for index, image in enumerate(images):
+    for index, image in enumerate(
+        _iter_rendered_pdf_pages(path, max_pages=_max_ocr_pages(), dpi=200)
+    ):
         text, confidence, warning = _run_tesseract(image)
         pages.append(
             PageText(
@@ -919,51 +1244,11 @@ def _ocr_pdf_pages(path: Path) -> list[PageText]:
 
 
 def _ocr_pdf_pages_with_vision(path: Path) -> list[PageText]:
-    """OCR PDF pages with the macOS Vision framework.
-
-    PyMuPDF varsa sayfalar tek tek rasterlestirilir (bellek dostu); yoksa
-    ``pdf2image`` ciktisi kullanilir.
-    """
-
-    max_pages = _max_ocr_pages()
-    if importlib.util.find_spec("fitz") is not None and importlib.util.find_spec("PIL") is not None:
-        fitz = importlib.import_module("fitz")
-        from PIL import Image  # noqa: PLC0415 - opsiyonel bagimlilik, tembel import
-
-        try:
-            document = fitz.open(str(path))
-        except Exception as exc:
-            raise ReportOcrError(
-                "PDF OCR icin acilamadi.", ERROR_CORRUPT_DOCUMENT, detail=str(exc)
-            ) from exc
-        pages: list[PageText] = []
-        try:
-            for index in range(min(len(document), max_pages)):
-                pixmap = document[index].get_pixmap(dpi=200)
-                image = Image.open(io.BytesIO(pixmap.tobytes("png")))
-                text, confidence, warning = _run_vision(image)
-                pages.append(
-                    PageText(
-                        page_number=index + 1,
-                        text=text,
-                        source=TEXT_SOURCE_OCR,
-                        confidence=confidence,
-                        warning=warning,
-                    )
-                )
-        except ReportOcrError:
-            raise
-        except Exception as exc:
-            raise ReportOcrError(
-                "PDF sayfasi goruntuye cevrilemedi.", ERROR_CORRUPT_DOCUMENT, detail=str(exc)
-            ) from exc
-        finally:
-            document.close()
-        return pages
-
-    images = _render_pdf_pages(path)[:max_pages]
-    pages = []
-    for index, image in enumerate(images):
+    """OCR PDF pages sequentially with the macOS Vision framework."""
+    pages: list[PageText] = []
+    for index, image in enumerate(
+        _iter_rendered_pdf_pages(path, max_pages=_max_ocr_pages(), dpi=200)
+    ):
         text, confidence, warning = _run_vision(image)
         pages.append(
             PageText(
@@ -987,30 +1272,27 @@ def ocr_pdf_page_rotated(
     """Dondurulmus (orn. 90/270 derece yan donmus CAD paftasi) PDF sayfasini yuksek cozunurlukle OCR okur."""
     if not ocr_available():
         return None
-    if importlib.util.find_spec("fitz") is None or importlib.util.find_spec("PIL") is None:
-        return None
     engine = _resolve_ocr_engine()
     if engine not in {"vision", "tesseract"}:
         return None
 
-    fitz = importlib.import_module("fitz")
-    from PIL import Image  # noqa: PLC0415
-
     resolved = validate_input_path(path)
+    dpi = max(72, int(round(72.0 * zoom)))
     try:
-        document = fitz.open(str(resolved))
-    except Exception:
+        rendered = list(
+            _iter_rendered_pdf_pages(
+                resolved,
+                start_page=page_index,
+                max_pages=1,
+                dpi=dpi,
+                rotate_deg=rotate_deg,
+            )
+        )
+    except ReportOcrError:
         return None
-    try:
-        if page_index < 0 or page_index >= len(document):
-            return None
-        matrix = fitz.Matrix(zoom, zoom).prerotate(rotate_deg)
-        pixmap = document[page_index].get_pixmap(matrix=matrix, alpha=False)
-        image = Image.open(io.BytesIO(pixmap.tobytes("png")))
-    except Exception:
+    if not rendered:
         return None
-    finally:
-        document.close()
+    image = rendered[0]
 
     if engine == "vision":
         text, confidence, warning = _run_vision(image)
@@ -1023,59 +1305,6 @@ def ocr_pdf_page_rotated(
         confidence=confidence,
         warning=warning,
     )
-
-
-def _render_pdf_pages(path: Path) -> list[Any]:
-    """Rasterize PDF pages with the first available optional backend."""
-
-    if importlib.util.find_spec("fitz") is not None:
-        return _render_pdf_pages_with_fitz(path)
-
-    if importlib.util.find_spec("pdf2image") is not None:
-        pdf2image = importlib.import_module("pdf2image")
-        try:
-            return list(
-                pdf2image.convert_from_path(
-                    str(path), dpi=200, first_page=1, last_page=_max_ocr_pages()
-                )
-            )
-        except Exception as exc:
-            raise ReportOcrError(
-                "PDF sayfalari OCR icin goruntuye cevrilemedi.",
-                ERROR_CORRUPT_DOCUMENT,
-                detail=str(exc),
-            ) from exc
-
-    raise ReportOcrError(
-        "Taranmis PDF'ler icin PyMuPDF veya pdf2image gerekli (requirements-ocr.txt).",
-        ERROR_OCR_UNAVAILABLE,
-    )
-
-
-def _render_pdf_pages_with_fitz(path: Path) -> list[Any]:
-    fitz = importlib.import_module("fitz")
-    from PIL import Image  # noqa: PLC0415 - opsiyonel bagimlilik, tembel import
-
-    try:
-        document = fitz.open(str(path))
-    except Exception as exc:
-        raise ReportOcrError(
-            "PDF OCR icin acilamadi.", ERROR_CORRUPT_DOCUMENT, detail=str(exc)
-        ) from exc
-
-    images: list[Any] = []
-    try:
-        page_count = min(len(document), _max_ocr_pages())
-        for index in range(page_count):
-            pixmap = document[index].get_pixmap(dpi=200)
-            images.append(Image.open(io.BytesIO(pixmap.tobytes("png"))))
-    except Exception as exc:
-        raise ReportOcrError(
-            "PDF sayfasi goruntuye cevrilemedi.", ERROR_CORRUPT_DOCUMENT, detail=str(exc)
-        ) from exc
-    finally:
-        document.close()
-    return images
 
 
 def _ocr_image_page(path: Path) -> PageText:
@@ -1149,6 +1378,7 @@ def _choose_tesseract_language() -> tuple[str, str]:
 
     try:
         pytesseract = importlib.import_module("pytesseract")
+        _configure_pytesseract(pytesseract)
         available = set(pytesseract.get_languages(config=""))
     except Exception:
         available = set()
@@ -1162,6 +1392,7 @@ def _choose_tesseract_language() -> tuple[str, str]:
 def _run_tesseract(image: Any) -> tuple[str, float | None, str]:
     try:
         pytesseract = importlib.import_module("pytesseract")
+        _configure_pytesseract(pytesseract)
     except ImportError as exc:  # pragma: no cover - onceden kontrol edilir
         raise ReportOcrError("OCR icin pytesseract gerekli.", ERROR_OCR_UNAVAILABLE) from exc
 
@@ -2846,6 +3077,7 @@ __all__ = [
     "parse_date",
     "parse_number",
     "parse_report",
+    "pdf_rasterizer_status",
     "validate_input_path",
     "vision_available",
 ]

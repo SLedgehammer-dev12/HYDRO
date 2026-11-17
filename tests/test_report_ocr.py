@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -28,6 +30,12 @@ HAVE_PYPDF = importlib.util.find_spec("pypdf") is not None
 HAVE_REPORTLAB = importlib.util.find_spec("reportlab") is not None
 HAVE_PIL = importlib.util.find_spec("PIL") is not None
 HAVE_PYTESSERACT = importlib.util.find_spec("pytesseract") is not None
+HAVE_PYPDFIUM2 = importlib.util.find_spec("pypdfium2") is not None
+HAVE_QUARTZ = (
+    sys.platform == "darwin"
+    and importlib.util.find_spec("Quartz") is not None
+    and importlib.util.find_spec("CoreFoundation") is not None
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CLI_PATH = PROJECT_ROOT / "tools" / "ocr_report.py"
@@ -645,6 +653,111 @@ class PdfPipelineTests(unittest.TestCase):
         self.assertEqual(result.report.report_no.value, "R-5")
         self.assertTrue(result.report.missing_required_fields())
         self.assertTrue(result.needs_human_review)
+
+    @staticmethod
+    def _write_image_only_pdf(path: Path, text: str = "HIDROSTATIK TEST\n80 BAR") -> None:
+        from PIL import Image, ImageDraw, ImageFont
+
+        img = Image.new("RGB", (1000, 360), "white")
+        draw = ImageDraw.Draw(img)
+        try:
+            font = ImageFont.load_default(size=42)
+        except TypeError:  # pragma: no cover
+            font = ImageFont.load_default()
+        draw.text((60, 100), text, fill="black", font=font)
+        img.save(path, "PDF", resolution=200.0)
+
+    @unittest.skipUnless(
+        HAVE_PIL and HAVE_PYPDFIUM2, "Pillow/pypdfium2 yok: rasterizer testi atlandi"
+    )
+    def test_pypdfium2_rasterizer_renders_scanned_and_rotated_pdf(self) -> None:
+        real_find_spec = importlib.util.find_spec
+
+        def hide_fitz(name: str, *args: object, **kwargs: object) -> object:
+            if name == "fitz":
+                return None
+            return real_find_spec(name, *args, **kwargs)  # type: ignore[arg-type]
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            pdf_path = Path(tmp_dir) / "scan.pdf"
+            self._write_image_only_pdf(pdf_path)
+
+            with mock.patch.object(ocr.importlib.util, "find_spec", side_effect=hide_fitz):
+                avail, engine = ocr.pdf_rasterizer_status()
+                self.assertTrue(avail)
+                self.assertEqual(engine, "pypdfium2")
+
+                upright = list(ocr._iter_rendered_pdf_pages(pdf_path, max_pages=1, dpi=150))
+                rotated = list(
+                    ocr._iter_rendered_pdf_pages(pdf_path, max_pages=1, dpi=150, rotate_deg=270)
+                )
+                self.assertEqual(len(upright), 1)
+                self.assertEqual(len(rotated), 1)
+                self.assertGreater(upright[0].width, upright[0].height)
+                self.assertGreater(rotated[0].height, rotated[0].width)
+
+                if ocr.ocr_available():
+                    extracted = ocr.extract_text(pdf_path)
+                    self.assertEqual(extracted[0].source, ocr.TEXT_SOURCE_OCR)
+                    self.assertIn("80", extracted[0].text)
+
+    @unittest.skipUnless(
+        HAVE_QUARTZ and HAVE_PIL and ocr.ocr_available(),
+        "macOS Quartz/OCR hazir degil: Quartz rasterizer testi atlandi",
+    )
+    def test_macos_quartz_fallback_rasterizer_extracts_scanned_pdf(self) -> None:
+        real_find_spec = importlib.util.find_spec
+
+        def hide_fitz_and_pdfium(name: str, *args: object, **kwargs: object) -> object:
+            if name in {"fitz", "pypdfium2"}:
+                return None
+            return real_find_spec(name, *args, **kwargs)  # type: ignore[arg-type]
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            pdf_path = Path(tmp_dir) / "quartz_scan.pdf"
+            self._write_image_only_pdf(pdf_path, "TEST BASINCI: 80 BAR")
+
+            with mock.patch.object(
+                ocr.importlib.util, "find_spec", side_effect=hide_fitz_and_pdfium
+            ):
+                avail, engine = ocr.pdf_rasterizer_status()
+                self.assertTrue(avail)
+                self.assertEqual(engine, "macOS Quartz")
+                extracted = ocr.extract_text(pdf_path)
+
+            self.assertEqual(len(extracted), 1)
+            self.assertEqual(extracted[0].source, ocr.TEXT_SOURCE_OCR)
+            self.assertIn("80", extracted[0].text)
+
+    def test_resolve_bundled_tesseract_cmd_when_frozen_windows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir) / "HydroWeb"
+            tess_dir = base / "tesseract"
+            tessdata_dir = tess_dir / "tessdata"
+            tessdata_dir.mkdir(parents=True)
+            fake_exe = tess_dir / "tesseract.exe"
+            fake_exe.write_bytes(b"MZ")
+
+            fake_pytess = types.SimpleNamespace(
+                pytesseract=types.SimpleNamespace(tesseract_cmd="tesseract")
+            )
+            env_patch = {
+                k: v
+                for k, v in os.environ.items()
+                if k not in {"HYDRO_TESSERACT_CMD", "TESSDATA_PREFIX"}
+            }
+            with (
+                mock.patch.dict(os.environ, env_patch, clear=True),
+                mock.patch.object(sys, "platform", "win32"),
+                mock.patch.object(sys, "frozen", True, create=True),
+                mock.patch.object(sys, "_MEIPASS", str(base / "_internal"), create=True),
+                mock.patch.object(sys, "executable", str(base / "HydroWeb.exe")),
+            ):
+                resolved = ocr._resolve_tesseract_cmd()
+                self.assertEqual(resolved, fake_exe.resolve())
+                ocr._configure_pytesseract(fake_pytess)
+                self.assertEqual(fake_pytess.pytesseract.tesseract_cmd, str(fake_exe.resolve()))
+                self.assertEqual(os.environ.get("TESSDATA_PREFIX"), str(tessdata_dir.resolve()))
 
 
 @unittest.skipUnless(HAVE_PYPDF and HAVE_REPORTLAB, "pypdf/reportlab yok: CLI testleri atlandi")
