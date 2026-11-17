@@ -12,7 +12,7 @@
 
 | Alan | Durum | Kanıt |
 | --- | --- | --- |
-| Masaüstü uygulaması | Çalışıyor, kararlı | 668 unittest PASS (`skipped=1`) |
+| Masaüstü uygulaması | Çalışıyor, kararlı | 669 unittest PASS (`skipped=1`) |
 | Web backend (FastAPI) | Çalışıyor | 131 pytest PASS |
 | Web frontend (React 19) | Çalışıyor | `npm run typecheck` + `npm run build` PASS, 11/11 sekme smoke |
 | Bağımsız Web paketleme | Hazır (`v1.8.0`) | `HydroWeb.spec`, `build_web_dmg.sh` (`arm64`, `--self-test` PASS), `build_web_exe.ps1` + `installer/hydro_web.iss` |
@@ -154,10 +154,10 @@ Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen iş
 python3 -m pytest webapp/backend/tests -q                      # 131 passed
 
 # Masaüstü
-python3 -m unittest discover -s tests -p "test_*.py"           # 668 passed (1 skipped)
+python3 -m unittest discover -s tests -p "test_*.py"           # 669 passed (1 skipped)
 
 # OCR (gerçek form fixture'ları dahil)
-python3 -m pytest tests/test_report_ocr.py -q                  # 62 passed, 1 skipped
+python3 -m pytest tests/test_report_ocr.py -q                  # 63 passed, 1 skipped
 
 # Frontend derleme
 cd webapp/frontend && npm run typecheck && npm run build       # PASS

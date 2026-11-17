@@ -1477,7 +1477,8 @@ class UpdateSigningToolTests(unittest.TestCase):
             public_b64 = generated.stdout.strip()
             self.assertEqual(len(base64.b64decode(public_b64)), 32)
             self.assertTrue(key_path.is_file())
-            self.assertEqual(key_path.stat().st_mode & 0o777, 0o600)
+            if os.name == "posix":
+                self.assertEqual(key_path.stat().st_mode & 0o777, 0o600)
 
             artifact = Path(temp_dir) / "app.zip"
             artifact.write_bytes(b"release-payload")

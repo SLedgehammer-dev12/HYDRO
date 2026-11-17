@@ -41,6 +41,8 @@ class UiWorkflowTests(unittest.TestCase):
         except tk.TclError as exc:
             self.skipTest(f"Tk kullanilamiyor: {exc}")
         self.root.withdraw()
+        self.root.winfo_screenwidth = lambda: 1440  # type: ignore[method-assign]
+        self.root.winfo_screenheight = lambda: 900  # type: ignore[method-assign]
         self.app = HydrostaticTestApp(self.root)
 
     def tearDown(self) -> None:

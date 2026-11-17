@@ -56,14 +56,18 @@ class DatabaseManager:
             check_same_thread=False,
             timeout=BUSY_TIMEOUT_MS / 1000,
         )
-        self.conn.row_factory = sqlite3.Row
-        self.conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
-        self.conn.execute("PRAGMA journal_mode=WAL")
-        self.conn.execute("PRAGMA synchronous=NORMAL")
-        self.conn.execute("PRAGMA foreign_keys=ON")
-        self._create_tables()
-        self._migrate()
-        self._apply_permissions()
+        try:
+            self.conn.row_factory = sqlite3.Row
+            self.conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+            self.conn.execute("PRAGMA journal_mode=WAL")
+            self.conn.execute("PRAGMA synchronous=NORMAL")
+            self.conn.execute("PRAGMA foreign_keys=ON")
+            self._create_tables()
+            self._migrate()
+            self._apply_permissions()
+        except Exception:
+            self.conn.close()
+            raise
 
     # --- Schema / migrations ---
 

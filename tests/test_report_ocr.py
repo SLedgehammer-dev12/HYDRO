@@ -533,6 +533,27 @@ class OcrAvailabilityTests(unittest.TestCase):
         self.assertEqual(pages[0].source, ocr.TEXT_SOURCE_OCR)
         self.assertIn("R-77", pages[0].text)
 
+    @unittest.skipUnless(
+        HAVE_PIL and HAVE_PYTESSERACT, "Pillow/pytesseract yok: gorsel OCR testi atlandi"
+    )
+    def test_image_validation_and_missing_engine_distinguished(self) -> None:
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            corrupt = Path(tmp_dir) / "bozuk.png"
+            corrupt.write_bytes(b"gecersiz")
+            valid = Path(tmp_dir) / "gecerli.png"
+            Image.new("L", (200, 100), color=255).save(valid)
+
+            with mock.patch.object(ocr, "_resolve_ocr_engine", return_value=""):
+                with self.assertRaises(ocr.ReportOcrError) as corrupt_ctx:
+                    ocr.extract_text(corrupt)
+                self.assertEqual(corrupt_ctx.exception.code, ocr.ERROR_CORRUPT_IMAGE)
+
+                with self.assertRaises(ocr.ReportOcrError) as unavail_ctx:
+                    ocr.extract_text(valid)
+                self.assertEqual(unavail_ctx.exception.code, ocr.ERROR_OCR_UNAVAILABLE)
+
 
 @unittest.skipUnless(HAVE_PYPDF and HAVE_REPORTLAB, "pypdf/reportlab yok: PDF testleri atlandi")
 class PdfPipelineTests(unittest.TestCase):

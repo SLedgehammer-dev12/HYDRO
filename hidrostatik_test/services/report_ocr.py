@@ -1079,18 +1079,26 @@ def _render_pdf_pages_with_fitz(path: Path) -> list[Any]:
 
 
 def _ocr_image_page(path: Path) -> PageText:
+    image = _load_image(path)
     engine = _resolve_ocr_engine()
     if engine == "vision":
-        image = _load_image(path)
         text, confidence, warning = _run_vision(image)
     elif engine == "tesseract":
-        image = _load_image(path)
         text, confidence, warning = _run_tesseract(image)
     else:
+        has_ocr_pkg = importlib.util.find_spec("pytesseract") is not None or (
+            sys.platform == "darwin" and importlib.util.find_spec("ocrmac") is not None
+        )
+        if not has_ocr_pkg:
+            raise ReportOcrError(
+                "Goruntu OCR icin pytesseract/Pillow veya macOS Vision (ocrmac) gerekli "
+                "(requirements-ocr.txt).",
+                ERROR_DEPENDENCY_MISSING,
+            )
         raise ReportOcrError(
-            "Goruntu OCR icin pytesseract/Pillow veya macOS Vision (ocrmac) gerekli "
-            "(requirements-ocr.txt).",
-            ERROR_DEPENDENCY_MISSING,
+            "Goruntu OCR motoru kullanilamiyor (Tesseract calistirilabilir dosyasi veya "
+            "macOS Vision bulunamadi).",
+            ERROR_OCR_UNAVAILABLE,
         )
     if not text.strip():
         raise ReportOcrError(
