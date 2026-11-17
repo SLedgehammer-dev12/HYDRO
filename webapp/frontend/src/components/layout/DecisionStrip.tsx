@@ -35,9 +35,9 @@ export function DecisionStrip() {
   const unit = marginUnit(activeTab);
 
   return (
-    <div className="sticky top-[57px] z-30 border-b border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-2)_78%,transparent)] backdrop-blur-lg">
+    <div className="sticky top-[65px] z-30 border-b border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-2)_78%,transparent)] backdrop-blur-lg">
       <div className="mx-auto flex max-w-[1500px] flex-wrap items-center gap-x-2 gap-y-1.5 px-4 py-1.5">
-        <span className="flex items-center gap-1.5 text-[9.5px] font-semibold uppercase tracking-[0.14em] text-[var(--text-faint)]">
+        <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">
           <CircleDot size={11} aria-hidden />
           Aktif karar
         </span>
@@ -108,7 +108,7 @@ export function DecisionStrip() {
         ) : null}
 
         {backend === "demo" ? (
-          <span className="badge badge-warning hidden lg:inline-flex">demo verisi</span>
+          <span className="badge badge-warning hidden lg:inline-flex">çevrimdışı</span>
         ) : null}
 
         <button

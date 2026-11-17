@@ -28,6 +28,8 @@ import type {
   PigSpeedRequest,
   PigSpeedResponse,
   PipeOption,
+  PlanProfileCommitRequest,
+  PlanProfileCommitResponse,
   PressureProfileRequest,
   PressureProfileResponse,
   PressureVariationRequest,
@@ -39,6 +41,7 @@ import type {
   ReferenceTableMeta,
   ScheduleOption,
   Session,
+  SessionFormsResponse,
   SessionListItem,
   SessionUpdateResponse,
   SnapshotMapping,
@@ -201,7 +204,7 @@ export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): 
     throw new ApiError(
       0,
       "network_error",
-      "Sunucuya ulaşılamadı. Backend çalışmıyor olabilir; arayüz demo modunda devam ediyor.",
+      "Sunucuya ulaşılamadı. Bağlantı sağlanana kadar yerel hesaplama kullanılıyor.",
     );
   } finally {
     if (timer) clearTimeout(timer);
@@ -383,6 +386,9 @@ export const api = {
 
   project: (id: string, signal?: AbortSignal) => apiFetch<Project>(`/projects/${id}`, { signal }),
 
+  projectScene: (id: string, signal?: AbortSignal) =>
+    apiFetch<import("./types").ProjectSceneResponse>(`/projects/${id}/scene`, { signal }),
+
   createProject: (body: ProjectInput, signal?: AbortSignal) =>
     apiFetch<Project>("/projects", { method: "POST", body, signal }),
 
@@ -427,6 +433,16 @@ export const api = {
         signal,
       },
     ),
+
+  commitPlanProfile: (body: PlanProfileCommitRequest, signal?: AbortSignal) =>
+    apiFetch<PlanProfileCommitResponse>("/projects/plan-profile/commit", {
+      method: "POST",
+      body,
+      signal,
+    }),
+
+  sessionForms: (sessionId: string, signal?: AbortSignal) =>
+    apiFetch<SessionFormsResponse>(`/sessions/${sessionId}/forms`, { signal }),
 
   createSession: (
     body: { name?: string; project_id?: string | null; inputs?: Record<string, unknown> },

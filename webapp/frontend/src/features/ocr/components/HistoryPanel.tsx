@@ -12,7 +12,6 @@ export interface HistoryPanelProps {
   items: OcrAnalysisSummary[];
   loading: boolean;
   error: boolean;
-  demo: boolean;
   openingId: string | null;
   selectedId?: string | null;
   onOpen: (item: OcrAnalysisSummary) => void;
@@ -23,7 +22,6 @@ export default function HistoryPanel({
   items,
   loading,
   error,
-  demo,
   openingId,
   selectedId = null,
   onOpen,
@@ -37,11 +35,6 @@ export default function HistoryPanel({
           <h2 id="ocr-history-title" className="text-base font-semibold text-[var(--text)]">
             Geçmiş analizler
           </h2>
-          {demo ? (
-            <span className="rounded-full border border-[var(--warning-border)] bg-[var(--warning-bg)] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-[var(--warning)]">
-              demo
-            </span>
-          ) : null}
         </div>
         <button
           type="button"
@@ -72,8 +65,7 @@ export default function HistoryPanel({
 
       {error ? (
         <p className="mt-4 rounded-lg border border-[var(--warning-border)] bg-[var(--warning-bg)] px-3 py-2 text-[11px] leading-relaxed text-[var(--warning)]">
-          Geçmiş listesi yüklenemedi; demo kayıtları gösteriliyor. Sunucu bağlantısı kurulunca
-          gerçek analizler listelenir.
+          Geçmiş analiz listesi yüklenemedi. Sunucu bağlantısı kurulduğunda kayıtlar burada listelenir.
         </p>
       ) : null}
 

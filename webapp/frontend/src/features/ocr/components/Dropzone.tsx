@@ -4,11 +4,11 @@ import clsx from "clsx";
 import { FileText, Upload, X } from "lucide-react";
 import { formatBytes } from "../format";
 
-export const MAX_FILE_BYTES = 26_214_400;
-export const MAX_FILE_LABEL = "25 MB";
-export const ACCEPT_ATTRIBUTE = ".pdf,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp";
-const SUPPORTED_EXTENSIONS = [".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"];
-const SUPPORTED_HINT = "PDF, JPG, PNG, TIFF, BMP, WEBP";
+export const MAX_FILE_BYTES = 500 * 1024 * 1024;
+export const MAX_FILE_LABEL = "500 MB";
+export const ACCEPT_ATTRIBUTE = ".pdf,.xlsx,.xls,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp";
+const SUPPORTED_EXTENSIONS = [".pdf", ".xlsx", ".xls", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"];
+const SUPPORTED_HINT = "PDF, XLSX, XLS, JPG, PNG, TIFF, BMP, WEBP";
 
 export function validateOcrFile(file: File, maxBytes = MAX_FILE_BYTES): string | null {
   const name = file.name.toLowerCase();
@@ -21,7 +21,8 @@ export function validateOcrFile(file: File, maxBytes = MAX_FILE_BYTES): string |
     return "Dosya boş. Başka bir kopya seçin veya belgeyi yeniden tarayın.";
   }
   if (file.size > maxBytes) {
-    return `Dosya ${formatBytes(file.size)}; ${MAX_FILE_LABEL} sınırını aşıyor. Sayfaları bölerek yükleyin.`;
+    const limitLabel = maxBytes === MAX_FILE_BYTES ? MAX_FILE_LABEL : formatBytes(maxBytes);
+    return `Dosya ${formatBytes(file.size)}; ${limitLabel} sınırını aşıyor. Sayfaları bölerek yükleyin.`;
   }
   return null;
 }
@@ -29,6 +30,7 @@ export function validateOcrFile(file: File, maxBytes = MAX_FILE_BYTES): string |
 export interface DropzoneProps {
   file: File | null;
   error: string | null;
+  maxBytes?: number;
   disabled?: boolean;
   onSelect: (file: File) => void;
   onRemove: () => void;
@@ -38,6 +40,7 @@ export interface DropzoneProps {
 export default function Dropzone({
   file,
   error,
+  maxBytes = MAX_FILE_BYTES,
   disabled = false,
   onSelect,
   onRemove,
@@ -45,10 +48,13 @@ export default function Dropzone({
 }: DropzoneProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
+  const effectiveMaxBytes = maxBytes > 0 ? maxBytes : MAX_FILE_BYTES;
+  const maxLabel =
+    effectiveMaxBytes === MAX_FILE_BYTES ? MAX_FILE_LABEL : formatBytes(effectiveMaxBytes);
 
   const acceptFile = (candidate: File | undefined) => {
     if (!candidate) return;
-    const validation = validateOcrFile(candidate);
+    const validation = validateOcrFile(candidate, effectiveMaxBytes);
     if (validation) {
       onError(validation);
       return;
@@ -69,7 +75,7 @@ export default function Dropzone({
     if (disabled) return;
     const files = Array.from(event.dataTransfer.files);
     if (files.length === 0) {
-      onError("Bırakılan öğe bir dosya değil. PDF veya görsel seçin.");
+      onError("Bırakılan öğe bir dosya değil. PDF, Excel veya görsel seçin.");
       return;
     }
     acceptFile(files[0]);
@@ -162,7 +168,7 @@ export default function Dropzone({
             veya <span className="font-semibold text-[var(--primary)]">dosya seçin</span>
           </span>
           <span id="ocr-dropzone-hint" className="text-[11px] leading-relaxed text-[var(--text-faint)]">
-            {SUPPORTED_HINT} · en fazla {MAX_FILE_LABEL} · tek dosya
+            {SUPPORTED_HINT} · en fazla {maxLabel} · tek dosya
           </span>
         </button>
       )}

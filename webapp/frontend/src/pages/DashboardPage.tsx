@@ -112,8 +112,8 @@ export function DashboardPage() {
             {projectCode ? <span className="font-mono text-[11px] text-[var(--text-faint)]"> · {projectCode}</span> : null}
             <span className="text-[var(--text-faint)]"> · </span>
             <span className="font-medium text-[var(--text-soft)]">{sessionName}</span> kesitinin durumu.
-            Kararlar backend’den veya demo motorundan gelir; son kabul her zaman yetkili personel
-            tarafından verilir.
+            Değerlendirme sonuçları şartname kurallarına göre hesaplanır; son kabul her zaman
+            yetkili personel tarafından verilir.
           </>
         }
         meta={
@@ -277,7 +277,7 @@ export function DashboardPage() {
       <div className="grid gap-4 xl:grid-cols-[1.25fr_1fr]">
         <SectionCard
           title="Kot profili"
-          description="4 kot noktasından türetilen yaklaşık profil. Birleşik 3D saha görünümü Geometri & Saha sayfasındadır."
+          description={inputs.profile_points.length >= 2 ? "Plan-profil paftasından aktarılan gerçek arazi kot profili." : "Kesit kot değerlerinden oluşturulan boykesit profili."}
           icon={Mountain}
           action={
             <Button size="sm" variant="ghost" icon={<ArrowRight size={12} />} onClick={open3DScene}>
@@ -330,7 +330,7 @@ export function DashboardPage() {
       <div className="grid gap-4 xl:grid-cols-[1.15fr_1fr]">
         <SectionCard
           title="Son 24 saat eğilimi"
-          description="Basınç ve sıcaklık seyri. Demo modunda örnek zaman serisidir."
+          description="Basınç ve sıcaklık seyri (24 saatlik izleme grafiği)."
           icon={Activity}
         >
           <TrendChart

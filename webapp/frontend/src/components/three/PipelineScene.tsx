@@ -32,6 +32,7 @@ import {
 export interface PipelineSceneProps {
   data: SceneData;
   className?: string;
+  onOpenSession?: (sessionId: string) => void;
 }
 
 const PIG_RATES = [1, 4, 16];
@@ -41,7 +42,7 @@ const PIG_RATES = [1, 4, 16];
  * ekipmanlar, pig simülasyonu, akış izleri, kesit düzlemi, kamera presetleri
  * ve erişilebilir segment/ekipman veri tablosu tek bileşende.
  */
-export default function PipelineScene({ data, className }: PipelineSceneProps) {
+export default function PipelineScene({ data, className, onOpenSession }: PipelineSceneProps) {
   const resolved = useMemo(() => resolveSceneData(data), [data]);
   const scene = resolved.data;
   const layout = useMemo(() => buildSceneLayout(scene), [scene]);
@@ -197,26 +198,31 @@ export default function PipelineScene({ data, className }: PipelineSceneProps) {
         <div className="pointer-events-none absolute inset-0 z-30 flex flex-col justify-between gap-2 p-2 sm:p-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
             <div className="pointer-events-auto w-full rounded-xl border border-line/70 bg-ink-950/85 px-3 py-2 shadow-lg sm:max-w-[300px]">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-1.5">
                 <span className="inline-block h-1.5 w-1.5 rounded-full bg-cyan" />
                 <p className="text-[11px] font-semibold text-mist-100">3D saha görünümü</p>
-                {resolved.isDemo ? (
-                  <span className="rounded bg-cyan/15 px-1.5 py-0.5 text-[9px] font-medium text-cyan">
-                    Demo
+                {!resolved.isDemo && scene.is_survey_profile ? (
+                  <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-medium text-emerald-300">
+                    Plan-Profil Gerçek Topoğrafya
                   </span>
                 ) : null}
               </div>
               <p className="numeric mt-0.5 text-[10px] text-mist-500">
                 {numberFormat0.format(scene.segments.length)} segment ·{" "}
                 {formatDistance(layout.totalLengthM)} · {scene.equipment.length} ekipman
+                {scene.landmarks && scene.landmarks.length > 0
+                  ? ` · ${scene.landmarks.length} saha noktası`
+                  : ""}
               </p>
               {scene.warnings && scene.warnings.length > 0 ? (
                 <p
                   className="mt-1.5 rounded border border-amber/40 bg-amber/10 px-1.5 py-1 text-[10px] leading-snug text-amber"
                   title={scene.warnings.join(" · ")}
                 >
-                  <span className="font-semibold">Yaklaşık sahne</span> ·{" "}
-                  {scene.warnings[0]}
+                  <span className="font-semibold">
+                    {scene.is_survey_profile ? "Süreklilik / Kontrol" : "Yaklaşık sahne"}
+                  </span>{" "}
+                  · {scene.warnings[0]}
                   {scene.warnings.length > 1 ? ` (+${scene.warnings.length - 1})` : ""}
                 </p>
               ) : null}
@@ -263,6 +269,7 @@ export default function PipelineScene({ data, className }: PipelineSceneProps) {
               segment={selectedSegment}
               equipment={selectedEquipment}
               onClose={() => setSelectedId(null)}
+              onOpenSession={onOpenSession}
             />
           </div>
         </div>

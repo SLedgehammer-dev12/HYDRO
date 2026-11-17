@@ -95,10 +95,10 @@ export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
         </section>
 
         <section>
-          <h3 className="eyebrow">Backend</h3>
+          <h3 className="eyebrow">Bağlantı</h3>
           <p className="mt-1 text-[11px] leading-relaxed text-[var(--text-muted)]">
-            Backend bağlı değilse arayüz demo motoruyla çalışır; hesaplar yerel önizlemedir ve
-            “demo” olarak işaretlenir. Bağlantı durumu üst bardadır; Ayarlar’dan yenilenebilir.
+            Sunucu bağlı değilse hesaplamalar tarayıcı üzerinde yerel olarak yürütülür. Bağlantı
+            durumu üst çubuktadır; Ayarlar sayfasından yenilenebilir.
           </p>
         </section>
       </div>

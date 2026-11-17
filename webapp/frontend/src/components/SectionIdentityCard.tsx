@@ -8,6 +8,7 @@ import { useSessions } from "../hooks/queries";
 import { useAppStore } from "../store/useAppStore";
 import {
   evaluateProjectKpContinuity,
+  evaluateSegmentConsistency,
   formatKp,
   formatKpLocation,
   parseKpMeters,
@@ -16,8 +17,9 @@ import { num } from "../lib/format";
 import type { SessionListItem } from "../lib/types";
 
 /**
- * Kesit kimlik kartı: proje bağlantısı, kesit numarası, başlangıç/bitiş KP
- * noktaları ve ardışık kesitlerle canlı KP süreklilik kontrolü.
+ * Test Bölümü (Section) kimlik kartı: proje bağlantısı, bölüm numarası, başlangıç/bitiş KP
+ * noktaları, ardışık bölümlerle canlı KP süreklilik kontrolü ve alt parçaların (Segment)
+ * uzunluk/istasyon tutarlılık özeti.
  * Aynı bilgi oturum `inputs.section_meta` alanında saklanır.
  */
 export function SectionIdentityCard() {
@@ -38,6 +40,19 @@ export function SectionIdentityCard() {
   const startM = parseKpMeters(meta.start_kp);
   const endM = parseKpMeters(meta.end_kp);
   const spanM = startM !== null && endM !== null ? endM - startM : null;
+
+  /* Alt parça (Segment) kontrolü: Σ Segment Uzunluğu == Section (ΔKP) */
+  const segmentSummary = useMemo(
+    () =>
+      evaluateSegmentConsistency({
+        segments: inputs.segments,
+        sectionMeta: inputs.section_meta,
+        fallbackLengthM: inputs.geometry.length_m,
+      }),
+    [inputs.segments, inputs.section_meta, inputs.geometry.length_m],
+  );
+  const segmentTone: "pass" | "warning" | "fail" =
+    segmentSummary.status === "pass" ? "pass" : segmentSummary.status === "warning" ? "warning" : "fail";
 
   /* Seçili projedeki kesit listesine aktif kesitin güncel KP değerlerini yansıtıp sürekliliği denetle */
   const currentId = sessionId ?? "__active_section__";
@@ -86,13 +101,18 @@ export function SectionIdentityCard() {
 
   return (
     <SectionCard
-      title="Kesit kimliği ve KP aralığı"
-      description="Proje, kesit numarası, başlangıç/bitiş KP noktaları ve ardışık kesitlerle KP süreklilik kontrolü."
+      title="Test Bölümü (Section) kimliği ve KP aralığı"
+      description="Proje bağlantısı, bölüm no, başlangıç/bitiş KP noktaları, ardışık bölüm sürekliliği ve segment özeti."
       icon={Tag}
       action={
         <div className="flex flex-wrap items-center gap-1.5">
           {currentCheck ? (
             <Badge tone={currentCheck.tone}>{currentCheck.badgeLabel}</Badge>
+          ) : null}
+          {segmentSummary.hasSegments ? (
+            <Badge tone={segmentTone}>
+              {segmentSummary.badgeLabel}
+            </Badge>
           ) : null}
           <Button size="sm" variant="ghost" icon={<FolderOpen size={12} />} onClick={() => setTab("projects")}>
             Projeler & Kesitler
@@ -121,7 +141,7 @@ export function SectionIdentityCard() {
 
       <FieldGrid cols={4}>
         <TextField
-          label="Kesit no"
+          label="Test Bölümü (Section) no"
           value={meta.section_no}
           onChange={(value) => patchInputs({ section_meta: { section_no: value } })}
           placeholder="K-01"
@@ -152,7 +172,7 @@ export function SectionIdentityCard() {
           }
         />
         <TextField
-          label="Kesit açıklaması"
+          label="Test Bölümü açıklaması"
           value={meta.description}
           onChange={(value) => patchInputs({ section_meta: { description: value } })}
           placeholder="Bölüm 12–13 · Doğu Hattı"
@@ -239,6 +259,52 @@ export function SectionIdentityCard() {
               ΔKP ({num(spanM, 0)} m) uzunluğunu geometriye uygula
             </Button>
           ) : null}
+        </div>
+      ) : null}
+
+      {segmentSummary.hasSegments ? (
+        <div
+          className={`mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3 py-2 text-[11.5px] ${
+            segmentSummary.status === "fail"
+              ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--text)]"
+              : segmentSummary.status === "warning"
+                ? "border-[var(--warning-border)] bg-[var(--warning-bg)] text-[var(--text)]"
+                : "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--text)]"
+          }`}
+        >
+          <div className="flex items-start gap-2">
+            {segmentTone === "pass" ? (
+              <CheckCircle2 size={14} className="mt-0.5 shrink-0 tone-pass" aria-hidden />
+            ) : (
+              <AlertTriangle size={14} className={`mt-0.5 shrink-0 ${segmentTone === "fail" ? "tone-fail" : "tone-warning"}`} aria-hidden />
+            )}
+            <div className="space-y-0.5">
+              <p className="font-medium leading-snug">
+                Et Kalınlığı / Çap Alt Parçaları (Segmentler): {segmentSummary.headline}
+              </p>
+              <div className="flex flex-wrap gap-x-4 gap-y-0.5 font-mono text-[10.5px] text-[var(--text-muted)]">
+                <span>
+                  Σ Segment: {num(segmentSummary.totalSegmentLengthM, 1)} m
+                  {segmentSummary.targetSectionLengthM !== null
+                    ? ` ↔ Test Bölümü (Section): ${num(segmentSummary.targetSectionLengthM, 1)} m`
+                    : ""}
+                  {segmentSummary.deltaLengthM !== null
+                    ? segmentSummary.deltaLengthM === 0
+                      ? " ✓ Tam eşit"
+                      : ` (${segmentSummary.deltaLengthM > 0 ? "+" : ""}${num(segmentSummary.deltaLengthM, 1)} m fark)`
+                    : ""}
+                </span>
+                {segmentSummary.issues.length > 0 ? (
+                  <span className="text-[var(--danger-text)]">
+                    {segmentSummary.issues[0]}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          </div>
+          <Badge tone={segmentTone}>
+            {segmentSummary.badgeLabel}
+          </Badge>
         </div>
       ) : null}
     </SectionCard>

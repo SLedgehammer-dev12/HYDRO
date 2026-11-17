@@ -80,11 +80,11 @@ _STATUS_LABELS = {
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Hidrostatik test raporunu (PDF/gorsel) okur, alanlari cikarir ve "
+            "Hidrostatik test raporunu (PDF/Excel/gorsel) okur, alanlari cikarir ve "
             "uygulamanin hesapladigi degerlerle karsilastirir."
         )
     )
-    parser.add_argument("report", help="Rapor dosyasi (.pdf, .png, .jpg, .tif ...)")
+    parser.add_argument("report", help="Rapor dosyasi (.pdf, .xlsx, .xls, .png, .jpg, .tif ...)")
     parser.add_argument(
         "--json",
         action="store_true",

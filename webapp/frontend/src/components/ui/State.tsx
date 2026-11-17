@@ -72,7 +72,7 @@ export function OfflineNotice({ children }: { children?: ReactNode }) {
     <div className="flex items-start gap-2.5 rounded-xl border border-[var(--warning-border)] bg-[var(--warning-bg)] px-3.5 py-2.5">
       <WifiOff size={14} className="mt-0.5 shrink-0 text-[var(--warning)]" aria-hidden />
       <p className="text-[11.5px] leading-relaxed text-[var(--text-muted)]">
-        {children ?? "Backend bağlı değil. Girdiler yerelde korunuyor, hesaplar demo motoruyla üretiliyor."}
+        {children ?? "Sunucu bağlantısı yok. Girdiler tarayıcıda korunuyor ve hesaplamalar yerel olarak yürütülüyor."}
       </p>
     </div>
   );

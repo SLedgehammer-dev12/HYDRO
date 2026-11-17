@@ -16,6 +16,7 @@ import {
 
 const SOURCE_HINTS: Record<string, string> = {
   "pdf-text-layer": "Gömülü metin katmanı kullanıldı; OCR çalıştırılmadı.",
+  spreadsheet: "Excel hücreleri doğrudan okundu; görüntü OCR çalıştırılmadı.",
   ocr: "Sayfalar rasterleştirilip Tesseract ile okundu.",
   mixed: "Bazı sayfalar metin katmanından, bazıları OCR ile okundu.",
 };
@@ -69,7 +70,7 @@ export default function SummaryCard({ result, demo }: SummaryCardProps) {
         <div className="flex flex-wrap items-center gap-2">
           {demo ? (
             <span className="rounded-full border border-[var(--warning-border)] bg-[var(--warning-bg)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--warning)]">
-              Demo verisi
+              Çevrimdışı kayıt
             </span>
           ) : null}
           <span

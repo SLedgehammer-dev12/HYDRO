@@ -47,6 +47,7 @@ _INFO_FG = "#16365D"
 
 _SOURCE_LABELS = {
     "pdf-text-layer": "PDF metin katmani",
+    "spreadsheet": "Excel calisma kitabi",
     "ocr": "OCR (Tesseract)",
     "mixed": "Karma (metin katmani + OCR)",
 }
@@ -388,6 +389,7 @@ class ReportOcrDialog:
             filetypes=[
                 ("Desteklenen raporlar", patterns),
                 ("PDF", "*.pdf"),
+                ("Excel", "*.xlsx *.xls"),
                 ("Goruntuler", "*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp"),
                 ("Tum dosyalar", "*.*"),
             ],
@@ -405,7 +407,7 @@ class ReportOcrDialog:
         if not path:
             messagebox.showwarning(
                 "Rapor Secilmedi",
-                "Once bir PDF veya goruntu dosyasi secin.",
+                "Once bir PDF, Excel veya goruntu dosyasi secin.",
                 parent=self._dialog,
             )
             return

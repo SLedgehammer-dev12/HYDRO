@@ -83,7 +83,7 @@ export function SettingsPage() {
         meta={
           <>
             <Badge tone={backendTone}>
-              {backend === "online" ? "Backend bağlı" : backend === "demo" ? "Demo modu" : "Kontrol ediliyor"}
+              {backend === "online" ? "Sunucu bağlı" : backend === "demo" ? "Çevrimdışı" : "Kontrol ediliyor"}
             </Badge>
             <span className="text-[10.5px] text-[var(--text-faint)]">
               Son kontrol: {lastCheck ? dateTime(lastCheck) : "—"}
@@ -109,8 +109,8 @@ export function SettingsPage() {
           {backend === "online" && sessionApiReady === false ? (
             <div className="mb-2">
               <InlineNotice tone="warning" title="Oturum API’si henüz hazır değil">
-                Sağlık ucu yanıt veriyor ancak `/api/sessions` 404 döndürüyor. Hesaplamalar mümkün
-                olduğunda gerçek uçlardan, oturum işlemleri ise yerel demo modundan yürütülür.
+                Sağlık ucu yanıt veriyor ancak `/api/sessions` yanıt vermiyor. Hesaplamalar
+                sunucudan, oturum işlemleri tarayıcı üzerinden yürütülür.
               </InlineNotice>
             </div>
           ) : null}
@@ -147,9 +147,9 @@ export function SettingsPage() {
             </div>
           ) : (
             <div className="space-y-2">
-              <InlineNotice tone="warning" title="Backend yanıtı yok">
-                Sağlık ucu yanıt vermedi. Uygulama demo motoruyla çalışıyor; tüm formlar ve kararlar
-                yerel önizleme niteliğindedir.
+              <InlineNotice tone="warning" title="Sunucu yanıtı yok">
+                Sağlık ucu yanıt vermedi. Bağlantı sağlanana kadar hesaplamalar tarayıcı üzerinde
+                yerel olarak yürütülür.
               </InlineNotice>
               <p className="text-[10.5px] leading-relaxed text-[var(--text-faint)]">
                 Backend’i başlattıktan sonra “Bağlantıyı yenile” ile durum güncellenir.
@@ -314,7 +314,7 @@ export function SettingsPage() {
             </div>
             <div className="flex justify-between gap-2">
               <dt className="text-[var(--text-faint)]">Kimlik</dt>
-              <dd className="truncate font-mono text-[10px]">{sessionId ?? "demo-yerel"}</dd>
+              <dd className="truncate font-mono text-[10px]">{sessionId ?? "yerel-oturum"}</dd>
             </div>
             <div className="flex justify-between gap-2">
               <dt className="text-[var(--text-faint)]">Durum</dt>
@@ -380,8 +380,8 @@ export function SettingsPage() {
           </div>
         </div>
         <InlineNotice tone="info" title="Yetki notu" icon={Monitor}>
-          MVP’de kimlik doğrulama yoktur; çalışma alanı anonim anahtarla ayrılır. Resmi kabul için
-          yetkili personel onayı ve ASME B31.8 değerlendirmesi gerekir.
+          Yerel kurulumda kimlik doğrulama kapalıdır; çalışma alanı anonim anahtarla ayrılır. Resmi
+          kabul için yetkili personel onayı ve ASME B31.8 değerlendirmesi gerekir.
         </InlineNotice>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <Button
@@ -406,18 +406,18 @@ export function SettingsPage() {
             : "border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-muted)]",
         )}
       >
-        Demo modu, gerçek API yokken arayüzü doldurmak içindir. Demo kararlar resmi kabul değildir.
-        Backend bağlandığında aynı alanlar `/api` sözleşmesiyle çalışır.
+        Sunucu bağlantısı olmadığında hesaplamalar tarayıcıda yerel olarak yürütülür; resmi kabul
+        için sunucu kaydı ve yetkili personel onayı gerekir.
       </div>
 
       <ConfirmDialog
         open={confirmReset}
         title="Oturum sıfırlansın mı?"
-        message="Girdiler örnek değerlere döner, sonuçlar yeniden üretilir ve kaydedilmemiş değişiklikler kaybolur. Sunucudaki oturum silinmez."
+        message="Girdiler varsayılan değerlere döner, sonuçlar yeniden üretilir ve kaydedilmemiş değişiklikler kaybolur. Sunucudaki oturum silinmez."
         confirmLabel="Sıfırla"
         onConfirm={() => {
           resetSession();
-          pushToast("info", "Oturum sıfırlandı", "Örnek girdilerle yeni taslak hazır.");
+          pushToast("info", "Oturum sıfırlandı", "Varsayılan girdilerle yeni taslak hazır.");
         }}
         onClose={() => setConfirmReset(false)}
       />

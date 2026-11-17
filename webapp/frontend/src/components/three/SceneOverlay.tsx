@@ -30,11 +30,11 @@ const PRESETS: Array<{ preset: CameraPreset; label: string }> = [
 ];
 
 const BUTTON_BASE =
-  "inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-md border px-2 text-[10px] font-medium transition-colors " +
+  "inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border px-3 text-[12.5px] font-semibold transition-colors " +
   "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan";
 
 const BUTTON_IDLE =
-  "border-line/80 bg-ink-900/70 text-mist-400 hover:border-cyan/40 hover:text-mist-100";
+  "border-line/80 bg-ink-900/75 text-mist-200 hover:border-cyan/50 hover:text-mist-50";
 const BUTTON_ACTIVE = "border-cyan/60 bg-cyan/15 text-cyan";
 
 interface PresetToolbarProps {
@@ -102,7 +102,7 @@ export function PresetToolbar({
           aria-pressed={cutaway}
           className={`${BUTTON_BASE} ${cutaway ? BUTTON_ACTIVE : BUTTON_IDLE}`}
           onClick={onCutaway}
-        >          <Scissors size={12} aria-hidden />
+        >          <Scissors size={14} aria-hidden />
           Kesit
         </button>
         <button
@@ -112,7 +112,7 @@ export function PresetToolbar({
           className={`${BUTTON_BASE} ${flow ? BUTTON_ACTIVE : BUTTON_IDLE}`}
           onClick={onFlow}
         >
-          <Droplets size={12} aria-hidden />
+          <Droplets size={14} aria-hidden />
           Akış
         </button>
         <button
@@ -122,7 +122,7 @@ export function PresetToolbar({
           className={`${BUTTON_BASE} ${labels ? BUTTON_ACTIVE : BUTTON_IDLE}`}
           onClick={onLabels}
         >
-          <Tag size={12} aria-hidden />
+          <Tag size={14} aria-hidden />
           Etiket
         </button>
         {hasPig ? (
@@ -142,7 +142,7 @@ export function PresetToolbar({
               } disabled:cursor-not-allowed disabled:opacity-50`}
               onClick={onPigPlay}
             >
-              {pigPlaying ? <Pause size={12} aria-hidden /> : <Play size={12} aria-hidden />}
+              {pigPlaying ? <Pause size={14} aria-hidden /> : <Play size={14} aria-hidden />}
               Pig
             </button>
             <button
@@ -162,7 +162,7 @@ export function PresetToolbar({
           className={`${BUTTON_BASE} ${BUTTON_IDLE}`}
           onClick={onReset}
         >
-          <RotateCcw size={12} aria-hidden />
+          <RotateCcw size={14} aria-hidden />
           Sıfırla
         </button>
       </div>
@@ -194,8 +194,8 @@ export function SceneLegend({ mode, onModeChange, ranges }: SceneLegendProps) {
             type="button"
             aria-label="Basınca göre renklendir"
             aria-pressed={mode === "pressure"}
-            className={`rounded px-1.5 py-0.5 text-[9px] ${
-              mode === "pressure" ? "bg-cyan/15 text-cyan" : "text-mist-500 hover:text-mist-200"
+            className={`rounded px-2.5 py-1 text-[11.5px] font-semibold ${
+              mode === "pressure" ? "bg-cyan/15 text-cyan" : "text-mist-400 hover:text-mist-100"
             }`}
             onClick={() => onModeChange("pressure")}
           >
@@ -205,8 +205,8 @@ export function SceneLegend({ mode, onModeChange, ranges }: SceneLegendProps) {
             type="button"
             aria-label="Kullanım oranına göre renklendir"
             aria-pressed={mode === "utilization"}
-            className={`rounded px-1.5 py-0.5 text-[9px] ${
-              mode === "utilization" ? "bg-cyan/15 text-cyan" : "text-mist-500 hover:text-mist-200"
+            className={`rounded px-2.5 py-1 text-[11.5px] font-semibold ${
+              mode === "utilization" ? "bg-cyan/15 text-cyan" : "text-mist-400 hover:text-mist-100"
             }`}
             onClick={() => onModeChange("utilization")}
           >
@@ -235,9 +235,10 @@ interface SelectionCardProps {
   segment: SceneSegment | null;
   equipment: SceneEquipment | null;
   onClose: () => void;
+  onOpenSession?: (sessionId: string) => void;
 }
 
-export function SelectionCard({ segment, equipment, onClose }: SelectionCardProps) {
+export function SelectionCard({ segment, equipment, onClose, onOpenSession }: SelectionCardProps) {
   if (!segment && !equipment) return null;
   const meta = statusMeta(segment?.status ?? equipment?.status);
   const title = segment?.label ?? equipment?.label ?? "";
@@ -295,6 +296,15 @@ export function SelectionCard({ segment, equipment, onClose }: SelectionCardProp
         <span className={`inline-block h-1.5 w-1.5 rounded-full ${meta.dot}`} />
         {meta.label}
       </p>
+      {segment?.session_id && onOpenSession ? (
+        <button
+          type="button"
+          onClick={() => onOpenSession(segment.session_id!)}
+          className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-cyan/50 bg-cyan/15 px-2.5 py-1.5 text-[11px] font-semibold text-cyan transition-colors hover:bg-cyan/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan"
+        >
+          Bu Test Bölümünü Aç
+        </button>
+      ) : null}
     </div>
   );
 }

@@ -37,8 +37,10 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
   const backend = useAppStore((state) => state.backend);
   const sessionApiReady = useAppStore((state) => state.sessionApiReady);
   const rightPanelOpen = useAppStore((state) => state.rightPanelOpen);
+  const desktopSidebarOpen = useAppStore((state) => state.desktopSidebarOpen);
   const setTheme = useAppStore((state) => state.setTheme);
   const toggleSidebar = useAppStore((state) => state.toggleSidebar);
+  const toggleDesktopSidebar = useAppStore((state) => state.toggleDesktopSidebar);
   const toggleRightPanel = useAppStore((state) => state.toggleRightPanel);
   const setTab = useAppStore((state) => state.setTab);
   const setSessionMeta = useAppStore((state) => state.setSessionMeta);
@@ -84,10 +86,10 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
       setSessionMeta({ name: item.name, revision: item.revision, status: item.status });
       pushToast(
         "info",
-        "Demo oturum görünümü",
+        "Yerel oturum görünümü",
         sessionApiReady === false
-          ? "Oturum API’si bu backend sürümünde henüz hazır değil; demo girdileri gösteriliyor."
-          : "Backend bağlı olmadığı için oturum verisi yerel demo girdilerinden gösteriliyor.",
+          ? "Oturum servisi hazır değil; yerel oturum verileri gösteriliyor."
+          : "Sunucu bağlı olmadığı için yerel oturum verileri gösteriliyor.",
       );
       return;
     }
@@ -125,22 +127,35 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
   return (
     <>
       <header className="sticky top-0 z-40 border-b border-[var(--border)] bg-[color-mix(in_srgb,var(--canvas)_82%,transparent)] px-3 py-2.5 backdrop-blur-xl sm:px-4">
-        <div className="mx-auto flex max-w-[1500px] items-center gap-2">
-          <IconButton label="Menüyü aç" className="lg:hidden" onClick={toggleSidebar}>
-            <Menu size={17} />
+        <div className="mx-auto flex max-w-[1500px] items-center gap-2.5">
+          <IconButton
+            label={
+              desktopSidebarOpen
+                ? "Sol gezinme menüsünü gizle / aç"
+                : "Sol gezinme menüsünü göster"
+            }
+            onClick={() => {
+              if (typeof window !== "undefined" && window.innerWidth < 1024) {
+                toggleSidebar();
+              } else {
+                toggleDesktopSidebar();
+              }
+            }}
+          >
+            <Menu size={20} />
           </IconButton>
 
           <div className="relative min-w-0" ref={pickerRef}>
             <button
               type="button"
-              className="flex min-w-0 max-w-[300px] items-center gap-2 rounded-xl border border-transparent px-2 py-1.5 text-left transition-colors hover:border-[var(--border)] hover:bg-[var(--surface-3)] sm:max-w-[420px]"
+              className="flex min-w-0 max-w-[320px] items-center gap-2.5 rounded-xl border border-[var(--border-strong)] bg-[var(--surface-2)] px-3.5 py-2 text-left transition-colors hover:border-[var(--primary)] hover:bg-[var(--surface-3)] sm:max-w-[460px]"
               aria-haspopup="listbox"
               aria-expanded={pickerOpen}
               onClick={() => setPickerOpen((value) => !value)}
             >
               <div className="min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="truncate text-[13.5px] font-semibold tracking-[-0.01em]">
+                <div className="flex items-center gap-2">
+                  <span className="truncate text-[15px] font-bold tracking-[-0.01em] text-[var(--text)]">
                     {switching ? "Yükleniyor…" : sessionName}
                   </span>
                   <Badge tone={statusTone}>
@@ -153,7 +168,7 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
                           : "Taslak"}
                   </Badge>
                 </div>
-                <p className="mt-0.5 flex items-center gap-1.5 text-[10.5px] text-[var(--text-faint)]">
+                <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
                   {projectCode ? (
                     <>
                       <span className="font-mono">{projectCode}</span>
@@ -168,12 +183,12 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
                   {backend === "demo" ? (
                     <>
                       <span aria-hidden>·</span>
-                      <span>demo</span>
+                      <span>çevrimdışı</span>
                     </>
                   ) : null}
                 </p>
               </div>
-              <ChevronDown size={14} className="shrink-0 text-[var(--text-faint)]" aria-hidden />
+              <ChevronDown size={16} className="shrink-0 text-[var(--text-soft)]" aria-hidden />
             </button>
 
             {pickerOpen ? (
@@ -265,31 +280,29 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
             ) : null}
           </div>
 
-          <div className="ml-auto flex items-center gap-1.5">
+          <div className="ml-auto flex items-center gap-2">
             <Button
               variant="primary"
-              size="sm"
               className="hidden sm:inline-flex"
-              icon={saveSession.isPending ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+              icon={saveSession.isPending ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
               disabled={saveSession.isPending}
               onClick={() => saveSession.mutate()}
             >
               {saveSession.isPending ? "Kaydediliyor" : "Kaydet"}
             </Button>
             <IconButton label="Kaydet" className="sm:hidden" disabled={saveSession.isPending} onClick={() => saveSession.mutate()}>
-              {saveSession.isPending ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
+              {saveSession.isPending ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
             </IconButton>
 
             <Button
-              size="sm"
               className="hidden md:inline-flex"
-              icon={<Plus size={13} />}
+              icon={<Plus size={16} />}
               onClick={() => {
                 if (dirty) setConfirmNew(true);
                 else createNew();
               }}
             >
-              Yeni
+              Yeni Oturum
             </Button>
 
             <button
@@ -306,10 +319,10 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
               )}
               title={
                 backend === "online" && sessionApiReady === false
-                  ? "Backend sağlık ucu çalışıyor ancak oturum API’si henüz hazır değil; demo verisi kullanılıyor."
+                  ? "Sunucu çalışıyor ancak oturum servisi yanıt vermiyor; yerel veriler kullanılıyor."
                   : backend === "online"
-                    ? `Backend bağlı · sürüm ${meta?.app.version ?? "—"}`
-                    : "Backend bağlı değil; demo motoru kullanılıyor. Tıklayınca Ayarlar açılır."
+                    ? `Sunucu bağlı · sürüm ${meta?.app.version ?? "—"}`
+                    : "Sunucu bağlı değil; yerel hesaplama kullanılıyor. Tıklayınca Ayarlar açılır."
               }
               onClick={() => setTab("settings")}
             >
@@ -319,7 +332,7 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
                 : backend === "online"
                   ? "Bağlı"
                   : backend === "demo"
-                    ? "Demo"
+                    ? "Çevrimdışı"
                     : "Kontrol"}
             </button>
 
@@ -327,11 +340,11 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
               label={theme === "dark" ? "Açık temaya geç" : "Koyu temaya geç"}
               onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
             >
-              {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+              {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
             </IconButton>
 
             <IconButton label="Kısayollar ve yardım" className="hidden sm:grid" onClick={onOpenHelp}>
-              <HelpCircle size={15} />
+              <HelpCircle size={18} />
             </IconButton>
 
             <IconButton
@@ -339,7 +352,7 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
               className="hidden xl:grid"
               onClick={toggleRightPanel}
             >
-              {rightPanelOpen ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
+              {rightPanelOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
             </IconButton>
           </div>
         </div>
@@ -350,8 +363,8 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
         title="Yeni oturum açılsın mı?"
         message={
           <span>
-            Kaydedilmemiş değişiklikler var. Yeni oturum açarsanız mevcut girdiler demo
-            oturumunda kalır; sunucuya yazılmamış değişiklikler kaybolur.
+            Kaydedilmemiş değişiklikler var. Yeni oturum açarsanız sunucuya kaydedilmemiş mevcut
+            değişiklikler kaybolur.
           </span>
         }
         confirmLabel="Yeni oturum"

@@ -4,6 +4,8 @@ export type SceneStatus = "pending" | "pass" | "fail" | "warning";
 
 export interface SceneSegment {
   id: string;
+  session_id?: string;
+  section_no?: string;
   label: string;
   /** Start/end distance along the pipeline in metres. */
   start_m: number;
@@ -42,6 +44,15 @@ export interface ScenePig {
   speed_m_per_s?: number;
 }
 
+export interface SceneLandmark {
+  id: string;
+  distance_m: number;
+  elevation_m: number;
+  kp?: string;
+  kind: string;
+  label: string;
+}
+
 export interface SceneData {
   segments: SceneSegment[];
   equipment: SceneEquipment[];
@@ -49,7 +60,10 @@ export interface SceneData {
   flow_speed_m_per_s?: number;
   pressure_min_bar?: number;
   pressure_max_bar?: number;
+  start_kp_m?: number | null;
+  is_survey_profile?: boolean;
   /** Optional real survey points: [distance_m, elevation_m]. */
   profile_points?: ScenePoint[];
+  landmarks?: SceneLandmark[];
   warnings?: string[];
 }

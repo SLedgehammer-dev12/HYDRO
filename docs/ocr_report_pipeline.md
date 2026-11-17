@@ -1,7 +1,7 @@
 # OCR Tabanli Test Raporu Okuma ve Karsilastirma Altyapisi
 
 **Durum:** Servis + UI entegrasyonu tamamlandi (`Rapor > Test Raporu Kontrol (OCR)...`).
-**Kapsam:** Yuklenen hidrostatik test raporlarindan (PDF/gorsel) alan
+**Kapsam:** Yuklenen hidrostatik test raporlarindan (PDF/gorsel/`.xlsx`/`.xls`) alan
 cikarma, guven skoru, insan onayi ve uygulamanin hesapladigi degerlerle
 toleransli karsilastirma.
 **Ilgili dosyalar:**
@@ -40,6 +40,7 @@ zaman yetkili personel tarafindan verilir.
 ### 2.1 Katmanli okuma: once gomulu metin, sonra OCR
 
 ```text
+Excel (.xlsx/.xls) -> openpyxl (data_only) / xlrd -> hucre esleme (source="spreadsheet") -> alan cikarimi
 PDF -> pypdf/pdfplumber metin katmani -> yeterliyse -> alan cikarimi
                                  |
                                  +-- yetersizse -> raster -> Tesseract / macOS Vision -> alan cikarimi
@@ -141,12 +142,13 @@ flowchart TD
 
 | Oge | Deger |
 |---|---|
+| Excel | `.xlsx`, `.xls` (dogrudan hucre okuma, OCR calismaz) |
 | PDF | Gomulu metin katmani; taranmis PDF'ler opsiyonel OCR ile |
 | Gorsel | `.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.bmp`, `.webp` |
 | Maksimum dosya boyutu | 25 MB |
 | Maksimum PDF sayfasi (metin) | 200 |
 | OCR'a verilen maksimum sayfa | 30 |
-| Desteklenmeyen | `.docx`, `.xlsx`, elle yazilmis notlar, imza/stamp dogrulama |
+| Desteklenmeyen | `.docx`, elle yazilmis notlar, imza/stamp dogrulama |
 | Sifreli PDF | Sifre girilmeden reddedilir (`encrypted_pdf`) |
 | Bos metin / okunaksiz goruntu | `empty_text` / `corrupt_image` |
 

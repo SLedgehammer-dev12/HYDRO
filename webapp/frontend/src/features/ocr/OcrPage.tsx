@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import {
   AlertTriangle,
@@ -8,6 +9,8 @@ import {
   Clipboard,
   Download,
   FileJson,
+  FileScan,
+  FolderOpen,
   Loader2,
   RefreshCw,
   RotateCcw,
@@ -24,10 +27,16 @@ import WarningsPanel from "./components/WarningsPanel";
 import MappingPanel from "./components/MappingPanel";
 import StatusPanel from "./components/StatusPanel";
 import HistoryPanel from "./components/HistoryPanel";
+import PlanProfilePanel from "./components/PlanProfilePanel";
+import DossierPanel from "./components/DossierPanel";
 import { PageHeader } from "../../components/layout/PageHeader";
+import { useOpenSession, useProjects, useSessions } from "../../hooks/queries";
+import { api } from "../../lib/api";
+import { createEmptyInputs } from "../../lib/mock";
+import { toApiInputs } from "../../lib/normalize";
+import { useAppStore } from "../../store/useAppStore";
 import { flattenReport } from "./fields";
 import {
-  DEMO_HISTORY,
   DEMO_MAPPING_PROFILES,
   DEMO_RESULT,
   SAMPLE_CALCULATED,
@@ -35,6 +44,8 @@ import {
 import {
   OcrApiError,
   analyzeOcr,
+  applyOcrAnalysis,
+  approveOcrAnalysis,
   cancelOcrAnalysis,
   currentSessionId,
   getMappingProfile,
@@ -50,6 +61,7 @@ import {
   ANALYSIS_STATUS_LABELS,
   SOURCE_LABELS,
   isBlockingDiscrepancy,
+  type ApprovedField,
   type MappingProfile,
   type OcrAnalysisResult,
   type OcrAnalysisSummary,
@@ -101,6 +113,7 @@ function wait(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 export default function OcrPage() {
+  const [ocrMode, setOcrMode] = useState<"report" | "plan_profile">("report");
   const [file, setFile] = useState<File | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
 
@@ -149,6 +162,65 @@ export default function OcrPage() {
   const errorRef = useRef<HTMLDivElement>(null);
   const sessionId = useMemo(() => currentSessionId(), []);
 
+  const queryClient = useQueryClient();
+  const activeProjectId = useAppStore((s) => s.projectId);
+  const activeSessionId = useAppStore((s) => s.sessionId);
+  const setStoreProject = useAppStore((s) => s.setProject);
+  const setStoreTab = useAppStore((s) => s.setTab);
+  const pushToast = useAppStore((s) => s.pushToast);
+
+  const projectsQuery = useProjects();
+  const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data]);
+  const [applyMode, setApplyMode] = useState<"existing" | "new">("existing");
+  const [applyProjectId, setApplyProjectId] = useState<string>("");
+  const [applySessionId, setApplySessionId] = useState<string>("");
+  const [newApplyProjectName, setNewApplyProjectName] = useState<string>("");
+  const [newApplySectionNo, setNewApplySectionNo] = useState<string>("BÖLÜM 1");
+  const [overwriteExisting, setOverwriteExisting] = useState(false);
+  const [approvedKeys, setApprovedKeys] = useState<Set<string>>(new Set());
+  const [approving, setApproving] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [appliedSessionId, setAppliedSessionId] = useState<string | null>(null);
+
+  const targetSessionsQuery = useSessions(
+    applyMode === "existing" && applyProjectId ? applyProjectId : null,
+  );
+  const targetSessions = useMemo(
+    () => targetSessionsQuery.data ?? [],
+    [targetSessionsQuery.data],
+  );
+  const openSession = useOpenSession();
+
+  useEffect(() => {
+    if (applyMode !== "existing") return;
+    if (!applyProjectId && projects.length > 0) {
+      const preferred =
+        activeProjectId && projects.some((p) => p.id === activeProjectId)
+          ? activeProjectId
+          : projects[0].id;
+      setApplyProjectId(preferred);
+    } else if (projects.length === 0) {
+      setApplyMode("new");
+    }
+  }, [applyMode, applyProjectId, activeProjectId, projects]);
+
+  useEffect(() => {
+    if (applyMode !== "existing" || !applyProjectId) return;
+    if (applySessionId === "__NEW__") return;
+    if (targetSessions.length === 0) {
+      setApplySessionId("__NEW__");
+      return;
+    }
+    if (!applySessionId || !targetSessions.some((s) => s.id === applySessionId)) {
+      const preferred =
+        activeSessionId && targetSessions.some((s) => s.id === activeSessionId)
+          ? activeSessionId
+          : targetSessions[0].id;
+      setApplySessionId(preferred);
+    }
+  }, [applyMode, applyProjectId, applySessionId, targetSessions, activeSessionId]);
+
   const demoMode = statusError;
   const selectedProfile = useMemo(
     () => profiles.find((profile) => profile.id === selectedProfileId) ?? null,
@@ -190,8 +262,8 @@ export default function OcrPage() {
       setHistoryDemo(false);
       setHistoryError(false);
     } catch {
-      setHistory(DEMO_HISTORY);
-      setHistoryDemo(true);
+      setHistory([]);
+      setHistoryDemo(false);
       setHistoryError(true);
     } finally {
       setHistoryLoading(false);
@@ -213,17 +285,13 @@ export default function OcrPage() {
       } else {
         setProfiles(DEMO_MAPPING_PROFILES);
         setProfilesDemo(true);
-        setProfilesError(
-          "Sunucuda eşleme profili yok; yerel taslak profiller gösteriliyor. Format geldiğinde profil oluşturun.",
-        );
+        setProfilesError(null);
         setSelectedProfileId((current) => current ?? DEMO_MAPPING_PROFILES[0].id);
       }
     } catch {
       setProfiles(DEMO_MAPPING_PROFILES);
       setProfilesDemo(true);
-      setProfilesError(
-        "Eşleme profilleri yüklenemedi; yerel taslak profiller gösteriliyor. Bu profil analizle gönderilmez.",
-      );
+      setProfilesError("Sunucu eşleme profilleri okunamadı; standart şablon kullanılıyor.");
       setSelectedProfileId((current) => current ?? DEMO_MAPPING_PROFILES[0].id);
     } finally {
       setProfilesLoading(false);
@@ -302,6 +370,14 @@ export default function OcrPage() {
           .map((item) => item.descriptor.key),
       ),
     );
+    setApprovedKeys(new Set(Object.keys(analysis.approved_fields ?? {})));
+    setActionError(null);
+    setAppliedSessionId(null);
+    const secVal = analysis.report?.section_id?.value;
+    if (secVal) setNewApplySectionNo(String(secVal));
+    if (analysis.dossier?.detected_project_name) {
+      setNewApplyProjectName(analysis.dossier.detected_project_name);
+    }
     const nextTab: TabKey = (analysis.discrepancies ?? []).some(isBlockingDiscrepancy)
       ? "discrepancies"
       : "fields";
@@ -313,16 +389,16 @@ export default function OcrPage() {
 
   const runDemo = async (signal: AbortSignal) => {
     setStage("upload");
-    setStageNote("Demo: dosya yükleniyor (yerel, ağa çıkılmaz).");
+    setStageNote("Dosya okunuyor (yerel)...");
     await wait(500, signal);
     setStage("extract");
-    setStageNote("Demo: metin katmanı ve OCR çıktısı üretiliyor.");
+    setStageNote("Metin katmanı çıkarılıyor...");
     await wait(950, signal);
     setStage("parse");
-    setStageNote("Demo: alan etiketleri eşleniyor.");
+    setStageNote("Alan etiketleri eşleniyor...");
     await wait(800, signal);
     setStage("compare");
-    setStageNote("Demo: toleranslar uygulanıyor.");
+    setStageNote("Toleranslar kontrol ediliyor...");
     await wait(650, signal);
     applyResult(DEMO_RESULT, true);
   };
@@ -364,7 +440,7 @@ export default function OcrPage() {
     setPhase("error");
   };
 
-  const runAnalysis = async () => {
+  const runAnalysis = async (force = false) => {
     if (!file) {
       setFileError("Analiz için önce bir dosya seçin.");
       return;
@@ -382,7 +458,7 @@ export default function OcrPage() {
     setEdits({});
     setPhase("analyzing");
     setStage("upload");
-    setStageNote(demoMode ? "Demo modu: backend kapalı, yerel örnek sonuç üretilecek." : null);
+    setStageNote(demoMode ? "Sunucu kapalı; yerel ön kontrol yürütülüyor." : null);
     setElapsed(0);
     startedAtRef.current = Date.now();
     const controller = new AbortController();
@@ -399,6 +475,7 @@ export default function OcrPage() {
           calculated: parsed.value,
           mappingProfileId: profilesDemo ? null : selectedProfileId,
           sessionId,
+          force,
         },
         controller.signal,
       );
@@ -423,7 +500,7 @@ export default function OcrPage() {
         },
       });
       if (final.status === "succeeded") {
-        applyResult(final, false);
+        applyResult({ ...final, reused: Boolean(job.reused) }, false);
       } else if (final.status === "failed") {
         showFailure(final.error, "Analiz tamamlanamadı; sunucu hata ayrıntısı göndermedi.");
       } else if (final.status === "cancelled") {
@@ -502,12 +579,6 @@ export default function OcrPage() {
     }
   };
 
-  const showDemo = () => {
-    if (phase === "analyzing") handleCancel();
-    applyResult(DEMO_RESULT, true);
-    setFileError(null);
-  };
-
   const resetAll = () => {
     if (abortRef.current) {
       abortRef.current.abort();
@@ -535,7 +606,7 @@ export default function OcrPage() {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `${resultDemo ? "demo-" : ""}ocr-${shortId(result.id).replace("…", "")}.json`;
+    anchor.download = `ocr-${shortId(result.id).replace("…", "")}.json`;
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
@@ -598,12 +669,129 @@ export default function OcrPage() {
         ? "Hesaplanan değer JSON'unu düzeltin."
         : null;
 
-  const approveBlockedReason =
-    pendingLowConfidence.length > 0
-      ? `${pendingLowConfidence.length} düşük güvenli alan seçilmedi; onaydan önce her birini işaretleyin.`
-      : editedCount > 0
-        ? `${editedCount} alan elle düzeltildi; düzeltme onay sayılmaz. Onay uç noktası bağlanınca değerler denetim iziyle gönderilecek.`
-        : "Onay uç noktası hazır (POST /api/ocr/analyses/{id}/approve); oturum kimliği ve yetki katmanı bağlanınca etkinleşecek.";
+  const approveDisabledReason = !result
+    ? "Önce analiz tamamlanmalıdır."
+    : selectedFields.size === 0
+      ? "Onaylamak için en az bir alan seçin."
+      : null;
+
+  const canApplyToSession =
+    Boolean(result) &&
+    !resultDemo &&
+    approvedKeys.size > 0 &&
+    !applying &&
+    (applyMode === "new"
+      ? newApplyProjectName.trim().length > 0
+      : Boolean(applyProjectId));
+
+  const handleApproveSelected = async () => {
+    if (!result || selectedFields.size === 0) return;
+    setApproving(true);
+    setActionError(null);
+    try {
+      const fieldsPayload: Record<string, ApprovedField> = {};
+      for (const item of fields) {
+        const key = item.descriptor.key;
+        if (!selectedFields.has(key)) continue;
+        const editedVal = edits[key];
+        fieldsPayload[key] = {
+          value: editedVal !== undefined ? editedVal : item.field.value,
+          unit: item.field.unit || item.descriptor.unit || "",
+          approved: true,
+        };
+      }
+      if (resultDemo) {
+        setApprovedKeys((prev) => new Set([...prev, ...Object.keys(fieldsPayload)]));
+        pushToast("info", "Alanlar Yerel Onaylandı (Demo)", `${Object.keys(fieldsPayload).length} alan onaylandı.`);
+        return;
+      }
+      const res = await approveOcrAnalysis(result.id, {
+        fields: fieldsPayload,
+        approve_all: allSelected && pendingLowConfidence.length === 0,
+      });
+      setApprovedKeys((prev) => new Set([...prev, ...Object.keys(fieldsPayload)]));
+      pushToast("success", "Alanlar Onaylandı", `${res.approved_count} alan denetim iziyle kaydedildi.`);
+    } catch (caught) {
+      const apiErr = toOcrApiError(caught);
+      setActionError(apiErr.message);
+      pushToast("error", "Alan onayı başarısız", apiErr.message);
+    } finally {
+      setApproving(false);
+    }
+  };
+
+  const handleApplyToSession = async () => {
+    if (!result || resultDemo || approvedKeys.size === 0) return;
+    setApplying(true);
+    setActionError(null);
+    try {
+      let targetProjectId = applyProjectId;
+      if (applyMode === "new") {
+        const pname = newApplyProjectName.trim();
+        if (!pname) {
+          setActionError("Yeni proje adı boş bırakılamaz.");
+          return;
+        }
+        const createdProj = await api.createProject({ name: pname, client: "BOTAŞ" });
+        setStoreProject(createdProj);
+        targetProjectId = createdProj.id;
+        setApplyMode("existing");
+        setApplyProjectId(createdProj.id);
+        void queryClient.invalidateQueries({ queryKey: ["projects"] });
+      } else {
+        const projObj = projects.find((p) => p.id === targetProjectId);
+        if (projObj) setStoreProject(projObj);
+      }
+
+      if (!targetProjectId) {
+        setActionError("Lütfen hedef projeyi seçin veya yeni proje oluşturun.");
+        return;
+      }
+
+      let targetSessionId = applySessionId;
+      if (!targetSessionId || targetSessionId === "__NEW__") {
+        const secLabel = newApplySectionNo.trim() || "BÖLÜM 1";
+        const projObj = projects.find((p) => p.id === targetProjectId);
+        const emptyInputs = createEmptyInputs();
+        emptyInputs.section_meta.section_no = secLabel;
+        emptyInputs.section_meta.description = projObj
+          ? `${projObj.name} · ${secLabel}`
+          : secLabel;
+        const createdSess = await api.createSession({
+          name: projObj ? `${secLabel} · ${projObj.code || projObj.name}` : secLabel,
+          project_id: targetProjectId,
+          inputs: toApiInputs(emptyInputs),
+        });
+        targetSessionId = createdSess.id;
+        setApplySessionId(targetSessionId);
+        void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      }
+
+      const appliedRes = await applyOcrAnalysis(result.id, {
+        session_id: targetSessionId,
+        fields: Array.from(approvedKeys),
+        overwrite: overwriteExisting,
+      });
+
+      setAppliedSessionId(targetSessionId);
+      void queryClient.invalidateQueries({ queryKey: ["projects"] });
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      void queryClient.invalidateQueries({ queryKey: ["session", targetSessionId] });
+      void queryClient.invalidateQueries({ queryKey: ["results", targetSessionId] });
+      await openSession.mutateAsync(targetSessionId);
+      pushToast(
+        "success",
+        "Test Raporu Kesite İşlendi",
+        `${appliedRes.applied.length} alan aktarıldı, form slotları ve hesaplamalar güncellendi.`,
+      );
+    } catch (caught) {
+      const apiErr = toOcrApiError(caught);
+      setActionError(apiErr.message);
+      pushToast("error", "Kesite aktarım tamamlanamadı", apiErr.message);
+    } finally {
+      setApplying(false);
+    }
+  };
 
   const handleTabKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -623,9 +811,13 @@ export default function OcrPage() {
   return (
     <div className="space-y-5">
       <PageHeader
-        kicker="Rapor doğrulama · OCR"
-        title="Test Raporu Kontrolü"
-        description="PDF veya taranmış test raporunu yükleyin; alanlar çıkarılır, hesaplanan değerlerle toleranslı karşılaştırılır ve insan onayına sunulur."
+        kicker="OCR · Belge & Pafta Okuma"
+        title={ocrMode === "plan_profile" ? "Plan-Profil Paftasından Kesit Üret" : "Test Raporu Kontrolü"}
+        description={
+          ocrMode === "plan_profile"
+            ? "Plan-profil PDF/CAD paftasını tarayarak test bölümlerini (Section), KP aralıklarını ve kotları çıkarın; seçili projede otomatik oluşturun."
+            : "PDF, Excel (.xlsx/.xls) veya taranmış test raporunu yükleyin; alanlar çıkarılır, hesaplanan değerlerle toleranslı karşılaştırılır ve insan onayına sunulur."
+        }
         actions={
           <div className="flex flex-col items-end gap-1.5 text-right">
             <span
@@ -641,7 +833,7 @@ export default function OcrPage() {
               {statusLoading
                 ? "Motor kontrol ediliyor"
                 : statusError
-                  ? "Backend çevrimdışı · demo"
+                  ? "Sunucu çevrimdışı"
                   : status?.available
                     ? "OCR hazır"
                     : "OCR kullanılamıyor"}
@@ -652,6 +844,48 @@ export default function OcrPage() {
           </div>
         }
       />
+
+      <div
+        role="tablist"
+        aria-label="OCR iş akışı"
+        className="inline-flex flex-wrap gap-2 rounded-xl border border-[var(--border-strong)] bg-[var(--surface-2)] p-1.5"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={ocrMode === "report"}
+          onClick={() => setOcrMode("report")}
+          className={clsx(
+            "inline-flex min-h-[44px] items-center gap-2.5 rounded-xl px-4 py-2.5 text-[14px] font-bold transition-colors",
+            ocrMode === "report"
+              ? "bg-[var(--primary)] text-[var(--primary-ink)] shadow-sm"
+              : "text-[var(--text-soft)] hover:bg-[var(--surface-3)] hover:text-[var(--text)]",
+          )}
+        >
+          <ScanLine size={17} aria-hidden="true" />
+          Test Raporu Kontrolü
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={ocrMode === "plan_profile"}
+          onClick={() => setOcrMode("plan_profile")}
+          className={clsx(
+            "inline-flex min-h-[44px] items-center gap-2.5 rounded-xl px-4 py-2.5 text-[14px] font-bold transition-colors",
+            ocrMode === "plan_profile"
+              ? "bg-[var(--primary)] text-[var(--primary-ink)] shadow-sm"
+              : "text-[var(--text-soft)] hover:bg-[var(--surface-3)] hover:text-[var(--text)]",
+          )}
+        >
+          <FileScan size={17} aria-hidden="true" />
+          Plan-Profil Paftasından Kesit Üret
+        </button>
+      </div>
+
+      {ocrMode === "plan_profile" ? (
+        <PlanProfilePanel />
+      ) : (
+        <>
 
       <div className="flex items-start gap-2.5 rounded-xl border border-[var(--warning-border)] bg-[var(--warning-bg)] px-3.5 py-3 text-[11px] leading-relaxed text-[var(--warning)]">
         <ShieldAlert size={16} className="mt-0.5 shrink-0 text-[var(--warning)]" aria-hidden="true" />
@@ -671,16 +905,17 @@ export default function OcrPage() {
                   <FileJson size={16} aria-hidden="true" />
                 </span>
                 <div>
-                  <h2 id="ocr-upload-title" className="text-base font-semibold text-[var(--text)]">
+                  <h2 id="ocr-upload-title" className="text-[18px] font-bold text-[var(--text)]">
                     1 · Rapor dosyası
                   </h2>
                   <p className="text-[11px] text-[var(--text-faint)]">
-                    Tek dosya · en fazla {MAX_FILE_BYTES / (1024 * 1024)} MB
+                    Tek dosya · en fazla{" "}
+                    {Math.round((status?.limits?.max_file_size_bytes ?? MAX_FILE_BYTES) / (1024 * 1024))} MB
                   </p>
                 </div>
               </div>
               <span className="rounded-full border border-[var(--border)] bg-[var(--surface-3)] px-2.5 py-1 text-[10px] text-[var(--text-soft)]">
-                {demoMode ? "Demo modu" : "Sunucu analizi"}
+                {demoMode ? "Çevrimdışı" : "Sunucu analizi"}
               </span>
             </div>
 
@@ -688,6 +923,7 @@ export default function OcrPage() {
               <Dropzone
                 file={file}
                 error={fileError}
+                maxBytes={status?.limits?.max_file_size_bytes}
                 disabled={phase === "analyzing"}
                 onSelect={(next) => {
                   setFile(next);
@@ -708,8 +944,8 @@ export default function OcrPage() {
 
             {demoMode ? (
               <p className="mt-3 rounded-lg border border-[var(--warning-border)] bg-[var(--warning-bg)] px-3 py-2 text-[11px] leading-relaxed text-[var(--warning)]">
-                Backend çevrimdışı: <strong>Analiz Et</strong> yerel demo sonucu üretir. Dosya
-                yüklenmez, hiçbir veri ağa çıkmaz.
+                Sunucu çevrimdışı: gerçek dosya analizi için sunucu bağlantısı gereklidir. Dosya
+                cihazdan çıkmaz.
               </p>
             ) : null}
 
@@ -729,8 +965,8 @@ export default function OcrPage() {
                     Hesaplanan değerlerle karşılaştır
                   </span>
                   <span className="mt-0.5 block text-[11px] leading-relaxed text-[var(--text-faint)]">
-                    Oturum hesapları bağlanana kadar karşılaştırma payload'ını JSON olarak
-                    yapıştırın. Boş bırakılırsa yalnızca alan çıkarımı yapılır.
+                    Karşılaştırma verisini JSON olarak girebilirsiniz. Boş bırakılırsa yalnızca alan
+                    çıkarımı yapılır.
                   </span>
                 </span>
               </label>
@@ -815,18 +1051,18 @@ export default function OcrPage() {
                 </p>
                 <p className="mt-0.5 text-[10px] text-[var(--text-faint)]">
                   {profilesDemo
-                    ? "Yerel taslak profil yalnızca önizleme içindir; analizle gönderilmez."
+                    ? "Standart etiket sözlüğü kullanılıyor."
                     : `Karşılaştırma: ${useCalculated && calculatedJson.trim() ? "JSON payload gönderilecek" : "yalnızca alan çıkarımı"}`}
                 </p>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2.5">
                 {phase === "analyzing" ? (
                   <button
                     type="button"
                     onClick={handleCancel}
-                    className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-[var(--danger-border)] px-3.5 py-2 text-sm font-medium text-[var(--danger)] transition hover:bg-[var(--danger-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
+                    className="btn btn-danger"
                   >
-                    <Square size={14} aria-hidden="true" />
+                    <Square size={16} aria-hidden="true" />
                     İptal
                   </button>
                 ) : null}
@@ -837,19 +1073,14 @@ export default function OcrPage() {
                   }}
                   disabled={!file || phase === "analyzing"}
                   aria-describedby={analyzeDisabledReason ? "ocr-analyze-reason" : undefined}
-                  className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-[var(--primary-ink)] transition hover:bg-[var(--primary-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--canvas)] disabled:cursor-not-allowed disabled:opacity-40"
+                  className="btn btn-primary btn-lg"
                 >
                   {phase === "analyzing" ? (
-                    <Loader2 size={16} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                    <Loader2 size={18} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
                   ) : (
-                    <ScanLine size={16} aria-hidden="true" />
+                    <ScanLine size={18} aria-hidden="true" />
                   )}
                   Analiz Et
-                  {demoMode ? (
-                    <span className="rounded border border-current px-1.5 py-0.5 text-[9px] uppercase tracking-wide">
-                      demo
-                    </span>
-                  ) : null}
                 </button>
               </div>
             </div>
@@ -873,7 +1104,7 @@ export default function OcrPage() {
                     Analiz sürüyor · {STAGES[activeStageIndex].label}
                   </p>
                   <p className="numeric text-[10px] text-[var(--text-muted)]">
-                    {formatNumber(elapsed, 0)} sn · 300 sn sınırı
+                    {formatNumber(elapsed, 0)} sn · 600 sn sınırı
                   </p>
                 </div>
                 <ol className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
@@ -993,14 +1224,6 @@ export default function OcrPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={showDemo}
-                  className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-[var(--warning-border)] bg-[var(--warning-bg)] px-3.5 py-2 text-xs font-medium text-[var(--warning)] hover:bg-[var(--warning-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
-                >
-                  <ScanLine size={13} aria-hidden="true" />
-                  Demo sonucu göster
-                </button>
-                <button
-                  type="button"
                   onClick={resetAll}
                   className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-[var(--border)] px-3.5 py-2 text-xs font-medium text-[var(--text-soft)] hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
                 >
@@ -1018,7 +1241,7 @@ export default function OcrPage() {
                   <ArrowRight size={20} aria-hidden="true" />
                 </span>
                 <div>
-                  <h2 id="ocr-empty-title" className="text-base font-semibold text-[var(--text)]">
+                  <h2 id="ocr-empty-title" className="text-[18px] font-bold text-[var(--text)]">
                     Henüz analiz yok
                   </h2>
                   <p className="mt-1 max-w-2xl text-xs leading-relaxed text-[var(--text-muted)]">
@@ -1052,7 +1275,7 @@ export default function OcrPage() {
                   <h2
                     ref={resultHeadingRef}
                     tabIndex={-1}
-                    className="mt-1 text-lg font-semibold text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
+                    className="mt-1 text-[20px] font-bold text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
                   >
                     Analiz sonucu{" "}
                     <span className="numeric text-xs font-normal text-[var(--text-faint)]">
@@ -1068,23 +1291,35 @@ export default function OcrPage() {
                 <div className="flex flex-wrap gap-2">
                   {resultDemo ? (
                     <span className="self-center rounded-full border border-[var(--warning-border)] bg-[var(--warning-bg)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--warning)]">
-                      demo · resmi değil
+                      çevrimdışı kayıt
                     </span>
                   ) : null}
                   <button
                     type="button"
-                    onClick={downloadJson}
-                    className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-3)] px-3.5 py-2 text-xs font-medium text-[var(--text)] hover:border-[var(--info-border)] hover:text-[var(--primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
+                    onClick={() => {
+                      void runAnalysis(true);
+                    }}
+                    disabled={!file || phase === "analyzing"}
+                    className="btn"
+                    title="Mevcut önbelleği atlayıp belgeyi baştan OCR ile analiz eder"
                   >
-                    <Download size={14} aria-hidden="true" />
+                    <RefreshCw size={16} aria-hidden="true" />
+                    Yeniden Analiz Et
+                  </button>
+                  <button
+                    type="button"
+                    onClick={downloadJson}
+                    className="btn"
+                  >
+                    <Download size={16} aria-hidden="true" />
                     JSON İndir
                   </button>
                   <button
                     type="button"
                     onClick={resetAll}
-                    className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-[var(--border)] px-3.5 py-2 text-xs font-medium text-[var(--text-soft)] hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
+                    className="btn"
                   >
-                    <Trash2 size={14} aria-hidden="true" />
+                    <Trash2 size={16} aria-hidden="true" />
                     Yeni Analiz
                   </button>
                 </div>
@@ -1105,176 +1340,350 @@ export default function OcrPage() {
                 </p>
               </div>
 
-              <SummaryCard result={result} demo={resultDemo} />
+              {(() => {
+                const rawResultBlocks = (
+                  <>
+                    <SummaryCard result={result} demo={resultDemo} />
 
-              <section className="panel" aria-labelledby="ocr-result-table-title">
-                <div className="flex flex-wrap items-center justify-between gap-2 px-5 pt-4">
-                  <h2
-                    id="ocr-result-table-title"
-                    className="text-sm font-semibold text-[var(--text)]"
-                  >
-                    Sonuç ayrıntıları
-                  </h2>
-                  <p className="text-[10px] text-[var(--text-faint)]">
-                    {ANALYSIS_STATUS_LABELS[result.status]} ·{" "}
-                    {comparisonRequested ? "karşılaştırma yapıldı" : "karşılaştırma yapılmadı"}
-                  </p>
-                </div>
-                <div
-                  role="tablist"
-                  aria-label="Analiz sonucu sekmeleri"
-                  className="mt-3 flex flex-wrap gap-1 border-b hairline px-3"
-                  onKeyDown={handleTabKeyDown}
-                >
-                  {tabs.map((item) => {
-                    const selected = tab === item.key;
-                    return (
-                      <button
-                        key={item.key}
-                        type="button"
-                        role="tab"
-                        id={`ocr-tab-${item.key}`}
-                        aria-selected={selected}
-                        aria-controls={`ocr-panel-${item.key}`}
-                        tabIndex={selected ? 0 : -1}
-                        onClick={() => setTab(item.key)}
-                        className={clsx(
-                          "inline-flex min-h-10 items-center gap-1.5 rounded-t-lg border-b-2 px-3 py-2 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]",
-                          selected
-                            ? "border-[var(--primary)] text-[var(--primary)]"
-                            : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-soft)]",
-                        )}
-                      >
-                        {item.label}
-                        <span
-                          className={clsx(
-                            "numeric rounded-full px-1.5 py-0.5 text-[10px]",
-                            selected ? "bg-[var(--primary-soft)] text-[var(--primary)]" : "bg-[var(--surface-3)] text-[var(--text-muted)]",
-                          )}
+                    <section className="panel" aria-labelledby="ocr-result-table-title">
+                      <div className="flex flex-wrap items-center justify-between gap-2 px-5 pt-4">
+                        <h2
+                          id="ocr-result-table-title"
+                          className="text-[18px] font-bold text-[var(--text)]"
                         >
-                          {item.count}
+                          Sonuç ayrıntıları
+                        </h2>
+                        <p className="text-[10px] text-[var(--text-faint)]">
+                          {ANALYSIS_STATUS_LABELS[result.status]} ·{" "}
+                          {comparisonRequested ? "karşılaştırma yapıldı" : "karşılaştırma yapılmadı"}
+                        </p>
+                      </div>
+                      <div
+                        role="tablist"
+                        aria-label="Analiz sonucu sekmeleri"
+                        className="mt-3 flex flex-wrap gap-1 border-b hairline px-3"
+                        onKeyDown={handleTabKeyDown}
+                      >
+                        {tabs.map((item) => {
+                          const selected = tab === item.key;
+                          return (
+                            <button
+                              key={item.key}
+                              type="button"
+                              role="tab"
+                              id={`ocr-tab-${item.key}`}
+                              aria-selected={selected}
+                              aria-controls={`ocr-panel-${item.key}`}
+                              tabIndex={selected ? 0 : -1}
+                              onClick={() => setTab(item.key)}
+                              className={clsx(
+                                "inline-flex min-h-10 items-center gap-1.5 rounded-t-lg border-b-2 px-3 py-2 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]",
+                                selected
+                                  ? "border-[var(--primary)] text-[var(--primary)]"
+                                  : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-soft)]",
+                              )}
+                            >
+                              {item.label}
+                              <span
+                                className={clsx(
+                                  "numeric rounded-full px-1.5 py-0.5 text-[10px]",
+                                  selected ? "bg-[var(--primary-soft)] text-[var(--primary)]" : "bg-[var(--surface-3)] text-[var(--text-muted)]",
+                                )}
+                              >
+                                {item.count}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <div
+                        role="tabpanel"
+                        id={`ocr-panel-${tab}`}
+                        aria-labelledby={`ocr-tab-${tab}`}
+                        className="pb-1"
+                      >
+                        {tab === "fields" ? (
+                          <FieldsTable
+                            fields={fields}
+                            selected={selectedFields}
+                            edits={edits}
+                            onToggle={toggleField}
+                            onEdit={editField}
+                          />
+                        ) : null}
+                        {tab === "discrepancies" ? (
+                          <DiscrepanciesTable
+                            items={result.discrepancies ?? []}
+                            hasCalculated={comparisonRequested}
+                          />
+                        ) : null}
+                        {tab === "warnings" ? (
+                          <WarningsPanel
+                            warnings={result.warnings ?? []}
+                            issues={result.issues ?? []}
+                            reportWarnings={result.report?.warnings ?? []}
+                          />
+                        ) : null}
+                      </div>
+                    </section>
+                  </>
+                );
+
+                const approvalPanel = (
+                  <section className="panel p-5" aria-labelledby="ocr-approval-title">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h2 id="ocr-approval-title" className="text-[18px] font-bold text-[var(--text)]">
+                        Alan onayı ve kesite aktarım
+                      </h2>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="numeric rounded-full border border-[var(--border)] bg-[var(--surface-3)] px-2.5 py-1 text-[10px] text-[var(--text-soft)]">
+                          {selectedFields.size}/{fields.length} seçili
                         </span>
+                        <span className="numeric rounded-full border border-[var(--success-border)] bg-[var(--success-bg)] px-2.5 py-1 text-[10px] text-[var(--success)]">
+                          {approvedKeys.size} onaylı
+                        </span>
+                      </div>
+                    </div>
+                    <p className="mt-1 max-w-3xl text-[11px] leading-relaxed text-[var(--text-muted)]">
+                      Onay, raporun ham değerini değiştirmez; onaylı değerler seçtiğiniz proje/test bölümüne
+                      aktarılır ve mühendislik hesapları otomatik tetiklenir. Düşük güvenli alanlar (&lt;{" "}
+                      {formatNumber(lowThreshold, 2)}) açıkça işaretlenmeden toplu onay verilemez. Kritik
+                      güven eşiği &lt; {formatNumber(criticalThreshold, 2)}.
+                    </p>
+
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedFields(new Set(fields.map((item) => item.descriptor.key)))}
+                        disabled={allSelected || fields.length === 0}
+                        className="rounded-md border border-[var(--border)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--text-soft)] hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Tümünü seç
                       </button>
-                    );
-                  })}
-                </div>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedFields(new Set())}
+                        disabled={selectedFields.size === 0}
+                        className="rounded-md border border-[var(--border)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--text-soft)] hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Seçimi temizle
+                      </button>
+                      {pendingLowConfidence.length > 0 ? (
+                        <span className="rounded-full border border-[var(--warning-border)] bg-[var(--warning-bg)] px-2.5 py-1 text-[10px] text-[var(--warning)]">
+                          {pendingLowConfidence.length} düşük güvenli alan onay bekliyor:{" "}
+                          {pendingLowConfidence
+                            .slice(0, 3)
+                            .map((item) => item.descriptor.label)
+                            .join(", ")}
+                          {pendingLowConfidence.length > 3 ? "…" : ""}
+                        </span>
+                      ) : (
+                        <span className="rounded-full border border-[var(--success-border)] bg-[var(--success-bg)] px-2.5 py-1 text-[10px] text-[var(--success)]">
+                          düşük güvenli alan seçimi tamam
+                        </span>
+                      )}
+                      {editedCount > 0 ? (
+                        <span className="rounded-full border border-[var(--border)] bg-[var(--surface-3)] px-2.5 py-1 text-[10px] text-[var(--text-soft)]">
+                          {editedCount} elle düzeltme
+                        </span>
+                      ) : null}
+                    </div>
 
-                <div
-                  role="tabpanel"
-                  id={`ocr-panel-${tab}`}
-                  aria-labelledby={`ocr-tab-${tab}`}
-                  className="pb-1"
-                >
-                  {tab === "fields" ? (
-                    <FieldsTable
-                      fields={fields}
-                      selected={selectedFields}
-                      edits={edits}
-                      onToggle={toggleField}
-                      onEdit={editField}
-                    />
-                  ) : null}
-                  {tab === "discrepancies" ? (
-                    <DiscrepanciesTable
-                      items={result.discrepancies ?? []}
-                      hasCalculated={comparisonRequested}
-                    />
-                  ) : null}
-                  {tab === "warnings" ? (
-                    <WarningsPanel
-                      warnings={result.warnings ?? []}
-                      issues={result.issues ?? []}
-                      reportWarnings={result.report?.warnings ?? []}
-                    />
-                  ) : null}
-                </div>
-              </section>
+                    {!resultDemo ? (
+                      <div className="mt-4 space-y-3 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3.5 text-xs">
+                        <div className="flex flex-wrap items-center gap-4">
+                          <label className="inline-flex cursor-pointer items-center gap-2 font-medium text-[var(--text)]">
+                            <input
+                              type="radio"
+                              name="ocr-single-apply-mode"
+                              checked={applyMode === "existing"}
+                              disabled={projects.length === 0}
+                              onChange={() => setApplyMode("existing")}
+                            />
+                            Kayıtlı proje / test bölümüne uygula
+                          </label>
+                          <label className="inline-flex cursor-pointer items-center gap-2 font-medium text-[var(--text)]">
+                            <input
+                              type="radio"
+                              name="ocr-single-apply-mode"
+                              checked={applyMode === "new"}
+                              onChange={() => setApplyMode("new")}
+                            />
+                            Yeni proje ve test bölümü oluştur
+                          </label>
+                        </div>
 
-              <section className="panel p-5" aria-labelledby="ocr-approval-title">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h2 id="ocr-approval-title" className="text-base font-semibold text-[var(--text)]">
-                    Alan onayı
-                  </h2>
-                  <span className="numeric rounded-full border border-[var(--border)] bg-[var(--surface-3)] px-2.5 py-1 text-[10px] text-[var(--text-soft)]">
-                    {selectedFields.size}/{fields.length} seçili
-                  </span>
-                </div>
-                <p className="mt-1 max-w-3xl text-[11px] leading-relaxed text-[var(--text-muted)]">
-                  Onay, raporun ham değerini değiştirmez; onaylı değer ayrı saklanır. Düşük güvenli
-                  alanlar (&lt; {formatNumber(lowThreshold, 2)}) açıkça işaretlenmeden toplu onay
-                  verilemez. Kritik güven eşiği &lt; {formatNumber(criticalThreshold, 2)}.
-                </p>
+                        {applyMode === "existing" ? (
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <label className="flex flex-col gap-1 text-[11px] font-medium text-[var(--text-soft)]">
+                              Hedef proje
+                              <select
+                                value={applyProjectId}
+                                onChange={(e) => {
+                                  setApplyProjectId(e.target.value);
+                                  setApplySessionId("");
+                                }}
+                                className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-2.5 py-2 text-xs text-[var(--text)]"
+                              >
+                                {projects.map((proj) => (
+                                  <option key={proj.id} value={proj.id}>
+                                    {proj.code ? `[${proj.code}] ` : ""}
+                                    {proj.name} ({proj.section_count} bölüm)
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="flex flex-col gap-1 text-[11px] font-medium text-[var(--text-soft)]">
+                              Hedef test bölümü
+                              <select
+                                value={applySessionId}
+                                onChange={(e) => setApplySessionId(e.target.value)}
+                                className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-2.5 py-2 text-xs text-[var(--text)]"
+                              >
+                                {targetSessions.map((sess) => (
+                                  <option key={sess.id} value={sess.id}>
+                                    {sess.name}
+                                  </option>
+                                ))}
+                                <option value="__NEW__">+ Bu projede yeni test bölümü oluştur</option>
+                              </select>
+                            </label>
+                            {applySessionId === "__NEW__" ? (
+                              <label className="flex flex-col gap-1 text-[11px] font-medium text-[var(--text-soft)] sm:col-span-2">
+                                Yeni bölüm numarası
+                                <input
+                                  type="text"
+                                  value={newApplySectionNo}
+                                  onChange={(e) => setNewApplySectionNo(e.target.value)}
+                                  placeholder="Ör: BÖLÜM 1"
+                                  className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-2.5 py-2 text-xs text-[var(--text)]"
+                                />
+                              </label>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <label className="flex flex-col gap-1 text-[11px] font-medium text-[var(--text-soft)]">
+                              Yeni proje adı
+                              <input
+                                type="text"
+                                value={newApplyProjectName}
+                                onChange={(e) => setNewApplyProjectName(e.target.value)}
+                                placeholder="Ör: HİZAN İLÇESİ DGBH YAPIM İŞİ PROJESİ"
+                                className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-2.5 py-2 text-xs text-[var(--text)]"
+                              />
+                            </label>
+                            <label className="flex flex-col gap-1 text-[11px] font-medium text-[var(--text-soft)]">
+                              Yeni bölüm numarası
+                              <input
+                                type="text"
+                                value={newApplySectionNo}
+                                onChange={(e) => setNewApplySectionNo(e.target.value)}
+                                placeholder="Ör: BÖLÜM 1"
+                                className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-2.5 py-2 text-xs text-[var(--text)]"
+                              />
+                            </label>
+                          </div>
+                        )}
 
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedFields(new Set(fields.map((item) => item.descriptor.key)))}
-                    disabled={allSelected || fields.length === 0}
-                    className="rounded-md border border-[var(--border)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--text-soft)] hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    Tümünü seç
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedFields(new Set())}
-                    disabled={selectedFields.size === 0}
-                    className="rounded-md border border-[var(--border)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--text-soft)] hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    Seçimi temizle
-                  </button>
-                  {pendingLowConfidence.length > 0 ? (
-                    <span className="rounded-full border border-[var(--warning-border)] bg-[var(--warning-bg)] px-2.5 py-1 text-[10px] text-[var(--warning)]">
-                      {pendingLowConfidence.length} düşük güvenli alan onay bekliyor:{" "}
-                      {pendingLowConfidence
-                        .slice(0, 3)
-                        .map((item) => item.descriptor.label)
-                        .join(", ")}
-                      {pendingLowConfidence.length > 3 ? "…" : ""}
-                    </span>
-                  ) : (
-                    <span className="rounded-full border border-[var(--success-border)] bg-[var(--success-bg)] px-2.5 py-1 text-[10px] text-[var(--success)]">
-                      düşük güvenli alan seçimi tamam
-                    </span>
-                  )}
-                  {editedCount > 0 ? (
-                    <span className="rounded-full border border-[var(--border)] bg-[var(--surface-3)] px-2.5 py-1 text-[10px] text-[var(--text-soft)]">
-                      {editedCount} elle düzeltme
-                    </span>
-                  ) : null}
-                </div>
+                        <label className="inline-flex cursor-pointer items-center gap-2 text-[11px] text-[var(--text-soft)]">
+                          <input
+                            type="checkbox"
+                            checked={overwriteExisting}
+                            onChange={(e) => setOverwriteExisting(e.target.checked)}
+                          />
+                          Kesitte zaten dolu olan alanların üzerine yaz
+                        </label>
+                      </div>
+                    ) : null}
 
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    disabled
-                    title={approveBlockedReason}
-                    aria-describedby="ocr-approve-reason"
-                    className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-3)] px-4 py-2 text-xs font-semibold text-[var(--text-muted)] opacity-60"
-                  >
-                    <CheckCircle2 size={14} aria-hidden="true" />
-                    Seçilenleri onayla ({selectedFields.size})
-                  </button>
-                  <button
-                    type="button"
-                    disabled
-                    title="Oturuma uygulama, onay tamamlandıktan ve oturum seçildikten sonra etkinleşecek."
-                    className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-3)] px-4 py-2 text-xs font-semibold text-[var(--text-muted)] opacity-60"
-                  >
-                    <ArrowRight size={14} aria-hidden="true" />
-                    Oturuma uygula
-                  </button>
-                </div>
-                <p
-                  id="ocr-approve-reason"
-                  className="mt-2 rounded-lg border border-[var(--border)] bg-[var(--surface-3)] px-3 py-2 text-[10px] leading-relaxed text-[var(--text-muted)]"
-                >
-                  Neden pasif: {approveBlockedReason}
-                </p>
-                <p className="mt-2 text-[10px] leading-relaxed text-[var(--text-faint)]">
-                  Denetim izi: onaylayan kullanıcı, zaman damgası, alan bazlı değer ve ham OCR metni
-                  kaydedilir. Uygulama ayrı bir adımdır; onayla birlikte oturuma yazılmaz.
-                </p>
-              </section>
+                    {actionError ? (
+                      <p
+                        role="alert"
+                        className="mt-3 rounded-lg border border-[var(--danger-border)] bg-[var(--danger-bg)] px-3 py-2 text-[11px] text-[var(--danger)]"
+                      >
+                        {actionError}
+                      </p>
+                    ) : null}
+
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={Boolean(approveDisabledReason) || approving}
+                        title={approveDisabledReason ?? "Seçili alanları onayla"}
+                        onClick={() => {
+                          void handleApproveSelected();
+                        }}
+                        className="btn btn-secondary inline-flex min-h-10 items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {approving ? (
+                          <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+                        ) : (
+                          <CheckCircle2 size={14} aria-hidden="true" />
+                        )}
+                        Seçilenleri onayla ({selectedFields.size})
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!canApplyToSession}
+                        title={
+                          resultDemo
+                            ? "Demo analiz sunucuya uygulanamaz."
+                            : approvedKeys.size === 0
+                              ? "Önce en az bir alanı onaylayın."
+                              : "Onaylı alanları seçili test bölümüne aktar ve hesapla"
+                        }
+                        onClick={() => {
+                          void handleApplyToSession();
+                        }}
+                        className="btn btn-primary inline-flex min-h-10 items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {applying ? (
+                          <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+                        ) : (
+                          <ArrowRight size={14} aria-hidden="true" />
+                        )}
+                        Oturuma uygula ({approvedKeys.size} onaylı)
+                      </button>
+                      {appliedSessionId ? (
+                        <button
+                          type="button"
+                          onClick={() => setStoreTab("geometry")}
+                          className="btn btn-secondary inline-flex min-h-10 items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-semibold"
+                        >
+                          <FolderOpen size={14} aria-hidden="true" />
+                          Kesit ve Hesapları Aç
+                        </button>
+                      ) : null}
+                    </div>
+                    <p className="mt-2 text-[10px] leading-relaxed text-[var(--text-faint)]">
+                      Denetim izi: onaylayan kullanıcı, zaman damgası, alan bazlı değer ve ham OCR metni
+                      kaydedilir. Uygulama adımında kesit hesaplamaları ve 11 zorunlu form slotu otomatik güncellenir.
+                    </p>
+                  </section>
+                );
+
+                return result.dossier && result.dossier.sections.length > 0 ? (
+                  <>
+                    <DossierPanel analysisId={result.id} dossier={result.dossier} />
+                    <details className="panel p-4">
+                      <summary className="cursor-pointer text-sm font-semibold text-[var(--text-muted)]">
+                        Ham Tekil OCR Alan Dökümü ve Alan Onayı (Çoklu bölüm dokümanlarında yukarıdaki Bölüm Kartlarını kullanın)
+                      </summary>
+                      <div className="mt-4 space-y-5">
+                        {rawResultBlocks}
+                        {approvalPanel}
+                      </div>
+                    </details>
+                  </>
+                ) : (
+                  <>
+                    {rawResultBlocks}
+                    {approvalPanel}
+                  </>
+                );
+              })()}
             </div>
           ) : null}
         </div>
@@ -1284,17 +1693,14 @@ export default function OcrPage() {
             status={status}
             loading={statusLoading}
             error={statusError}
-            demoActive={resultDemo}
             onRetry={() => {
               void loadStatus();
             }}
-            onDemo={showDemo}
           />
           <HistoryPanel
             items={history}
             loading={historyLoading}
             error={historyError}
-            demo={historyDemo}
             openingId={openingHistoryId}
             selectedId={result?.id ?? null}
             onOpen={(item) => {
@@ -1321,6 +1727,8 @@ export default function OcrPage() {
           demo={profilesDemo}
         />
       </div>
+        </>
+      )}
     </div>
   );
 }

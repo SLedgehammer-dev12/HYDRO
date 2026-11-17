@@ -2,7 +2,7 @@
 
 > Tek kaynak özet. Ayrıntı için "Ayrıntılı notlar" bölümündeki dosyalara bakın.
 >
-> **Son güncelleme:** 2026-11-16
+> **Son güncelleme:** 2026-11-17
 > **Dal:** `feat/ergonomics-ocr`
 > **Son commit:** `fef2ae4` — OCR gerçek form kalibrasyonu (Vision), bbox eşleme, eşleme profili, göreli segment toleransı
 
@@ -12,14 +12,14 @@
 
 | Alan | Durum | Kanıt |
 | --- | --- | --- |
-| Masaüstü uygulaması | Çalışıyor, kararlı | 653 unittest PASS |
-| Web backend (FastAPI) | Çalışıyor | 97 pytest PASS |
+| Masaüstü uygulaması | Çalışıyor, kararlı | 668 unittest PASS (`skipped=1`) |
+| Web backend (FastAPI) | Çalışıyor | 125 pytest PASS |
 | Web frontend (React 19) | Çalışıyor | `npm run build` PASS, 11/11 sekme smoke |
 | Domain parity | Masaüstü ile aynı kaynak | `hidrostatik_test.domain` doğrudan import edilir |
 | Proje / Test Bölümü (Section) DB | Çalışıyor | `projects` + `sessions.project_id` + `inputs.section_meta` |
 | KP sürekliliği + Segment denetimi | Tamamlandı | `lib/kp.ts`, Geometri & Saha sayfası |
-| Plan-Profil PDF tarama | Çalışıyor (metin katmanı) | `POST /api/projects/plan-profile/scan` |
-| OCR rapor kontrolü | Çalışıyor (macOS Vision) | `ocrmac`, bbox eşleme, onay, gerçek form kalibrasyonu |
+| Plan-Profil PDF / CAD tarama | Çalışıyor (PDF + DWG/DXF) | `POST /api/projects/plan-profile/scan` |
+| OCR rapor kontrolü | Çalışıyor (Vision + Excel) | `ocrmac`, `.xlsx`/`.xls`, `commit-dossier` proje/bölüm kaydı, tekil onay/uygulama |
 | Docker / dağıtım | Hazır | `webapp/Dockerfile`, `docker-compose.yml` |
 
 **Durum:** MVP tamam. Kalan işler ağırlıklı olarak üretim sertleştirmesi (auth, migration, kod bölme) ve kurum onayı bekleyen veri işleri.
@@ -78,16 +78,16 @@
 
 ## 3. Devam Eden / Sıradaki İş
 
-Aktif çalışma yok. OCR kalibrasyonu gerçek formlarla tamamlandı; sıradaki
-adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen işlerdir.
+Aktif çalışma yok. 74 sayfalık ERCİŞ toplu OCR kalibrasyon raporu (`docs/spec/ocr_calibration_report.md`),
+`SectionIdentityCard` segment özeti, terminoloji standardizasyonu, Projeler sayfası `Σ Section` boru hattı KPI'ı,
+`three.js` kod bölme, OCR Test Raporu Kontrolü'nden çoklu/hesap/tekil raporların proje & bölüm eşleyerek (veya
+yeni proje/test bölümü açarak) kaydedilmesi, kümülatif hesaplama (`profile`/`air`/`pressure`/`pig`), 11 kontrol
+noktası değerlendirmesi ve canlı oturum hidrasyonu tamamlandı.
 
-Sıradaki mantıklı adımlar (öncelik sırasıyla):
-
-1. **Segment özetini `SectionIdentityCard`'a taşı** — KP girişi ile segment sonucu aynı kartta görünsün.
-2. **Terminoloji ayrımını yaygınlaştır**: "Test Bölümü (Section)" ve
-   "Et Kalınlığı / Çap Alt Parçası (Segment)" metinlerini tüm ekranlarda tutarlı kullan.
-3. **Projeler sayfasında boru hattı toplamı KPI'ı** — `Σ Section` ile ilk/son KP aralığı karşılaştırması.
-4. **Frontend kod bölme** — three.js lazy load (ana bundle ~2.2 MB).
+Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen işlerdir:
+1. OCR DB kuyruğu + worker + iptal.
+2. Alembic üretim migrasyonu ve Auth/OIDC.
+3. Frontend birim testleri (vitest).
 
 ---
 
@@ -96,11 +96,15 @@ Sıradaki mantıklı adımlar (öncelik sırasıyla):
 ### 4.1 Web / üretim sertleştirmesi (P1)
 
 - [x] OCR mapping profile `pre_extract` / `post_map` uygulanması (`pre_extract`: ek etiket adları; `post_map`: hedef yol geçersiz kılma).
+- [x] Frontend kod bölme (`three.js` / `PipelineScene` lazy load; ana bundle ~2.26 MB → ~1.25 MB + 1.02 MB ayrı chunk).
+- [x] `SectionIdentityCard` segment özeti, terminoloji ayrımı ("Test Bölümü (Section)" / "Segment") ve Projeler sayfası `Σ Section` KPI'ı.
+- [x] 74 sayfalık ERCİŞ toplu OCR doğrulaması ve `.Başlık Yeri` / alfanümerik `BÖLÜM` iyileştirmesi (`docs/spec/ocr_calibration_report.md`).
+- [x] `.xlsx` / `.xls` test raporlarının doğrudan hücre tabanlı (`source="spreadsheet"`) okunması (`openpyxl` + `xlrd`, magic-byte/ZIP doğrulama).
+- [x] OCR Test Raporu Kontrolü kayıt & hesap hattı (`commit-dossier` liste sözleşmesi, mühendislik hesap paketi & boş `.xls` ayrımı, proje/KP kesit eşleme veya otomatik yeni proje + 11 zorunlu form slotu açma, `profile`/`air`/`pressure`/`pig` `TestResult` kaydı + canlı hidrasyon, tekil rapor onay/uygulama).
 - [ ] OCR DB kuyruğu + worker + iptal (şu an analiz senkron).
 - [ ] Alembic üretim migrasyonu (`create_all` + hafif kolon migrasyonu yerine).
 - [ ] Auth / OIDC + iki kişi onay kuralı (MVP'de anonim `X-Session-ID`).
 - [ ] Postgres runtime testi (kod uyumlu, `psycopg` kurulu değil).
-- [ ] Frontend kod bölme (three.js lazy load).
 - [ ] Frontend birim testleri (vitest); şu an `verify-tabs.mjs` ile sekme regresyonu korunuyor.
 - [ ] 3D gerçek veri: `profile_points[]` / `equipment[]` girdileri (yoksa yaklaşık sahne + uyarı).
 
@@ -141,23 +145,23 @@ Sıradaki mantıklı adımlar (öncelik sırasıyla):
 
 ---
 
-## 6. Doğrulama (son çalıştırma: 2026-11-16)
+## 6. Doğrulama (son çalıştırma: 2026-11-17)
 
 ```bash
 # Web backend
-python3 -m pytest webapp/backend/tests -q                      # 97 passed
+python3 -m pytest webapp/backend/tests -q                      # 125 passed
 
 # Masaüstü
-python3 -m unittest discover -s tests -p "test_*.py"           # 653 passed
+python3 -m unittest discover -s tests -p "test_*.py"           # 668 passed (1 skipped)
 
 # OCR (gerçek form fixture'ları dahil)
-python3 -m pytest tests/test_report_ocr.py -q                  # 53 passed, 1 skipped
+python3 -m pytest tests/test_report_ocr.py -q                  # 62 passed, 1 skipped
 
 # Frontend derleme
 cd webapp/frontend && npm run build                            # PASS
 
-# Sekme smoke (uygulama 8095'te çalışırken)
-cd webapp/frontend && HYDRO_APP_URL=http://127.0.0.1:8095 \
+# Sekme smoke (uygulama 8099'da izole DB ile çalışırken)
+cd webapp/frontend && HYDRO_APP_URL=http://127.0.0.1:8099 \
   node scripts/verify-tabs.mjs                                 # 11/11 PASS
 ```
 

@@ -219,6 +219,7 @@ FIELD_ALIASES: Final[dict[str, tuple[str, ...]]] = {
         "P Test",
     ),
     "air_test.vp": (
+        "Basıncı 1 Bar Değiştirmek İçin Gerekli Teorik Su Miktarı",
         "Teorik İlave Su",
         "Teorik Hacim",
         "Theoretical Added Water",
@@ -226,6 +227,7 @@ FIELD_ALIASES: Final[dict[str, tuple[str, ...]]] = {
         "Vp",
     ),
     "air_test.vpa": (
+        "Basıncı 1 Bar Değiştirmek İçin Kullanılan Su Miktarı",
         "Fiili İlave Su",
         "Fiili Hacim",
         "Gerçek Hacim",
@@ -331,6 +333,7 @@ FIELD_ALIASES: Final[dict[str, tuple[str, ...]]] = {
         "Verdict",
     ),
     "notes": (
+        "Açıklamalar",
         "Açıklama",
         "Notlar",
         "Not",

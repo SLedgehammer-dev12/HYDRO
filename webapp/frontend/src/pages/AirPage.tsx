@@ -92,12 +92,12 @@ export function AirPage() {
       return;
     }
     calculateAir.mutate(request, {
-      onSuccess: ({ data, mode: resultMode }) => {
+      onSuccess: ({ data }) => {
         const passed = data.passed;
         pushToast(
           passed ? "success" : "error",
           passed ? "Hava içerik testi başarılı" : "Hava içerik testi başarısız",
-          `Vpa/Vp = ${num(data.ratio, 6)} · marj ${fmt.m3(data.decision.margin ?? 0)}${resultMode === "demo" ? " (demo)" : ""}`,
+          `Vpa/Vp = ${num(data.ratio, 6)} · marj ${fmt.m3(data.decision.margin ?? 0)}`,
         );
         saveResult.mutate({
           testType: "air",

@@ -191,7 +191,7 @@ export function ReportsPage() {
 
   async function openSession(id: string) {
     if (backend !== "online") {
-      pushToast("info", "Demo oturumu", "Oturum açma yalnızca backend bağlıyken çalışır.");
+      pushToast("info", "Çevrimdışı oturum", "Kayıtlı oturum açma yalnızca sunucu bağlıyken çalışır.");
       return;
     }
     try {
@@ -216,7 +216,7 @@ export function ReportsPage() {
             <span className="text-[10.5px] text-[var(--text-faint)]">
               {inputs.report.operator || "Operatör belirtilmedi"} · {inputs.report.date || "Tarih yok"}
             </span>
-            {backend === "demo" ? <Badge tone="warning">demo çıktı</Badge> : null}
+            {backend === "demo" ? <Badge tone="warning">yerel çıktı</Badge> : null}
           </>
         }
         actions={
@@ -401,7 +401,7 @@ export function ReportsPage() {
                         {entry.format.toUpperCase()} · {fmt.bytes(entry.size)} · {relativeTime(entry.at)}
                       </p>
                     </div>
-                    {entry.demo ? <Badge tone="warning">demo</Badge> : <Badge tone="pass">sunucu</Badge>}
+                    {entry.demo ? <Badge tone="warning">yerel</Badge> : <Badge tone="pass">sunucu</Badge>}
                   </li>
                 ))}
               </ul>

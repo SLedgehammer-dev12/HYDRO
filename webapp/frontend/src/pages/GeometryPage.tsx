@@ -196,11 +196,11 @@ export function GeometryPage() {
       return;
     }
     calculate.mutate(sections, {
-      onSuccess: ({ data, mode }) => {
+      onSuccess: ({ data }) => {
         pushToast(
           "success",
           "Geometri doğrulandı",
-          `${data.section_count} kesit · ${fmt.m(data.total_length_m, 0)} · ${fmt.m3Short(data.internal_volume_m3)}${mode === "demo" ? " (demo motoru)" : ""}`,
+          `${data.section_count} kesit · ${fmt.m(data.total_length_m, 0)} · ${fmt.m3Short(data.internal_volume_m3)}`,
         );
       },
       onError: (error) => {

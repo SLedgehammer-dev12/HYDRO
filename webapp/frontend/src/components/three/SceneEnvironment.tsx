@@ -135,7 +135,44 @@ function GroundPlane({ layout }: { layout: SceneLayout }) {
   );
 }
 
-/** Renders the terrain, grid and the station ruler under the pipeline. */
+/** Renders the terrain, grid, landmark pins and station ruler under the pipeline. */
+function LandmarkPins({ layout, showLabels }: { layout: SceneLayout; showLabels: boolean }) {
+  if (!layout.landmarks || layout.landmarks.length === 0) return null;
+  return (
+    <group>
+      {layout.landmarks.map((item) => {
+        const { x, y, z } = item.position;
+        return (
+          <group key={item.landmark.id} position={[x, y, z]}>
+            <Line
+              points={[new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0.9, 0)]}
+              color={item.color}
+              lineWidth={1.2}
+              transparent
+              opacity={0.75}
+            />
+            <mesh position={[0, 0.95, 0]}>
+              <sphereGeometry args={[0.07, 10, 8]} />
+              <meshBasicMaterial color={item.color} toneMapped={false} />
+            </mesh>
+            {showLabels ? (
+              <SceneHtml position={[0, 1.24, 0]} center zIndexRange={[10, 0]}>
+                <span
+                  className="whitespace-nowrap rounded border border-line/60 bg-ink-950/80 px-1.5 py-0.5 text-[9.5px] text-mist-200 shadow"
+                  style={{ borderLeftColor: item.color, borderLeftWidth: 2 }}
+                >
+                  {item.landmark.label}
+                  {item.landmark.kp ? ` · KP ${item.landmark.kp}` : ""}
+                </span>
+              </SceneHtml>
+            ) : null}
+          </group>
+        );
+      })}
+    </group>
+  );
+}
+
 export default function SceneEnvironment({
   layout,
   showLabels,
@@ -147,6 +184,7 @@ export default function SceneEnvironment({
       <SceneLights layout={layout} highQuality={highQuality} />
       <GroundPlane layout={layout} />
       <Terrain layout={layout} />
+      <LandmarkPins layout={layout} showLabels={showLabels} />
       <StationRuler layout={layout} showLabels={showLabels} />
       {highQuality && !reducedMotion ? (
         <ContactShadows

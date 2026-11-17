@@ -24,11 +24,14 @@ import difflib
 import importlib
 import importlib.util
 import io
+import math
 import os
 import re
 import sys
+import zipfile
 from dataclasses import dataclass, replace
 from datetime import date as _date
+from datetime import datetime as _datetime
 from pathlib import Path
 from typing import Any, Final, Sequence
 
@@ -67,14 +70,29 @@ ERROR_OCR_UNAVAILABLE: Final[str] = "ocr_unavailable"
 ERROR_DEPENDENCY_MISSING: Final[str] = "dependency_missing"
 ERROR_INVALID_CALCULATED: Final[str] = "invalid_calculated"
 
-#: Dosya boyutu guvenlik siniri (25 MB). Taranmis raporlar tipik olarak
-#: 1-10 MB araligindadir; buyuk dosyalar bellek tuketimini sinirlamak icin
-#: reddedilir.
-MAX_FILE_SIZE_BYTES: Final[int] = 25 * 1024 * 1024
+#: Dosya boyutu guvenlik siniri (500 MB varsayilan; HYDRO_MAX_UPLOAD_MB ile
+#: 1..500 MB araliginda yapilandirilabilir).
+MAX_FILE_SIZE_BYTES: Final[int] = 500 * 1024 * 1024
+MAX_ALLOWED_UPLOAD_MB: Final[int] = 500
+
+
+def effective_max_file_size_bytes() -> int:
+    """Return active upload/file size limit (500 MB default, clamped 1..500 MB)."""
+
+    raw = os.environ.get("HYDRO_MAX_UPLOAD_MB")
+    if raw is not None and raw.strip():
+        try:
+            mb = int(raw.strip())
+            return max(1, min(mb, MAX_ALLOWED_UPLOAD_MB)) * 1024 * 1024
+        except ValueError:
+            pass
+    return MAX_FILE_SIZE_BYTES
+
+
 #: PDF sayfa siniri; OCR maliyetini ve calisma suresini sinirlar.
 MAX_PDF_PAGES: Final[int] = 200
 #: OCR'a verilecek en fazla sayfa sayisi.
-MAX_OCR_PAGES: Final[int] = 30
+MAX_OCR_PAGES: Final[int] = 200
 #: Metin katmani bu karakter sayisinin altindaysa OCR denenir.
 MIN_TEXT_LAYER_CHARS: Final[int] = 40
 #: Regex/veri isleme icin metin uzunlugu siniri.
@@ -82,10 +100,11 @@ MAX_TEXT_CHARS: Final[int] = 2_000_000
 #: OCR goruntusunun yeniden olceklenme esigi (piksel).
 OCR_MIN_IMAGE_WIDTH: Final[int] = 1200
 
+SPREADSHEET_EXTENSIONS: Final[frozenset[str]] = frozenset({".xlsx", ".xls"})
 SUPPORTED_EXTENSIONS: Final[frozenset[str]] = frozenset(
-    {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
+    {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp", ".xlsx", ".xls"}
 )
-IMAGE_EXTENSIONS: Final[frozenset[str]] = SUPPORTED_EXTENSIONS - {".pdf"}
+IMAGE_EXTENSIONS: Final[frozenset[str]] = SUPPORTED_EXTENSIONS - {".pdf"} - SPREADSHEET_EXTENSIONS
 
 STATUS_MATCH: Final[str] = "match"
 STATUS_WITHIN_TOLERANCE: Final[str] = "within_tolerance"
@@ -96,6 +115,7 @@ STATUS_NOT_COMPARABLE: Final[str] = "not_comparable"
 
 TEXT_SOURCE_LAYER: Final[str] = "text-layer"
 TEXT_SOURCE_OCR: Final[str] = "ocr"
+TEXT_SOURCE_SPREADSHEET: Final[str] = "spreadsheet"
 
 
 class ReportOcrError(Exception):
@@ -182,6 +202,7 @@ class OcrAnalysisResult:
     issues: tuple[ValidationIssue, ...] = ()
     warnings: tuple[str, ...] = ()
     needs_human_review: bool = True
+    pages: tuple[PageText, ...] = ()
 
     @property
     def used_ocr(self) -> bool:
@@ -249,12 +270,13 @@ def validate_input_path(path: str | os.PathLike[str]) -> Path:
         raise ReportOcrError("Dosya bilgisi okunamadi.", ERROR_INVALID_PATH) from exc
     if size == 0:
         raise ReportOcrError("Rapor dosyasi bos.", ERROR_EMPTY_FILE)
-    if size > MAX_FILE_SIZE_BYTES:
+    limit_bytes = effective_max_file_size_bytes()
+    if size > limit_bytes:
         raise ReportOcrError(
             (
                 "Rapor dosyasi boyut sinirini asiyor "
                 f"({size / (1024 * 1024):.1f} MB > "
-                f"{MAX_FILE_SIZE_BYTES / (1024 * 1024):.0f} MB)."
+                f"{limit_bytes / (1024 * 1024):.0f} MB)."
             ),
             ERROR_FILE_TOO_LARGE,
         )
@@ -275,7 +297,10 @@ def extract_text(path: str | os.PathLike[str]) -> list[PageText]:
     """
 
     resolved = validate_input_path(path)
-    if resolved.suffix.lower() == ".pdf":
+    suffix = resolved.suffix.lower()
+    if suffix in SPREADSHEET_EXTENSIONS:
+        return _extract_spreadsheet_text(resolved)
+    if suffix == ".pdf":
         pages = _extract_pdf_text(resolved)
         if _text_char_count(pages) >= MIN_TEXT_LAYER_CHARS:
             return pages
@@ -319,6 +344,364 @@ def extract_text(path: str | os.PathLike[str]) -> list[PageText]:
         return ocr_pages
 
     return [_ocr_image_page(resolved)]
+
+
+_EXCEL_MAX_ROWS: Final[int] = 2000
+_EXCEL_MAX_COLS: Final[int] = 64
+_XLSX_MAX_ENTRIES: Final[int] = 500
+_XLSX_MAX_UNCOMPRESSED_BYTES: Final[int] = 1024 * 1024 * 1024
+_EXCEL_ERROR_TOKENS: Final[frozenset[str]] = frozenset(
+    {"#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#N/A", "#NUM!", "#NULL!"}
+)
+_EXCEL_SEP_ONLY_RE: Final[re.Pattern[str]] = re.compile(r"^[:=\-—\s]+$")
+_EXCEL_DOT_PLACEHOLDER_RE: Final[re.Pattern[str]] = re.compile(r"^[._\-—\s]{4,}$")
+_EXCEL_UNIT_TOKEN_BODY: Final[str] = (
+    r"mm|cm|m|km|in|inch|inç|ft|bar|barg|bara|psi|kpa|mpa|°c|ºc|°f|"
+    r"m3|m³|m\^3|l|lt|ml|%|1/bar|1/k|1/°c|10\^-?6/bar|10\^?-?6/°c"
+)
+_EXCEL_UNIT_CELL_RE: Final[re.Pattern[str]] = re.compile(
+    rf"^(?:\(?\s*(?:{_EXCEL_UNIT_TOKEN_BODY})\s*\)?|\(\s*[ck]\s*\))\s*[:=]?\s*$",
+    re.IGNORECASE,
+)
+_EXCEL_TRAILING_UNIT_RE: Final[re.Pattern[str]] = re.compile(
+    rf"\s*\(\s*(?P<unit>{_EXCEL_UNIT_TOKEN_BODY}|[ck])\s*\)\s*$",
+    re.IGNORECASE,
+)
+_EXCEL_ITEM_PREFIX_RE: Final[re.Pattern[str]] = re.compile(r"^[3-9]\.\s*")
+_EXCEL_TRAILING_OP_RE: Final[re.Pattern[str]] = re.compile(r"\d\s*[xX×*+/]\s*$")
+_XLS_OLE2_MAGIC: Final[bytes] = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+
+
+def _validate_xlsx_zip(path: Path) -> None:
+    try:
+        if not zipfile.is_zipfile(path):
+            raise ReportOcrError(
+                "Excel (.xlsx) dosyasi gecersiz veya bozuk.",
+                ERROR_CORRUPT_DOCUMENT,
+            )
+        with zipfile.ZipFile(path, "r") as archive:
+            infos = archive.infolist()
+            if len(infos) > _XLSX_MAX_ENTRIES:
+                raise ReportOcrError(
+                    "Excel (.xlsx) dosyasi guvenlik sinirini asiyor.",
+                    ERROR_CORRUPT_DOCUMENT,
+                )
+            names_lower = {info.filename.lower() for info in infos}
+            if "xl/workbook.xml" not in names_lower:
+                raise ReportOcrError(
+                    "Excel (.xlsx) dosyasi gecersiz veya bozuk (workbook eksik).",
+                    ERROR_CORRUPT_DOCUMENT,
+                )
+            total_uncompressed = 0
+            max_uncompressed = int(
+                _XLSX_MAX_UNCOMPRESSED_BYTES
+                * max(1.0, effective_max_file_size_bytes() / MAX_FILE_SIZE_BYTES)
+            )
+            for info in infos:
+                with archive.open(info, "r") as entry:
+                    while chunk := entry.read(65536):
+                        total_uncompressed += len(chunk)
+                        if total_uncompressed > max_uncompressed:
+                            raise ReportOcrError(
+                                "Excel (.xlsx) dosyasi guvenlik sinirini asiyor.",
+                                ERROR_CORRUPT_DOCUMENT,
+                            )
+    except ReportOcrError:
+        raise
+    except Exception as exc:
+        raise ReportOcrError(
+            "Excel (.xlsx) dosyasi gecersiz veya bozuk.",
+            ERROR_CORRUPT_DOCUMENT,
+            detail=str(exc),
+        ) from exc
+
+
+def _excel_normalize_cell(value: Any) -> str:
+    if value is None or isinstance(value, bool):
+        return ""
+    if isinstance(value, (_datetime, _date)):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return ""
+        if value.is_integer():
+            return str(int(value))
+        return f"{value:.10g}".replace(".", ",")
+    text = " ".join(str(value).split()).strip()
+    if not text or text.upper() in _EXCEL_ERROR_TOKENS or _EXCEL_DOT_PLACEHOLDER_RE.fullmatch(text):
+        return ""
+    return text
+
+
+def _excel_clean_label(raw: str) -> tuple[str, str]:
+    text = raw.strip()
+    trailing_unit = ""
+    if unit_match := _EXCEL_TRAILING_UNIT_RE.search(text):
+        trailing_unit = unit_match.group("unit").strip()
+        text = text[: unit_match.start()].strip()
+    text = _EXCEL_ITEM_PREFIX_RE.sub("", text).strip()
+    text = text.rstrip(":= ").strip()
+    return text, trailing_unit
+
+
+def _excel_match_label_key(label: str) -> str | None:
+    cleaned = label.strip()
+    if not cleaned:
+        return None
+    probe = f"{_fold(cleaned)} : __VAL__"
+    matched = _match_field_line(probe, _ALIAS_PATTERNS, _FUZZY_ALIASES)
+    if matched is None:
+        return None
+    key, rest_start = matched
+    return key if probe[rest_start:].strip() == "__VAL__" else None
+
+
+def _looks_like_excel_value(token: str) -> bool:
+    if _EXCEL_TRAILING_OP_RE.search(token):
+        return False
+    if _looks_like_value(token) or normalize_result(token) is not None:
+        return True
+    if match := _NUMBER_RE.match(token):
+        tail = token[match.end() :].strip()
+        if tail and _EXCEL_UNIT_CELL_RE.fullmatch(tail):
+            return True
+    if len(token) <= 32 and any(char.isdigit() for char in token):
+        try:
+            parse_date(token)
+            return True
+        except ValueError:
+            pass
+    return False
+
+
+def _excel_format_unit_join(value_line: str, unit: str) -> str:
+    sep = "\t" if unit[0].isdigit() else " "
+    return f"{value_line}{sep}{unit}"
+
+
+def _excel_row_to_lines(cells: Sequence[str]) -> list[str]:
+    """Convert one Excel row into ``Etiket : Deger`` lines without merging multi-column pairs."""
+
+    stripped_cells = [raw.strip() for raw in cells if raw and raw.strip()]
+    if "(" in stripped_cells and ")" in stripped_cells:
+        return [" ".join(stripped_cells)]
+
+    lines: list[str] = []
+    pending_labels: list[str] = []
+    pending_unit = ""
+
+    for raw in cells:
+        token = raw.strip()
+        if not token or _EXCEL_SEP_ONLY_RE.fullmatch(token):
+            continue
+
+        if _EXCEL_UNIT_CELL_RE.fullmatch(token):
+            cleaned_unit = token.rstrip(":= ").strip().strip("()")
+            if cleaned_unit:
+                if lines and not pending_labels and " : " in lines[-1]:
+                    lines[-1] = _excel_format_unit_join(lines[-1], cleaned_unit)
+                elif not pending_unit:
+                    pending_unit = cleaned_unit
+            continue
+
+        has_string_label = any(
+            _excel_match_label_key(lbl) in (_STRING_FIELDS | {"result", "date"})
+            for lbl in pending_labels
+        )
+        is_explicit_label = _excel_match_label_key(_excel_clean_label(token)[0]) is not None
+        is_value = not is_explicit_label and (
+            _looks_like_excel_value(token) or (bool(pending_labels) and has_string_label)
+        )
+
+        if is_value:
+            if pending_labels:
+                chosen = pending_labels[-1]
+                for candidate in reversed(pending_labels):
+                    if _excel_match_label_key(candidate) is not None:
+                        chosen = candidate
+                        break
+                line = f"{chosen} : {token}"
+                if pending_unit:
+                    line = _excel_format_unit_join(line, pending_unit)
+                lines.append(line)
+                pending_labels.clear()
+                pending_unit = ""
+            else:
+                lines.append(token)
+            continue
+
+        cleaned, inline_unit = _excel_clean_label(token)
+        if not cleaned:
+            continue
+
+        new_key = _excel_match_label_key(cleaned)
+        if pending_labels:
+            existing_keys = {
+                k for lbl in pending_labels if (k := _excel_match_label_key(lbl)) is not None
+            }
+            if pending_unit or (
+                new_key is not None and existing_keys and new_key not in existing_keys
+            ):
+                lines.extend(pending_labels)
+                pending_labels.clear()
+                pending_unit = ""
+
+        pending_labels.append(cleaned)
+        if inline_unit and not pending_unit:
+            pending_unit = inline_unit
+
+    for leftover in pending_labels:
+        lines.append(leftover)
+    return lines
+
+
+def _extract_xlsx_sheets(path: Path) -> list[tuple[str, list[list[str]]]]:
+    _validate_xlsx_zip(path)
+    if (
+        importlib.util.find_spec("openpyxl") is None
+        or importlib.util.find_spec("defusedxml") is None
+    ):
+        raise ReportOcrError(
+            "Excel (.xlsx) okumak icin openpyxl ve defusedxml gerekli.",
+            ERROR_DEPENDENCY_MISSING,
+        )
+    excel_reader_mod = importlib.import_module("openpyxl.reader.excel")
+
+    class _WorksheetOnlyReader(excel_reader_mod.ExcelReader):  # type: ignore[misc]
+        """Skip chartsheets while keeping sheet indices aligned for defined names."""
+
+        def read_chartsheet(self, sheet: Any, rel: Any) -> None:
+            cs = excel_reader_mod.Chartsheet()
+            cs._parent = self.wb
+            cs.title = getattr(sheet, "name", "Chart")
+            self.wb._add_sheet(cs)
+
+    reader: Any = None
+    try:
+        reader = _WorksheetOnlyReader(path, read_only=True, data_only=True, keep_links=False)
+        reader.read()
+        wb = reader.wb
+    except Exception as exc:
+        if reader is not None and getattr(reader, "archive", None) is not None:
+            reader.archive.close()
+        raise ReportOcrError(
+            "Excel (.xlsx) dosyasi okunamadi veya bozuk.",
+            ERROR_CORRUPT_DOCUMENT,
+            detail=str(exc),
+        ) from exc
+
+    sheets: list[tuple[str, list[list[str]]]] = []
+    try:
+        for ws in wb.worksheets[:MAX_PDF_PAGES]:
+            rows: list[list[str]] = []
+            for row_values in ws.iter_rows(
+                max_row=_EXCEL_MAX_ROWS, max_col=_EXCEL_MAX_COLS, values_only=True
+            ):
+                cells = [_excel_normalize_cell(val) for val in row_values]
+                if any(cells):
+                    rows.append([cell for cell in cells if cell])
+            sheets.append((ws.title, rows))
+    except Exception as exc:
+        raise ReportOcrError(
+            "Excel (.xlsx) sayfalari okunamadi.",
+            ERROR_CORRUPT_DOCUMENT,
+            detail=str(exc),
+        ) from exc
+    finally:
+        wb.close()
+    return sheets
+
+
+def _extract_xls_sheets(path: Path) -> list[tuple[str, list[list[str]]]]:
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(len(_XLS_OLE2_MAGIC))
+    except OSError as exc:
+        raise ReportOcrError(
+            "Excel (.xls) dosyasi okunamadi.",
+            ERROR_CORRUPT_DOCUMENT,
+            detail=str(exc),
+        ) from exc
+    if head != _XLS_OLE2_MAGIC:
+        raise ReportOcrError(
+            "Excel (.xls) dosyasi gecersiz veya bozuk.",
+            ERROR_CORRUPT_DOCUMENT,
+        )
+
+    if importlib.util.find_spec("xlrd") is None:
+        raise ReportOcrError(
+            "Eski Excel (.xls) okumak icin xlrd gerekli (requirements-ocr.txt).",
+            ERROR_DEPENDENCY_MISSING,
+        )
+    xlrd = importlib.import_module("xlrd")
+    try:
+        wb = xlrd.open_workbook(str(path), on_demand=True)
+    except Exception as exc:
+        raise ReportOcrError(
+            "Excel (.xls) dosyasi okunamadi veya bozuk.",
+            ERROR_CORRUPT_DOCUMENT,
+            detail=str(exc),
+        ) from exc
+
+    sheets: list[tuple[str, list[list[str]]]] = []
+    try:
+        for index in range(min(wb.nsheets, MAX_PDF_PAGES)):
+            sh = wb.sheet_by_index(index)
+            rows: list[list[str]] = []
+            for r in range(min(sh.nrows, _EXCEL_MAX_ROWS)):
+                row_cells: list[str] = []
+                for c in range(min(sh.ncols, _EXCEL_MAX_COLS)):
+                    ctype = sh.cell_type(r, c)
+                    if ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK, xlrd.XL_CELL_ERROR):
+                        continue
+                    val = sh.cell_value(r, c)
+                    if ctype == xlrd.XL_CELL_DATE:
+                        try:
+                            val = xlrd.xldate_as_datetime(val, wb.datemode)
+                        except Exception:
+                            continue
+                    elif ctype == xlrd.XL_CELL_BOOLEAN:
+                        continue
+                    normalized = _excel_normalize_cell(val)
+                    if normalized:
+                        row_cells.append(normalized)
+                if row_cells:
+                    rows.append(row_cells)
+            sheets.append((sh.name, rows))
+    finally:
+        wb.release_resources()
+    return sheets
+
+
+def _extract_spreadsheet_text(path: Path) -> list[PageText]:
+    suffix = path.suffix.lower()
+    sheets = _extract_xlsx_sheets(path) if suffix == ".xlsx" else _extract_xls_sheets(path)
+
+    pages: list[PageText] = []
+    for page_index, (sheet_name, rows) in enumerate(sheets, start=1):
+        if not rows:
+            continue
+        lines: list[str] = [sheet_name] if sheet_name else []
+        for row in rows:
+            lines.extend(_excel_row_to_lines(row))
+        sheet_text = "\n".join(line for line in lines if line.strip())
+        if sheet_text.strip():
+            pages.append(
+                PageText(
+                    page_number=page_index,
+                    text=sheet_text,
+                    source=TEXT_SOURCE_SPREADSHEET,
+                    confidence=1.0,
+                )
+            )
+    if not pages:
+        raise ReportOcrError(
+            "Excel raporunda okunabilir metin bulunamadi.",
+            ERROR_EMPTY_TEXT,
+        )
+    return pages
 
 
 def _extract_pdf_text(path: Path) -> list[PageText]:
@@ -543,8 +926,10 @@ def _ocr_pdf_pages_with_vision(path: Path) -> list[PageText]:
     """
 
     max_pages = _max_ocr_pages()
-    if importlib.util.find_spec("fitz") is not None:
+    if importlib.util.find_spec("fitz") is not None and importlib.util.find_spec("PIL") is not None:
         fitz = importlib.import_module("fitz")
+        from PIL import Image  # noqa: PLC0415 - opsiyonel bagimlilik, tembel import
+
         try:
             document = fitz.open(str(path))
         except Exception as exc:
@@ -590,6 +975,54 @@ def _ocr_pdf_pages_with_vision(path: Path) -> list[PageText]:
             )
         )
     return pages
+
+
+def ocr_pdf_page_rotated(
+    path: str | os.PathLike[str],
+    *,
+    page_index: int = 0,
+    rotate_deg: int = 270,
+    zoom: float = 3.2,
+) -> PageText | None:
+    """Dondurulmus (orn. 90/270 derece yan donmus CAD paftasi) PDF sayfasini yuksek cozunurlukle OCR okur."""
+    if not ocr_available():
+        return None
+    if importlib.util.find_spec("fitz") is None or importlib.util.find_spec("PIL") is None:
+        return None
+    engine = _resolve_ocr_engine()
+    if engine not in {"vision", "tesseract"}:
+        return None
+
+    fitz = importlib.import_module("fitz")
+    from PIL import Image  # noqa: PLC0415
+
+    resolved = validate_input_path(path)
+    try:
+        document = fitz.open(str(resolved))
+    except Exception:
+        return None
+    try:
+        if page_index < 0 or page_index >= len(document):
+            return None
+        matrix = fitz.Matrix(zoom, zoom).prerotate(rotate_deg)
+        pixmap = document[page_index].get_pixmap(matrix=matrix, alpha=False)
+        image = Image.open(io.BytesIO(pixmap.tobytes("png")))
+    except Exception:
+        return None
+    finally:
+        document.close()
+
+    if engine == "vision":
+        text, confidence, warning = _run_vision(image)
+    else:
+        text, confidence, warning = _run_tesseract(image)
+    return PageText(
+        page_number=page_index + 1,
+        text=text,
+        source=TEXT_SOURCE_OCR,
+        confidence=confidence,
+        warning=warning,
+    )
 
 
 def _render_pdf_pages(path: Path) -> list[Any]:
@@ -787,28 +1220,34 @@ _VISION_NUMERIC_RE: Final[re.Pattern[str]] = re.compile(r"[\d.,:'+\-/\s]+")
 _VISION_CODE_RE: Final[re.Pattern[str]] = re.compile(r"[A-ZÇĞİÖŞÜ]{1,8}[-\s]?\d{1,8}")
 _VISION_DATE_RE: Final[re.Pattern[str]] = re.compile(r"\d{1,2}[./]\d{1,2}[./]\d{2,4}")
 _VISION_KP_RE: Final[re.Pattern[str]] = re.compile(r"\d{1,4}\+\d{2,3}(?:[.,]\d+)?")
-_VISION_WORD_NUMBER_RE: Final[re.Pattern[str]] = re.compile(r"[A-ZÇĞİÖŞÜa-zçğıöşü]{2,14}\s+\d{1,6}")
+_VISION_WORD_NUMBER_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:[A-Za-z]{2,14}\s+\d{1,6}[A-Za-z]*(?:[-/.\s]+[A-Za-z\d]+)*|\d{1,4}\.?\s*(?:bolum|kesim))[. *]*",
+    re.IGNORECASE,
+)
 _VISION_PAREN_UNIT_RE: Final[re.Pattern[str]] = re.compile(r"^\([^)]{0,10}\)$")
+_VISION_PUNCTUATION_ONLY_RE: Final[re.Pattern[str]] = re.compile(r"^[:.\-—_,\s]+$")
 
 
 def _looks_like_value(text: str) -> bool:
     """True when a Vision block is likely a field value, not a label/description."""
 
     stripped = text.strip()
-    if not stripped or len(stripped) > 26:
+    if not stripped or len(stripped) > 30:
+        return False
+    if _VISION_PUNCTUATION_ONLY_RE.match(stripped):
         return False
     if _VISION_UNIT_ONLY_RE.match(stripped):
         return False
     upper = stripped.upper()
     if upper in {"PASS", "FAIL", "KABUL", "RED"}:
         return True
-    if _VISION_NUMERIC_RE.fullmatch(stripped):
-        return True
     if _VISION_DATE_RE.fullmatch(stripped) or _VISION_KP_RE.fullmatch(stripped):
         return True
     if _VISION_CODE_RE.fullmatch(stripped):
         return True
-    if _VISION_WORD_NUMBER_RE.fullmatch(stripped):
+    if _VISION_WORD_NUMBER_RE.fullmatch(_fold(stripped)):
+        return True
+    if _VISION_NUMERIC_RE.fullmatch(stripped) and any(char.isdigit() for char in stripped):
         return True
     digits = sum(char.isdigit() for char in stripped)
     return bool(digits) and digits / len(stripped) >= 0.5
@@ -1186,7 +1625,9 @@ def _build_alias_patterns(
 ) -> tuple[tuple[re.Pattern[str], str], ...]:
     entries: list[tuple[int, re.Pattern[str], str]] = []
     seen: set[tuple[str, str]] = set()
-    merged: dict[str, Sequence[str]] = {key: list(aliases) for key, aliases in FIELD_ALIASES.items()}
+    merged: dict[str, Sequence[str]] = {
+        key: list(aliases) for key, aliases in FIELD_ALIASES.items()
+    }
     for key, aliases in (extra or {}).items():
         merged.setdefault(key, [])
         merged[key] = [*merged[key], *aliases]
@@ -1449,6 +1890,7 @@ def parse_report(
     for page in pages:
         section = ""
         pa_seen = 0
+        start_kp_seen = False
         page_text = page.text[:MAX_TEXT_CHARS]
         for raw_line in page_text.splitlines():
             folded = _fold(raw_line)
@@ -1496,10 +1938,15 @@ def parse_report(
                     key = "pressure_test.p_delta"
                 pa_seen += 1
 
+            if key == "start_kp" and start_kp_seen:
+                key = "end_kp"
+
             order += 1
             extracted = _build_field(key, rest, page, warnings, source=page.source)
             if extracted is None:
                 continue
+            if key == "start_kp":
+                start_kp_seen = True
             candidates.append(_Candidate(key=key, field=extracted, order=order, section=section))
 
     if page_warnings := [page.warning for page in pages if page.warning]:
@@ -1523,14 +1970,18 @@ def parse_report(
         if verdict is not None:
             values["result"] = verdict
             warnings.append(
-                "Rapor sonucu serbest metinden cikarildi (kabul/red cumlesi); "
-                "insan onayi gerekli."
+                "Rapor sonucu serbest metinden cikarildi (kabul/red cumlesi); insan onayi gerekli."
             )
 
     if "report_no" not in values:
         form_no = _find_form_number(pages)
         if form_no is not None:
             values["report_no"] = form_no
+
+    if "section_id" not in values:
+        section_id = _find_section_id(pages)
+        if section_id is not None:
+            values["section_id"] = section_id
 
     report = HydrotestReport(
         report_no=values.get("report_no"),
@@ -1625,6 +2076,48 @@ def _find_form_number(pages: Sequence[PageText]) -> ExtractedField | None:
     return None
 
 
+_SECTION_ID_FALLBACK_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?P<prefix>BOLUM|KESIM)\s+(?P<code>\d{1,4}(?:\s*[-/]\s*[A-Za-z\d]{1,6}|[A-Za-z]{1,3})?)\b",
+    re.IGNORECASE,
+)
+_SECTION_ID_FALLBACK_REV_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?P<code>\d{1,4})\.?\s*(?P<prefix>bolum|kesim)\b",
+    re.IGNORECASE,
+)
+
+
+def _find_section_id(pages: Sequence[PageText]) -> ExtractedField | None:
+    """Find a section designation (e.g. 'BÖLÜM 11-A', '14.bölüm') in report text."""
+
+    for page in pages:
+        for line in page.text.splitlines():
+            stripped = line.strip()
+            if not stripped or len(stripped) > 60:
+                continue
+            folded = _fold(stripped)
+            if match := _SECTION_ID_FALLBACK_RE.search(folded):
+                prefix = "KESİM" if match.group("prefix").upper() == "KESIM" else "BÖLÜM"
+                code = _clean_text(match.group("code")).upper().replace(" ", "")
+                return ExtractedField(
+                    value=f"{prefix} {code}",
+                    unit="",
+                    confidence=0.7,
+                    raw_text=stripped,
+                    page=page.page_number,
+                )
+            if match_rev := _SECTION_ID_FALLBACK_REV_RE.search(folded):
+                prefix = "KESİM" if match_rev.group("prefix").lower() == "kesim" else "BÖLÜM"
+                sec_num = match_rev.group("code")
+                return ExtractedField(
+                    value=f"{prefix} {sec_num}",
+                    unit="",
+                    confidence=0.7,
+                    raw_text=match_rev.group(0),
+                    page=page.page_number,
+                )
+    return None
+
+
 _FORMULA_OPERATORS: Final[tuple[str, ...]] = ("x", "X", "×", "*", "+", "/")
 
 
@@ -1699,7 +2192,12 @@ def _build_field(
     *,
     source: str,
 ) -> ExtractedField | None:
-    base_confidence = 0.9 if source == TEXT_SOURCE_LAYER else 0.55
+    if source == TEXT_SOURCE_SPREADSHEET:
+        base_confidence = 0.96
+    elif source == TEXT_SOURCE_LAYER:
+        base_confidence = 0.9
+    else:
+        base_confidence = 0.55
     if page.confidence is not None and source == TEXT_SOURCE_OCR:
         base_confidence = min(base_confidence, 0.45 + 0.4 * page.confidence)
 
@@ -2275,6 +2773,8 @@ def analyze_report(
     sources = {page.source for page in pages}
     if sources == {TEXT_SOURCE_OCR}:
         source = TEXT_SOURCE_OCR
+    elif sources == {TEXT_SOURCE_SPREADSHEET}:
+        source = TEXT_SOURCE_SPREADSHEET
     elif sources == {TEXT_SOURCE_LAYER}:
         source = "pdf-text-layer"
     else:
@@ -2299,6 +2799,7 @@ def analyze_report(
         issues=issues,
         warnings=tuple(warnings),
         needs_human_review=True,
+        pages=tuple(pages),
     )
 
 
@@ -2315,19 +2816,24 @@ __all__ = [
     "ERROR_INVALID_PATH",
     "ERROR_OCR_UNAVAILABLE",
     "ERROR_UNSUPPORTED_FORMAT",
+    "MAX_ALLOWED_UPLOAD_MB",
     "MAX_FILE_SIZE_BYTES",
     "OcrAnalysisResult",
     "PageText",
     "Discrepancy",
     "ReportOcrError",
+    "SPREADSHEET_EXTENSIONS",
     "SUPPORTED_EXTENSIONS",
+    "TEXT_SOURCE_SPREADSHEET",
     "analyze_report",
     "compare_with_calculated",
+    "effective_max_file_size_bytes",
     "extract_text",
     "has_blocking_discrepancies",
     "normalize_result",
     "ocr_available",
     "ocr_engine_name",
+    "ocr_pdf_page_rotated",
     "ocr_status",
     "parse_date",
     "parse_number",

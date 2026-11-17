@@ -12,6 +12,8 @@ import type {
   ApplyResponse,
   ApproveRequestInput,
   ApproveResponse,
+  DossierCommitRequest,
+  DossierCommitResponse,
   ListEnvelope,
   MappingProfile,
   OcrAnalysisResult,
@@ -126,6 +128,9 @@ function buildAnalyzeBody(input: AnalyzeRequestInput): FormData {
   if (input.language) {
     body.append("language", input.language);
   }
+  if (input.force) {
+    body.append("force", "true");
+  }
   return body;
 }
 
@@ -137,7 +142,7 @@ export async function analyzeOcr(
     method: "POST",
     body: buildAnalyzeBody(input),
     signal,
-    timeoutMs: 180_000,
+    timeoutMs: 600_000,
     headers: { "Idempotency-Key": currentSessionId() + "-" + Date.now().toString(36) },
   });
 }
@@ -202,6 +207,22 @@ export async function applyOcrAnalysis(
   });
 }
 
+export async function commitOcrDossier(
+  analysisId: string,
+  input: DossierCommitRequest,
+  signal?: AbortSignal,
+): Promise<DossierCommitResponse> {
+  return request<DossierCommitResponse>(
+    `/ocr/analyses/${encodeURIComponent(analysisId)}/commit-dossier`,
+    {
+      method: "POST",
+      body: input,
+      signal,
+      timeoutMs: 30_000,
+    },
+  );
+}
+
 export async function listMappingProfiles(
   signal?: AbortSignal,
 ): Promise<ListEnvelope<MappingProfile>> {
@@ -262,8 +283,8 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 /**
- * Analiz işini tamamlanana kadar yoklar. Sunucu zaman aşımı 300 sn;
- * istemci 330 sn sonra `ocr_timeout` üretir. İptal `AbortSignal` ile yapılır.
+ * Analiz işini tamamlanana kadar yoklar. Sunucu zaman aşımı 600 sn;
+ * istemci 630 sn sonra `ocr_timeout` üretir. İptal `AbortSignal` ile yapılır.
  */
 export async function waitForAnalysis(
   analysisId: string,
@@ -274,7 +295,7 @@ export async function waitForAnalysis(
     timeoutMs?: number;
   } = {},
 ): Promise<OcrAnalysisResult> {
-  const { signal, onProgress, pollIntervalMs = 1200, timeoutMs = 330_000 } = options;
+  const { signal, onProgress, pollIntervalMs = 1200, timeoutMs = 630_000 } = options;
   const startedAt = Date.now();
 
   for (;;) {
@@ -295,7 +316,7 @@ export async function waitForAnalysis(
       throw new OcrApiError({
         code: "ocr_timeout",
         message:
-          "Analiz 300 saniye sınırını aştı. Daha az sayfalı veya daha küçük bir dosyayla yeniden deneyin.",
+          "Analiz 600 saniye sınırını aştı. Daha az sayfalı veya daha küçük bir dosyayla yeniden deneyin.",
         details: { analysis_id: analysisId },
       });
     }
@@ -308,13 +329,13 @@ export function errorHint(code: string): string {
   switch (code) {
     case "network_error":
     case "client_error":
-      return "Backend'e ulaşılamıyor. Sunucuyu başlatın veya demo sonucuyla arayüzü inceleyin.";
+      return "Sunucuya ulaşılamıyor. Sunucunun çalıştığını kontrol edip yeniden deneyin.";
     case "aborted":
       return "İstek iptal edildi. Dosya korunuyor; yeniden deneyebilirsiniz.";
     case "file_too_large":
-      return "Dosyayı 25 MB altına indirin; taranmış PDF'lerde sayfaları bölün veya 200–300 DPI ile yeniden tarayın.";
+      return "Dosya boyutu 500 MB sınırını aşıyor; taranmış PDF'lerde sayfaları bölün veya 200–300 DPI ile yeniden tarayın.";
     case "unsupported_format":
-      return "Yalnızca PDF, JPG, PNG, TIFF, BMP ve WEBP yükleyin. DOCX/XLSX desteklenmez.";
+      return "Yalnızca PDF, XLSX, XLS, JPG, PNG, TIFF, BMP ve WEBP yükleyin. DOCX desteklenmez.";
     case "empty_file":
       return "Dosya boş görünüyor. Farklı bir kopya seçin veya yeniden tarayın.";
     case "encrypted_pdf":
@@ -346,6 +367,10 @@ export function errorHint(code: string): string {
       return "Analiz zaten bitmiş; iptal yerine yeni analiz başlatın.";
     case "not_found":
       return "Analiz kaydı bulunamadı. Geçmiş listesini yenileyip yeniden açın.";
+    case "duplicate_filled_forms":
+      return "Seçili test bölümünde daha önce doldurulmuş formlar mevcut. Üzerine yazmayı onaylayın veya yalnızca yeni formları seçin.";
+    case "project_required":
+      return "Kayıt için mevcut bir proje seçin ya da yeni proje adı girin.";
     default:
       return "Yeniden deneyin. Sorun sürerse request_id ile yöneticiye bildirin.";
   }

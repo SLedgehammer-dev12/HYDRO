@@ -16,10 +16,11 @@ import { PressurePage } from "./pages/PressurePage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import OcrPage from "./features/ocr/OcrPage";
-import { useBackendProbe, useProjects, useSaveSession, useSessions } from "./hooks/queries";
+import { hydrateSessionResults, useBackendProbe, useProjects, useSaveSession, useSessions } from "./hooks/queries";
 import { useAppStore } from "./store/useAppStore";
 import { TAB_BY_KEY, VISIBLE_TABS, hashForTab, tabFromHash } from "./lib/constants";
 import { api, apiErrorMessage } from "./lib/api";
+import { createEmptyInputs } from "./lib/mock";
 import { toApiInputs } from "./lib/normalize";
 
 function isTyping(target: EventTarget | null): boolean {
@@ -79,7 +80,14 @@ export default function App() {
 
   /* Oturum geri yükleme (backend bağlıysa) */
   useEffect(() => {
-    if (backend !== "online" || bootstrapped.current) return;
+    if (
+      backend !== "online" ||
+      bootstrapped.current ||
+      !sessionsQuery.isFetchedAfterMount ||
+      !projectsQuery.isFetchedAfterMount
+    ) {
+      return;
+    }
     const list = sessionsQuery.data;
     if (!list) return;
     bootstrapped.current = true;
@@ -99,6 +107,7 @@ export default function App() {
             revision: session.revision,
             status: session.status,
           });
+          void hydrateSessionResults(session.id);
           const project = projectsQuery.data?.find((item) => item.id === session.project_id);
           if (project) setProject(project);
           else if (session.project_id) setProject({ id: session.project_id, name: "" });
@@ -116,10 +125,12 @@ export default function App() {
           if (!validProjectId && state.projectId) {
             setProject(null);
           }
+          const emptyInputs = createEmptyInputs();
+          applySessionInputs(emptyInputs);
           const created = await api.createSession({
-            name: state.sessionName || "Oturum 1",
+            name: "Yeni Kesit 1",
             project_id: validProjectId,
-            inputs: toApiInputs(state.inputs),
+            inputs: toApiInputs(emptyInputs),
           });
           setSessionMeta({
             id: created.id,
@@ -135,6 +146,8 @@ export default function App() {
     })();
   }, [
     backend,
+    sessionsQuery.isFetchedAfterMount,
+    projectsQuery.isFetchedAfterMount,
     sessionsQuery.data,
     projectsQuery.data,
     sessionId,
@@ -228,8 +241,8 @@ export default function App() {
 
               <footer className="mt-6 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border)] pt-3 text-[10px] text-[var(--text-faint)]">
                 <span>
-                  HYDRO · Hidrostatik Test Değerlendirme · backend:{" "}
-                  <span className="font-mono">{backend === "online" ? "bağlı" : "demo"}</span>
+                  HYDRO · Hidrostatik Test Değerlendirme · sunucu:{" "}
+                  <span className="font-mono">{backend === "online" ? "bağlı" : "çevrimdışı"}</span>
                 </span>
                 <span className="font-mono">4-NGTL 0-GN-P-002-5007 R4</span>
               </footer>

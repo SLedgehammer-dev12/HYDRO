@@ -155,7 +155,7 @@ export function buildReportText(
   lines.push("Nihai karar ASME B31.8 ve proje prosedürü ile birlikte değerlendirilmelidir.");
   lines.push("İşaret sözleşmesi: ΔT = Tilk − Tson; Pa = Pilk − Pson.");
   lines.push("Hidrolik kot hesabında 15 °C su yoğunluğu (999,1 kg/m³) kullanılır.");
-  lines.push("Bu rapor demo/ön izleme çıktısı olabilir; resmi kabul için backend kaydı ve");
+  lines.push("Resmi kabul için sunucu kaydı ve");
   lines.push("yetkili personel onayı gereklidir.");
   lines.push(rule());
 

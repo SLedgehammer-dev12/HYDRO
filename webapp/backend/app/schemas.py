@@ -200,6 +200,19 @@ class ProjectSummary(StrictModel):
     updated_at: str | None = None
 
 
+class SectionProfilePointIn(StrictModel):
+    station_m: float = Field(ge=0, le=1_000_000)
+    elevation_m: float = Field(ge=-500, le=10_000)
+
+
+class SectionLandmarkIn(StrictModel):
+    station_m: float = Field(ge=0, le=1_000_000)
+    kp: str = Field(default="", max_length=40)
+    kind: str = Field(default="crossing", max_length=32)
+    label: str = Field(min_length=1, max_length=120)
+    elevation_m: float | None = None
+
+
 class DraftSectionIn(StrictModel):
     section_no: str = Field(min_length=1, max_length=40)
     start_kp: str = Field(min_length=1, max_length=40)
@@ -217,11 +230,19 @@ class DraftSectionIn(StrictModel):
     smys_mpa: float | None = Field(default=None, gt=0, le=2000)
     test_date: str | None = Field(default=None, max_length=40)
     notes: str | None = Field(default=None, max_length=400)
+    profile_points: list[SectionProfilePointIn] = Field(default_factory=list, max_length=250)
+    landmarks: list[SectionLandmarkIn] = Field(default_factory=list, max_length=40)
 
 
 class DraftSectionBatchCreate(StrictModel):
     sections: list[DraftSectionIn] = Field(min_length=1, max_length=100)
 
+
+class PlanProfileCommitRequest(StrictModel):
+    project_id: str | None = None
+    project_name: str | None = Field(default=None, max_length=200)
+    project_code: str | None = Field(default=None, max_length=64)
+    sections: list[DraftSectionIn] = Field(min_length=1, max_length=100)
 
 
 class SessionDuplicate(StrictModel):
@@ -284,6 +305,15 @@ class OcrApplyRequest(StrictModel):
     overwrite: bool = False
 
 
+class OcrDossierCommitRequest(StrictModel):
+    target_project_id: str | None = None
+    create_new_project: bool = False
+    new_project_name: str | None = Field(default=None, max_length=200)
+    new_project_code: str | None = Field(default=None, max_length=64)
+    overwrite_filled: bool = False
+    selected_sections: list[str] | None = None
+
+
 class MappingProfileCreate(StrictModel):
     name: str = Field(min_length=1, max_length=200)
     format_key: str = Field(min_length=1, max_length=120)
@@ -309,14 +339,18 @@ __all__ = [
     "CoefficientBRequest",
     "CoefficientCompareRequest",
     "CoefficientTableRequest",
+    "DraftSectionBatchCreate",
+    "DraftSectionIn",
     "GeometryIn",
     "MappingProfileCreate",
     "MappingProfileUpdate",
     "OcrApplyRequest",
     "OcrApproveField",
     "OcrApproveRequest",
+    "OcrDossierCommitRequest",
     "PigSpeedRequest",
     "PipeSectionIn",
+    "PlanProfileCommitRequest",
     "PressureProfileRequest",
     "PressureVariationRequest",
     "PressurizationRequest",
@@ -326,6 +360,8 @@ __all__ = [
     "ReferenceCompareRequest",
     "ReportExportRequest",
     "ResultCreate",
+    "SectionLandmarkIn",
+    "SectionProfilePointIn",
     "SessionCreate",
     "SessionDuplicate",
     "SessionUpdate",

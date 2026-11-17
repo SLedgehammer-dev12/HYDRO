@@ -7,19 +7,21 @@ import importlib
 import importlib.util
 import json
 import os
+import threading
+from pathlib import Path
 from typing import Any, BinaryIO, Iterable
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as OrmSession
 
 from hidrostatik_test.services.report_ocr import (
-    MAX_FILE_SIZE_BYTES,
     MAX_OCR_PAGES,
     MAX_PDF_PAGES,
     SUPPORTED_EXTENSIONS,
     OcrAnalysisResult,
     ReportOcrError,
     analyze_report,
+    effective_max_file_size_bytes,
     ocr_available,
     ocr_engine_name,
     ocr_status,
@@ -35,12 +37,14 @@ from ..models import (
     new_uuid,
 )
 from . import audit
+from . import dossier as dossier_service
 from . import sessions as session_service
-from .storage import StoredUpload, store_upload
+from .storage import StoredUpload, kind_for_extension, store_upload
 
 LOW_CONFIDENCE = 0.6
 CRITICAL_CONFIDENCE = 0.4
 AUTO_FILL = 0.85
+_OCR_LANG_LOCK = threading.Lock()
 
 _ERROR_STATUS = {
     "file_not_found": 404,
@@ -221,7 +225,7 @@ def status_payload(db: OrmSession, workspace_hash: str) -> dict[str, Any]:
         "engine": _engine_payload(),
         "pdf_rasterizer": _rasterizer_payload(),
         "limits": {
-            "max_file_size_bytes": MAX_FILE_SIZE_BYTES,
+            "max_file_size_bytes": effective_max_file_size_bytes(),
             "max_pdf_pages": MAX_PDF_PAGES,
             "max_ocr_pages": MAX_OCR_PAGES,
             "supported_extensions": sorted(SUPPORTED_EXTENSIONS),
@@ -307,6 +311,28 @@ def _existing_analysis(
     return db.execute(query).scalars().first()
 
 
+def _is_stale_analysis(existing: OcrAnalysis, file_path: Path, extension: str) -> bool:
+    """Return True if a cached successful OCR row lacks `dossier` or was truncated (e.g. old 30-page limit)."""
+    if existing.status != "succeeded":
+        return False
+    if (
+        not isinstance(existing.dossier, dict)
+        or int(existing.dossier.get("schema_version") or 0) < dossier_service.DOSSIER_SCHEMA_VERSION
+    ):
+        return True
+    if extension.lower() == ".pdf":
+        try:
+            from pypdf import PdfReader
+
+            total_pages = len(PdfReader(str(file_path)).pages)
+            expected = min(total_pages, MAX_OCR_PAGES)
+            if existing.page_count is not None and expected > int(existing.page_count):
+                return True
+        except Exception:
+            pass
+    return False
+
+
 def analyze_upload(
     db: OrmSession,
     settings: Settings,
@@ -318,6 +344,7 @@ def analyze_upload(
     session_id: str | None,
     mapping_profile_id: str | None,
     language: str | None,
+    force: bool = False,
 ) -> tuple[OcrAnalysis, bool]:
     if session_id:
         try:
@@ -339,13 +366,17 @@ def analyze_upload(
         max_bytes=settings.max_upload_bytes,
     )
 
-    existing = _existing_analysis(
-        db,
-        workspace_hash=workspace_hash,
-        session_id=session_id,
-        sha256=stored.sha256,
+    existing = (
+        None
+        if force
+        else _existing_analysis(
+            db,
+            workspace_hash=workspace_hash,
+            session_id=session_id,
+            sha256=stored.sha256,
+        )
     )
-    if existing is not None:
+    if existing is not None and not _is_stale_analysis(existing, stored.path, stored.extension):
         stored.path.unlink(missing_ok=True)
         return existing, True
 
@@ -358,7 +389,7 @@ def analyze_upload(
         mime=stored.mime,
         size_bytes=stored.size_bytes,
         sha256=stored.sha256,
-        kind="report_pdf" if stored.extension == ".pdf" else "report_image",
+        kind=kind_for_extension(stored.extension),
     )
     db.add(attachment)
     db.flush()
@@ -380,38 +411,39 @@ def analyze_upload(
     analysis.started_at = utcnow()
     db.commit()
 
-    previous_lang = os.environ.get("HYDRO_OCR_LANG")
-    if language:
-        os.environ["HYDRO_OCR_LANG"] = language
-    try:
-        result: OcrAnalysisResult = analyze_report(
-            stored.path, calculated, extra_aliases=_profile_aliases(profile)
-        )
-    except ReportOcrError as exc:
-        analysis.status = "failed"
-        analysis.error_code = exc.code
-        analysis.error_message = exc.message
-        analysis.finished_at = utcnow()
-        db.commit()
-        raise _http_error(exc, analysis_id=analysis.id) from exc
-    except Exception as exc:  # unexpected domain failure
-        analysis.status = "failed"
-        analysis.error_code = "internal_error"
-        analysis.error_message = "OCR analizi tamamlanamadi."
-        analysis.finished_at = utcnow()
-        db.commit()
-        raise AppError(
-            "internal_error",
-            "OCR analizi tamamlanamadi.",
-            status_code=500,
-            details={"analysis_id": analysis.id},
-        ) from exc
-    finally:
+    with _OCR_LANG_LOCK:
+        previous_lang = os.environ.get("HYDRO_OCR_LANG")
         if language:
-            if previous_lang is None:
-                os.environ.pop("HYDRO_OCR_LANG", None)
-            else:
-                os.environ["HYDRO_OCR_LANG"] = previous_lang
+            os.environ["HYDRO_OCR_LANG"] = language
+        try:
+            result: OcrAnalysisResult = analyze_report(
+                stored.path, calculated, extra_aliases=_profile_aliases(profile)
+            )
+        except ReportOcrError as exc:
+            analysis.status = "failed"
+            analysis.error_code = exc.code
+            analysis.error_message = exc.message
+            analysis.finished_at = utcnow()
+            db.commit()
+            raise _http_error(exc, analysis_id=analysis.id) from exc
+        except Exception as exc:  # unexpected domain failure
+            analysis.status = "failed"
+            analysis.error_code = "internal_error"
+            analysis.error_message = "OCR analizi tamamlanamadi."
+            analysis.finished_at = utcnow()
+            db.commit()
+            raise AppError(
+                "internal_error",
+                "OCR analizi tamamlanamadi.",
+                status_code=500,
+                details={"analysis_id": analysis.id},
+            ) from exc
+        finally:
+            if language:
+                if previous_lang is None:
+                    os.environ.pop("HYDRO_OCR_LANG", None)
+                else:
+                    os.environ["HYDRO_OCR_LANG"] = previous_lang
 
     payload = json_safe(result.to_dict())
     analysis.status = "succeeded"
@@ -423,6 +455,13 @@ def analyze_upload(
     analysis.discrepancies = payload.get("discrepancies") or []
     analysis.issues = payload.get("issues") or []
     analysis.warnings = payload.get("warnings") or []
+    analysis.dossier = json_safe(
+        dossier_service.analyze_dossier_pages(
+            result.pages,
+            source_filename=stored.filename,
+            fallback_report=payload.get("report"),
+        )
+    )
     analysis.needs_human_review = True
     analysis.finished_at = utcnow()
     analysis.error_code = None
@@ -539,6 +578,7 @@ def detail_payload(db: OrmSession, analysis: OcrAnalysis) -> dict[str, Any]:
         base["report"] = analysis.report
         base["filename"] = attachment.filename if attachment is not None else None
         base["used_ocr"] = analysis.source in {"ocr", "mixed"}
+        base["dossier"] = dossier_service.build_dossier_view(db, analysis)
     elif analysis.status in {"queued", "running"}:
         base["progress"] = {
             "stage": "analyzing" if analysis.status == "running" else "queued",
@@ -838,8 +878,7 @@ def apply_to_session(
             applied.append({"field": name, "target": target, "from": current, "to": resolved})
 
     session.inputs = session_service.normalize_inputs(inputs)
-    session.revision = int(session.revision or 1) + 1
-    session.updated_at = utcnow()
+    recomp = dossier_service.recompute_session_from_inputs_and_forms(db, session)
     audit.record(
         db,
         action="ocr.apply",
@@ -847,7 +886,11 @@ def apply_to_session(
         entity_id=session.id,
         session_id=session.id,
         workspace_hash=analysis.workspace_id_hash,
-        after={"analysis_id": analysis.id, "applied": [item["field"] for item in applied]},
+        after={
+            "analysis_id": analysis.id,
+            "applied": [item["field"] for item in applied],
+            "persisted_result_types": recomp.get("persisted_result_types", []),
+        },
     )
     db.commit()
     db.refresh(session)
@@ -859,6 +902,7 @@ def apply_to_session(
         "skipped": skipped,
         "conflicts": conflicts,
         "session_revision": session.revision,
+        "persisted_result_types": recomp.get("persisted_result_types", []),
     }
 
 

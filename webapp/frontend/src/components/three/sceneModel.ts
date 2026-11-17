@@ -1,8 +1,10 @@
 import * as THREE from "three";
+import { formatKp } from "../../lib/kp";
 import type {
   SceneData,
   SceneEquipment,
   SceneEquipmentType,
+  SceneLandmark,
   ScenePoint,
   SceneSegment,
   SceneStatus,
@@ -168,7 +170,7 @@ export const DEMO_SCENE: SceneData = {
     [2900, 459],
     [3280, 449],
   ],
-  warnings: ["Demo sahne: kot ve ekipman konumları semboliktir."],
+  warnings: ["Kesit geometrisi girildiğinde saha görünümü gerçek ölçülerle güncellenir."],
 };
 
 /** Empty or unusable payloads fall back to the demo field so the view is never blank. */
@@ -191,10 +193,19 @@ export function resolveSceneData(data: SceneData | null | undefined): ResolvedSc
     data: {
       ...data,
       equipment: Array.isArray(data.equipment) ? data.equipment : [],
+      landmarks: Array.isArray(data.landmarks) ? data.landmarks : [],
+      start_kp_m: data.start_kp_m ?? null,
+      is_survey_profile: Boolean(data.is_survey_profile),
       warnings: Array.isArray(data.warnings) ? data.warnings : [],
     },
     isDemo: false,
   };
+}
+
+export interface LayoutLandmark {
+  landmark: SceneLandmark;
+  position: THREE.Vector3;
+  color: string;
 }
 
 export interface LayoutSegment {
@@ -265,9 +276,11 @@ export interface SceneLayout {
   elevationRangeM: number;
   stationScale: number;
   verticalScale: number;
+  isSurveyProfile: boolean;
   ranges: SceneRanges;
   segments: LayoutSegment[];
   equipment: LayoutEquipment[];
+  landmarks: LayoutLandmark[];
   supports: SupportPost[];
   ticks: TickMark[];
   profile: ProfileSample[];
@@ -369,8 +382,9 @@ function rampColor(fraction: number, target: THREE.Color): THREE.Color {
 function buildTerrain(
   layout: Omit<SceneLayout, "terrain">,
 ): TerrainMesh {
-  const { totalLengthM, profile, stationToX, elevationToY } = layout;
-  const samples = 72;
+  const { totalLengthM, profile, stationToX, elevationToY, isSurveyProfile } = layout;
+  const terrainDrop = isSurveyProfile ? 0.36 : TERRAIN_DROP;
+  const samples = isSurveyProfile ? 96 : 72;
   const lanes = [-1, -0.62, -0.28, 0, 0.28, 0.62, 1];
   const positions: number[] = [];
   const colors: number[] = [];
@@ -393,7 +407,7 @@ function buildTerrain(
     // ground rises above it. The pipe remains the readable datum.
     let ridgeY = elevationToY(elevation) - 0.04;
     const pipeSample = layout.sample(distance, new THREE.Vector3());
-    ridgeY = Math.min(ridgeY, pipeSample.y - TERRAIN_DROP);
+    ridgeY = Math.min(ridgeY, pipeSample.y - terrainDrop);
     ridgeY = Math.max(ridgeY, 0.04);
     const elevationFraction = (elevation - minElevation) / elevationRange;
 
@@ -560,16 +574,18 @@ export function buildSceneLayout(data: SceneData): SceneLayout {
   };
 
   const profilePairsValue = profilePairs(data, totalLengthM);
+  const isSurveyProfile = Boolean(data.is_survey_profile);
+  const terrainDrop = isSurveyProfile ? 0.36 : TERRAIN_DROP;
 
   const groundYAt = (distance: number): number => {
     const pipe = sample(distance, new THREE.Vector3());
     const terrainElevation = elevationFromProfile(profilePairsValue, distance);
-    const ridge = Math.min(elevationToY(terrainElevation) - 0.04, pipe.y - TERRAIN_DROP);
+    const ridge = Math.min(elevationToY(terrainElevation) - 0.04, pipe.y - terrainDrop);
     return Math.max(0.04, ridge);
   };
 
   const profile: ProfileSample[] = [];
-  const profileSamples = 64;
+  const profileSamples = isSurveyProfile ? 96 : 64;
   for (let index = 0; index <= profileSamples; index += 1) {
     const distance = (index / profileSamples) * totalLengthM;
     const elevation = elevationFromProfile(profilePairsValue, distance);
@@ -579,7 +595,7 @@ export function buildSceneLayout(data: SceneData): SceneLayout {
       elevation,
       ridge: new THREE.Vector3(
         stationToX(distance),
-        Math.max(0.04, Math.min(elevationToY(elevation), pipe.y - TERRAIN_DROP)),
+        Math.max(0.04, Math.min(elevationToY(elevation), pipe.y - terrainDrop)),
         0,
       ),
     });
@@ -654,9 +670,28 @@ export function buildSceneLayout(data: SceneData): SceneLayout {
         0.03,
         TERRAIN_HALF_WIDTH * 0.82 + 1.1,
       ),
-      label: formatDistance(distance),
+      label:
+        typeof data.start_kp_m === "number" && Number.isFinite(data.start_kp_m)
+          ? `KP ${formatKp(data.start_kp_m + distance)}`
+          : formatDistance(distance),
     });
   }
+
+  const landmarkColor = (kind: string): string => {
+    if (kind === "river") return "#38bdf8";
+    if (kind === "road") return "#f5b544";
+    if (kind === "pig") return "#34d399";
+    return "#c084fc";
+  };
+
+  const landmarks: LayoutLandmark[] = (data.landmarks ?? []).map((landmark) => {
+    const d = clamp(finite(landmark.distance_m, 0), 0, totalLengthM);
+    return {
+      landmark,
+      position: new THREE.Vector3(stationToX(d), groundYAt(d), -1.65),
+      color: landmarkColor(landmark.kind),
+    };
+  });
 
   const partial: Omit<SceneLayout, "terrain"> = {
     totalLengthM,
@@ -665,9 +700,11 @@ export function buildSceneLayout(data: SceneData): SceneLayout {
     elevationRangeM,
     stationScale,
     verticalScale,
+    isSurveyProfile,
     ranges,
     segments,
     equipment,
+    landmarks,
     supports,
     ticks,
     profile,

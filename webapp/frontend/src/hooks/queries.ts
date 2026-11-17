@@ -8,6 +8,7 @@ import {
   DEMO_REFERENCE_TABLES,
   DEMO_SPEC,
   buildDemoResults,
+  buildSceneData,
   computeA,
   computeAir,
   computeB,
@@ -46,14 +47,19 @@ import type {
   PigSpeedRequest,
   PigSpeedResponse,
   PipeOption,
+  PlanProfileCommitRequest,
+  PlanProfileCommitResponse,
   PressureProfileRequest,
   PressureProfileResponse,
   PressureVariationRequest,
   PressureVariationResponse,
   Project,
   ProjectInput,
+  ProjectSceneResponse,
   ReferenceTableMeta,
+  ResultBundle,
   Session,
+  SessionFormsResponse,
   SessionListItem,
   SessionStatus,
   SpecResponse,
@@ -252,9 +258,13 @@ export function useCatalog() {
 /* Oturumlar                                                           */
 /* ------------------------------------------------------------------ */
 
-export function useSessions(projectId?: string | null) {
+export function useSessions(
+  projectId?: string | null,
+  options?: { enabled?: boolean },
+) {
   return useQuery<SessionListItem[]>({
     queryKey: ["sessions", projectId ?? "all"],
+    enabled: options?.enabled ?? true,
     queryFn: async () => {
       const state = useAppStore.getState();
       const fallback = () => ({
@@ -417,9 +427,18 @@ export function useDeleteProject() {
         "remove",
       );
       const store = useAppStore.getState();
-      if (store.projectId === id) store.setProject(null);
+      if (store.projectId === id) {
+        store.setProject(null);
+        store.resetSession("Yeni oturum");
+      }
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
-      store.pushToast("success", "Proje silindi", removed?.name ?? "Proje arşivlendi.");
+      void queryClient.invalidateQueries({ queryKey: ["project-scene"] });
+      void queryClient.invalidateQueries({ queryKey: ["session-forms"] });
+      store.pushToast(
+        "success",
+        "Proje silindi",
+        removed ? `${removed.name} ve bağlı kesitler silindi.` : "Proje ve bağlı kesitler silindi.",
+      );
     },
     onError: (error) => {
       useAppStore.getState().pushToast("error", "Proje silinemedi", error.message);
@@ -441,6 +460,7 @@ export function useDuplicateSession() {
     onSuccess: (session) => {
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
       void queryClient.invalidateQueries({ queryKey: ["projects"] });
+      void queryClient.invalidateQueries({ queryKey: ["project-scene"] });
       useAppStore.getState().pushToast("success", "Kesit kopyalandı", session.name);
     },
     onError: (error) => {
@@ -467,6 +487,7 @@ export function useDeleteSection() {
       }
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
       void queryClient.invalidateQueries({ queryKey: ["projects"] });
+      void queryClient.invalidateQueries({ queryKey: ["project-scene"] });
       store.pushToast("success", "Kesit silindi", "Kesit arşivlendi; proje kaydı korundu.");
     },
     onError: (error) => {
@@ -500,6 +521,7 @@ export function useCreateDraftSectionsBatch() {
     onSuccess: (data) => {
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
       void queryClient.invalidateQueries({ queryKey: ["projects"] });
+      void queryClient.invalidateQueries({ queryKey: ["project-scene"] });
       useAppStore
         .getState()
         .pushToast(
@@ -514,18 +536,131 @@ export function useCreateDraftSectionsBatch() {
   });
 }
 
+export function useCommitPlanProfile() {
+  const queryClient = useQueryClient();
+  return useMutation<PlanProfileCommitResponse, Error, PlanProfileCommitRequest>({
+    mutationFn: async (body) => api.commitPlanProfile(body),
+    onSuccess: (data) => {
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      void queryClient.invalidateQueries({ queryKey: ["projects"] });
+      void queryClient.invalidateQueries({ queryKey: ["session-forms"] });
+      void queryClient.invalidateQueries({ queryKey: ["project-scene"] });
+      useAppStore
+        .getState()
+        .pushToast(
+          "success",
+          "Plan-profil kesitleri kaydedildi",
+          `${data.project.name} projesine ${data.created_count} kesit ve her biri için 11 boş BOTAŞ formu oluşturuldu.`,
+        );
+    },
+    onError: (error) => {
+      useAppStore.getState().pushToast("error", "Plan-profil kaydedilemedi", error.message);
+    },
+  });
+}
+
+export function useSessionForms(sessionId: string | null) {
+  return useQuery<SessionFormsResponse>({
+    queryKey: ["session-forms", sessionId],
+    queryFn: () => api.sessionForms(sessionId!),
+    enabled: Boolean(sessionId),
+    staleTime: 10_000,
+  });
+}
+
+export function useProjectScene(projectId: string | null, enabled = true) {
+  return useQuery<ProjectSceneResponse>({
+    queryKey: ["project-scene", projectId],
+    enabled: Boolean(projectId) && enabled,
+    queryFn: async () => {
+      const state = useAppStore.getState();
+      if (!projectId || state.backend !== "online" || projectId.startsWith("demo-")) {
+        const local = buildSceneData(state.inputs, state.results);
+        const total = local.segments.reduce(
+          (acc, s) => Math.max(acc, s.end_m),
+          0,
+        );
+        return {
+          ...local,
+          project_id: projectId ?? "demo-project-001",
+          project_name: state.projectName || "Örnek Proje",
+          section_count: local.segments.length ? 1 : 0,
+          total_length_m: total,
+          continuity_ok: true,
+          sections: [],
+        };
+      }
+      return api.projectScene(projectId);
+    },
+    staleTime: 15_000,
+    retry: false,
+  });
+}
+
+let activeSessionLoadSeq = 0;
+
+export async function hydrateSessionResults(
+  sessionId: string,
+  expectedSeq?: number,
+): Promise<void> {
+  if (!sessionId || sessionId.startsWith("demo-") || useAppStore.getState().backend !== "online") {
+    return;
+  }
+  const token = expectedSeq ?? activeSessionLoadSeq;
+  try {
+    const list = await api.results(sessionId, 20);
+    if (token !== activeSessionLoadSeq || useAppStore.getState().sessionId !== sessionId) {
+      return;
+    }
+    const patch: Partial<ResultBundle> = {};
+    let latestComputed: string | undefined;
+    for (const item of list.items ?? []) {
+      if (!latestComputed && item.computed_at) latestComputed = item.computed_at;
+      if (item.test_type === "air" && !patch.air) {
+        patch.air = item.result as unknown as AirContentResponse;
+      } else if (item.test_type === "pressure" && !patch.pressure) {
+        patch.pressure = item.result as unknown as PressureVariationResponse;
+      } else if (item.test_type === "profile" && !patch.profile) {
+        patch.profile = item.result as unknown as PressureProfileResponse;
+      } else if (item.test_type === "pig" && !patch.pig) {
+        patch.pig = item.result as unknown as PigSpeedResponse;
+      }
+    }
+    if (Object.keys(patch).length > 0) {
+      const current = useAppStore.getState().results;
+      useAppStore.getState().setResults({
+        geometry: current.geometry,
+        coefficients: current.coefficients,
+        bCompare: current.bCompare,
+        backendCompare: current.backendCompare,
+        ...patch,
+        lastComputedAt: latestComputed,
+        source: "live",
+      });
+    }
+  } catch {
+    // Sunucu hesap geçmişi alınamazsa mevcut yerel hesaplar korunur.
+  }
+}
+
 export function useOpenSession() {
   const queryClient = useQueryClient();
   return useMutation<Session, Error, string>({
     mutationFn: async (id) => {
+      const seq = ++activeSessionLoadSeq;
       const state = useAppStore.getState();
       if (state.backend !== "online" || id.startsWith("demo-")) {
         await sleep(240);
         return demoSessionDetail(state.inputs, state.sessionName);
       }
-      return api.session(id);
+      const session = await api.session(id);
+      if (seq !== activeSessionLoadSeq) {
+        throw new Error("Oturum seçimi değişti.");
+      }
+      return session;
     },
     onSuccess: (session) => {
+      const seq = activeSessionLoadSeq;
       const store = useAppStore.getState();
       store.applySessionInputs(session.inputs);
       store.setSessionMeta({
@@ -536,9 +671,12 @@ export function useOpenSession() {
       });
       store.markSaved(session.revision);
       queryClient.setQueryData(["session", session.id], session);
+      void queryClient.invalidateQueries({ queryKey: ["results", session.id] });
+      void hydrateSessionResults(session.id, seq);
       store.pushToast("success", "Kesit açıldı", session.name);
     },
     onError: (error) => {
+      if (error.message === "Oturum seçimi değişti.") return;
       useAppStore.getState().pushToast("error", "Kesit açılamadı", error.message);
     },
   });
@@ -652,13 +790,14 @@ export function useSaveSession() {
       store.markSaved(result.revision);
       store.pushToast(
         "success",
-        result.demo ? "Yerel demo oturumuna kaydedildi" : "Oturum kaydedildi",
+        result.demo ? "Tarayıcı oturumuna kaydedildi" : "Oturum kaydedildi",
         result.demo
-          ? "Backend bağlı olmadığı için değişiklikler tarayıcıda tutuluyor."
+          ? "Sunucu bağlantısı olmadığı için değişiklikler tarayıcıda tutuluyor."
           : `Revizyon ${result.revision ?? "-"} · ${new Date().toLocaleTimeString("tr-TR")}`,
       );
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
       void queryClient.invalidateQueries({ queryKey: ["session"] });
+      void queryClient.invalidateQueries({ queryKey: ["project-scene"] });
     },
     onError: (error) => {
       useAppStore
@@ -710,11 +849,12 @@ export function useCreateSession() {
       store.pushToast(
         "success",
         "Yeni oturum oluşturuldu",
-        demo ? "Demo modunda yerel oturum açıldı." : `${session.name} · revizyon ${session.revision}`,
+        demo ? "Çevrimdışı yerel oturum açıldı." : `${session.name} · revizyon ${session.revision}`,
       );
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
       /* Kesit sayısı proje kartlarında `section_count` olarak görünür. */
       void queryClient.invalidateQueries({ queryKey: ["projects"] });
+      void queryClient.invalidateQueries({ queryKey: ["project-scene"] });
     },
     onError: (error) => {
       useAppStore.getState().pushToast("error", "Oturum açılamadı", error.message);

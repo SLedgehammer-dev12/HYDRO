@@ -1,10 +1,11 @@
-import { useMemo, useState } from "react";
+import { Suspense, lazy, useId, useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
   Building2,
   CheckCircle2,
   Copy,
+  FileCheck2,
   FileScan,
   FolderOpen,
   GitCompareArrows,
@@ -12,7 +13,10 @@ import {
   Pencil,
   Plus,
   Rows3,
+  Ruler,
   Trash2,
+  Upload,
+  X,
 } from "lucide-react";
 import { PageHeader } from "../components/layout/PageHeader";
 import { SectionCard, KpiCard } from "../components/ui/Card";
@@ -21,6 +25,7 @@ import { Button } from "../components/ui/Button";
 import { ConfirmDialog, Modal } from "../components/ui/Dialog";
 import { FieldGrid, NumberField, TextField } from "../components/ui/Field";
 import { EmptyState, InlineNotice } from "../components/ui/State";
+const PipelineScene = lazy(() => import("../components/three/PipelineScene"));
 import {
   useCreateDraftSectionsBatch,
   useCreateProject,
@@ -29,18 +34,21 @@ import {
   useDeleteSection,
   useDuplicateSession,
   useOpenSession,
+  useProjectScene,
   useProjects,
-  useScanPlanProfile,
+  useSessionForms,
   useSessions,
   useUpdateProject,
 } from "../hooks/queries";
+import { api } from "../lib/api";
 import { useAppStore } from "../store/useAppStore";
-import { createDefaultInputs } from "../lib/mock";
+import { createEmptyInputs } from "../lib/mock";
 import { toApiInputs } from "../lib/normalize";
 import {
   evaluateProjectKpContinuity,
   formatKp,
   formatKpLocation,
+  mergePlanProfileScans,
   normalizeKpText,
   parseKpMeters,
   resolveSectionMeta,
@@ -98,6 +106,7 @@ export function ProjectsPage() {
   const setTab = useAppStore((state) => state.setTab);
   const projectId = useAppStore((state) => state.projectId);
   const setProject = useAppStore((state) => state.setProject);
+  const setSceneScope = useAppStore((state) => state.setSceneScope);
   const applySessionInputs = useAppStore((state) => state.applySessionInputs);
   const setSessionMeta = useAppStore((state) => state.setSessionMeta);
   const markSaved = useAppStore((state) => state.markSaved);
@@ -110,7 +119,6 @@ export function ProjectsPage() {
   const duplicateSession = useDuplicateSession();
   const deleteSession = useDeleteSection();
   const openSession = useOpenSession();
-  const scanPlanProfile = useScanPlanProfile();
   const createDraftBatch = useCreateDraftSectionsBatch();
 
   const [selectedId, setSelectedId] = useState<string | null>(projectId);
@@ -118,8 +126,8 @@ export function ProjectsPage() {
     () => projects.find((project) => project.id === (selectedId ?? projectId)) ?? projects[0] ?? null,
     [projects, selectedId, projectId],
   );
-  const sectionsQuery = useSessions(selected?.id ?? null);
-  const rawSections = sectionsQuery.data ?? [];
+  const sectionsQuery = useSessions(selected?.id ?? null, { enabled: Boolean(selected) });
+  const rawSections = selected ? (sectionsQuery.data ?? []) : [];
 
   /* Projeye ait tüm kesitler için ardışık KP sürekliliği denetimi */
   const kpContinuity = useMemo(
@@ -147,6 +155,8 @@ export function ProjectsPage() {
   const [form, setForm] = useState<ProjectForm>(EMPTY_FORM);
   const [deletingProject, setDeletingProject] = useState<Project | null>(null);
   const [deletingSection, setDeletingSection] = useState<SessionListItem | null>(null);
+  const [formsModalSession, setFormsModalSession] = useState<SessionListItem | null>(null);
+  const formsQuery = useSessionForms(formsModalSession?.id ?? null);
 
   /* Yeni kesit (section) oluşturma modal durumu */
   const [sectionDialogOpen, setSectionDialogOpen] = useState(false);
@@ -159,13 +169,31 @@ export function ProjectsPage() {
     notes: "",
   });
 
-  /* Plan-Profil PDF tarama ve taslak kesit üretimi modal durumu */
+  /* Plan-Profil PDF/CAD çoklu pafta tarama ve taslak kesit üretimi modal durumu */
   const [scanDialogOpen, setScanDialogOpen] = useState(false);
-  const [scanFile, setScanFile] = useState<File | null>(null);
+  const [scanQueue, setScanQueue] = useState<
+    Array<{
+      id: string;
+      file: File;
+      status: "pending" | "scanning" | "done" | "error";
+      sectionCount?: number;
+      error?: string;
+    }>
+  >([]);
+  const [isScanningSheets, setIsScanningSheets] = useState(false);
+  const [scanProgressText, setScanProgressText] = useState("");
+  const [scannedDoneCount, setScannedDoneCount] = useState(0);
   const [maxSectionLenM, setMaxSectionLenM] = useState<number | null>(12_000);
   const [maxElevDiffM, setMaxElevDiffM] = useState<number | null>(180);
   const [scanResult, setScanResult] = useState<PlanProfileScanResponse | null>(null);
   const [editableDrafts, setEditableDrafts] = useState<DraftSectionItem[]>([]);
+  const [showProjectScene, setShowProjectScene] = useState(false);
+  const modalScanInputId = useId();
+  const modalAppendInputId = useId();
+  const projectSceneQuery = useProjectScene(
+    selected?.id ?? null,
+    showProjectScene && Boolean(selected),
+  );
 
   /* Yeni kesit eklenirken bir önceki kesitin bitiş KP'sini bul */
   const lastOrderedSection = useMemo(() => {
@@ -287,7 +315,7 @@ export function ProjectsPage() {
     const sectionNo = sectionForm.section_no.trim() || nextSectionNo(rawSections);
     const lengthM = Math.round((modalEndM - modalStartM) * 100) / 100;
 
-    const inputs = createDefaultInputs();
+    const inputs = createEmptyInputs();
     const meta: SectionMeta = {
       ...inputs.section_meta,
       section_no: sectionNo,
@@ -303,13 +331,12 @@ export function ProjectsPage() {
     inputs.geometry.length_m = lengthM;
 
     const name = `${meta.section_no} · KP ${startFormatted}–${endFormatted} · ${selected.code || selected.name}`;
-    setProject(selected);
-    applySessionInputs(inputs);
     createSession.mutate(
       { name, inputs: toApiInputs(inputs), projectId: selected.id },
       {
         onSuccess: ({ session }) => {
           setProject(selected);
+          applySessionInputs(session.inputs);
           setSessionMeta({
             id: session.id,
             name: session.name,
@@ -340,29 +367,84 @@ export function ProjectsPage() {
 
   function openScanDialog() {
     if (!selected) return;
+    setScanQueue([]);
+    setIsScanningSheets(false);
+    setScanProgressText("");
+    setScannedDoneCount(0);
     setScanResult(null);
     setEditableDrafts([]);
     setScanDialogOpen(true);
   }
 
-  function runPlanProfileScan() {
-    if (!scanFile) {
-      pushToast("warning", "PDF seçilmedi", "Taranacak Plan-Profil PDF dosyasını seçin.");
+  function addModalScanFiles(files: FileList | File[] | null) {
+    if (!files || files.length === 0) return;
+    const incoming = Array.from(files);
+    setScanQueue((prev) => {
+      const seen = new Set(prev.map((q) => q.id));
+      const next = [...prev];
+      for (const file of incoming) {
+        const key = `${file.name}::${file.size}::${file.lastModified}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          next.push({ id: key, file, status: "pending" });
+        }
+      }
+      return next;
+    });
+  }
+
+  async function runPlanProfileScan() {
+    if (scanQueue.length === 0) {
+      pushToast("warning", "Pafta seçilmedi", "Taranacak Plan-Profil PDF veya CAD paftalarını seçin.");
       return;
     }
-    scanPlanProfile.mutate(
-      {
-        file: scanFile,
-        maxSectionLengthM: maxSectionLenM ?? 12_000,
-        maxElevationDiffM: maxElevDiffM,
-      },
-      {
-        onSuccess: (result) => {
-          setScanResult(result);
-          setEditableDrafts(result.draft_sections);
-        },
-      },
+    setIsScanningSheets(true);
+    setScannedDoneCount(0);
+    setScanQueue((prev) =>
+      prev.map((item) => ({ ...item, status: "pending", sectionCount: undefined, error: undefined })),
     );
+
+    const results: PlanProfileScanResponse[] = [];
+    for (let idx = 0; idx < scanQueue.length; idx += 1) {
+      const item = scanQueue[idx];
+      setScanProgressText(`Pafta taranıyor: ${idx + 1} / ${scanQueue.length} — ${item.file.name}`);
+      setScanQueue((prev) =>
+        prev.map((entry, eIdx) => (eIdx === idx ? { ...entry, status: "scanning" } : entry)),
+      );
+      try {
+        const res = await api.scanPlanProfile({
+          file: item.file,
+          maxSectionLengthM: maxSectionLenM ?? 12_000,
+          maxElevationDiffM: maxElevDiffM,
+        });
+        results.push(res);
+        setScanQueue((prev) =>
+          prev.map((entry, eIdx) =>
+            eIdx === idx
+              ? { ...entry, status: "done", sectionCount: res.draft_sections.length }
+              : entry,
+          ),
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Tarama hatası";
+        setScanQueue((prev) =>
+          prev.map((entry, eIdx) => (eIdx === idx ? { ...entry, status: "error", error: msg } : entry)),
+        );
+      }
+      setScannedDoneCount(idx + 1);
+    }
+
+    setIsScanningSheets(false);
+    if (results.length === 0) {
+      setScanProgressText("Hiçbir pafta okunamadı.");
+      pushToast("error", "Paftalar taranamadı", "Yüklenen paftaların hiçbiri çözümlenemedi.");
+      return;
+    }
+
+    const { mergedScan, drafts } = mergePlanProfileScans(results, rawSections);
+    setScanResult(mergedScan);
+    setEditableDrafts(drafts);
+    setScanProgressText(`${results.length} / ${scanQueue.length} pafta tarandı · ${drafts.length} taslak hazır.`);
   }
 
   function updateDraftRow(index: number, patch: Partial<DraftSectionItem>) {
@@ -447,7 +529,7 @@ export function ProjectsPage() {
         }
       />
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <KpiCard label="Proje" value={num(projects.length, 0)} icon={Building2} hint="Kayıtlı proje sayısı" />
         <KpiCard label="Toplam kesit" value={num(totalSections, 0)} icon={Layers} hint="Projelere bağlı kesitler" />
         <KpiCard
@@ -485,7 +567,119 @@ export function ProjectsPage() {
               : "Kesit eklendiğinde denetlenir"
           }
         />
+        <KpiCard
+          label="Σ Section (Boru hattı)"
+          value={
+            rawSections.length === 0 || kpContinuity.totalSectionsLengthM <= 0
+              ? "—"
+              : num(kpContinuity.totalSectionsLengthM, 0)
+          }
+          unit={rawSections.length > 0 && kpContinuity.totalSectionsLengthM > 0 ? "m" : undefined}
+          icon={Ruler}
+          tone={
+            rawSections.length === 0 || kpContinuity.totalSectionsLengthM <= 0
+              ? undefined
+              : kpContinuity.sumMatchesPipeline
+                ? "pass"
+                : "warning"
+          }
+          hint={
+            kpContinuity.pipelineSpanM !== null && kpContinuity.pipelineSpanM > 0
+              ? kpContinuity.sumMatchesPipeline
+                ? `Hat KP aralığı (${num(kpContinuity.pipelineSpanM, 0)} m) ile eşit`
+                : `Hat aralığı (${num(kpContinuity.pipelineSpanM, 0)} m) fark: ${kpContinuity.totalSectionsLengthM - kpContinuity.pipelineSpanM > 0 ? "+" : ""}${num(kpContinuity.totalSectionsLengthM - kpContinuity.pipelineSpanM, 0)} m`
+              : rawSections.length > 0
+                ? `${rawSections.length} kesit uzunluğu toplamı`
+                : "Kesit eklendiğinde toplanır"
+          }
+        />
       </div>
+
+      {showProjectScene && selected ? (
+        <SectionCard
+          title={`${selected.name} · Birleşik 3D Proje Görünümü`}
+          description="Projedeki tüm test bölümleri (ayrı paftalardan yüklenenler dahil) KP ekseninde uç uca birleştirilerek görüntülenir. İstediğiniz segmente tıklayarak bölümü açabilirsiniz."
+          icon={Layers}
+          action={
+            <div className="flex flex-wrap items-center gap-2">
+              {projectSceneQuery.data ? (
+                <>
+                  <Badge tone={projectSceneQuery.data.continuity_ok ? "pass" : "warning"}>
+                    {projectSceneQuery.data.section_count} bölüm ·{" "}
+                    {num(projectSceneQuery.data.total_length_m, 0)} m
+                  </Badge>
+                  <Badge tone={projectSceneQuery.data.continuity_ok ? "pass" : "warning"}>
+                    {projectSceneQuery.data.continuity_ok ? "Tam KP Zinciri" : "KP Farkı Var"}
+                  </Badge>
+                </>
+              ) : null}
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={() => {
+                  setProject(selected);
+                  setSceneScope("project");
+                  setTab("field");
+                }}
+              >
+                Saha Sekmesinde Aç
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setShowProjectScene(false)}>
+                Gizle
+              </Button>
+            </div>
+          }
+          bodyClassName="pt-2"
+        >
+          {projectSceneQuery.data &&
+          !projectSceneQuery.data.continuity_ok &&
+          projectSceneQuery.data.warnings?.length ? (
+            <div className="mb-3">
+              <InlineNotice tone="warning" title="Proje KP Sürekliliği Uyarısı">
+                <ul className="list-disc space-y-0.5 pl-4 text-[11.5px]">
+                  {projectSceneQuery.data.warnings.map((w, idx) => (
+                    <li key={idx}>{w}</li>
+                  ))}
+                </ul>
+              </InlineNotice>
+            </div>
+          ) : null}
+          {projectSceneQuery.isLoading && !projectSceneQuery.data ? (
+            <div className="flex min-h-[260px] items-center justify-center text-xs text-[var(--text-muted)]">
+              Proje genelindeki test bölümleri 3D görünümde birleştiriliyor...
+            </div>
+          ) : projectSceneQuery.data && projectSceneQuery.data.segments.length > 0 ? (
+            <div className="scene-shell">
+              <Suspense
+                fallback={
+                  <div className="flex min-h-[460px] items-center justify-center text-xs text-[var(--text-muted)]">
+                    3D saha görünümü yükleniyor...
+                  </div>
+                }
+              >
+                <PipelineScene
+                  data={projectSceneQuery.data}
+                  className="min-h-[460px]"
+                  onOpenSession={(sid) =>
+                    openSession.mutate(sid, {
+                      onSuccess: () => {
+                        setSceneScope("section");
+                        setTab("field");
+                      },
+                    })
+                  }
+                />
+              </Suspense>
+            </div>
+          ) : (
+            <EmptyState
+              title="3D sahne oluşturulamadı"
+              description="Seçili projede 3D geometri oluşturacak kesit verisi henüz yok."
+              icon={Layers}
+            />
+          )}
+        </SectionCard>
+      ) : null}
 
       <div className="grid gap-4 xl:grid-cols-[320px_1fr]">
         <SectionCard
@@ -558,11 +752,21 @@ export function ProjectsPage() {
               <div className="flex flex-wrap items-center gap-1.5">
                 <Button
                   size="lg"
+                  variant={showProjectScene ? "primary" : "default"}
+                  icon={<Layers size={15} />}
+                  disabled={!selected || rawSections.length === 0}
+                  aria-pressed={showProjectScene}
+                  onClick={() => setShowProjectScene((prev) => !prev)}
+                >
+                  3D Birleşik Proje Görünümü
+                </Button>
+                <Button
+                  size="lg"
                   icon={<FileScan size={15} />}
                   disabled={!selected}
                   onClick={openScanDialog}
                 >
-                  Plan-Profil PDF’den taslak üret
+                  Plan-Profil Paftalarından Taslak Üret
                 </Button>
                 <Button
                   size="lg"
@@ -676,6 +880,7 @@ export function ProjectsPage() {
                       <th scope="col" className="num">Bitiş KP</th>
                       <th scope="col">KP Sürekliliği</th>
                       <th scope="col">Durum</th>
+                      <th scope="col">Form Takibi</th>
                       <th scope="col" className="num">Rev.</th>
                       <th scope="col">Güncelleme</th>
                       <th scope="col">İşlem</th>
@@ -685,6 +890,14 @@ export function ProjectsPage() {
                     {sections.map((session) => {
                       const meta = resolveSectionMeta(session);
                       const check = kpContinuity.byId[session.id];
+                      const fs = session.forms_summary;
+                      const formTone = !fs
+                        ? "neutral"
+                        : fs.failed_forms.length > 0
+                          ? "fail"
+                          : fs.complete
+                            ? "pass"
+                            : "warning";
                       return (
                         <tr key={session.id}>
                           <td>
@@ -725,6 +938,30 @@ export function ProjectsPage() {
                           <td>
                             <Badge tone={statusTone(session.status)}>{statusLabel(session.status)}</Badge>
                           </td>
+                          <td>
+                            {fs ? (
+                              <div className="space-y-0.5">
+                                <Badge tone={formTone}>
+                                  {fs.filled_required} / {fs.required_total} Form
+                                </Badge>
+                                {fs.failed_forms.length > 0 ? (
+                                  <span className="block text-[10px] font-medium text-[var(--danger)]">
+                                    {fs.failed_forms.length} form başarısız
+                                  </span>
+                                ) : fs.missing_required > 0 ? (
+                                  <span className="block text-[10px] text-[var(--text-muted)]">
+                                    {fs.missing_required} zorunlu eksik
+                                  </span>
+                                ) : (
+                                  <span className="block text-[10px] text-[var(--text-muted)]">
+                                    Tüm formlar tamam
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-[10.5px] text-[var(--text-faint)]">0 / 11</span>
+                            )}
+                          </td>
                           <td className="num">{session.revision}</td>
                           <td>
                             <span className="block text-[11px] text-[var(--text-soft)]">{relativeTime(session.updated_at)}</span>
@@ -734,6 +971,9 @@ export function ProjectsPage() {
                             <div className="flex flex-wrap items-center gap-1">
                               <Button size="sm" variant="ghost" icon={<FolderOpen size={11} />} onClick={() => openSection(session)}>
                                 Aç
+                              </Button>
+                              <Button size="sm" variant="ghost" icon={<FileCheck2 size={11} />} onClick={() => setFormsModalSession(session)}>
+                                Formlar
                               </Button>
                               <Button size="sm" variant="ghost" icon={<Copy size={11} />} onClick={() => copySection(session)}>
                                 Kopyala
@@ -943,21 +1183,28 @@ export function ProjectsPage() {
 
       <Modal
         open={scanDialogOpen}
-        onClose={() => setScanDialogOpen(false)}
-        title="Plan-Profil PDF’den taslak kesit (section) üret"
-        description="Plan-profil PDF dosyasındaki KP istasyonları, kot noktaları ve boru parametreleri taranarak uç uca eşleşen taslak kesitler oluşturulur."
+        onClose={() => {
+          if (!isScanningSheets) setScanDialogOpen(false);
+        }}
+        title="Plan-Profil Paftalarından Taslak Kesit (Section) Üret"
+        description="Tek bir toplu paftayı veya her test bölümünün ayrı paftalarını sırayla tarayarak uç uca eşleşen taslak kesitler oluşturun."
+        className="max-w-4xl max-h-[88vh] overflow-y-auto"
         footer={
           <>
-            <Button variant="ghost" onClick={() => setScanDialogOpen(false)}>
+            <Button variant="ghost" disabled={isScanningSheets} onClick={() => setScanDialogOpen(false)}>
               Kapat
             </Button>
             <Button
               icon={<FileScan size={14} />}
-              loading={scanPlanProfile.isPending}
-              disabled={!scanFile}
-              onClick={runPlanProfileScan}
+              loading={isScanningSheets}
+              disabled={scanQueue.length === 0 || isScanningSheets}
+              onClick={() => void runPlanProfileScan()}
             >
-              PDF’i tara ve taslakları üret
+              {isScanningSheets
+                ? `Taranıyor (${scannedDoneCount}/${scanQueue.length})...`
+                : scanQueue.length > 1
+                  ? `${scanQueue.length} Paftayı Sırayla Tara & Birleştir`
+                  : "Paftayı Tara ve Taslakları Üret"}
             </Button>
             {editableDrafts.length > 0 ? (
               <Button
@@ -966,27 +1213,146 @@ export function ProjectsPage() {
                 loading={createDraftBatch.isPending}
                 onClick={commitDraftSections}
               >
-                Taslakları projeye kaydet ({editableDrafts.length} kesit)
+                Taslakları Projeye Kaydet ({editableDrafts.length} kesit)
               </Button>
             ) : null}
           </>
         }
       >
         <div className="space-y-3">
-          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3">
-            <label className="field-label block">Plan-Profil PDF / görsel dosyası</label>
-            <input
-              type="file"
-              accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff"
-              className="mt-1.5 block w-full text-[12px] text-[var(--text-soft)] file:mr-3 file:rounded-lg file:border file:border-[var(--border)] file:bg-[var(--surface-3)] file:px-3 file:py-1.5 file:text-[11.5px] file:font-semibold file:text-[var(--text)]"
-              onChange={(event) => {
-                const file = event.target.files?.[0] ?? null;
-                setScanFile(file);
-                setScanResult(null);
-                setEditableDrafts([]);
-              }}
-            />
-            <FieldGrid cols={2} className="mt-3">
+          <div className="space-y-3 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3">
+            <div className="relative">
+              <input
+                id={modalScanInputId}
+                type="file"
+                multiple
+                disabled={isScanningSheets}
+                accept=".pdf,.dwg,.dxf,.png,.jpg,.jpeg,.tif,.tiff"
+                className="visually-hidden"
+                onChange={(event) => {
+                  if (isScanningSheets) return;
+                  addModalScanFiles(event.target.files);
+                  event.target.value = "";
+                }}
+              />
+              <label
+                htmlFor={modalScanInputId}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  if (isScanningSheets) return;
+                  addModalScanFiles(event.dataTransfer.files);
+                }}
+                className="flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-[var(--border-strong)] bg-[var(--surface-1)] px-4 py-4 text-center transition-colors hover:border-[var(--primary)] [input:focus-visible+&]:outline [input:focus-visible+&]:outline-2 [input:focus-visible+&]:outline-offset-2 [input:focus-visible+&]:outline-[var(--focus)]"
+              >
+                <Upload size={18} className="mb-1.5 text-[var(--primary)]" aria-hidden />
+                <span className="text-[12.5px] font-medium text-[var(--text)]">
+                  {scanQueue.length > 0
+                    ? `${scanQueue.length} pafta seçildi (sürükleyip bırakarak veya tıklayarak ekleyebilirsiniz)`
+                    : "Plan-Profil PDF, DWG/DXF veya görsel paftaları seçin (çoklu seçim desteklenir)"}
+                </span>
+                <span className="mt-0.5 text-[10.5px] text-[var(--text-muted)]">
+                  Ayrı test bölümü paftalarını tek seferde seçip sırayla taratabilirsiniz.
+                </span>
+              </label>
+            </div>
+
+            {scanQueue.length > 0 ? (
+              <div className="space-y-2 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold text-[var(--text)]">
+                    Seçili Paftalar ({scanQueue.length})
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <div className="relative">
+                      <input
+                        id={modalAppendInputId}
+                        type="file"
+                        multiple
+                        accept=".pdf,.dwg,.dxf,.png,.jpg,.jpeg,.tif,.tiff"
+                        className="visually-hidden"
+                        disabled={isScanningSheets}
+                        onChange={(event) => {
+                          addModalScanFiles(event.target.files);
+                          event.target.value = "";
+                        }}
+                      />
+                      <label
+                        htmlFor={modalAppendInputId}
+                        className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-[10.5px] font-medium text-[var(--text-soft)] hover:border-[var(--primary)] [input:focus-visible+&]:outline [input:focus-visible+&]:outline-2 [input:focus-visible+&]:outline-offset-2 [input:focus-visible+&]:outline-[var(--focus)]"
+                      >
+                        <Plus size={11} aria-hidden />
+                        Başka Pafta Ekle
+                      </label>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={isScanningSheets}
+                      onClick={() => {
+                        setScanQueue([]);
+                        setScanResult(null);
+                        setEditableDrafts([]);
+                        setScanProgressText("");
+                      }}
+                    >
+                      Temizle
+                    </Button>
+                  </div>
+                </div>
+
+                <ul className="max-h-32 space-y-1 overflow-y-auto scroll-thin pr-1">
+                  {scanQueue.map((item, idx) => (
+                    <li
+                      key={item.id}
+                      className="flex items-center justify-between gap-2 rounded border border-[var(--border)] px-2 py-1 text-[11px]"
+                    >
+                      <span className="min-w-0 truncate">
+                        <span className="mr-1.5 font-mono text-[10px] text-[var(--text-faint)]">#{idx + 1}</span>
+                        {item.file.name}
+                      </span>
+                      <span className="flex shrink-0 items-center gap-1.5">
+                        {item.status === "scanning" ? (
+                          <Badge tone="info">Taranıyor...</Badge>
+                        ) : item.status === "done" ? (
+                          <Badge tone="pass">{item.sectionCount ?? 0} kesit</Badge>
+                        ) : item.status === "error" ? (
+                          <span title={item.error}>
+                            <Badge tone="fail">Hata</Badge>
+                          </span>
+                        ) : (
+                          <Badge tone="neutral">Hazır</Badge>
+                        )}
+                        <button
+                          type="button"
+                          disabled={isScanningSheets}
+                          aria-label={`${item.file.name} paftasını çıkar`}
+                          onClick={() => setScanQueue((prev) => prev.filter((q) => q.id !== item.id))}
+                          className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--danger-bg)] hover:text-[var(--danger)] disabled:opacity-40"
+                        >
+                          <X size={12} aria-hidden />
+                        </button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+
+                {isScanningSheets || scanProgressText ? (
+                  <div className="space-y-1" role="status" aria-live="polite">
+                    {isScanningSheets ? (
+                      <progress
+                        value={scannedDoneCount}
+                        max={scanQueue.length}
+                        className="h-1.5 w-full accent-[var(--primary)]"
+                      />
+                    ) : null}
+                    <p className="text-[10.5px] text-[var(--text-muted)]">{scanProgressText}</p>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            <FieldGrid cols={2}>
               <NumberField
                 label="Hedef maks. kesit boyu"
                 unit="m"
@@ -1046,6 +1412,9 @@ export function ProjectsPage() {
                       <th scope="col">Bitiş KP</th>
                       <th scope="col" className="num">Uzunluk (m)</th>
                       <th scope="col" className="num">Kot (Baş/Bit/Min/Max)</th>
+                      {scanQueue.length > 1 || editableDrafts.some((d) => Boolean(d.source_file)) ? (
+                        <th scope="col">Kaynak Pafta</th>
+                      ) : null}
                       <th scope="col">KP Sürekliliği</th>
                     </tr>
                   </thead>
@@ -1056,8 +1425,11 @@ export function ProjectsPage() {
                           <input
                             type="text"
                             value={draft.section_no}
+                            autoCorrect="off"
+                            autoCapitalize="none"
+                            spellCheck={false}
                             onChange={(e) => updateDraftRow(idx, { section_no: e.target.value })}
-                            className="field-input h-7 w-[72px] px-2 font-mono text-[11px]"
+                            className="field-input h-7 w-[78px] px-2 font-mono text-[11px]"
                             aria-label={`Kesit no ${idx + 1}`}
                           />
                         </td>
@@ -1065,6 +1437,9 @@ export function ProjectsPage() {
                           <input
                             type="text"
                             value={draft.start_kp}
+                            autoCorrect="off"
+                            autoCapitalize="none"
+                            spellCheck={false}
                             onChange={(e) => updateDraftRow(idx, { start_kp: e.target.value })}
                             className="field-input h-7 w-[92px] px-2 font-mono text-[11px]"
                             aria-label={`Başlangıç KP ${idx + 1}`}
@@ -1074,6 +1449,9 @@ export function ProjectsPage() {
                           <input
                             type="text"
                             value={draft.end_kp}
+                            autoCorrect="off"
+                            autoCapitalize="none"
+                            spellCheck={false}
                             onChange={(e) => updateDraftRow(idx, { end_kp: e.target.value })}
                             className="field-input h-7 w-[92px] px-2 font-mono text-[11px]"
                             aria-label={`Bitiş KP ${idx + 1}`}
@@ -1085,10 +1463,19 @@ export function ProjectsPage() {
                             ? `${num(draft.start_elevation_m, 0)} / ${num(draft.end_elevation_m, 0)} (${num(draft.lowest_elevation_m, 0)}–${num(draft.highest_elevation_m, 0)} m)`
                             : "—"}
                         </td>
+                        {scanQueue.length > 1 || editableDrafts.some((d) => Boolean(d.source_file)) ? (
+                          <td className="max-w-[140px] truncate text-[10.5px] text-[var(--text-muted)]" title={draft.source_file}>
+                            {draft.source_file || "—"}
+                          </td>
+                        ) : null}
                         <td>
                           <Badge tone={draft.continuity_ok ? "pass" : "warning"}>
                             {idx === 0
-                              ? "Başlangıç"
+                              ? draft.prev_end_kp
+                                ? draft.continuity_ok
+                                  ? "Öncekiyle eşleşiyor"
+                                  : draft.continuity_note
+                                : "Başlangıç"
                               : draft.continuity_ok
                                 ? "Eşleşiyor"
                                 : draft.continuity_note}
@@ -1109,8 +1496,8 @@ export function ProjectsPage() {
         title="Proje silinsin mi?"
         message={
           <span>
-            <strong>{deletingProject?.name}</strong> arşivlenecek. Projeye bağlı kesitler silinmez;
-            proje bağlantıları kaldırılır.
+            <strong>{deletingProject?.name}</strong> ile birlikte bu projeye bağlı tüm test
+            bölümleri ve BOTAŞ form kayıtları da silinecek.
           </span>
         }
         confirmLabel="Projeyi sil"
@@ -1137,6 +1524,203 @@ export function ProjectsPage() {
         }}
         onClose={() => setDeletingSection(null)}
       />
+
+      <Modal
+        open={Boolean(formsModalSession)}
+        onClose={() => setFormsModalSession(null)}
+        title={
+          formsQuery.data
+            ? `${formsQuery.data.section_no} · BOTAŞ Form & Hakediş Takibi`
+            : `${formsModalSession?.name ?? ""} · BOTAŞ Form Takibi`
+        }
+        description="Hidrostatik testin tamamlanması gereken 11 zorunlu BOTAŞ formu (Ön ve Nihai Kurutma dahil) ve otomatik kontrol noktaları."
+        className="max-w-4xl max-h-[85vh] overflow-y-auto"
+        footer={
+          <>
+            {formsModalSession ? (
+              <Button
+                variant="primary"
+                onClick={() => {
+                  const s = formsModalSession;
+                  setFormsModalSession(null);
+                  openSection(s);
+                }}
+              >
+                Kesiti Çalışma Alanında Aç
+              </Button>
+            ) : null}
+            <Button variant="ghost" onClick={() => setFormsModalSession(null)}>
+              Kapat
+            </Button>
+          </>
+        }
+      >
+        {formsQuery.isLoading ? (
+          <div className="py-8 text-center text-xs text-[var(--text-muted)]">
+            Form kayıtları yükleniyor...
+          </div>
+        ) : formsQuery.isError ? (
+          <InlineNotice tone="danger" title="Formlar yüklenemedi">
+            {(formsQuery.error as Error)?.message || "Sunucu hatası oluştu."}
+          </InlineNotice>
+        ) : formsQuery.data ? (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge
+                tone={
+                  formsQuery.data.summary.failed_forms.length > 0
+                    ? "fail"
+                    : formsQuery.data.summary.complete
+                      ? "pass"
+                      : "warning"
+                }
+              >
+                {formsQuery.data.summary.filled_required} /{" "}
+                {formsQuery.data.summary.required_total} Zorunlu Form Dolu
+              </Badge>
+              <Badge tone="neutral">
+                {formsQuery.data.summary.missing_required} Eksik Form
+              </Badge>
+              {formsQuery.data.summary.supplementary_filled > 0 ? (
+                <Badge tone="info">
+                  {formsQuery.data.summary.supplementary_filled} Ek Rapor
+                </Badge>
+              ) : null}
+            </div>
+
+            {formsQuery.data.missing_required_forms.length > 0 ? (
+              <InlineNotice
+                tone="warning"
+                title={`Tamamlanması Gereken Eksik Formlar (${formsQuery.data.missing_required_forms.length})`}
+              >
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {formsQuery.data.missing_required_forms.map((m) => (
+                    <span
+                      key={m.form_code}
+                      className="rounded border border-[var(--border)] bg-[var(--surface-1)] px-2 py-0.5 text-[11px]"
+                    >
+                      {m.form_title} ({m.botas_code})
+                    </span>
+                  ))}
+                </div>
+              </InlineNotice>
+            ) : (
+              <InlineNotice tone="success" title="Tüm Zorunlu BOTAŞ Formları Mevcut">
+                11 zorunlu formun tamamı doldurulmuş.
+              </InlineNotice>
+            )}
+
+            <div className="table-wrap scroll-thin">
+              <table className="data">
+                <thead>
+                  <tr>
+                    <th scope="col">BOTAŞ Kodu</th>
+                    <th scope="col">Form Adı</th>
+                    <th scope="col">Tip</th>
+                    <th scope="col">Durum</th>
+                    <th scope="col">Kaynak Doküman / Sayfa</th>
+                    <th scope="col">Tarih</th>
+                    <th scope="col" className="num">Rev.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {formsQuery.data.forms.map((row) => {
+                    const tone =
+                      row.status === "passed"
+                        ? "pass"
+                        : row.status === "failed"
+                          ? "fail"
+                          : row.status === "warning"
+                            ? "warning"
+                            : row.status === "filled"
+                              ? "info"
+                              : "neutral";
+                    const label =
+                      row.status === "passed"
+                        ? "Başarılı"
+                        : row.status === "failed"
+                          ? "Başarısız"
+                          : row.status === "warning"
+                            ? "İnceleme"
+                            : row.status === "filled"
+                              ? "Dolu"
+                              : "Boş";
+                    return (
+                      <tr key={row.id}>
+                        <td className="font-mono text-[10.5px]">{row.botas_code}</td>
+                        <td className="font-medium text-[var(--text)]">{row.form_title}</td>
+                        <td>
+                          <Badge tone={row.required ? "info" : "neutral"}>
+                            {row.required ? "Zorunlu" : "Ek"}
+                          </Badge>
+                        </td>
+                        <td>
+                          <Badge tone={tone}>{label}</Badge>
+                        </td>
+                        <td className="text-[11px] text-[var(--text-soft)]">
+                          {row.source_filename ? (
+                            <span>
+                              {row.source_filename}
+                              {row.pages.length > 0 ? ` (s. ${row.pages.join(", ")})` : ""}
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="font-mono text-[11px]">{row.form_date || "—"}</td>
+                        <td className="num">{row.revision}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div>
+              <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-[var(--text)]">
+                Operasyon Kontrol Noktaları (11 Madde)
+              </h3>
+              <div className="grid gap-2 md:grid-cols-2">
+                {formsQuery.data.checkpoints.map((cp) => {
+                  const cpTone =
+                    cp.status === "passed"
+                      ? "pass"
+                      : cp.status === "failed"
+                        ? "fail"
+                        : cp.status === "warning"
+                          ? "warning"
+                          : "neutral";
+                  return (
+                    <div
+                      key={cp.key}
+                      className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-2.5 text-[11px]"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="font-semibold text-[var(--text)]">{cp.label}</span>
+                        <Badge tone={cpTone}>
+                          {cp.status === "passed"
+                            ? "Uygun"
+                            : cp.status === "failed"
+                              ? "Uygun Değil"
+                              : cp.status === "warning"
+                                ? "İnceleme"
+                                : "Bekliyor"}
+                        </Badge>
+                      </div>
+                      {cp.message ? (
+                        <p className="mt-1 text-[var(--text-soft)]">{cp.message}</p>
+                      ) : null}
+                      <span className="mt-0.5 block font-mono text-[9.5px] text-[var(--text-faint)]">
+                        Madde {cp.ref}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 }

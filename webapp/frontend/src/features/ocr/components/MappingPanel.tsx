@@ -118,19 +118,15 @@ export default function MappingPanel({
             <h2 id="ocr-mapping-title" className="text-base font-semibold text-[var(--text)]">
               Rapor formatı eşleme
             </h2>
-            <span className="rounded-full border border-[var(--warning-border)] bg-[var(--warning-bg)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--warning)]">
-              Format yarın geliyor
-            </span>
             {demo ? (
               <span className="rounded-full border border-[var(--border)] bg-[var(--surface-3)] px-2.5 py-1 text-[10px] uppercase tracking-[0.12em] text-[var(--text-soft)]">
-                yerel taslak
+                standart şablon
               </span>
             ) : null}
           </div>
           <p className="mt-1 max-w-3xl text-xs leading-relaxed text-[var(--text-muted)]">
-            Kanonik alanlar sabittir; form etiketleri, birimler ve zorunluluk profil bazında
-            yapılandırılır. Gerçek form geldiğinde alias listeleri güncellenecek ve kuru çalıştırma
-            ile kalibre edilecek.
+            Kanonik alanlar sabittir; form etiketleri, birimler ve zorunluluk kuralları profil
+            bazında yapılandırılır.
           </p>
         </div>
         <div className="flex flex-col gap-1 sm:min-w-[280px]">
@@ -350,7 +346,7 @@ export default function MappingPanel({
             <button
               type="button"
               disabled
-              title="Kaydetme, yarınki format doğrulamasından sonra etkinleşecek."
+              title="Standart şablon salt okunurdur."
               className="inline-flex min-h-10 items-center rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-medium text-[var(--text-muted)] opacity-50"
             >
               Profili kaydet
@@ -365,7 +361,7 @@ export default function MappingPanel({
             </button>
             {dirty ? (
               <span className="rounded-full border border-[var(--warning-border)] bg-[var(--warning-bg)] px-2.5 py-1 text-[10px] font-semibold text-[var(--warning)]">
-                yerel taslak · kaydedilmedi
+                kaydedilmemiş değişiklik
               </span>
             ) : null}
           </div>

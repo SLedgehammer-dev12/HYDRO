@@ -5,7 +5,8 @@
  * Alan adları API ile birebir aynıdır; snake_case korunur.
  */
 
-export type { SceneData, SceneEquipment, ScenePoint, SceneSegment, SceneStatus } from "./scene";
+export type { SceneData, SceneEquipment, SceneLandmark, ScenePoint, SceneSegment, SceneStatus } from "./scene";
+import type { SceneData, SceneStatus } from "./scene";
 
 /* ------------------------------------------------------------------ */
 /* Ortak enum'lar                                                      */
@@ -513,6 +514,19 @@ export interface SectionMeta {
   notes: string;
 }
 
+export interface ProfilePointItem {
+  station_m: number;
+  elevation_m: number;
+}
+
+export interface SectionLandmarkItem {
+  station_m: number;
+  kp?: string;
+  kind: string;
+  label: string;
+  elevation_m?: number | null;
+}
+
 export interface DraftSectionItem {
   section_no: string;
   start_kp: string;
@@ -533,13 +547,123 @@ export interface DraftSectionItem {
   prev_end_kp: string | null;
   continuity_ok: boolean;
   continuity_note: string;
+  source_file?: string;
+  profile_points?: ProfilePointItem[];
+  landmarks?: SectionLandmarkItem[];
+}
+
+export interface ProjectSceneSectionItem {
+  session_id: string;
+  section_no: string;
+  name: string;
+  start_kp: string;
+  end_kp: string;
+  start_m: number;
+  end_m: number;
+  length_m: number;
+  status: SceneStatus;
+}
+
+export interface ProjectSceneResponse extends SceneData {
+  project_id: string;
+  project_name: string;
+  section_count: number;
+  total_length_m: number;
+  continuity_ok: boolean;
+  sections: ProjectSceneSectionItem[];
+}
+
+export interface SimilarProjectCandidate {
+  id: string;
+  name: string;
+  code: string;
+  similarity: number;
+  similarity_pct: number;
+  section_count: number;
+  exact_match?: boolean;
+}
+
+export interface CheckAutoDetail {
+  status: "passed" | "failed" | "warning" | "pending";
+  checked: boolean | null;
+  auto_evaluated: boolean;
+  source_forms: string[];
+  message: string;
+  metrics?: Record<string, unknown>;
+}
+
+export interface SectionFormsSummary {
+  required_total: number;
+  filled_required: number;
+  missing_required: number;
+  missing_titles: string[];
+  supplementary_filled: number;
+  failed_forms: string[];
+  complete: boolean;
+}
+
+export interface SectionFormRecord {
+  id: string;
+  form_code: string;
+  botas_code: string;
+  form_title: string;
+  required: boolean;
+  status: "empty" | "filled" | "passed" | "failed" | "warning";
+  analysis_id: string | null;
+  source_filename: string;
+  pages: number[];
+  form_date: string;
+  warnings: string[];
+  revision: number;
+  filled_at: string | null;
+  updated_at: string | null;
+}
+
+export interface SessionFormCheckpoint {
+  key: CheckKey;
+  label: string;
+  ref: string;
+  checked: boolean;
+  status: "passed" | "failed" | "warning" | "pending";
+  message: string;
+  source_forms: string[];
+}
+
+export interface SessionFormsResponse {
+  session_id: string;
+  project_id: string | null;
+  section_no: string;
+  session_name: string;
+  summary: SectionFormsSummary;
+  forms: SectionFormRecord[];
+  missing_required_forms: Array<{
+    form_code: string;
+    botas_code: string;
+    form_title: string;
+  }>;
+  checkpoints: SessionFormCheckpoint[];
+}
+
+export interface PlanProfileCommitRequest {
+  project_id?: string | null;
+  project_name?: string | null;
+  project_code?: string | null;
+  sections: Array<Partial<DraftSectionItem>>;
+}
+
+export interface PlanProfileCommitResponse {
+  project_id: string;
+  created_count: number;
+  updated_count?: number;
+  items: SessionListItem[];
+  project: Project;
 }
 
 export interface PlanProfileScanResponse {
   file_name: string;
   page_count: number;
   extraction_method: string;
-  strategy: "explicit" | "auto_split";
+  strategy: "cad_profile" | "explicit" | "auto_split";
   station_count: number;
   elevation_point_count: number;
   min_kp: string;
@@ -557,6 +681,8 @@ export interface PlanProfileScanResponse {
   continuity_ok: boolean;
   continuity_issues: string[];
   warnings: string[];
+  detected_project_name?: string | null;
+  similar_projects?: SimilarProjectCandidate[];
 }
 
 export interface SessionResultSummary {
@@ -590,6 +716,7 @@ export interface SessionListItem {
   created_at?: string;
   result_summary?: SessionResultSummary;
   section_meta?: SectionMeta;
+  forms_summary?: SectionFormsSummary | null;
 }
 
 export interface SessionSummaryResponse {
@@ -764,6 +891,8 @@ export interface AppInputs {
   geometry: GeometryInputs;
   geometry_catalog: GeometryCatalogInputs;
   segments: SegmentRow[];
+  profile_points: ProfilePointItem[];
+  landmarks: SectionLandmarkItem[];
   section_profile: SectionProfileInputs;
   material_grade: string;
   location_class: string;
@@ -774,6 +903,8 @@ export interface AppInputs {
   helper: HelperInputs;
   modes: ModeInputs;
   checks: Record<CheckKey, boolean>;
+  check_details?: Partial<Record<CheckKey, CheckAutoDetail>>;
+  forms_summary?: SectionFormsSummary | null;
   report: ReportMeta;
 }
 

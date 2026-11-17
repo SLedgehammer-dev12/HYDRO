@@ -54,8 +54,8 @@ export function Modal({
       <div ref={cardRef} className={cn("modal-card", className)} role="dialog" aria-modal="true" aria-label={typeof title === "string" ? title : "Diyalog"}>
         <header className="flex items-start justify-between gap-3 border-b border-[var(--border)] px-5 py-4">
           <div>
-            <h2 className="text-[15px] font-semibold">{title}</h2>
-            {description ? <p className="mt-1 text-[11.5px] text-[var(--text-faint)]">{description}</p> : null}
+            <h2 className="text-[19px] font-bold text-[var(--text)]">{title}</h2>
+            {description ? <p className="mt-1 text-[13px] text-[var(--text-muted)]">{description}</p> : null}
           </div>
           <IconButton label="Kapat" onClick={onClose}>
             <X size={15} aria-hidden />

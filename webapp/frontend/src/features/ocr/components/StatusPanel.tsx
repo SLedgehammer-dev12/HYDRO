@@ -1,7 +1,7 @@
 import clsx from "clsx";
 import type { ReactNode } from "react";
-import { Cpu, Loader2, RefreshCw, ScanLine } from "lucide-react";
-import { formatNumber } from "../format";
+import { Cpu, Loader2, RefreshCw } from "lucide-react";
+import { formatBytes, formatNumber } from "../format";
 import type { OcrStatus } from "../types";
 import { TONE_BADGE_CLASSES } from "./tone";
 
@@ -9,9 +9,7 @@ export interface StatusPanelProps {
   status: OcrStatus | null;
   loading: boolean;
   error: boolean;
-  demoActive: boolean;
   onRetry: () => void;
-  onDemo: () => void;
 }
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
@@ -27,9 +25,7 @@ export default function StatusPanel({
   status,
   loading,
   error,
-  demoActive,
   onRetry,
-  onDemo,
 }: StatusPanelProps) {
   const available = status?.available === true && !error;
 
@@ -72,11 +68,10 @@ export default function StatusPanel({
       {error ? (
         <div className="mt-4 rounded-lg border border-[var(--danger-border)] bg-[var(--danger-bg)] px-3 py-3 text-xs leading-relaxed text-[var(--danger)]">
           <p className="font-medium">
-            Backend'e ulaşılamadı. Arayüz demo verisiyle incelenebilir.
+            Sunucuya ulaşılamadı. Bağlantıyı kontrol edip yeniden deneyin.
           </p>
           <p className="mt-1 text-[11px] text-[var(--danger)]">
-            Sunucu adresi: <span className="numeric">127.0.0.1:8080</span>. Servis kapalıysa
-            gerçek analiz başlatılamaz; yüklediğiniz dosya cihazdan çıkmaz.
+            Servis kapalıysa analiz başlatılamaz; yüklediğiniz dosya cihazdan çıkmaz.
           </p>
           <div className="mt-2.5 flex flex-wrap gap-2">
             <button
@@ -87,20 +82,7 @@ export default function StatusPanel({
               <RefreshCw size={12} aria-hidden="true" />
               Bağlantıyı dene
             </button>
-            <button
-              type="button"
-              onClick={onDemo}
-              className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-[var(--warning-border)] bg-[var(--warning-bg)] px-2.5 py-1 text-[11px] font-medium text-[var(--warning)] hover:bg-[var(--warning-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
-            >
-              <ScanLine size={12} aria-hidden="true" />
-              Demo sonucu göster
-            </button>
           </div>
-          {demoActive ? (
-            <p className="mt-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--warning)]">
-              Demo modu etkin — sonuçlar resmi değildir
-            </p>
-          ) : null}
         </div>
       ) : null}
 
@@ -141,7 +123,8 @@ export default function StatusPanel({
             <Row label="Limitler">
               {status.limits ? (
                 <span className="numeric">
-                  25 MB · PDF {formatNumber(status.limits.max_pdf_pages, 0)} sayfa · OCR{" "}
+                  {formatBytes(status.limits.max_file_size_bytes)} · PDF{" "}
+                  {formatNumber(status.limits.max_pdf_pages, 0)} sayfa · OCR{" "}
                   {formatNumber(status.limits.max_ocr_pages, 0)} sayfa
                 </span>
               ) : (
@@ -177,15 +160,6 @@ export default function StatusPanel({
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t hairline pt-3">
         <p className="text-[10px] text-[var(--text-faint)]">OCR çıktısı resmi kabul değildir.</p>
-        {!error ? (
-          <button
-            type="button"
-            onClick={onDemo}
-            className="rounded-md border border-[var(--border)] px-2 py-1 text-[10px] font-medium text-[var(--text-soft)] transition hover:border-[var(--warning-border)] hover:text-[var(--warning)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
-          >
-            Demo sonucuyla önizle
-          </button>
-        ) : null}
       </div>
     </section>
   );

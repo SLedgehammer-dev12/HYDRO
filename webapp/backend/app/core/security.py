@@ -23,6 +23,8 @@ _MAGIC_PREFIXES: tuple[tuple[bytes, str], ...] = (
     (b"II*\x00", "image/tiff"),
     (b"MM\x00*", "image/tiff"),
     (b"BM", "image/bmp"),
+    (b"PK\x03\x04", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+    (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", "application/vnd.ms-excel"),
 )
 
 _EXTENSION_MIME = {
@@ -34,6 +36,8 @@ _EXTENSION_MIME = {
     ".tiff": "image/tiff",
     ".bmp": "image/bmp",
     ".webp": "image/webp",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".xls": "application/vnd.ms-excel",
 }
 
 

@@ -3,7 +3,7 @@
  * Alan adları backend ile birebir aynıdır; frontend'de kopya anahtar üretilmez.
  */
 
-export type OcrSource = "pdf-text-layer" | "ocr" | "mixed";
+export type OcrSource = "pdf-text-layer" | "spreadsheet" | "ocr" | "mixed";
 
 export type OcrAnalysisStatus =
   | "queued"
@@ -99,6 +99,120 @@ export interface OcrErrorDetail {
   detail?: string;
 }
 
+import type {
+  CheckAutoDetail,
+  CheckKey,
+  Project,
+  SectionFormsSummary,
+  SimilarProjectCandidate,
+} from "../../lib/types";
+
+export interface DossierFormEntry {
+  form_code: string;
+  botas_code: string;
+  form_title: string;
+  required: boolean;
+  order: number;
+  status: "empty" | "filled" | "passed" | "failed" | "warning";
+  source_filename: string;
+  pages: number[];
+  form_date: string;
+  extracted_data: Record<string, unknown>;
+  warnings: string[];
+}
+
+export interface DossierMissingForm {
+  form_code: string;
+  botas_code: string;
+  form_title: string;
+}
+
+export interface DossierCalcResult {
+  status: "passed" | "failed" | "warning" | "pending";
+  passed: boolean | null;
+  summary: string;
+  [key: string]: unknown;
+}
+
+export interface DossierSection {
+  section_no: string;
+  header: Record<string, unknown>;
+  present_forms: DossierFormEntry[];
+  missing_required_forms: DossierMissingForm[];
+  filled_required_count: number;
+  required_total: number;
+  supplementary_count: number;
+  calculations: {
+    air?: DossierCalcResult;
+    pressure?: DossierCalcResult;
+    profile?: DossierCalcResult;
+    pig?: DossierCalcResult;
+  };
+  checks: Record<string, boolean>;
+  check_details: Partial<Record<CheckKey, CheckAutoDetail>>;
+  pages: number[];
+}
+
+export interface DossierConflictItem {
+  section_no: string;
+  session_id: string;
+  session_name: string;
+  form_code: string;
+  botas_code: string;
+  form_title: string;
+  existing_status: string;
+  existing_filename: string;
+  existing_date: string;
+  existing_revision: number;
+  new_date: string;
+  new_pages: number[];
+}
+
+export interface OcrDossierView {
+  schema_version?: number;
+  detected_project_name?: string | null;
+  source_filename: string;
+  page_count: number;
+  sections_count: number;
+  sections: DossierSection[];
+  unassigned_pages: Array<{
+    page: number;
+    form_code?: string;
+    section_no?: string;
+    reason: string;
+  }>;
+  blank_template_pages: number[];
+  required_form_catalog: DossierMissingForm[];
+  warnings: string[];
+  similar_projects?: SimilarProjectCandidate[];
+  project_conflicts?: Record<string, DossierConflictItem[]>;
+}
+
+export interface DossierCommitRequest {
+  target_project_id?: string | null;
+  create_new_project: boolean;
+  new_project_name?: string | null;
+  new_project_code?: string | null;
+  overwrite_filled: boolean;
+  selected_sections?: string[] | null;
+}
+
+export interface DossierCommitResponse {
+  project: Project;
+  created_sections: Array<{ session_id: string; section_no: string; name: string }>;
+  updated_sections: Array<{ session_id: string; section_no: string; name: string }>;
+  created_sections_count?: number;
+  updated_sections_count?: number;
+  saved_forms_count: number;
+  overwritten_forms_count: number;
+  sections_summary: Array<{
+    session_id: string;
+    section_no: string;
+    forms_summary: SectionFormsSummary;
+    calculations?: Record<string, DossierCalcResult>;
+  }>;
+}
+
 export interface OcrAnalysisMetrics {
   low_confidence_fields: number;
   critical_confidence_fields: number;
@@ -119,6 +233,7 @@ export interface OcrAnalysisResult {
   issues?: ValidationIssue[];
   warnings?: string[];
   approved_fields?: Record<string, ApprovedField> | null;
+  dossier?: OcrDossierView | null;
   progress?: { stage: string; elapsed_s: number } | null;
   error?: OcrErrorDetail | null;
   created_at?: string;
@@ -243,6 +358,7 @@ export interface AnalyzeRequestInput {
   mappingProfileId?: string | null;
   sessionId?: string | null;
   language?: string;
+  force?: boolean;
 }
 
 export interface ApproveRequestInput {
@@ -275,6 +391,7 @@ export interface ApplyResponse {
 
 export const SOURCE_LABELS: Record<OcrSource, string> = {
   "pdf-text-layer": "PDF metin katmanı",
+  spreadsheet: "Excel çalışma kitabı",
   ocr: "OCR",
   mixed: "Karma (metin + OCR)",
 };

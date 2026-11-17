@@ -39,14 +39,14 @@ export function SectionCard({
       <header className="panel-head">
         <div className="flex min-w-0 items-start gap-2.5">
           {Icon ? (
-            <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border border-[var(--border)] bg-[var(--surface-3)] text-[var(--text-muted)]">
-              <Icon size={15} strokeWidth={1.8} aria-hidden />
+            <span className="mt-0.5 grid size-10 shrink-0 place-items-center rounded-xl border border-[color-mix(in_srgb,var(--primary)_35%,var(--border-strong))] bg-[var(--primary-soft)] text-[var(--primary)]">
+              <Icon size={19} strokeWidth={2} aria-hidden />
             </span>
           ) : null}
           <div className="min-w-0">
-            <h2 className="text-[15px] font-semibold leading-tight tracking-[-0.01em]">{title}</h2>
+            <h2 className="text-[18px] font-bold leading-snug tracking-[-0.015em] text-[var(--text)] sm:text-[19.5px]">{title}</h2>
             {description ? (
-              <p className="mt-1 text-[11.5px] leading-relaxed text-[var(--text-faint)]">
+              <p className="mt-1 text-[13px] leading-relaxed text-[var(--text-muted)]">
                 {description}
               </p>
             ) : null}

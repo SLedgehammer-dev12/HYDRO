@@ -515,14 +515,17 @@ class OcrAvailabilityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             path = Path(tmp_dir) / "tarama.png"
             Image.new("L", (400, 200), color=255).save(path)
-            with mock.patch.object(
-                ocr,
-                "_resolve_ocr_engine",
-                return_value="tesseract",
-            ), mock.patch.object(
-                ocr,
-                "_run_tesseract",
-                return_value=("Report No: R-77\nTest Pressure: 80 bar\n", 0.9, ""),
+            with (
+                mock.patch.object(
+                    ocr,
+                    "_resolve_ocr_engine",
+                    return_value="tesseract",
+                ),
+                mock.patch.object(
+                    ocr,
+                    "_run_tesseract",
+                    return_value=("Report No: R-77\nTest Pressure: 80 bar\n", 0.9, ""),
+                ),
             ):
                 pages = ocr.extract_text(path)
 
@@ -863,6 +866,284 @@ class VisionBlockPairingTests(unittest.TestCase):
         ]
         report = ocr.parse_report(ocr._vision_blocks_to_text(blocks))
         self.assertAlmostEqual(report.pipe_od_mm.as_float(), 355.60)
+
+    def test_alphanumeric_and_reverse_section_ids_pair_and_fallback(self) -> None:
+        blocks = [
+            ("Test Bölüm No", 1.0, [0.186, 0.7382, 0.088, 0.009]),
+            ("BÖLÜM 3B", 1.0, [0.394, 0.7382, 0.063, 0.010]),
+        ]
+        report = ocr.parse_report(ocr._vision_blocks_to_text(blocks))
+        self.assertEqual(report.section_id.value, "BÖLÜM 3B")
+
+        report_rev = ocr.parse_report("Test Bölüm No\n14.bölüm\n")
+        self.assertEqual(report_rev.section_id.value, "BÖLÜM 14")
+
+        report_dash = ocr.parse_report("BÖLÜM 11-A\nTest Bölüm No : :\n")
+        self.assertEqual(report_dash.section_id.value, "BÖLÜM 11-A")
+
+        report_prose = ocr.parse_report("BÖLÜM 5 Basınç Testi\nTest Bölüm No : :\n")
+        self.assertEqual(report_prose.section_id.value, "BÖLÜM 5")
+
+    def test_truncated_second_head_location_maps_to_end_kp(self) -> None:
+        text = (
+            "1.Başlık No : TB-01\n"
+            "1.Başlık Yeri : 25+404\n"
+            "2.Başlık No : TB-02\n"
+            ".Başlık Yeri : 34+203\n"
+        )
+        report = ocr.parse_report(text)
+        self.assertEqual(report.start_kp.value, "25+404")
+        self.assertEqual(report.end_kp.value, "34+203")
+
+    def test_punctuation_only_blocks_are_rejected_as_values(self) -> None:
+        self.assertFalse(ocr._looks_like_value(":"))
+        self.assertFalse(ocr._looks_like_value(": :"))
+        self.assertFalse(ocr._looks_like_value(".. .."))
+        self.assertTrue(ocr._looks_like_value("BÖLÜM 11-A"))
+        self.assertTrue(ocr._looks_like_value("14.bölüm"))
+
+
+class SpreadsheetExtractionTests(unittest.TestCase):
+    """Excel (.xlsx / .xls) test raporu okuma ve alan cikarimi testleri."""
+
+    def test_xlsx_multi_sheet_extraction_and_comparison(self) -> None:
+        import datetime as dt
+
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws1 = wb.active
+        ws1.title = "hydrostatic test data"
+        ws1.append(["HİDROSTATİK TEST VERİLERİ"])
+        ws1.append(["Test Bölüm No", ":", "BÖLÜM 5", "Tarih", ":", dt.date(2026, 10, 5)])
+        ws1.append(["1.Başlık Yeri", ":", "25+404", "2.Başlık Yeri", ":", "34+203"])
+        # Sol sutun etiketi birim tasisa da degeri bossa sag sutun (355.6) m'ye cevrilmemeli
+        ws1.append(["Test Bölüm Boyu (m)", ":", "", "Boru Dış Çapı", ":", 355.6])
+        ws1.append(["Boru Et Kalınlığı", ":", "5,2 mm"])
+        ws1.append(["Test Bölüm Boyu", ":", 8802.34, "m"])
+        ws1.append(["Maximum İşletme Basıncı(Bar)", ":", 75.0])
+        ws1.append(["Maks. Test Basıncı", ":", "131,68 bar"])
+        ws1.append(["Operatör", ":", "A Yılmaz"])
+        ws1.append(["Hata Hücresi", ":", "#DIV/0!"])
+        ws1.append(["............"])
+
+        ws2 = wb.create_sheet("acceptance air test report")
+        ws2.append(["HAVA İÇERİK TESTİ KABUL RAPORU"])
+        ws2.append(["Vp (L)", "=", 62.5])
+        ws2.append(
+            ["VpA", "=", "Basıncı 1 Bar Değiştirmek İçin Kullanılan Su Miktarı", "(m³) =", 0.0640]
+        )
+        ws2.append(
+            ["K", "=", "Katsayı,Dikişsiz Borular İçin 1,Kaynaklı Borular İçin 1,02", "-", 1.02]
+        )
+        ws2.append(["A", "=", "Suyun İzotermal Sıkıştırılabilirlik Katsayısı", "(1/Bar) =", 45.106])
+
+        ws3 = wb.create_sheet("leak test acceptance report")
+        ws3.append(["BASINÇ TESTİ KABUL RAPORU"])
+        ws3.append(["Tilk", ":", 20.0, "°C", "Tson", ":", 20.2, "°C"])
+        ws3.append(["PA", "=", "Ölçülen Basınç Değişimi", 0.400, "(Bar)"])
+        ws3.append(
+            ["T", "=", "Testin Başı ve Sonunda su sıcaklığında oluşan değişim", 0.200, "(°C)"]
+        )
+        ws3.append(
+            ["B", "=", "Su ve Çeliğin Isıl Genleşme Katsayıları Arasındaki Fark", 161.497, "(1/K)"]
+        )
+        ws3.append(["A", "=", "Suyun İzotermal Sıkıştırılabilirlik Katsayısı", 44.892, "(1/Bar)"])
+        ws3.append(["PL", "=", "Test Boyunca İzin Verilebilir Basınç Değişimi", 0.300, "(Bar)"])
+        ws3.append(["4.Sonuç:", "KABUL"])
+        ws3.append(["5.Açıklamalar", ":", "Sızıntı görülmedi"])
+
+        # Grafik sayfasi (iter_rows yok) atlanabilmeli
+        wb.create_chartsheet("Grafik")
+
+        with tempfile.TemporaryDirectory() as td:
+            xlsx_path = Path(td) / "rapor.xlsx"
+            wb.save(xlsx_path)
+
+            calculated = {
+                "pipe_od_mm": 355.6,
+                "wall_mm": 5.2,
+                "length_m": 8802.34,
+                "test_pressure_bar": 131.68,
+                "air_test": {"vp_m3": 0.0625, "vpa_m3": 0.0640, "a_micro_per_bar": 45.106},
+                "pressure_test": {
+                    "t_initial_c": 20.0,
+                    "t_final_c": 20.2,
+                    "delta_t_c": 0.200,
+                    "pa_bar": 0.400,
+                    "a_micro_per_bar": 44.892,
+                    "b_micro_per_c": 161.497,
+                },
+                "result": "PASS",
+            }
+            result = ocr.analyze_report(xlsx_path, calculated=calculated)
+            self.assertEqual(result.source, "spreadsheet")
+            self.assertGreaterEqual(result.confidence, 0.9)
+            self.assertFalse(any("OCR kullanildi" in w for w in result.warnings))
+            self.assertGreater(len(result.discrepancies), 0)
+            self.assertFalse(ocr.has_blocking_discrepancies(result.discrepancies))
+            self.assertTrue(all(d.status == "match" for d in result.discrepancies))
+
+            rep = result.report
+            self.assertEqual(rep.section_id.value, "BÖLÜM 5")
+            self.assertEqual(rep.date.value, "2026-10-05")
+            self.assertEqual(rep.start_kp.value, "25+404")
+            self.assertEqual(rep.end_kp.value, "34+203")
+            self.assertAlmostEqual(rep.pipe_od_mm.as_float(), 355.6)
+            self.assertAlmostEqual(rep.wall_mm.as_float(), 5.2)
+            self.assertAlmostEqual(rep.length_m.as_float(), 8802.34)
+            self.assertAlmostEqual(rep.max_operating_pressure_bar.as_float(), 75.0)
+            self.assertAlmostEqual(rep.test_pressure_bar.as_float(), 131.68)
+            self.assertEqual(rep.operator.value, "A Yılmaz")
+            self.assertAlmostEqual(rep.air_test.vp.as_float(), 0.0625)
+            self.assertAlmostEqual(rep.air_test.vpa.as_float(), 0.0640)
+            self.assertAlmostEqual(rep.air_test.k.as_float(), 1.02)
+            self.assertAlmostEqual(rep.air_test.a.as_float(), 45.106)
+            self.assertAlmostEqual(rep.pressure_test.t_initial.as_float(), 20.0)
+            self.assertAlmostEqual(rep.pressure_test.t_final.as_float(), 20.2)
+            self.assertAlmostEqual(rep.pressure_test.pa.as_float(), 0.400)
+            self.assertAlmostEqual(rep.pressure_test.delta_t.as_float(), 0.200)
+            self.assertAlmostEqual(rep.pressure_test.a.as_float(), 44.892)
+            self.assertAlmostEqual(rep.pressure_test.b.as_float(), 161.497)
+            self.assertAlmostEqual(rep.pressure_test.pl.as_float(), 0.300)
+            self.assertEqual(rep.result.value, "PASS")
+            self.assertEqual(rep.notes.value, "Sızıntı görülmedi")
+
+    def test_xlsx_zip_bomb_stream_cap_and_empty_workbook(self) -> None:
+        from unittest import mock
+
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["Test Bölüm No", ":", "BÖLÜM 5"])
+        wb_empty = openpyxl.Workbook()
+
+        with tempfile.TemporaryDirectory() as td:
+            xlsx_path = Path(td) / "rapor.xlsx"
+            empty_path = Path(td) / "bos.xlsx"
+            wb.save(xlsx_path)
+            wb_empty.save(empty_path)
+
+            with mock.patch.object(ocr, "_XLSX_MAX_UNCOMPRESSED_BYTES", 128):
+                with self.assertRaises(ocr.ReportOcrError) as ctx:
+                    ocr.extract_text(xlsx_path)
+                self.assertEqual(ctx.exception.code, ocr.ERROR_CORRUPT_DOCUMENT)
+
+            with self.assertRaises(ocr.ReportOcrError) as empty_ctx:
+                ocr.extract_text(empty_path)
+            self.assertEqual(empty_ctx.exception.code, ocr.ERROR_EMPTY_TEXT)
+
+    def test_portable_xls_extraction_and_ole2_validation(self) -> None:
+        import datetime as dt
+        import types
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as td:
+            bad_xls = Path(td) / "bozuk.xls"
+            bad_xls.write_bytes(b"not an ole2 file")
+            with self.assertRaises(ocr.ReportOcrError) as bad_ctx:
+                ocr.extract_text(bad_xls)
+            self.assertEqual(bad_ctx.exception.code, ocr.ERROR_CORRUPT_DOCUMENT)
+
+            valid_header_xls = Path(td) / "rapor.xls"
+            valid_header_xls.write_bytes(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 32)
+
+            rows = [
+                [
+                    (1, "Test Bölüm No"),
+                    (1, ":"),
+                    (1, "BÖLÜM 7"),
+                    (1, "Tarih"),
+                    (1, ":"),
+                    (3, 46341.0),
+                ],
+                [(1, "Boru Dış Çapı"), (1, ":"), (2, 406.4), (1, "mm")],
+                [(1, "Hata"), (5, 0x07)],
+                [(1, "Test Tarihi"), (1, ":"), (1, "15 Kasım 2026")],
+            ]
+
+            class _FakeSheet:
+                name = "hydrostatic test data"
+                nrows = len(rows)
+                ncols = 6
+
+                def cell_type(self, r: int, c: int) -> int:
+                    return rows[r][c][0] if c < len(rows[r]) else 0
+
+                def cell_value(self, r: int, c: int) -> object:
+                    return rows[r][c][1] if c < len(rows[r]) else ""
+
+            class _FakeWorkbook:
+                nsheets = 1
+                datemode = 0
+                released = False
+
+                def sheet_by_index(self, _idx: int) -> _FakeSheet:
+                    return _FakeSheet()
+
+                def release_resources(self) -> None:
+                    self.released = True
+
+            fake_wb = _FakeWorkbook()
+            fake_xlrd = types.SimpleNamespace(
+                XL_CELL_EMPTY=0,
+                XL_CELL_TEXT=1,
+                XL_CELL_NUMBER=2,
+                XL_CELL_DATE=3,
+                XL_CELL_BOOLEAN=4,
+                XL_CELL_ERROR=5,
+                XL_CELL_BLANK=6,
+                open_workbook=lambda *_args, **_kwargs: fake_wb,
+                xldate_as_datetime=lambda *_args: dt.datetime(2026, 11, 15),
+            )
+
+            with (
+                mock.patch.object(ocr.importlib.util, "find_spec", return_value=object()),
+                mock.patch.object(ocr.importlib, "import_module", return_value=fake_xlrd),
+            ):
+                result = ocr.analyze_report(valid_header_xls)
+            self.assertTrue(fake_wb.released)
+            self.assertEqual(result.source, "spreadsheet")
+            self.assertEqual(result.report.section_id.value, "BÖLÜM 7")
+            self.assertAlmostEqual(result.report.pipe_od_mm.as_float(), 406.4)
+            self.assertEqual(result.report.date.value, "2026-11-15")
+
+    def test_vision_value_helpers_turkish_and_redos_safe(self) -> None:
+        import time
+
+        self.assertFalse(ocr._looks_like_value("5.Açıklamalar"))
+        self.assertTrue(ocr._looks_like_value("14.KESİM"))
+        self.assertEqual(
+            ocr._find_section_id([ocr.PageText(1, "14.kesim\n")]).value,
+            "KESİM 14",
+        )
+        t0 = time.monotonic()
+        self.assertFalse(ocr._looks_like_value("AB 1" + "*" * 24 + "!"))
+        self.assertLess(time.monotonic() - t0, 0.1)
+
+    def test_non_workbook_zip_rejected_as_corrupt_xlsx(self) -> None:
+        import zipfile
+
+        with tempfile.TemporaryDirectory() as td:
+            fake_xlsx = Path(td) / "sahte.xlsx"
+            with zipfile.ZipFile(fake_xlsx, "w") as zf:
+                zf.writestr("hello.txt", "not a workbook")
+
+            with self.assertRaises(ocr.ReportOcrError) as ctx:
+                ocr.extract_text(fake_xlsx)
+            self.assertEqual(ctx.exception.code, ocr.ERROR_CORRUPT_DOCUMENT)
+
+    def test_real_botas_xls_templates_parse_without_error(self) -> None:
+        xls_files = sorted(Path("/Users/macbook/Documents/Kodlama/HYDRO").glob("BOT-FRM-*.xls"))
+        if not xls_files:
+            self.skipTest("BOTAS .xls şablonları klasörde yok.")
+        for xls_path in xls_files:
+            pages = ocr.extract_text(xls_path)
+            self.assertGreater(len(pages), 0, xls_path.name)
+            self.assertTrue(all(p.source == "spreadsheet" for p in pages))
+            rep = ocr.parse_report(pages)
+            self.assertIsNone(rep.air_test.vp, xls_path.name)
 
 
 if __name__ == "__main__":

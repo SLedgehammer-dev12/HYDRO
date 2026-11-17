@@ -14,6 +14,7 @@ from ..core.errors import validation_error
 from ..core.timeutil import json_safe
 from ..db import get_db
 from ..services import audit
+from ..services import dossier as dossier_service
 from ..services import reports as report_service
 from ..services import scene as scene_service
 from ..services import sessions as session_service
@@ -99,6 +100,16 @@ def get_session(
     session = session_service.get_session(db, session_id, workspace.hash)
     _etag(response, session.revision)
     return json_safe(session_service.serialize_session(session))
+
+
+@router.get("/{session_id}/forms")
+def get_session_forms(
+    session_id: str,
+    db: OrmSession = Depends(get_db),
+    workspace: Workspace = Depends(get_workspace),
+) -> dict:
+    session = session_service.get_session(db, session_id, workspace.hash)
+    return json_safe(dossier_service.get_session_forms_payload(db, session))
 
 
 @router.put("/{session_id}")

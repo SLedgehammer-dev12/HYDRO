@@ -72,6 +72,8 @@ def default_inputs() -> dict[str, Any]:
         "location_class": "Class 1 - min 1.25 x dizayn basinci",
         "pump_location": "",
         "segments": [],
+        "profile_points": [],
+        "landmarks": [],
         "air": {
             "temperature_c": None,
             "pressure_bar": None,
@@ -112,6 +114,8 @@ def default_inputs() -> dict[str, Any]:
             "pig_mode": "Temizlik pigi",
         },
         "checks": {key: False for key in FIELD_CHECK_KEYS},
+        "check_details": {},
+        "forms_summary": None,
         "coefficients": {
             "air_a": {"state": "empty", "source": "empty"},
             "pressure_a": {"state": "empty", "source": "empty"},
@@ -130,10 +134,16 @@ def normalize_inputs(raw: dict[str, Any] | None) -> dict[str, Any]:
     merged["schema_version"] = 1
     if not isinstance(merged.get("segments"), list):
         merged["segments"] = []
+    if not isinstance(merged.get("profile_points"), list):
+        merged["profile_points"] = []
+    if not isinstance(merged.get("landmarks"), list):
+        merged["landmarks"] = []
     if not isinstance(merged.get("checks"), dict):
         merged["checks"] = {}
     for key in FIELD_CHECK_KEYS:
         merged["checks"].setdefault(key, False)
+    if not isinstance(merged.get("check_details"), dict):
+        merged["check_details"] = {}
     if not isinstance(merged.get("report_entries"), list):
         merged["report_entries"] = []
     # The SPA keeps ambient temperature under ``air``; mirror it to the
@@ -170,9 +180,7 @@ def session_brief(session: HydroSession) -> dict[str, Any]:
     summary = session.result_summary or {}
     raw_inputs = session.inputs if isinstance(session.inputs, dict) else {}
     raw_meta = (
-        raw_inputs.get("section_meta")
-        if isinstance(raw_inputs.get("section_meta"), dict)
-        else {}
+        raw_inputs.get("section_meta") if isinstance(raw_inputs.get("section_meta"), dict) else {}
     )
     section_meta = {
         "section_no": str(raw_meta.get("section_no") or ""),
@@ -194,6 +202,7 @@ def session_brief(session: HydroSession) -> dict[str, Any]:
         "created_at": iso_z(session.created_at),
         "result_summary": summary,
         "section_meta": section_meta,
+        "forms_summary": raw_inputs.get("forms_summary"),
     }
 
 
@@ -249,6 +258,7 @@ def create_session(
     project_id: str | None = None,
     inputs: dict[str, Any] | None = None,
     wizard_state: dict[str, Any] | None = None,
+    commit: bool = True,
 ) -> HydroSession:
     _validate_project(db, project_id, workspace_hash)
     session = HydroSession(
@@ -265,6 +275,10 @@ def create_session(
     )
     db.add(session)
     db.flush()
+    if project_id is not None:
+        from . import dossier as dossier_service
+
+        dossier_service.ensure_section_form_slots(db, session, commit=False)
     audit.record(
         db,
         action="session.create",
@@ -274,8 +288,9 @@ def create_session(
         workspace_hash=workspace_hash,
         after={"name": session.name},
     )
-    db.commit()
-    db.refresh(session)
+    if commit:
+        db.commit()
+        db.refresh(session)
     return session
 
 
@@ -499,6 +514,7 @@ def create_result(
     *,
     test_type: str,
     payload: dict[str, Any],
+    commit: bool = True,
 ) -> dict[str, Any]:
     from .calculations import evaluate_test
 
@@ -543,8 +559,9 @@ def create_result(
         workspace_hash=session.workspace_id_hash,
         after={"test_type": test_type, "decision_status": row.decision_status},
     )
-    db.commit()
-    db.refresh(row)
+    if commit:
+        db.commit()
+        db.refresh(row)
     return {
         "id": row.id,
         "test_type": row.test_type,

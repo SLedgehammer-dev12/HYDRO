@@ -1,11 +1,15 @@
-import { createDefaultInputs } from "./mock";
+import { createDefaultInputs, createEmptyInputs } from "./mock";
 import { parseNumber } from "./format";
 import { extractKpFromLocation, formatKpLocation } from "./kp";
 import type {
   AMode,
   AppInputs,
   BSource,
+  CheckAutoDetail,
   CheckKey,
+  ProfilePointItem,
+  SectionFormsSummary,
+  SectionLandmarkItem,
   SegmentRow,
   SteelModel,
 } from "./types";
@@ -56,7 +60,8 @@ function asBMode(value: unknown, fallback: "auto" | "table" | "manual") {
 }
 
 function asSegments(value: unknown, fallback: SegmentRow[]): SegmentRow[] {
-  if (!Array.isArray(value) || value.length === 0) return fallback;
+  if (!Array.isArray(value)) return fallback;
+  if (value.length === 0) return [];
   const rows: SegmentRow[] = [];
   value.forEach((item, index) => {
     const row = asRecord(item);
@@ -74,13 +79,45 @@ function asSegments(value: unknown, fallback: SegmentRow[]): SegmentRow[] {
       start_station_m: asNumber(row.start_station_m, null),
     });
   });
-  return rows.length > 0 ? rows : fallback;
+  return rows;
+}
+
+function asProfilePoints(value: unknown): ProfilePointItem[] {
+  if (!Array.isArray(value)) return [];
+  const points: ProfilePointItem[] = [];
+  for (const item of value) {
+    const row = asRecord(item);
+    const station = asNumber(row.station_m, null);
+    const elevation = asNumber(row.elevation_m, null);
+    if (station === null || elevation === null) continue;
+    points.push({ station_m: station, elevation_m: elevation });
+  }
+  return points.sort((a, b) => a.station_m - b.station_m);
+}
+
+function asLandmarks(value: unknown): SectionLandmarkItem[] {
+  if (!Array.isArray(value)) return [];
+  const items: SectionLandmarkItem[] = [];
+  for (const rawItem of value) {
+    const row = asRecord(rawItem);
+    const station = asNumber(row.station_m, null);
+    const label = asString(row.label).trim();
+    if (station === null || !label) continue;
+    items.push({
+      station_m: station,
+      kp: asString(row.kp),
+      kind: asString(row.kind, "crossing"),
+      label,
+      elevation_m: asNumber(row.elevation_m, null),
+    });
+  }
+  return items.sort((a, b) => a.station_m - b.station_m);
 }
 
 /** API `inputs` nesnesini (kısmi olabilir) yerel modele birleştirir. */
 export function normalizeInputs(raw: unknown): AppInputs {
-  const base = createDefaultInputs();
-  if (!isRecord(raw)) return base;
+  if (!isRecord(raw)) return createDefaultInputs();
+  const base = createEmptyInputs();
 
   const sectionMeta = asRecord(raw.section_meta);
   const geometry = asRecord(raw.geometry);
@@ -92,7 +129,7 @@ export function normalizeInputs(raw: unknown): AppInputs {
   const helper = asRecord(raw.helper);
   const modes = asRecord(raw.modes);
   const checks = asRecord(raw.checks);
-  const report = asRecord(raw.report);
+  const report = isRecord(raw.report) ? raw.report : asRecord(raw.report_meta);
 
   const airA = asNumber(air.a_micro_per_bar, base.air.a_micro_per_bar);
   const pressureA = asNumber(pressure.a_micro_per_bar, base.pressure.a_micro_per_bar);
@@ -124,6 +161,8 @@ export function normalizeInputs(raw: unknown): AppInputs {
       schedule_option: asString(catalog.schedule_option, base.geometry_catalog.schedule_option),
     },
     segments: asSegments(raw.segments, base.segments),
+    profile_points: asProfilePoints(raw.profile_points),
+    landmarks: asLandmarks(raw.landmarks),
     section_profile: {
       highest_elevation_m: asNumber(profile.highest_elevation_m, base.section_profile.highest_elevation_m),
       lowest_elevation_m: asNumber(profile.lowest_elevation_m, base.section_profile.lowest_elevation_m),
@@ -133,8 +172,8 @@ export function normalizeInputs(raw: unknown): AppInputs {
       smys_mpa: asNumber(profile.smys_mpa, base.section_profile.smys_mpa),
     },
     material_grade: asString(raw.material_grade, base.material_grade),
-    location_class: asString(raw.location_class, base.location_class),
-    pump_location: asString(raw.pump_location, base.pump_location),
+    location_class: asString(raw.location_class).trim() || base.location_class,
+    pump_location: asString(raw.pump_location).trim() || base.pump_location,
     air: {
       temperature_c: asNumber(air.temperature_c, base.air.temperature_c),
       pressure_bar: asNumber(air.pressure_bar, base.air.pressure_bar),
@@ -202,6 +241,44 @@ export function normalizeInputs(raw: unknown): AppInputs {
       section_id: asString(report.section_id, base.report.section_id),
     },
   };
+
+  if (isRecord(raw.check_details)) {
+    const details: Partial<Record<CheckKey, CheckAutoDetail>> = {};
+    for (const key of Object.keys(raw.check_details)) {
+      const item = asRecord(raw.check_details[key]);
+      const st = asString(item.status);
+      if (st === "passed" || st === "failed" || st === "warning" || st === "pending") {
+        details[key as CheckKey] = {
+          status: st,
+          checked: typeof item.checked === "boolean" ? item.checked : null,
+          auto_evaluated: Boolean(item.auto_evaluated),
+          source_forms: Array.isArray(item.source_forms)
+            ? item.source_forms.map((s) => String(s))
+            : [],
+          message: asString(item.message),
+          metrics: isRecord(item.metrics) ? item.metrics : undefined,
+        };
+      }
+    }
+    next.check_details = details;
+  }
+
+  if (isRecord(raw.forms_summary)) {
+    const fs = raw.forms_summary;
+    next.forms_summary = {
+      required_total: asNumberRequired(fs.required_total, 11),
+      filled_required: asNumberRequired(fs.filled_required, 0),
+      missing_required: asNumberRequired(fs.missing_required, 11),
+      missing_titles: Array.isArray(fs.missing_titles)
+        ? fs.missing_titles.map((s) => String(s))
+        : [],
+      supplementary_filled: asNumberRequired(fs.supplementary_filled, 0),
+      failed_forms: Array.isArray(fs.failed_forms)
+        ? fs.failed_forms.map((s) => String(s))
+        : [],
+      complete: Boolean(fs.complete),
+    } satisfies SectionFormsSummary;
+  }
 
   return next;
 }

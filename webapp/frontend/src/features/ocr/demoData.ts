@@ -41,7 +41,7 @@ function buildMappingFields(keys: readonly string[]): Record<string, MappingFiel
 export const DEMO_MAPPING_PROFILES: MappingProfile[] = [
   {
     id: "demo-mp-bot-021",
-    name: "BOT-FRM-CDB-001-021 R2 (demo)",
+    name: "BOT-FRM-CDB-001-021 R2",
     format_key: "bot-frm-cdb-001-021",
     schema_version: 1,
     is_default: true,
@@ -84,7 +84,7 @@ export const DEMO_MAPPING_PROFILES: MappingProfile[] = [
   },
   {
     id: "demo-mp-generic",
-    name: "Genel etiket profili (taslak)",
+    name: "Genel Etiket Profili",
     format_key: "generic-labels",
     schema_version: 1,
     is_default: false,
@@ -113,7 +113,7 @@ export const DEMO_MAPPING_PROFILES: MappingProfile[] = [
 
 export const DEMO_STATUS: OcrStatus = {
   available: true,
-  status_text: "Demo: OCR hazır (Tesseract + Pillow). Metin katmanlı PDF önceliklidir.",
+  status_text: "OCR hazır (Tesseract + Pillow). Metin katmanlı PDF önceliklidir.",
   engine: {
     name: "tesseract",
     version: "5.3.4",
@@ -123,13 +123,13 @@ export const DEMO_STATUS: OcrStatus = {
   pdf_rasterizer: {
     available: false,
     engine: null,
-    note: "Demo ortamı: Taranmış PDF için pdf2image + Poppler gerekir; görsel OCR çalışmaya devam eder.",
+    note: "Taranmış PDF için PyMuPDF veya pdf2image + Poppler gerekir; görsel OCR çalışmaya devam eder.",
   },
   limits: {
-    max_file_size_bytes: 26_214_400,
+    max_file_size_bytes: 500 * 1024 * 1024,
     max_pdf_pages: 200,
-    max_ocr_pages: 30,
-    supported_extensions: [".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"],
+    max_ocr_pages: 200,
+    supported_extensions: [".pdf", ".xlsx", ".xls", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"],
   },
   queue: { queued: 0, running: 0, max_concurrency: 1 },
   thresholds: {

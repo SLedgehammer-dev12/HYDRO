@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session as OrmSession
 
 from ..core.errors import not_found, validation_error
 from ..core.timeutil import iso_z, utcnow
-from ..models import HydroSession, Project, new_uuid
+from ..models import HydroSession, Project, SectionForm, new_uuid
 from . import audit
 
 # ---------------------------------------------------------------------------
@@ -126,6 +126,8 @@ def create_project(
     db: OrmSession,
     workspace_hash: str,
     payload: Any,
+    *,
+    commit: bool = True,
 ) -> Project:
     name = str(_payload_get(payload, "name") or "").strip()
     if not name:
@@ -152,8 +154,9 @@ def create_project(
         workspace_hash=workspace_hash,
         after={"name": project.name, "code": project.code, "client": project.client},
     )
-    db.commit()
-    db.refresh(project)
+    if commit:
+        db.commit()
+        db.refresh(project)
     return project
 
 
@@ -209,20 +212,32 @@ def delete_project(
     *,
     hard: bool = False,
 ) -> None:
+    now = utcnow()
     sessions = (
         db.execute(select(HydroSession).where(HydroSession.project_id == project.id))
         .scalars()
         .all()
     )
-    for session in sessions:
-        session.project_id = None
-        session.updated_at = utcnow()
-
     if hard:
+        forms = (
+            db.execute(select(SectionForm).where(SectionForm.project_id == project.id))
+            .scalars()
+            .all()
+        )
+        for form in forms:
+            db.delete(form)
+        for session in sessions:
+            db.delete(session)
+        db.flush()
         db.delete(project)
     else:
-        project.deleted_at = utcnow()
-        project.updated_at = utcnow()
+        for session in sessions:
+            if session.deleted_at is None:
+                session.deleted_at = now
+                session.updated_at = now
+                session.revision = int(session.revision or 1) + 1
+        project.deleted_at = now
+        project.updated_at = now
 
     audit.record(
         db,
@@ -230,7 +245,7 @@ def delete_project(
         entity_type="project",
         entity_id=project.id,
         workspace_hash=project.workspace_id_hash,
-        after={"hard": hard, "detached_sessions": len(sessions)},
+        after={"hard": hard, "deleted_sessions": len(sessions)},
     )
     db.commit()
 

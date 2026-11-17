@@ -1,3 +1,4 @@
+import { Suspense, lazy } from "react";
 import { ArrowDown, ArrowRight, CheckCircle2, ClipboardCheck, Gauge, Layers, Mountain, MoveRight, Waves } from "lucide-react";
 import { PageHeader } from "../components/layout/PageHeader";
 import { SectionCard, KpiCard, ResultTile } from "../components/ui/Card";
@@ -8,8 +9,15 @@ import { DecisionCard } from "../components/ui/DecisionCard";
 import { ProgressBar } from "../components/ui/Gauge";
 import { EmptyState, InlineNotice } from "../components/ui/State";
 import { PressureWindowChart, ElevationProfileChart } from "../components/charts/Charts";
-import PipelineScene from "../components/three/PipelineScene";
-import { useCalculatePig, useCalculateProfile, useMeta, useSaveTestResult } from "../hooks/queries";
+const PipelineScene = lazy(() => import("../components/three/PipelineScene"));
+import {
+  useCalculatePig,
+  useCalculateProfile,
+  useMeta,
+  useOpenSession,
+  useProjectScene,
+  useSaveTestResult,
+} from "../hooks/queries";
 import { useAppStore } from "../store/useAppStore";
 import { useEvaluateShortcut } from "../hooks/useEvaluateShortcut";
 import { CHECK_DEFINITIONS, FALLBACK_PIG_MODES, PUMP_LABELS } from "../lib/constants";
@@ -72,6 +80,10 @@ function WindowBar({
 export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
   const inputs = useAppStore((state) => state.inputs);
   const results = useAppStore((state) => state.results);
+  const projectId = useAppStore((state) => state.projectId);
+  const projectName = useAppStore((state) => state.projectName);
+  const sceneScope = useAppStore((state) => state.sceneScope);
+  const setSceneScope = useAppStore((state) => state.setSceneScope);
   const patchInputs = useAppStore((state) => state.patchInputs);
   const toggleCheck = useAppStore((state) => state.toggleCheck);
   const setTab = useAppStore((state) => state.setTab);
@@ -81,6 +93,8 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
   const calculateProfile = useCalculateProfile();
   const calculatePig = useCalculatePig();
   const saveResult = useSaveTestResult();
+  const openSession = useOpenSession();
+  const projectSceneQuery = useProjectScene(projectId, Boolean(projectId));
   useEvaluateShortcut(evaluateProfile);
 
   const profile = results.profile;
@@ -88,7 +102,13 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
   const sections = sectionsFromInputs(inputs);
   const sp = inputs.section_profile;
   const checked = CHECK_DEFINITIONS.filter((check) => inputs.checks[check.key]).length;
-  const scene = buildSceneData(inputs, results);
+  const sectionScene = buildSceneData(inputs, results);
+  const effectiveProjectMode = sceneScope === "project" && Boolean(projectId);
+  const projectScene = projectSceneQuery.data;
+  const scene =
+    effectiveProjectMode && projectScene && projectScene.segments.length > 0
+      ? projectScene
+      : sectionScene;
   const monitored = inputs.field.monitored_pressure_bar;
 
   const limits = meta?.limits;
@@ -147,13 +167,13 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
       return;
     }
     calculateProfile.mutate(request, {
-      onSuccess: ({ data, mode }) => {
+      onSuccess: ({ data }) => {
         pushToast(
           data.feasible ? "success" : "error",
           data.feasible ? "Basınç penceresi uygun" : "Basınç penceresi uygun değil",
           `${fmt.bar(data.selected_window.minimum_required_pressure_bar)} – ${fmt.bar(
             data.selected_window.maximum_allowable_pressure_bar,
-          )}${mode === "demo" ? " (demo)" : ""}`,
+          )}`,
         );
         saveResult.mutate({ testType: "profile", payload: request as unknown as Record<string, unknown> });
       },
@@ -173,7 +193,7 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
         travel_time_min: inputs.field.pig_travel_time_min,
       },
       {
-        onSuccess: ({ data, mode }) => {
+        onSuccess: ({ data }) => {
           patchInputs({
             field: {
               pig_speed_m_per_s: data.speed_m_per_s,
@@ -183,7 +203,7 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
           pushToast(
             data.passed === false ? "error" : "success",
             `Pig hızı ${data.status}`,
-            `${fmt.ms(data.speed_m_per_s)} · ${fmt.kmh(data.speed_km_per_h)}${mode === "demo" ? " (demo)" : ""}`,
+            `${fmt.ms(data.speed_m_per_s)} · ${fmt.kmh(data.speed_km_per_h)}`,
           );
           saveResult.mutate({
             testType: "pig",
@@ -239,19 +259,93 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
     <div id={embedded ? "saha" : undefined} className={embedded ? "space-y-5 border-t border-[var(--border)] pt-5" : "space-y-5"}>
       <div id="sahne-3d">
         <SectionCard
-          title="3D saha görünümü"
-          description="Önizleme ve tam saha tek görünümde birleştirildi: segmentler, kot profili, ekipmanlar, pig simülasyonu, kesit düzlemi ve eşdeğer veri tablosu."
+          title={
+            effectiveProjectMode && projectName
+              ? `3D saha görünümü · ${projectName}`
+              : "3D saha görünümü"
+          }
+          description={
+            effectiveProjectMode
+              ? "Projedeki tüm test bölümlerinin plan-profil kotları, bölüm sınırları ve durumları tek birleşik hat üzerinde görüntüleniyor. İstediğiniz segmente tıklayarak bölümü açabilirsiniz."
+              : "Önizleme ve tam saha tek görünümde birleştirildi: segmentler, kot profili, ekipmanlar, pig simülasyonu, kesit düzlemi ve eşdeğer veri tablosu."
+          }
           icon={Layers}
           action={
-            <div className="flex flex-wrap items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-2">
+              {projectId ? (
+                <div className="seg-control" role="group" aria-label="3D görünüm kapsamı">
+                  <button
+                    type="button"
+                    className="seg-btn"
+                    aria-pressed={sceneScope === "section"}
+                    onClick={() => setSceneScope("section")}
+                  >
+                    Aktif Bölüm
+                  </button>
+                  <button
+                    type="button"
+                    className="seg-btn"
+                    aria-pressed={sceneScope === "project"}
+                    onClick={() => setSceneScope("project")}
+                  >
+                    Tüm Proje (Birleşik 3D)
+                    {projectScene?.section_count ? (
+                      <span className="ml-1.5 rounded bg-[var(--primary-soft)] px-1.5 py-0.2 font-mono text-[10px]">
+                        {projectScene.section_count}
+                      </span>
+                    ) : null}
+                  </button>
+                </div>
+              ) : null}
+              {scene.is_survey_profile ? (
+                <Badge tone="pass">Plan-Profil Topoğrafya</Badge>
+              ) : null}
+              {(scene.landmarks?.length ?? 0) > 0 ? (
+                <Badge tone="info">{scene.landmarks?.length} pafta noktası</Badge>
+              ) : null}
               <Badge tone="info">{scene.segments.length} segment</Badge>
               <Badge tone="neutral">{scene.equipment.length} ekipman</Badge>
             </div>
           }
           bodyClassName="pt-2"
         >
+          {effectiveProjectMode && projectScene && !projectScene.continuity_ok && projectScene.warnings?.length ? (
+            <div className="mb-3">
+              <InlineNotice tone="warning" title="Proje KP Sürekliliği Uyarısı">
+                <ul className="list-disc space-y-0.5 pl-4 text-[11.5px]">
+                  {projectScene.warnings.map((w, idx) => (
+                    <li key={idx}>{w}</li>
+                  ))}
+                </ul>
+              </InlineNotice>
+            </div>
+          ) : null}
+          {effectiveProjectMode && projectSceneQuery.isLoading && !projectScene ? (
+            <div className="flex min-h-[240px] items-center justify-center text-xs text-[var(--text-muted)]">
+              Proje genelindeki test bölümleri birleştiriliyor...
+            </div>
+          ) : null}
           <div className="scene-shell">
-            <PipelineScene data={scene} className="min-h-[480px]" />
+            <Suspense
+              fallback={
+                <div className="flex min-h-[480px] items-center justify-center text-xs text-[var(--text-muted)]">
+                  3D saha görünümü yükleniyor...
+                </div>
+              }
+            >
+              <PipelineScene
+                data={scene}
+                className="min-h-[480px]"
+                onOpenSession={
+                  effectiveProjectMode
+                    ? (sid) =>
+                        openSession.mutate(sid, {
+                          onSuccess: () => setSceneScope("section"),
+                        })
+                    : undefined
+                }
+              />
+            </Suspense>
           </div>
         </SectionCard>
       </div>
@@ -511,15 +605,33 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
         >
           <ProgressBar value={checked} max={CHECK_DEFINITIONS.length} tone={checked === 11 ? "pass" : "info"} className="mb-3" />
           <div className="grid gap-2">
-            {CHECK_DEFINITIONS.map((check) => (
-              <CheckboxRow
-                key={check.key}
-                checked={inputs.checks[check.key]}
-                onChange={() => toggleCheck(check.key)}
-                label={check.label}
-                badge={<span className="chip">{check.ref}</span>}
-              />
-            ))}
+            {CHECK_DEFINITIONS.map((check) => {
+              const detail = inputs.check_details?.[check.key];
+              const autoBadge = detail?.auto_evaluated
+                ? detail.status === "passed"
+                  ? { label: "Otomatik: Uygun", tone: "pass" as const }
+                  : detail.status === "failed"
+                    ? { label: "Otomatik: Uygun Değil", tone: "fail" as const }
+                    : detail.status === "warning"
+                      ? { label: "İnceleme Gerekli", tone: "warning" as const }
+                      : null
+                : null;
+              return (
+                <CheckboxRow
+                  key={check.key}
+                  checked={inputs.checks[check.key]}
+                  onChange={() => toggleCheck(check.key)}
+                  label={check.label}
+                  hint={detail?.message}
+                  badge={
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      {autoBadge ? <Badge tone={autoBadge.tone}>{autoBadge.label}</Badge> : null}
+                      <span className="chip">{check.ref}</span>
+                    </span>
+                  }
+                />
+              );
+            })}
           </div>
         </SectionCard>
 

@@ -9,7 +9,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
 
-from hidrostatik_test.services.report_ocr import SUPPORTED_EXTENSIONS
+from hidrostatik_test.services.report_ocr import (
+    SPREADSHEET_EXTENSIONS,
+    SUPPORTED_EXTENSIONS,
+)
 
 from ..core.errors import AppError
 from ..core.security import (
@@ -155,4 +158,9 @@ __all__ = [
 
 
 def kind_for_extension(extension: str) -> str:
-    return "report_pdf" if extension.lower() == ".pdf" else "report_image"
+    ext = extension.lower()
+    if ext == ".pdf":
+        return "report_pdf"
+    if ext in SPREADSHEET_EXTENSIONS:
+        return "report_spreadsheet"
+    return "report_image"

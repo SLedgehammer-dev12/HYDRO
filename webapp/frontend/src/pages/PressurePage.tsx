@@ -108,11 +108,11 @@ export function PressurePage() {
       return;
     }
     calculate.mutate(request, {
-      onSuccess: ({ data, mode }) => {
+      onSuccess: ({ data }) => {
         pushToast(
           data.passed ? "success" : "error",
           data.passed ? "Basınç değişim testi başarılı" : "Basınç değişim testi başarısız",
-          `Marj ${fmt.bar(data.margin_bar)} · Pt ${fmt.bar(data.theoretical_pressure_change_bar)}${mode === "demo" ? " (demo)" : ""}`,
+          `Marj ${fmt.bar(data.margin_bar)} · Pt ${fmt.bar(data.theoretical_pressure_change_bar)}`,
         );
         saveResult.mutate({ testType: "pressure", payload: request as unknown as Record<string, unknown> });
       },

@@ -42,7 +42,7 @@ export function Button({
       disabled={disabled || loading}
       {...rest}
     >
-      {loading ? <Loader2 size={14} className="animate-spin" aria-hidden /> : icon}
+      {loading ? <Loader2 size={16} className="animate-spin" aria-hidden /> : icon}
       {children}
     </button>
   );

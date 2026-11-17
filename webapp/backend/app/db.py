@@ -86,14 +86,19 @@ def _apply_light_migrations() -> None:
     """Add columns that ``create_all`` cannot add to existing tables."""
 
     inspector = inspect(get_engine())
-    if "projects" not in inspector.get_table_names():
-        return
-    columns = {column["name"] for column in inspector.get_columns("projects")}
-    if "code" not in columns:
-        with get_engine().begin() as connection:
-            connection.execute(
-                text('ALTER TABLE "projects" ADD COLUMN "code" VARCHAR(64) DEFAULT \'\'')
-            )
+    table_names = set(inspector.get_table_names())
+    if "projects" in table_names:
+        columns = {column["name"] for column in inspector.get_columns("projects")}
+        if "code" not in columns:
+            with get_engine().begin() as connection:
+                connection.execute(
+                    text('ALTER TABLE "projects" ADD COLUMN "code" VARCHAR(64) DEFAULT \'\'')
+                )
+    if "ocr_analyses" in table_names:
+        ocr_cols = {column["name"] for column in inspector.get_columns("ocr_analyses")}
+        if "dossier" not in ocr_cols:
+            with get_engine().begin() as connection:
+                connection.execute(text('ALTER TABLE "ocr_analyses" ADD COLUMN "dossier" JSON'))
 
 
 def init_db() -> None:

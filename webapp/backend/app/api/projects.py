@@ -8,8 +8,10 @@ from sqlalchemy.orm import Session as OrmSession
 from .. import schemas
 from ..core.timeutil import json_safe
 from ..db import get_db
+from ..services import dossier as dossier_service
 from ..services import plan_profile as plan_profile_service
 from ..services import projects as project_service
+from ..services import scene as scene_service
 from .deps import Workspace, get_workspace
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -24,9 +26,7 @@ def list_projects(
     db: OrmSession = Depends(get_db),
     workspace: Workspace = Depends(get_workspace),
 ) -> dict:
-    payload = project_service.list_projects(
-        db, workspace.hash, limit=limit, offset=offset, q=q
-    )
+    payload = project_service.list_projects(db, workspace.hash, limit=limit, offset=offset, q=q)
     response.headers["X-Total-Count"] = str(payload["total"])
     return json_safe(payload)
 
@@ -52,6 +52,15 @@ def get_project(
     project = project_service.get_project(db, project_id, workspace.hash)
     count = project_service.section_count(db, project.id)
     return json_safe(project_service.serialize_project(project, count))
+
+
+@router.get("/{project_id}/scene")
+def get_project_scene(
+    project_id: str,
+    db: OrmSession = Depends(get_db),
+    workspace: Workspace = Depends(get_workspace),
+) -> dict:
+    return json_safe(scene_service.build_project_scene(db, project_id, workspace.hash))
 
 
 @router.put("/{project_id}")
@@ -87,6 +96,8 @@ def scan_plan_profile(
     max_section_length_m: float = Form(default=12_000.0),
     max_elevation_diff_m: float | None = Form(default=None),
     language: str | None = Form(default=None),
+    db: OrmSession = Depends(get_db),
+    workspace: Workspace = Depends(get_workspace),
 ) -> dict:
     payload = plan_profile_service.scan_plan_profile_upload(
         file_name=file.filename,
@@ -95,7 +106,47 @@ def scan_plan_profile(
         max_elevation_diff_m=max_elevation_diff_m,
         language=language,
     )
+    payload["similar_projects"] = dossier_service.find_similar_projects(
+        db,
+        workspace.hash,
+        payload.get("detected_project_name"),
+        threshold=0.70,
+    )
     return json_safe(payload)
+
+
+@router.post("/plan-profile/commit", status_code=201)
+def commit_plan_profile(
+    payload: schemas.PlanProfileCommitRequest,
+    db: OrmSession = Depends(get_db),
+    workspace: Workspace = Depends(get_workspace),
+) -> dict:
+    if payload.project_id:
+        project = project_service.get_project(db, payload.project_id, workspace.hash)
+    else:
+        name = (payload.project_name or "").strip()
+        if not name:
+            from ..core.errors import validation_error
+
+            raise validation_error(
+                "Hedef proje secilmeli veya yeni proje adi girilmelidir.",
+                field="project_name",
+            )
+        project = project_service.create_project(
+            db,
+            workspace.hash,
+            {"name": name, "code": (payload.project_code or "").strip(), "client": "BOTAŞ"},
+        )
+    result = plan_profile_service.create_sections_from_drafts(
+        db,
+        workspace_hash=workspace.hash,
+        project_id=project.id,
+        drafts=[item.model_dump() for item in payload.sections],
+    )
+    result["project"] = project_service.serialize_project(
+        project, project_service.section_count(db, project.id)
+    )
+    return json_safe(result)
 
 
 @router.post("/{project_id}/sections/batch", status_code=201)

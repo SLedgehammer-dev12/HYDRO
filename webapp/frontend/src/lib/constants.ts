@@ -260,9 +260,9 @@ export const FALLBACK_PIG_MODES: PigModeOption[] = [
 ];
 
 export const FALLBACK_LIMITS: SpecLimits = {
-  max_file_size_bytes: 26_214_400,
+  max_file_size_bytes: 500 * 1024 * 1024,
   max_pdf_pages: 200,
-  max_ocr_pages: 30,
+  max_ocr_pages: 200,
   max_test_section_length_m: 20_000,
   max_test_section_volume_m3: 12_500,
   air_acceptance_factor: 1.06,

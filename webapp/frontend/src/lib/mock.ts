@@ -50,7 +50,8 @@ import {
   STEEL_ALPHA_DEFAULT,
   WATER_DENSITY_15C,
 } from "./constants";
-import type { SceneData, SceneEquipment, SceneSegment } from "./scene";
+import { formatKp, parseKpMeters } from "./kp";
+import type { SceneData, SceneEquipment, SceneLandmark, SceneSegment } from "./scene";
 
 const round = (value: number, digits = 6): number => {
   const factor = 10 ** digits;
@@ -349,6 +350,8 @@ export function createDefaultInputs(): AppInputs {
       schedule_option: "Sch 20 - 8.74 mm",
     },
     segments: createDefaultSegments(),
+    profile_points: [],
+    landmarks: [],
     section_profile: {
       highest_elevation_m: 320,
       lowest_elevation_m: 180,
@@ -436,6 +439,105 @@ export function createDefaultInputs(): AppInputs {
   }
 
   return inputs;
+}
+
+export function createEmptyInputs(): AppInputs {
+  return {
+    section_meta: {
+      section_no: "",
+      description: "",
+      location: "",
+      start_kp: "",
+      end_kp: "",
+      test_date: "",
+      test_type: "Hidrostatik test",
+      notes: "",
+    },
+    geometry: {
+      outside_diameter_mm: null,
+      wall_thickness_mm: null,
+      length_m: null,
+    },
+    geometry_catalog: {
+      size_option: "",
+      schedule_option: "",
+    },
+    segments: [],
+    profile_points: [],
+    landmarks: [],
+    section_profile: {
+      highest_elevation_m: null,
+      lowest_elevation_m: null,
+      start_elevation_m: null,
+      end_elevation_m: null,
+      design_pressure_bar: null,
+      smys_mpa: null,
+    },
+    material_grade: "",
+    location_class: "Class 1 - min 1.25 x dizayn basinci",
+    pump_location: "Baslangic noktasi",
+    air: {
+      temperature_c: null,
+      pressure_bar: null,
+      a_micro_per_bar: null,
+      pressure_rise_bar: 1,
+      k_factor: 1.02,
+      actual_added_water_m3: null,
+      ambient_temperature_c: null,
+    },
+    pressure: {
+      temperature_c: null,
+      pressure_bar: null,
+      a_micro_per_bar: null,
+      b_micro_per_c: null,
+      delta_t_c: null,
+      actual_pressure_change_bar: null,
+      t_initial_c: null,
+      t_final_c: null,
+      derive_delta_t: true,
+    },
+    field: {
+      ambient_temperature_c: null,
+      pig_distance_m: null,
+      pig_travel_time_min: null,
+      pig_speed_m_per_s: null,
+      pig_speed_km_per_h: null,
+      monitored_pressure_bar: null,
+    },
+    helper: { steel_alpha_micro_per_c: STEEL_ALPHA_DEFAULT, water_beta_micro_per_c: null },
+    modes: {
+      air_a_mode: "auto",
+      air_a_reference: "",
+      pressure_a_mode: "auto",
+      pressure_a_reference: "",
+      pressure_b_mode: "table",
+      pressure_b_source: "institutional",
+      pressure_b_reference: "BOTAŞ referans tablosu - aktif T/P",
+      steel_model: "volumetric",
+      k_preset: "Kaynaklı boru - 1.02",
+      steel_preset: "Karbon çelik - 12.0",
+      pig_mode: "Temizlik pigi",
+    },
+    checks: {
+      ambient_temp: false,
+      temp_probes: false,
+      fill_air_entry: false,
+      fill_records: false,
+      thermal_balance: false,
+      air_content_limit: false,
+      pressurization_volume: false,
+      two_hour_hold: false,
+      pressure_records: false,
+      depressurize_discharge: false,
+      forms: false,
+    },
+    report: {
+      report_no: "",
+      operator: "",
+      date: "",
+      section_id: "",
+    },
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -590,8 +692,8 @@ export function computeB(inputs: CoefficientBRequest): BSourceResult {
     source: inputs.source,
     label: institutional ? "Kurum içi A/B kontrol tablosu" : "GAIL referans tablosu",
     note: institutional
-      ? "Demo tablo değeri - bilinear interpolasyon (kurum içi / BOTAŞ)."
-      : "Demo tablo değeri - GAIL referans tablosu.",
+      ? "Bilinear tablo interpolasyonu (kurum içi / BOTAŞ)."
+      : "GAIL referans tablosu interpolasyonu.",
     repaired_table: institutional && Math.abs(t - 7) < 1 && p >= 81 && p <= 100,
     water_beta_micro_per_c: null,
     steel_alpha_micro_per_c: null,
@@ -628,7 +730,7 @@ export function computeAir(request: AirContentRequest): AirContentResponse {
       request.k_factor);
   const limit = theoretical * 1.06;
   const ratio = theoretical > 0 ? request.actual_added_water_m3 / theoretical : 0;
-  const passed = request.actual_added_water_m3 < limit;
+  const passed = request.actual_added_water_m3 < limit * (1 - 1e-9);
   const margin = limit - request.actual_added_water_m3;
 
   return {
@@ -837,10 +939,10 @@ export function computePressurization(
   expectedPressure: number,
 ): PressurizationResponse {
   const actual = initialVolume + addedVolume;
-  const volumeDeviation = ((actual - theoreticalVolume) / theoreticalVolume) * 100;
+  const volumeDeviation = actual > 0 ? ((actual - theoreticalVolume) / actual) * 100 : 0;
   const pressureDeviation = pressure - expectedPressure;
   const tolerance = Math.max(0.05, 0.001 * expectedPressure);
-  const withinVolume = Math.abs(volumeDeviation) <= 0.2;
+  const withinVolume = volumeDeviation <= 0.2 + 1e-9;
   const withinPressure = Math.abs(pressureDeviation) <= tolerance;
   const passed = withinVolume && withinPressure;
 
@@ -886,8 +988,8 @@ export function computeTablePoint(
     b_micro_per_c: b.b_micro_per_c,
     source_note:
       table === "institutional"
-        ? "BOTAŞ referans tablosu - demo interpolasyon" + (repaired ? " - onarılmış A" : "")
-        : "GAIL referans tablosu - demo interpolasyon",
+        ? "BOTAŞ referans tablosu - yerel interpolasyon" + (repaired ? " - onarılmış A" : "")
+        : "GAIL referans tablosu - yerel interpolasyon",
     repaired,
     repair_note: repaired
       ? "Onarılmış A değeri: ham hücre komşu geçerli basınçlardan lineer interpolasyonla onarıldı; B ham tablodan alındı."
@@ -944,22 +1046,29 @@ export function buildDemoResults(inputs: AppInputs): ResultBundle {
     temperature_c: inputs.air.temperature_c ?? 20,
     pressure_bar: inputs.air.pressure_bar ?? 80,
   }).a_micro_per_bar;
-  const air = computeAir({
-    geometry: { sections },
-    a_micro_per_bar: airA,
-    pressure_rise_bar: inputs.air.pressure_rise_bar,
-    k_factor: inputs.air.k_factor,
-    actual_added_water_m3: inputs.air.actual_added_water_m3 ?? 0,
-  });
+  const air =
+    inputs.air.actual_added_water_m3 !== null
+      ? computeAir({
+          geometry: { sections },
+          a_micro_per_bar: airA,
+          pressure_rise_bar: inputs.air.pressure_rise_bar,
+          k_factor: inputs.air.k_factor,
+          actual_added_water_m3: inputs.air.actual_added_water_m3,
+        })
+      : undefined;
 
   const b = inputs.pressure.b_micro_per_c ?? 188.661;
-  const pressure = computePressure({
-    geometry: { sections },
-    a_micro_per_bar: inputs.pressure.a_micro_per_bar ?? 44.972,
-    b_micro_per_c: b,
-    delta_t_c: inputs.pressure.delta_t_c ?? 2,
-    actual_pressure_change_bar: inputs.pressure.actual_pressure_change_bar ?? 0,
-  });
+  const pressure =
+    inputs.pressure.actual_pressure_change_bar !== null &&
+    inputs.pressure.delta_t_c !== null
+      ? computePressure({
+          geometry: { sections },
+          a_micro_per_bar: inputs.pressure.a_micro_per_bar ?? 44.972,
+          b_micro_per_c: b,
+          delta_t_c: inputs.pressure.delta_t_c,
+          actual_pressure_change_bar: inputs.pressure.actual_pressure_change_bar,
+        })
+      : undefined;
 
   const profile =
     inputs.section_profile.design_pressure_bar &&
@@ -991,21 +1100,31 @@ export function buildDemoResults(inputs: AppInputs): ResultBundle {
         })
       : undefined;
 
-  const coefficientA = computeA({
-    temperature_c: inputs.air.temperature_c ?? 20,
-    pressure_bar: inputs.air.pressure_bar ?? 80,
-  });
-  const pressureA = computeA({
-    temperature_c: inputs.pressure.temperature_c ?? 20,
-    pressure_bar: inputs.pressure.pressure_bar ?? 80,
-  });
-  const pressureB = computeB({
-    source: inputs.modes.pressure_b_source,
-    temperature_c: inputs.pressure.temperature_c ?? 20,
-    pressure_bar: inputs.pressure.pressure_bar ?? 80,
-    steel_alpha_micro_per_c: inputs.helper.steel_alpha_micro_per_c,
-    steel_model: inputs.modes.steel_model,
-  });
+  const hasAirTP = inputs.air.temperature_c !== null && inputs.air.pressure_bar !== null;
+  const hasPressureTP =
+    inputs.pressure.temperature_c !== null && inputs.pressure.pressure_bar !== null;
+
+  const coefficientA = hasAirTP
+    ? computeA({
+        temperature_c: inputs.air.temperature_c as number,
+        pressure_bar: inputs.air.pressure_bar as number,
+      })
+    : undefined;
+  const pressureA = hasPressureTP
+    ? computeA({
+        temperature_c: inputs.pressure.temperature_c as number,
+        pressure_bar: inputs.pressure.pressure_bar as number,
+      })
+    : undefined;
+  const pressureB = hasPressureTP
+    ? computeB({
+        source: inputs.modes.pressure_b_source,
+        temperature_c: inputs.pressure.temperature_c as number,
+        pressure_bar: inputs.pressure.pressure_bar as number,
+        steel_alpha_micro_per_c: inputs.helper.steel_alpha_micro_per_c,
+        steel_model: inputs.modes.steel_model,
+      })
+    : undefined;
 
   return {
     geometry,
@@ -1013,17 +1132,29 @@ export function buildDemoResults(inputs: AppInputs): ResultBundle {
     pressure,
     profile,
     pig,
-    coefficients: { airA: coefficientA, pressureA, pressureB },
-    bCompare: computeCompare({
-      temperature_c: inputs.pressure.temperature_c ?? 20,
-      pressure_bar: inputs.pressure.pressure_bar ?? 80,
-      steel_alpha_micro_per_c: inputs.helper.steel_alpha_micro_per_c,
-      steel_model: inputs.modes.steel_model,
-    }),
-    backendCompare: computeBackendComparison(
-      inputs.pressure.temperature_c ?? 20,
-      inputs.pressure.pressure_bar ?? 80,
-    ),
+    ...(coefficientA || pressureA || pressureB
+      ? {
+          coefficients: {
+            ...(coefficientA ? { airA: coefficientA } : {}),
+            ...(pressureA ? { pressureA } : {}),
+            ...(pressureB ? { pressureB } : {}),
+          },
+        }
+      : {}),
+    ...(hasPressureTP
+      ? {
+          bCompare: computeCompare({
+            temperature_c: inputs.pressure.temperature_c as number,
+            pressure_bar: inputs.pressure.pressure_bar as number,
+            steel_alpha_micro_per_c: inputs.helper.steel_alpha_micro_per_c,
+            steel_model: inputs.modes.steel_model,
+          }),
+          backendCompare: computeBackendComparison(
+            inputs.pressure.temperature_c as number,
+            inputs.pressure.pressure_bar as number,
+          ),
+        }
+      : {}),
     source: "demo" as const,
     lastComputedAt: DEMO_NOW,
   };
@@ -1199,10 +1330,10 @@ export const DEMO_OCR_STATUS: OcrStatusResponse = {
     note: "Taranmış PDF için PyMuPDF veya pdf2image + Poppler gerekir.",
   },
   limits: {
-    max_file_size_bytes: 26_214_400,
+    max_file_size_bytes: 500 * 1024 * 1024,
     max_pdf_pages: 200,
-    max_ocr_pages: 30,
-    supported_extensions: [".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"],
+    max_ocr_pages: 200,
+    supported_extensions: [".pdf", ".xlsx", ".xls", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"],
   },
   queue: { queued: 0, running: 0, max_concurrency: 1 },
   thresholds: {
@@ -1245,43 +1376,190 @@ export function buildSceneData(inputs: AppInputs, results: { profile?: PressureP
   const highest = sp.highest_elevation_m ?? Math.max(startElev, endElev);
   const lowest = sp.lowest_elevation_m ?? Math.min(startElev, endElev);
 
-  const profile = [
-    { x: 0, y: startElev },
-    { x: totalLength * 0.33, y: highest },
-    { x: totalLength * 0.68, y: lowest },
-    { x: totalLength, y: endElev },
-  ].sort((a, b) => a.x - b.x);
+  const hasSurveyProfile =
+    Array.isArray(inputs.profile_points) && inputs.profile_points.length >= 2;
 
-  const pressure = results.profile?.monitored_pressure_bar ?? inputs.field.monitored_pressure_bar ?? inputs.air.pressure_bar ?? 0;
-  const maxAllowable = results.profile?.maximum_allowable_pressure_at_low_point_bar ?? 193.55;
-  const segments: SceneSegment[] = [];
-  let station = 0;
+  let profile: Array<{ x: number; y: number }>;
+  if (hasSurveyProfile) {
+    const rawSorted = inputs.profile_points
+      .filter((pt) => Number.isFinite(pt.station_m) && Number.isFinite(pt.elevation_m))
+      .map((pt) => ({ x: clamp(pt.station_m, 0, totalLength), y: pt.elevation_m }))
+      .sort((a, b) => a.x - b.x);
+    profile = [];
+    for (const pt of rawSorted) {
+      const prev = profile[profile.length - 1];
+      if (!prev || Math.abs(pt.x - prev.x) > 0.5) {
+        profile.push(pt);
+      } else {
+        profile[profile.length - 1] = pt;
+      }
+    }
+    if (profile.length === 0) {
+      profile = [
+        { x: 0, y: startElev },
+        { x: totalLength, y: endElev },
+      ];
+    } else {
+      if (profile[0].x > 0) profile.unshift({ x: 0, y: profile[0].y });
+      if (profile[profile.length - 1].x < totalLength) {
+        profile.push({ x: totalLength, y: profile[profile.length - 1].y });
+      }
+    }
+  } else {
+    profile = [
+      { x: 0, y: startElev },
+      { x: totalLength * 0.33, y: highest },
+      { x: totalLength * 0.68, y: lowest },
+      { x: totalLength, y: endElev },
+    ].sort((a, b) => a.x - b.x);
+  }
 
-  sections.forEach((section, index) => {
-    const start = station;
-    const end = station + section.length_m;
-    const utilization = maxAllowable > 0 ? pressure / maxAllowable : 0;
-    const status = utilization > 1 ? "fail" : utilization > 0.9 ? "warning" : "pass";
-    segments.push({
-      id: `scene-seg-${index + 1}`,
-      label:
-        section.nps_label ??
-        `Segment ${index + 1} · ${section.outside_diameter_mm.toFixed(1)} mm`,
-      start_m: start,
-      end_m: end,
-      start_elevation_m: interpolateElevation(profile, start),
-      end_elevation_m: interpolateElevation(profile, end),
-      outside_diameter_mm: section.outside_diameter_mm,
-      wall_thickness_mm: section.wall_thickness_mm,
-      pressure_bar: pressure,
-      utilization: round(utilization, 4),
-      status,
-    });
-    station = end;
-  });
-
+  const startKpM = parseKpMeters(inputs.section_meta.start_kp);
   const pumpAtStart = !inputs.pump_location.includes("Bitis") && !inputs.pump_location.includes("Bitiş");
   const pumpStation = pumpAtStart ? 0 : totalLength;
+  const pumpElev = interpolateElevation(profile, pumpStation);
+  const basePressure =
+    results.profile?.monitored_pressure_bar ??
+    inputs.field.monitored_pressure_bar ??
+    inputs.air.pressure_bar ??
+    results.profile?.selected_window.minimum_required_pressure_bar ??
+    0;
+  const smysMpa = inputs.section_profile.smys_mpa ?? 450;
+  const maxAllowable = results.profile?.maximum_allowable_pressure_at_low_point_bar ?? 193.55;
+  const segments: SceneSegment[] = [];
+
+  if (hasSurveyProfile) {
+    const sectionRanges: Array<{
+      start: number;
+      end: number;
+      outside_diameter_mm: number;
+      wall_thickness_mm: number;
+      nps_label: string | null;
+    }> = [];
+    let cursor = 0;
+    for (const sec of sections) {
+      sectionRanges.push({
+        start: cursor,
+        end: cursor + sec.length_m,
+        outside_diameter_mm: sec.outside_diameter_mm,
+        wall_thickness_mm: sec.wall_thickness_mm,
+        nps_label: sec.nps_label ?? null,
+      });
+      cursor += sec.length_m;
+    }
+
+    let chosenProfile = profile;
+    if (profile.length > 38) {
+      let minIdx = 0;
+      let maxIdx = 0;
+      profile.forEach((pt, idx) => {
+        if (pt.y < profile[minIdx].y) minIdx = idx;
+        if (pt.y > profile[maxIdx].y) maxIdx = idx;
+      });
+      const keep = new Set<number>([0, profile.length - 1, minIdx, maxIdx]);
+      const slots = 36 - keep.size;
+      for (let slot = 1; slot <= slots; slot += 1) {
+        const idx = Math.min(profile.length - 1, Math.round((slot * (profile.length - 1)) / (slots + 1)));
+        keep.add(idx);
+      }
+      chosenProfile = Array.from(keep)
+        .sort((a, b) => a - b)
+        .map((idx) => profile[idx]);
+    }
+
+    const rawBreakpoints = [
+      0,
+      ...sectionRanges.map((r) => r.end),
+      ...chosenProfile.map((p) => p.x),
+      totalLength,
+    ]
+      .filter((v) => Number.isFinite(v) && v >= 0 && v <= totalLength)
+      .sort((a, b) => a - b);
+
+    const breakpoints: number[] = [];
+    for (const bp of rawBreakpoints) {
+      if (breakpoints.length === 0 || bp - breakpoints[breakpoints.length - 1] >= 1.0) {
+        breakpoints.push(bp);
+      }
+    }
+    if (breakpoints.length > 0 && breakpoints[breakpoints.length - 1] < totalLength) {
+      if (totalLength - breakpoints[breakpoints.length - 1] >= 1.0) {
+        breakpoints.push(totalLength);
+      } else {
+        breakpoints[breakpoints.length - 1] = totalLength;
+      }
+    }
+
+    for (let index = 0; index < breakpoints.length - 1; index += 1) {
+      const start = breakpoints[index];
+      const end = breakpoints[index + 1];
+      const mid = 0.5 * (start + end);
+      const sec =
+        sectionRanges.find((r) => mid >= r.start && mid <= r.end) ??
+        sectionRanges[sectionRanges.length - 1];
+      const z0 = interpolateElevation(profile, start);
+      const z1 = interpolateElevation(profile, end);
+      const zMid = 0.5 * (z0 + z1);
+      const headBar = (WATER_DENSITY_15C * 9.80665 * (zMid - pumpElev)) / 100_000;
+      const segPressure = basePressure > 0 ? Math.max(0, round(basePressure - headBar, 2)) : 0;
+      const limitSmys =
+        smysMpa > 0 && sec.outside_diameter_mm > 0
+          ? (20 * smysMpa * sec.wall_thickness_mm) / sec.outside_diameter_mm
+          : maxAllowable;
+      const utilization = basePressure > 0 && limitSmys > 0 ? round(segPressure / limitSmys, 4) : 0;
+      const status =
+        basePressure <= 0
+          ? "pending"
+          : utilization > 1
+            ? "fail"
+            : utilization > 0.9
+              ? "warning"
+              : "pass";
+      const labelPrefix = inputs.section_meta.section_no || sec.nps_label || `Kesit ${index + 1}`;
+      const segLabel =
+        startKpM !== null
+          ? `${labelPrefix} · KP ${formatKp(startKpM + start)}–${formatKp(startKpM + end)}`
+          : `${labelPrefix} · #${index + 1}`;
+      segments.push({
+        id: `scene-seg-${index + 1}`,
+        label: segLabel,
+        start_m: round(start, 2),
+        end_m: round(end, 2),
+        start_elevation_m: round(z0, 2),
+        end_elevation_m: round(z1, 2),
+        outside_diameter_mm: sec.outside_diameter_mm,
+        wall_thickness_mm: sec.wall_thickness_mm,
+        pressure_bar: basePressure > 0 ? segPressure : undefined,
+        utilization: basePressure > 0 ? utilization : undefined,
+        status,
+      });
+    }
+  } else {
+    let station = 0;
+    sections.forEach((section, index) => {
+      const start = station;
+      const end = station + section.length_m;
+      const utilization = maxAllowable > 0 ? basePressure / maxAllowable : 0;
+      const status = utilization > 1 ? "fail" : utilization > 0.9 ? "warning" : "pass";
+      segments.push({
+        id: `scene-seg-${index + 1}`,
+        label:
+          section.nps_label ??
+          `Segment ${index + 1} · ${section.outside_diameter_mm.toFixed(1)} mm`,
+        start_m: start,
+        end_m: end,
+        start_elevation_m: interpolateElevation(profile, start),
+        end_elevation_m: interpolateElevation(profile, end),
+        outside_diameter_mm: section.outside_diameter_mm,
+        wall_thickness_mm: section.wall_thickness_mm,
+        pressure_bar: basePressure > 0 ? basePressure : undefined,
+        utilization: round(utilization, 4),
+        status,
+      });
+      station = end;
+    });
+  }
+
   const equipment: SceneEquipment[] = [
     {
       id: "eq-valve-start",
@@ -1304,7 +1582,7 @@ export function buildSceneData(inputs: AppInputs, results: { profile?: PressureP
       type: "pump",
       label: "Pompa",
       distance_m: pumpStation,
-      elevation_m: interpolateElevation(profile, pumpStation),
+      elevation_m: pumpElev,
       status: "pass",
     },
     {
@@ -1312,7 +1590,7 @@ export function buildSceneData(inputs: AppInputs, results: { profile?: PressureP
       type: "test-head",
       label: "Test başlığı",
       distance_m: pumpAtStart ? Math.min(40, totalLength * 0.01) : totalLength - Math.min(40, totalLength * 0.01),
-      elevation_m: interpolateElevation(profile, pumpStation),
+      elevation_m: pumpElev,
       status: "pass",
     },
     {
@@ -1325,8 +1603,62 @@ export function buildSceneData(inputs: AppInputs, results: { profile?: PressureP
     },
   ];
 
+  if (hasSurveyProfile && profile.length >= 3) {
+    let maxPt = profile[0];
+    let minPt = profile[0];
+    for (const pt of profile) {
+      if (pt.y > maxPt.y) maxPt = pt;
+      if (pt.y < minPt.y) minPt = pt;
+    }
+    if (maxPt.x > 40 && maxPt.x < totalLength - 40) {
+      equipment.push({
+        id: "eq-summit",
+        type: "gauge",
+        label: `Zirve · ${round(maxPt.y, 1)} m${startKpM !== null ? ` (KP ${formatKp(startKpM + maxPt.x)})` : ""}`,
+        distance_m: round(maxPt.x, 1),
+        elevation_m: round(maxPt.y, 1),
+        status: "warning",
+      });
+    }
+    if (minPt.x > 40 && minPt.x < totalLength - 40 && Math.abs(minPt.x - maxPt.x) > 40) {
+      equipment.push({
+        id: "eq-lowpoint",
+        type: "gauge",
+        label: `Maks. Statik Yük · ${round(minPt.y, 1)} m${startKpM !== null ? ` (KP ${formatKp(startKpM + minPt.x)})` : ""}`,
+        distance_m: round(minPt.x, 1),
+        elevation_m: round(minPt.y, 1),
+        status: "pass",
+      });
+    }
+  }
+
+  const landmarks: SceneLandmark[] = (inputs.landmarks ?? []).map((lm, idx) => {
+    const dist = clamp(lm.station_m, 0, totalLength);
+    return {
+      id: `lm-${idx + 1}`,
+      distance_m: round(dist, 1),
+      elevation_m: lm.elevation_m ?? round(interpolateElevation(profile, dist), 1),
+      kp: lm.kp || (startKpM !== null ? formatKp(startKpM + dist) : undefined),
+      kind: lm.kind,
+      label: lm.label,
+    };
+  });
+
+  const segPressures = segments
+    .map((seg) => seg.pressure_bar)
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  const computedMinPressure = segPressures.length ? Math.min(...segPressures) : undefined;
+  const computedMaxPressure = segPressures.length ? Math.max(...segPressures) : undefined;
+
   const pigDistance = inputs.field.pig_distance_m ?? totalLength / 2;
   const pigSpeed = results.pig?.speed_m_per_s ?? inputs.field.pig_speed_m_per_s ?? null;
+
+  const warnings: string[] = [];
+  if (results.profile?.feasible === false) {
+    warnings.push("Basınç penceresi üç limitin tamamını sağlamıyor; sahne yalnızca gösterim amaçlıdır.");
+  } else if (!hasSurveyProfile) {
+    warnings.push("Kot profili 4 noktadan yaklaşık türetildi.");
+  }
 
   return {
     segments,
@@ -1338,13 +1670,15 @@ export function buildSceneData(inputs: AppInputs, results: { profile?: PressureP
       speed_m_per_s: pigSpeed ?? undefined,
     },
     flow_speed_m_per_s: pigSpeed ?? 1.2,
-    pressure_min_bar: results.profile?.selected_window.minimum_required_pressure_bar ?? undefined,
-    pressure_max_bar: results.profile?.selected_window.maximum_allowable_pressure_bar ?? undefined,
+    pressure_min_bar:
+      computedMinPressure ?? results.profile?.selected_window.minimum_required_pressure_bar ?? undefined,
+    pressure_max_bar:
+      computedMaxPressure ?? results.profile?.selected_window.maximum_allowable_pressure_bar ?? undefined,
+    start_kp_m: startKpM,
+    is_survey_profile: hasSurveyProfile,
     profile_points: profile.map((p) => [round(p.x, 2), round(p.y, 2)]),
-    warnings:
-      results.profile?.feasible === false
-        ? ["Basınç penceresi üç limitin tamamını sağlamıyor; sahne yalnızca gösterim amaçlıdır."]
-        : ["Kot profili 4 noktadan yaklaşık türetildi."],
+    landmarks,
+    warnings,
   };
 }
 

@@ -51,7 +51,9 @@ def importers_of(graph: dict, target_file: str) -> list[str]:
     """Resolve exact import edges (including ``from pkg import module``) to files."""
     module_to_file: dict[str, str] = {}
     for node in graph["nodes"].values():
-        if node["type"] != "file" or not node["path"].startswith(("hidrostatik_test/", "webapp/backend/app/")):
+        if node["type"] != "file" or not node["path"].startswith(
+            ("hidrostatik_test/", "webapp/backend/app/")
+        ):
             continue
         path = node["path"]
         parts = list(Path(path).with_suffix("").parts)

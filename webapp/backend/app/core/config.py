@@ -13,7 +13,7 @@ Environment variables (all optional):
 ``HYDRO_CORS_ORIGINS``
     comma separated origin list. Empty means same-origin only.
 ``HYDRO_MAX_UPLOAD_MB``
-    OCR upload limit (default 25).
+    OCR upload limit in MB (default 500, clamped 1..500).
 ``HYDRO_OCR_ENABLED``
     queue/worker switch (default true).
 ``HYDRO_OCR_LANG``
@@ -79,11 +79,11 @@ class Settings:
     data_dir: Path = DEFAULT_DATA_DIR
     frontend_dist: Path = DEFAULT_FRONTEND_DIST
     cors_origins: tuple[str, ...] = ()
-    max_upload_mb: int = 25
+    max_upload_mb: int = 500
     ocr_enabled: bool = True
     ocr_lang: str = "tur+eng"
     tesseract_cmd: str = ""
-    ocr_timeout_s: int = 300
+    ocr_timeout_s: int = 600
     auth_mode: str = "none"
     scene_vertical_exaggeration: float = 3.0
     log_level: str = "INFO"
@@ -111,7 +111,7 @@ class Settings:
 
     @property
     def max_upload_bytes(self) -> int:
-        return max(1, self.max_upload_mb) * 1024 * 1024
+        return min(max(1, self.max_upload_mb), 500) * 1024 * 1024
 
     @property
     def repo_root(self) -> Path:
@@ -133,11 +133,11 @@ class Settings:
             data_dir=data_dir,
             frontend_dist=frontend_dist,
             cors_origins=origins,
-            max_upload_mb=_env_int("HYDRO_MAX_UPLOAD_MB", 25),
+            max_upload_mb=_env_int("HYDRO_MAX_UPLOAD_MB", 500),
             ocr_enabled=_env_bool("HYDRO_OCR_ENABLED", True),
             ocr_lang=_env("HYDRO_OCR_LANG") or "tur+eng",
             tesseract_cmd=_env("HYDRO_TESSERACT_CMD") or "",
-            ocr_timeout_s=_env_int("HYDRO_OCR_TIMEOUT_S", 300),
+            ocr_timeout_s=_env_int("HYDRO_OCR_TIMEOUT_S", 600),
             auth_mode=_env("HYDRO_AUTH_MODE") or "none",
             scene_vertical_exaggeration=float(_env("HYDRO_SCENE_VERTICAL_EXAGGERATION") or 3.0),
             log_level=_env("HYDRO_LOG_LEVEL") or "INFO",

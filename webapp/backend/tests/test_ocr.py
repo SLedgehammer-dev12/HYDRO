@@ -75,7 +75,7 @@ def test_ocr_status(client):
     body = client.get("/api/ocr/status").json()
     assert "available" in body
     assert isinstance(body["status_text"], str)
-    assert body["limits"]["max_file_size_bytes"] == 25 * 1024 * 1024
+    assert body["limits"]["max_file_size_bytes"] == 500 * 1024 * 1024
     assert ".pdf" in body["limits"]["supported_extensions"]
     assert body["thresholds"]["low_confidence"] == 0.6
     assert body["thresholds"]["human_review_required"] is True
@@ -386,3 +386,133 @@ def test_ocr_mapping_profiles_crud(client):
         json={"name": "Other", "format_key": "other"},
     ).json()
     assert client.delete(f"/api/ocr/mapping-profiles/{second['id']}").status_code == 204
+
+
+def test_analyze_xlsx_report_and_magic_validation(client):
+    import io
+    import zipfile
+
+    import openpyxl
+
+    status_body = client.get("/api/ocr/status").json()
+    assert ".xlsx" in status_body["limits"]["supported_extensions"]
+    assert ".xls" in status_body["limits"]["supported_extensions"]
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "hydrostatic test data"
+    ws.append(["Test Bölüm No", ":", "BÖLÜM 5"])
+    ws.append(["Boru Dış Çapı", ":", 355.6, "mm"])
+    ws.append(["Boru Et Kalınlığı", ":", 5.2, "mm"])
+    ws.append(["Test Bölüm Boyu", ":", 8802.34, "m"])
+    ws.append(["Maks. Test Basıncı", ":", 131.68, "bar"])
+    buf = io.BytesIO()
+    wb.save(buf)
+    xlsx_bytes = buf.getvalue()
+
+    res = client.post(
+        "/api/ocr/analyze",
+        files={
+            "file": (
+                "rapor.xlsx",
+                xlsx_bytes,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+    assert res.status_code in (200, 201), res.text
+    body = res.json()
+    assert body["source"] == "spreadsheet"
+    assert body["report"]["section_id"]["value"] == "BÖLÜM 5"
+    assert body["report"]["pipe_od_mm"]["value"] == 355.6
+
+    from app import db
+    from app.models import Attachment, OcrAnalysis
+
+    with db.get_sessionmaker()() as db_session:
+        analysis_row = db_session.get(OcrAnalysis, body["id"])
+        attachment_row = db_session.get(Attachment, analysis_row.attachment_id)
+        assert attachment_row.kind == "report_spreadsheet"
+
+    fake = client.post(
+        "/api/ocr/analyze",
+        files={
+            "file": (
+                "sahte.xlsx",
+                b"not a zip",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+    assert fake.status_code == 415
+    assert fake.json()["code"] == "unsupported_format"
+
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, "w") as zf:
+        zf.writestr("hello.txt", "not a workbook")
+    non_wb = client.post(
+        "/api/ocr/analyze",
+        files={
+            "file": (
+                "sahte_zip.xlsx",
+                zip_buf.getvalue(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+    assert non_wb.status_code == 422
+    assert non_wb.json()["code"] == "corrupt_document"
+
+
+def test_ocr_status_respects_hydro_max_upload_mb(client, monkeypatch):
+    from hidrostatik_test.services.report_ocr import effective_max_file_size_bytes
+
+    monkeypatch.setenv("HYDRO_MAX_UPLOAD_MB", "120")
+    assert effective_max_file_size_bytes() == 120 * 1024 * 1024
+    res = client.get("/api/ocr/status")
+    assert res.status_code == 200
+    assert res.json()["limits"]["max_file_size_bytes"] == 120 * 1024 * 1024
+
+    monkeypatch.setenv("HYDRO_MAX_UPLOAD_MB", "999")
+    assert effective_max_file_size_bytes() == 500 * 1024 * 1024
+
+
+def test_ocr_apply_recomputes_results_and_form_slots(client, tmp_path):
+    pdf = _make_report_pdf(tmp_path / "single_recomp.pdf")
+    session = create_session(client, inputs=full_inputs())
+    analysis = _upload(client, pdf, session_id=session["id"])
+    assert analysis.status_code == 201, analysis.text
+    analysis_id = analysis.json()["id"]
+
+    approved = client.post(
+        f"/api/ocr/analyses/{analysis_id}/approve",
+        json={
+            "fields": {
+                "test_pressure_bar": {"value": 80.0, "unit": "bar", "approved": True},
+                "pipe_od_mm": {"value": 406.4, "unit": "mm", "approved": True},
+            }
+        },
+    )
+    assert approved.status_code == 200
+
+    applied = client.post(
+        f"/api/ocr/analyses/{analysis_id}/apply",
+        json={
+            "session_id": session["id"],
+            "fields": ["test_pressure_bar", "pipe_od_mm"],
+            "overwrite": True,
+        },
+    )
+    assert applied.status_code == 200, applied.text
+    body = applied.json()
+    assert set(body["persisted_result_types"]).issuperset({"air", "pressure"})
+
+    forms_resp = client.get(f"/api/sessions/{session['id']}/forms")
+    assert forms_resp.status_code == 200
+    assert forms_resp.json()["summary"]["required_total"] == 11
+
+    results_resp = client.get(f"/api/sessions/{session['id']}/results")
+    assert results_resp.status_code == 200
+    assert {"air", "pressure"}.issubset(
+        {item["test_type"] for item in results_resp.json()["items"]}
+    )

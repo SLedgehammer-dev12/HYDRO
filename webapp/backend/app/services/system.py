@@ -35,10 +35,10 @@ from hidrostatik_test.domain.time_series import (
     THERMAL_BALANCE_THRESHOLD_C,
 )
 from hidrostatik_test.services.report_ocr import (
-    MAX_FILE_SIZE_BYTES,
     MAX_OCR_PAGES,
     MAX_PDF_PAGES,
     SUPPORTED_EXTENSIONS,
+    effective_max_file_size_bytes,
     ocr_available,
     ocr_status,
 )
@@ -194,7 +194,7 @@ def meta_payload(settings: Settings) -> dict[str, Any]:
         "pump_locations": list(get_pump_location_options()),
         "pig_modes": pig_modes,
         "limits": {
-            "max_file_size_bytes": MAX_FILE_SIZE_BYTES,
+            "max_file_size_bytes": effective_max_file_size_bytes(),
             "max_pdf_pages": MAX_PDF_PAGES,
             "max_ocr_pages": MAX_OCR_PAGES,
             "max_test_section_length_m": MAX_TEST_SECTION_LENGTH_M,

@@ -9,6 +9,7 @@ from .. import schemas
 from ..core.config import Settings
 from ..core.timeutil import json_safe
 from ..db import get_db
+from ..services import dossier as dossier_service
 from ..services import ocr as ocr_service
 from .deps import Workspace, get_settings, get_workspace
 
@@ -23,6 +24,7 @@ def analyze(
     session_id: str | None = Form(default=None),
     mapping_profile_id: str | None = Form(default=None),
     language: str | None = Form(default=None),
+    force: bool = Form(default=False),
     db: OrmSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     workspace: Workspace = Depends(get_workspace),
@@ -37,6 +39,7 @@ def analyze(
         session_id=session_id or None,
         mapping_profile_id=mapping_profile_id or None,
         language=language or None,
+        force=bool(force),
     )
     response.status_code = 200 if reused else 201
     payload = ocr_service.detail_payload(db, analysis)
@@ -125,6 +128,29 @@ def apply_analysis(
             session_id=payload.session_id,
             field_names=payload.fields,
             overwrite=payload.overwrite,
+        )
+    )
+
+
+@router.post("/analyses/{analysis_id}/commit-dossier")
+def commit_dossier(
+    analysis_id: str,
+    payload: schemas.OcrDossierCommitRequest,
+    db: OrmSession = Depends(get_db),
+    workspace: Workspace = Depends(get_workspace),
+) -> dict:
+    analysis = ocr_service.get_analysis(db, workspace.hash, analysis_id)
+    return json_safe(
+        dossier_service.commit_dossier_to_project(
+            db,
+            analysis,
+            workspace_hash=workspace.hash,
+            target_project_id=payload.target_project_id,
+            create_new_project=payload.create_new_project,
+            new_project_name=payload.new_project_name,
+            new_project_code=payload.new_project_code,
+            overwrite_filled=payload.overwrite_filled,
+            selected_sections=payload.selected_sections,
         )
     )
 

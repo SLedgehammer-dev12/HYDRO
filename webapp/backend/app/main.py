@@ -103,6 +103,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response = await call_next(request)
         response.headers[REQUEST_ID_HEADER] = request_id
         response.headers[SESSION_HEADER] = raw_workspace
+        if "text/html" in response.headers.get("content-type", ""):
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         return response
 
     if resolved.cors_origins:

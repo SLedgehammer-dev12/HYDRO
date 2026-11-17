@@ -18,6 +18,11 @@ pypdf>=5,<7
 # PDF metin/tablo cikarimi (yedek; pypdf yoksa veya tablo gerekirse)
 pdfplumber>=0.11,<1
 
+# Eski Excel (.xls) raporlari ve sablonlari icin
+xlrd>=2.0.1,<3
+# openpyxl ile XML guvenligi (XXE / entity genisleme korumasi)
+defusedxml>=0.7.1,<1
+
 # Goruntu OCR (Tesseract sarmalayicisi)
 pytesseract>=0.3.13,<1
 Pillow>=10,<13

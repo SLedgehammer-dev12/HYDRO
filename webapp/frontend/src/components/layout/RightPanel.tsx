@@ -31,7 +31,7 @@ export function RightPanel() {
         <div className="panel p-3.5">
           <div className="flex items-center justify-between">
             <p className="eyebrow">Canlı Özet</p>
-            <span className="chip">{results.source === "demo" ? "demo" : "canlı"}</span>
+            <span className="chip">{results.source === "live" ? "doğrulandı" : "ön hesap"}</span>
           </div>
 
           <div className="mt-3 space-y-2">

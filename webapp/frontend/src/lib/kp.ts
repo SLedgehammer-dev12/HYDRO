@@ -1,4 +1,11 @@
-import type { SegmentRow, SectionMeta, SessionListItem } from "./types";
+import type {
+  DraftSectionItem,
+  PlanProfileScanResponse,
+  SectionMeta,
+  SegmentRow,
+  SessionListItem,
+  SimilarProjectCandidate,
+} from "./types";
 
 /**
  * Boru hattı KP (Kilometre Point / Chainage) ayrıştırıcı, biçimleyici ve
@@ -614,4 +621,320 @@ export function evaluateSegmentConsistency(params: {
     issues,
     rows,
   };
+}
+
+function normalizeSectionKey(raw: string): string {
+  const cleaned = raw.trim().replace(/\s+/g, " ").toUpperCase();
+  const kMatch = /^K\s*[-_.]?\s*0*(\d{1,3})$/.exec(cleaned);
+  if (kMatch) {
+    return `K-${String(Number(kMatch[1])).padStart(2, "0")}`;
+  }
+  const bMatch = /^(?:TEST\s*)?B[ÖO]L[ÜU]M[ÜU]?\s*[-_:.#]?\s*0*(\d{1,3}[A-Z]?)$/.exec(cleaned);
+  if (bMatch) {
+    return `BÖLÜM ${bMatch[1]}`;
+  }
+  return cleaned;
+}
+
+/**
+ * Birden fazla plan-profil paftasından çıkan tarama sonuçlarını KP sırasına göre
+ * tek taslak listesinde birleştirir, mevcut proje kesitleriyle `K-01` çakışmalarını
+ * önler ve ardışık KP süreklilik denetimini günceller.
+ */
+export function mergePlanProfileScans(
+  scans: PlanProfileScanResponse[],
+  existingSessions: SessionListItem[] = [],
+): { mergedScan: PlanProfileScanResponse; drafts: DraftSectionItem[] } {
+  if (scans.length === 0) {
+    return {
+      mergedScan: {
+        file_name: "",
+        page_count: 0,
+        extraction_method: "",
+        strategy: "explicit",
+        station_count: 0,
+        elevation_point_count: 0,
+        min_kp: "0+000",
+        max_kp: "0+000",
+        total_length_m: 0,
+        pipe_meta: {
+          outside_diameter_mm: null,
+          wall_thickness_mm: null,
+          design_pressure_bar: null,
+          material_grade: "",
+          smys_mpa: null,
+        },
+        profile_points: [],
+        draft_sections: [],
+        continuity_ok: true,
+        continuity_issues: [],
+        warnings: [],
+      },
+      drafts: [],
+    };
+  }
+
+  const existingRanges = new Map<string, Array<{ s: number | null; e: number | null }>>();
+  const existingOrderedEnds: Array<{ label: string; startM: number; endM: number; endKp: string }> = [];
+  const usedKeys = new Set<string>();
+  let bolumStyleCount = 0;
+  let kStyleCount = 0;
+
+  for (const sess of existingSessions) {
+    const meta = resolveSectionMeta(sess);
+    const label = meta.section_no || sectionDisplayLabel(sess);
+    const norm = normalizeSectionKey(label);
+    const sM = parseKpMeters(meta.start_kp);
+    const eM = parseKpMeters(meta.end_kp);
+    if (norm) {
+      usedKeys.add(norm);
+      const arr = existingRanges.get(norm) ?? [];
+      arr.push({ s: sM, e: eM });
+      existingRanges.set(norm, arr);
+      if (/^BÖLÜM \d+/.test(norm)) bolumStyleCount += 1;
+      if (/^K-\d+$/.test(norm)) kStyleCount += 1;
+    }
+    if (sM !== null && eM !== null && eM > sM) {
+      existingOrderedEnds.push({ label, startM: sM, endM: eM, endKp: formatKp(eM) });
+    }
+  }
+
+  const rawDrafts: DraftSectionItem[] = [];
+  for (const scan of scans) {
+    for (const row of scan.draft_sections) {
+      const norm = normalizeSectionKey(row.section_no);
+      if (/^BÖLÜM \d+/.test(norm)) bolumStyleCount += 1;
+      const sm = parseKpMeters(row.start_kp) ?? row.start_m;
+      const em = parseKpMeters(row.end_kp) ?? row.end_m;
+      rawDrafts.push({
+        ...row,
+        start_m: sm,
+        end_m: em,
+        start_kp: Number.isFinite(sm) ? formatKp(sm) : row.start_kp,
+        end_kp: Number.isFinite(em) ? formatKp(em) : row.end_kp,
+        length_m: Number.isFinite(sm) && Number.isFinite(em) && em > sm ? Math.round((em - sm) * 100) / 100 : row.length_m,
+        source_file: row.source_file || scan.file_name,
+      });
+    }
+  }
+
+  rawDrafts.sort((a, b) => a.start_m - b.start_m || a.end_m - b.end_m);
+
+  const preferBolum = bolumStyleCount > 0 && kStyleCount === 0;
+  const claimedInBatch = new Map<string, Array<{ s: number; e: number }>>();
+
+  const nextFreeKey = (genericStyleOnly = false): string => {
+    const useBolum = preferBolum && !genericStyleOnly;
+    let n = 1;
+    while (true) {
+      const cand = useBolum ? `BÖLÜM ${n}` : `K-${String(n).padStart(2, "0")}`;
+      if (!usedKeys.has(cand) && !claimedInBatch.has(cand)) {
+        return cand;
+      }
+      n += 1;
+    }
+  };
+
+  const drafts: DraftSectionItem[] = rawDrafts.map((row) => {
+    const origNo = row.section_no.trim() || "K-01";
+    let norm = normalizeSectionKey(origNo);
+    const isGeneric = /^K-\d+$/.test(norm);
+
+    const existingList = existingRanges.get(norm) ?? [];
+    const collidesExistingDisjoint =
+      existingList.length > 0 &&
+      existingList.every(
+        (ex) =>
+          ex.s !== null &&
+          ex.e !== null &&
+          (row.end_m <= ex.s + 1.0 || row.start_m >= ex.e - 1.0),
+      );
+    const batchList = claimedInBatch.get(norm) ?? [];
+    const collidesInBatch = batchList.some(
+      (b) => row.end_m <= b.s + 1.0 || row.start_m >= b.e - 1.0,
+    );
+
+    let nextNo = origNo;
+    if ((isGeneric && collidesExistingDisjoint) || collidesInBatch) {
+      nextNo = nextFreeKey(!isGeneric && !preferBolum);
+      norm = normalizeSectionKey(nextNo);
+    }
+
+    const updatedClaims = claimedInBatch.get(norm) ?? [];
+    updatedClaims.push({ s: row.start_m, e: row.end_m });
+    claimedInBatch.set(norm, updatedClaims);
+    usedKeys.add(norm);
+
+    const nextDesc =
+      row.description && nextNo !== origNo && row.description.includes(origNo)
+        ? row.description.replace(origNo, nextNo)
+        : row.description;
+
+    return {
+      ...row,
+      section_no: nextNo,
+      description: nextDesc,
+    };
+  });
+
+  // Ardışık KP sürekliliğini birleştirilmiş sıraya göre yeniden hesapla
+  const continuityIssues: string[] = [];
+  for (let idx = 0; idx < drafts.length; idx += 1) {
+    const cur = drafts[idx];
+    if (idx === 0) {
+      const prevExisting = existingOrderedEnds
+        .filter((ex) => ex.endM <= cur.start_m + 1.0)
+        .sort((a, b) => b.endM - a.endM)[0];
+      if (prevExisting) {
+        const delta = Math.round(cur.start_m - prevExisting.endM);
+        cur.prev_end_kp = prevExisting.endKp;
+        cur.continuity_ok = Math.abs(delta) <= 0.5;
+        cur.continuity_note = cur.continuity_ok
+          ? `Projedeki önceki (${prevExisting.label}) bitiş KP (${prevExisting.endKp}) ile eşleşiyor.`
+          : `Projedeki ${prevExisting.label} bitişi (${prevExisting.endKp}) ile +${delta} m fark`;
+      } else {
+        cur.prev_end_kp = null;
+        cur.continuity_ok = true;
+        cur.continuity_note = "Başlangıç kesiti";
+      }
+    } else {
+      const prev = drafts[idx - 1];
+      const delta = Math.round(cur.start_m - prev.end_m);
+      cur.prev_end_kp = prev.end_kp;
+      cur.continuity_ok = Math.abs(delta) <= 0.5;
+      if (cur.continuity_ok) {
+        cur.continuity_note = `Önceki kesit (${prev.section_no}) bitiş KP (${prev.end_kp}) ile tam eşleşiyor.`;
+      } else {
+        const kind = delta > 0 ? `+${Math.abs(delta)} m boşluk` : `${Math.abs(delta)} m bindirme`;
+        cur.continuity_note = `${prev.section_no} bitiş KP (${prev.end_kp}) ile ${cur.section_no} başlangıç KP (${cur.start_kp}) eşleşmiyor (${kind}).`;
+        continuityIssues.push(cur.continuity_note);
+      }
+    }
+  }
+
+  // Tüm kot noktalarını station_m sırasıyla birleştir
+  const rawPts = scans
+    .flatMap((s) => s.profile_points ?? [])
+    .filter((p) => Number.isFinite(p.station_m) && Number.isFinite(p.elevation_m))
+    .sort((a, b) => a.station_m - b.station_m);
+  const mergedPoints: Array<{ kp: string; station_m: number; elevation_m: number }> = [];
+  for (const pt of rawPts) {
+    const last = mergedPoints[mergedPoints.length - 1];
+    if (!last || Math.abs(pt.station_m - last.station_m) > 0.5) {
+      mergedPoints.push({
+        kp: pt.kp || formatKp(pt.station_m),
+        station_m: pt.station_m,
+        elevation_m: pt.elevation_m,
+      });
+    } else {
+      mergedPoints[mergedPoints.length - 1] = {
+        kp: pt.kp || formatKp(pt.station_m),
+        station_m: pt.station_m,
+        elevation_m: pt.elevation_m,
+      };
+    }
+  }
+
+  const pipeMeta = {
+    outside_diameter_mm: scans.map((s) => s.pipe_meta.outside_diameter_mm).find((v) => v != null) ?? null,
+    wall_thickness_mm: scans.map((s) => s.pipe_meta.wall_thickness_mm).find((v) => v != null) ?? null,
+    design_pressure_bar: scans.map((s) => s.pipe_meta.design_pressure_bar).find((v) => v != null) ?? null,
+    material_grade: scans.map((s) => s.pipe_meta.material_grade).find((v) => Boolean(v)) ?? "",
+    smys_mpa: scans.map((s) => s.pipe_meta.smys_mpa).find((v) => v != null) ?? null,
+  };
+
+  const strategies = new Set(scans.map((s) => s.strategy));
+  const strategy: PlanProfileScanResponse["strategy"] =
+    strategies.size === 1
+      ? scans[0].strategy
+      : strategies.has("cad_profile")
+        ? "cad_profile"
+        : "explicit";
+
+  const minM = drafts.length ? Math.min(...drafts.map((d) => d.start_m)) : 0;
+  const maxM = drafts.length ? Math.max(...drafts.map((d) => d.end_m)) : 0;
+  const sumLen = drafts.reduce((acc, d) => acc + (Number(d.length_m) || 0), 0);
+
+  const similarMap = new Map<string, SimilarProjectCandidate>();
+  for (const scan of scans) {
+    for (const cand of scan.similar_projects ?? []) {
+      const prev = similarMap.get(cand.id);
+      if (!prev || cand.similarity > prev.similarity) {
+        similarMap.set(cand.id, cand);
+      }
+    }
+  }
+
+  const warnings = Array.from(new Set(scans.flatMap((s) => s.warnings ?? [])));
+  const methods = Array.from(new Set(scans.map((s) => s.extraction_method).filter(Boolean)));
+
+  const detectedProjectName = pickBestDetectedProjectName(
+    scans.map((s) => s.detected_project_name),
+  );
+
+  return {
+    mergedScan: {
+      file_name:
+        scans.length === 1
+          ? scans[0].file_name
+          : `${scans.length} pafta (${scans.map((s) => s.file_name).join(", ")})`,
+      page_count: scans.reduce((acc, s) => acc + (s.page_count || 0), 0),
+      extraction_method: methods.join(" + ") || scans[0].extraction_method,
+      strategy,
+      station_count: scans.reduce((acc, s) => acc + (s.station_count || 0), 0),
+      elevation_point_count:
+        mergedPoints.length || scans.reduce((acc, s) => acc + (s.elevation_point_count || 0), 0),
+      min_kp: drafts.length ? formatKp(minM) : scans[0].min_kp,
+      max_kp: drafts.length ? formatKp(maxM) : scans[0].max_kp,
+      total_length_m: drafts.length ? Math.round(sumLen * 100) / 100 : scans[0].total_length_m,
+      pipe_meta: pipeMeta,
+      profile_points: mergedPoints,
+      draft_sections: drafts,
+      continuity_ok: continuityIssues.length === 0,
+      continuity_issues: continuityIssues,
+      warnings,
+      detected_project_name: detectedProjectName,
+      similar_projects: Array.from(similarMap.values()).sort((a, b) => b.similarity - a.similarity),
+    },
+    drafts,
+  };
+}
+
+function foldTurkishAscii(text: string): string {
+  return text
+    .replace(/[İIı]/g, "i")
+    .replace(/[Çç]/g, "c")
+    .replace(/[Ğğ]/g, "g")
+    .replace(/[Öö]/g, "o")
+    .replace(/[Şş]/g, "s")
+    .replace(/[Üü]/g, "u")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+export function pickBestDetectedProjectName(
+  names: Array<string | null | undefined>,
+): string | null {
+  const cleaned = names.map((v) => v?.trim()).filter((v): v is string => Boolean(v));
+  if (cleaned.length === 0) return null;
+
+  const groups = new Map<string, string[]>();
+  for (const name of cleaned) {
+    const key = foldTurkishAscii(name) || name.toLowerCase();
+    const arr = groups.get(key) ?? [];
+    arr.push(name);
+    groups.set(key, arr);
+  }
+
+  let bestGroup: string[] = [];
+  for (const arr of groups.values()) {
+    if (arr.length > bestGroup.length) {
+      bestGroup = arr;
+    }
+  }
+  const turkishCount = (s: string) => (s.match(/[ÇĞİÖŞÜçğıöşü]/g) ?? []).length;
+  return bestGroup.sort(
+    (a, b) => turkishCount(b) - turkishCount(a) || b.length - a.length,
+  )[0];
 }

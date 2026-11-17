@@ -176,6 +176,7 @@ class OcrAnalysis(Base):
     discrepancies: Mapped[list[Any]] = mapped_column(JSON, default=list)
     issues: Mapped[list[Any]] = mapped_column(JSON, default=list)
     warnings: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    dossier: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     needs_human_review: Mapped[bool] = mapped_column(Boolean, default=True)
     approved_fields: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     error_code: Mapped[str | None] = mapped_column(String(64), default=None)
@@ -211,6 +212,46 @@ class OcrMappingProfile(Base):
     )
 
 
+class SectionForm(Base):
+    __tablename__ = "section_forms"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    workspace_id_hash: Mapped[str] = mapped_column(String(64), index=True)
+    project_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("projects.id", ondelete="CASCADE"), default=None, index=True
+    )
+    session_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("sessions.id", ondelete="CASCADE"), index=True
+    )
+    form_code: Mapped[str] = mapped_column(String(40))
+    botas_code: Mapped[str] = mapped_column(String(48), default="")
+    form_title: Mapped[str] = mapped_column(String(160))
+    required: Mapped[bool] = mapped_column(Boolean, default=True)
+    status: Mapped[str] = mapped_column(String(20), default="empty", index=True)
+    analysis_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("ocr_analyses.id", ondelete="SET NULL"), default=None
+    )
+    attachment_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("attachments.id", ondelete="SET NULL"), default=None
+    )
+    source_filename: Mapped[str] = mapped_column(String(255), default="")
+    pages: Mapped[list[int]] = mapped_column(JSON, default=list)
+    form_date: Mapped[str] = mapped_column(String(40), default="")
+    extracted_data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    warnings: Mapped[list[str]] = mapped_column(JSON, default=list)
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+    filled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    __table_args__ = (
+        UniqueConstraint("session_id", "form_code", name="uq_section_form_code"),
+        Index("ix_section_forms_project", "project_id"),
+    )
+
+
 class AuditEvent(Base):
     __tablename__ = "audit_events"
 
@@ -240,6 +281,7 @@ __all__ = [
     "OcrAnalysis",
     "OcrMappingProfile",
     "Project",
+    "SectionForm",
     "TestResult",
     "TimeSeriesRecord",
     "new_uuid",

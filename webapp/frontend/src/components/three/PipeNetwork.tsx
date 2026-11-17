@@ -26,6 +26,10 @@ interface PipeNetworkProps {
 
 interface PipeSegmentProps {
   item: LayoutSegment;
+  index: number;
+  totalSegments: number;
+  prevOd?: number;
+  nextOd?: number;
   colorMode: ColorMode;
   layout: SceneLayout;
   clipPlanes: THREE.Plane[];
@@ -63,6 +67,10 @@ function SegmentTooltip({ segment }: { segment: SceneSegment }) {
 
 function PipeSegment({
   item,
+  index,
+  totalSegments,
+  prevOd,
+  nextOd,
   colorMode,
   layout,
   clipPlanes,
@@ -80,6 +88,20 @@ function PipeSegment({
   const innerColor = useMemo(() => color.clone().multiplyScalar(0.5), [color]);
   const meta = statusMeta(segment.status);
   const emissiveIntensity = selected ? 0.5 : hovered ? 0.24 : 0.05;
+  const denseTopo = totalSegments > 6;
+  const showStartFlange =
+    !denseTopo ||
+    index === 0 ||
+    (typeof prevOd === "number" && Math.abs(prevOd - segment.outside_diameter_mm) > 0.1);
+  const showEndFlange =
+    !denseTopo ||
+    index === totalSegments - 1 ||
+    (typeof nextOd === "number" && Math.abs(nextOd - segment.outside_diameter_mm) > 0.1);
+  const showWeldBall = denseTopo && index > 0 && !showStartFlange;
+  const showSegmentLabel =
+    showLabels &&
+    !hovered &&
+    (!denseTopo || index % Math.max(1, Math.ceil(totalSegments / 5)) === 0);
 
   useEffect(() => {
     return () => {
@@ -138,28 +160,44 @@ function PipeSegment({
           />
         </mesh>
 
-        {[start, end].map((point, index) => (
-          <group key={index} position={[0, (index === 0 ? -1 : 1) * length * 0.5, 0]}>
-            <mesh castShadow rotation={[0, 0, 0]}>
-              <cylinderGeometry args={[radius * 1.16, radius * 1.16, 0.055, 20, 1, false]} />
-              <meshStandardMaterial
-                color="#8aa2bb"
-                metalness={0.75}
-                roughness={0.34}
-                clippingPlanes={clipPlanes}
-              />
-            </mesh>
-            <mesh>
-              <torusGeometry args={[radius * 1.16, 0.012, 6, 24]} />
-              <meshStandardMaterial
-                color="#c7d7e6"
-                metalness={0.8}
-                roughness={0.3}
-                clippingPlanes={clipPlanes}
-              />
-            </mesh>
-          </group>
-        ))}
+        {showWeldBall ? (
+          <mesh position={[0, -length * 0.5, 0]} castShadow>
+            <sphereGeometry args={[radius * 1.02, 16, 12]} />
+            <meshStandardMaterial
+              color={color}
+              metalness={0.42}
+              roughness={0.4}
+              clippingPlanes={clipPlanes}
+            />
+          </mesh>
+        ) : null}
+
+        {[start, end].map((_point, endpointIdx) => {
+          const showFlange = endpointIdx === 0 ? showStartFlange : showEndFlange;
+          if (!showFlange) return null;
+          return (
+            <group key={endpointIdx} position={[0, (endpointIdx === 0 ? -1 : 1) * length * 0.5, 0]}>
+              <mesh castShadow rotation={[0, 0, 0]}>
+                <cylinderGeometry args={[radius * 1.16, radius * 1.16, 0.055, 20, 1, false]} />
+                <meshStandardMaterial
+                  color="#8aa2bb"
+                  metalness={0.75}
+                  roughness={0.34}
+                  clippingPlanes={clipPlanes}
+                />
+              </mesh>
+              <mesh>
+                <torusGeometry args={[radius * 1.16, 0.012, 6, 24]} />
+                <meshStandardMaterial
+                  color="#c7d7e6"
+                  metalness={0.8}
+                  roughness={0.3}
+                  clippingPlanes={clipPlanes}
+                />
+              </mesh>
+            </group>
+          );
+        })}
 
         {selected ? (
           <mesh rotation={[-Math.PI / 2, 0, 0]}>
@@ -169,7 +207,7 @@ function PipeSegment({
         ) : null}
       </group>
 
-      {showLabels && !hovered ? (
+      {showSegmentLabel ? (
         <SceneHtml
           position={[0, radius + 0.34, 0]}
           center
@@ -254,10 +292,18 @@ export default function PipeNetwork({
   return (
     <group>
       <PipeSupports layout={layout} />
-      {layout.segments.map((item) => (
+      {layout.segments.map((item, idx) => (
         <PipeSegment
           key={item.segment.id}
           item={item}
+          index={idx}
+          totalSegments={layout.segments.length}
+          prevOd={idx > 0 ? layout.segments[idx - 1].segment.outside_diameter_mm : undefined}
+          nextOd={
+            idx < layout.segments.length - 1
+              ? layout.segments[idx + 1].segment.outside_diameter_mm
+              : undefined
+          }
           colorMode={colorMode}
           layout={layout}
           clipPlanes={clipPlanes}

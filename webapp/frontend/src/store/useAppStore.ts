@@ -50,7 +50,9 @@ export interface AppStore {
 
   theme: "dark" | "light";
   sidebarOpen: boolean;
+  desktopSidebarOpen: boolean;
   rightPanelOpen: boolean;
+  sceneScope: "section" | "project";
 
   backend: BackendMode;
   health: HealthResponse | null;
@@ -90,7 +92,9 @@ export interface AppStore {
   toggleTheme: () => void;
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
+  toggleDesktopSidebar: () => void;
   toggleRightPanel: () => void;
+  setSceneScope: (scope: "section" | "project") => void;
 
   setBackend: (mode: BackendMode, health?: HealthResponse | null) => void;
   setSessionApiReady: (ready: boolean | null) => void;
@@ -124,7 +128,9 @@ export const useAppStore = create<AppStore>()(
 
       theme: "dark",
       sidebarOpen: false,
+      desktopSidebarOpen: true,
       rightPanelOpen: true,
+      sceneScope: "section",
 
       backend: "checking",
       health: null,
@@ -282,7 +288,10 @@ export const useAppStore = create<AppStore>()(
 
       setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
       toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
+      toggleDesktopSidebar: () =>
+        set((state) => ({ desktopSidebarOpen: !state.desktopSidebarOpen })),
       toggleRightPanel: () => set((state) => ({ rightPanelOpen: !state.rightPanelOpen })),
+      setSceneScope: (sceneScope) => set({ sceneScope }),
 
       setBackend: (backend, health) =>
         set({

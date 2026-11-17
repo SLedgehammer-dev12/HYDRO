@@ -114,12 +114,12 @@ export function CoefficientsPage() {
           pressure_bar: context.pressure_bar,
         },
         {
-          onSuccess: ({ data, mode }) => {
+          onSuccess: ({ data }) => {
             setAValue(data.a_micro_per_bar);
             pushToast(
               "success",
               "A tablodan okundu",
-              `${fmt.a(data.a_micro_per_bar)}${data.repaired ? " · onarılmış hücre" : ""}${mode === "demo" ? " (demo)" : ""}`,
+              `${fmt.a(data.a_micro_per_bar)}${data.repaired ? " · onarılmış hücre" : ""}`,
             );
           },
           onError: (error) => pushToast("error", "A okunamadı", error.message),
@@ -137,12 +137,12 @@ export function CoefficientsPage() {
           "table_v1",
       },
       {
-        onSuccess: ({ data, mode }) => {
+        onSuccess: ({ data }) => {
           setAValue(data.a_micro_per_bar);
           pushToast(
             "success",
             "A katsayısı hesaplandı",
-            `${fmt.a(data.a_micro_per_bar)} · ${data.backend.label}${mode === "demo" ? " (demo)" : ""}`,
+            `${fmt.a(data.a_micro_per_bar)} · ${data.backend.label}`,
           );
         },
         onError: (error) => pushToast("error", "A hesaplanamadı", error.message),
@@ -164,7 +164,7 @@ export function CoefficientsPage() {
         steel_model: inputs.modes.steel_model,
       },
       {
-        onSuccess: ({ data, mode }) => {
+        onSuccess: ({ data }) => {
           patchInputs({ pressure: { b_micro_per_c: data.b_micro_per_c } });
           if (data.water_beta_micro_per_c !== null) {
             patchInputs({ helper: { water_beta_micro_per_c: data.water_beta_micro_per_c } });
@@ -172,7 +172,7 @@ export function CoefficientsPage() {
           pushToast(
             "success",
             "B katsayısı hazır",
-            `${fmt.b(data.b_micro_per_c)} · ${data.label}${mode === "demo" ? " (demo)" : ""}`,
+            `${fmt.b(data.b_micro_per_c)} · ${data.label}`,
           );
         },
         onError: (error) => pushToast("error", "B hesaplanamadı", error.message),
@@ -362,7 +362,7 @@ export function CoefficientsPage() {
 
           <div className="mt-3 flex items-center justify-between gap-2">
             <span className="text-[10.5px] text-[var(--text-faint)]">
-              {aMode === "manual" ? "Manuel modda hesap çalışmaz." : "Sunucu hesabı; backend yoksa demo motoru."}
+              {aMode === "manual" ? "Manuel modda hesap çalışmaz." : "Seçili sıcaklık ve basınç için katsayı hesaplanır."}
             </span>
             <Button
               size="lg"

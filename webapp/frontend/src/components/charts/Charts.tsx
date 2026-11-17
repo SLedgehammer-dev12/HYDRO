@@ -74,6 +74,12 @@ export interface ElevationPoint {
 }
 
 export function elevationPoints(inputs: AppInputs): ElevationPoint[] {
+  if (Array.isArray(inputs.profile_points) && inputs.profile_points.length >= 2) {
+    return [...inputs.profile_points]
+      .filter((pt) => Number.isFinite(pt.station_m) && Number.isFinite(pt.elevation_m))
+      .sort((a, b) => a.station_m - b.station_m)
+      .map((pt) => ({ station: pt.station_m, elevation: pt.elevation_m }));
+  }
   const total = inputs.segments.reduce((sum, segment) => sum + (segment.length_m ?? 0), 0) ||
     (inputs.geometry.length_m ?? 0);
   if (total <= 0) return [];

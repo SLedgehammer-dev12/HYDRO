@@ -52,6 +52,7 @@ export function Sidebar() {
   const tab = useAppStore((state) => state.tab);
   const setTab = useAppStore((state) => state.setTab);
   const sidebarOpen = useAppStore((state) => state.sidebarOpen);
+  const desktopSidebarOpen = useAppStore((state) => state.desktopSidebarOpen);
   const setSidebarOpen = useAppStore((state) => state.setSidebarOpen);
   const backend = useAppStore((state) => state.backend);
   const sessionApiReady = useAppStore((state) => state.sessionApiReady);
@@ -70,8 +71,8 @@ export function Sidebar() {
             <Droplet size={18} strokeWidth={2} aria-hidden />
           </span>
           <div>
-            <p className="text-[15px] font-semibold leading-none tracking-[-0.02em]">HYDRO</p>
-            <p className="mt-1 text-[10px] font-medium uppercase tracking-[0.14em] text-[var(--text-faint)]">
+            <p className="text-[17px] font-bold leading-none tracking-[-0.02em] text-[var(--text)]">HYDRO</p>
+            <p className="mt-1 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
               Test Platformu
             </p>
           </div>
@@ -89,7 +90,7 @@ export function Sidebar() {
       <div className="flex-1 space-y-5 overflow-y-auto pr-0.5 scroll-thin">
         {groups.map((group) => (
           <div key={group.key}>
-            <p className="px-2 pb-1.5 text-[9.5px] font-semibold uppercase tracking-[0.16em] text-[var(--text-faint)]">
+            <p className="px-2 pb-1.5 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">
               {group.label}
             </p>
             <div className="space-y-0.5">
@@ -107,7 +108,7 @@ export function Sidebar() {
                       setSidebarOpen(false);
                     }}
                   >
-                    <Icon size={15} strokeWidth={1.8} aria-hidden />
+                    <Icon size={17} strokeWidth={1.9} aria-hidden />
                     <span>{item.label}</span>
                     <span className="nav-index">{item.index}</span>
                   </button>
@@ -123,10 +124,10 @@ export function Sidebar() {
           <BackendDot backend={backend} />
           {backend === "online"
             ? sessionApiReady === false
-              ? "Backend kısmi"
-              : "Backend bağlı"
+              ? "Sunucu kısmi"
+              : "Sunucu bağlı"
             : backend === "demo"
-              ? "Demo modu"
+              ? "Çevrimdışı mod"
               : "Bağlantı kontrol ediliyor"}
         </div>
         <p className="mt-1.5 text-[10px] leading-relaxed text-[var(--text-faint)]">
@@ -140,7 +141,12 @@ export function Sidebar() {
 
   return (
     <>
-      <aside className="hidden w-[228px] shrink-0 border-r border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-2)_72%,transparent)] px-3 py-4 lg:block">
+      <aside
+        className={cn(
+          "hidden w-[244px] shrink-0 border-r border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-2)_72%,transparent)] px-3.5 py-4",
+          desktopSidebarOpen && "lg:block",
+        )}
+      >
         <div className="sticky top-4 h-[calc(100vh-2rem)]">{nav}</div>
       </aside>
 

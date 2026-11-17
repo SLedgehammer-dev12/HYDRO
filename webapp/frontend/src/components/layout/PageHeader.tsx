@@ -25,11 +25,11 @@ export function PageHeader({
             {kicker}
           </p>
         ) : null}
-        <h1 className="mt-1.5 text-[25px] font-semibold leading-[1.12] tracking-[-0.03em] text-balance sm:text-[30px]">
+        <h1 className="mt-1.5 text-[28px] font-bold leading-[1.12] tracking-[-0.03em] text-[var(--text)] text-balance sm:text-[34px]">
           {title}
         </h1>
         {description ? (
-          <p className="mt-1.5 max-w-[74ch] text-[12px] leading-relaxed text-[var(--text-muted)]">{description}</p>
+          <p className="mt-2 max-w-[74ch] text-[13.5px] leading-relaxed text-[var(--text-soft)] sm:text-[14px]">{description}</p>
         ) : null}
         {meta ? <div className="mt-2.5 flex flex-wrap items-center gap-2">{meta}</div> : null}
       </div>
