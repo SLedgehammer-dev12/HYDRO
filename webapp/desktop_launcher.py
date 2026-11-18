@@ -24,7 +24,23 @@ from pathlib import Path
 from typing import TextIO
 
 _STDIO_LOG_STREAM: TextIO | None = None
+_STDIN_NULL_STREAM: TextIO | None = None
 _ACTIVE_LOG_HANDLER: logging.Handler | None = None
+_LOOPBACK_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def _harden_windows_process() -> None:
+    """Suppress blocking Windows critical/missing-DLL modal dialogs in child/loader calls."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        kernel32 = getattr(ctypes, "windll", None) and ctypes.windll.kernel32  # type: ignore[attr-defined]
+        if kernel32 is not None:
+            kernel32.SetErrorMode(0x0001 | 0x0002 | 0x8000)
+    except Exception:
+        pass
 
 
 def _bootstrap_paths() -> None:
@@ -54,7 +70,7 @@ def _bootstrap_paths() -> None:
 
 def _configure_logging_and_stdio(data_dir: Path, log_level: str = "INFO") -> Path:
     """Configure rotating file logs and guard against console=False None stdio."""
-    global _STDIO_LOG_STREAM, _ACTIVE_LOG_HANDLER
+    global _STDIO_LOG_STREAM, _STDIN_NULL_STREAM, _ACTIVE_LOG_HANDLER
 
     log_dir = data_dir / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -67,6 +83,10 @@ def _configure_logging_and_stdio(data_dir: Path, log_level: str = "INFO") -> Pat
             sys.stdout = stream
         if sys.stderr is None:
             sys.stderr = stream
+    if sys.stdin is None:
+        stdin_stream = open(os.devnull, "r", encoding="utf-8")  # noqa: SIM115
+        _STDIN_NULL_STREAM = stdin_stream
+        sys.stdin = stdin_stream
 
     root_logger = logging.getLogger()
     if _ACTIVE_LOG_HANDLER is not None:
@@ -89,7 +109,7 @@ def _configure_logging_and_stdio(data_dir: Path, log_level: str = "INFO") -> Pat
 
 
 def _cleanup_logging() -> None:
-    global _STDIO_LOG_STREAM, _ACTIVE_LOG_HANDLER
+    global _STDIO_LOG_STREAM, _STDIN_NULL_STREAM, _ACTIVE_LOG_HANDLER
     if _ACTIVE_LOG_HANDLER is not None:
         logging.getLogger().removeHandler(_ACTIVE_LOG_HANDLER)
         try:
@@ -107,12 +127,30 @@ def _cleanup_logging() -> None:
         except Exception:
             pass
         _STDIO_LOG_STREAM = None
+    if _STDIN_NULL_STREAM is not None:
+        if sys.stdin is _STDIN_NULL_STREAM:
+            sys.stdin = None
+        try:
+            _STDIN_NULL_STREAM.close()
+        except Exception:
+            pass
+        _STDIN_NULL_STREAM = None
 
 
 def _is_port_available(host: str, port: int) -> bool:
-    """Bind without SO_REUSEADDR (important on Windows to avoid dual-bind races)."""
+    """Bind cleanly (checking active listeners + Windows SO_EXCLUSIVEADDRUSE)."""
+    probe_host = "127.0.0.1" if host in {"0.0.0.0", "::", ""} else host
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.settimeout(0.08)
+            if probe.connect_ex((probe_host, port)) == 0:
+                return False
+    except OSError:
+        pass
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            if sys.platform == "win32" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)  # type: ignore[attr-defined]
             sock.bind((host, port))
             return True
     except OSError:
@@ -123,7 +161,7 @@ def _pick_port(host: str, preferred_port: int | None = None) -> int:
     candidates: list[int] = []
     if preferred_port is not None and preferred_port > 0:
         candidates.append(preferred_port)
-    for port in range(8080, 8100):
+    for port in range(18790, 18830):
         if port not in candidates:
             candidates.append(port)
 
@@ -186,18 +224,19 @@ def _http_json(
         data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with _LOOPBACK_OPENER.open(req, timeout=timeout) as resp:
         raw = resp.read().decode("utf-8")
         return int(resp.status), json.loads(raw)
 
 
 def _http_text(url: str, *, timeout: float = 5.0) -> tuple[int, str]:
     req = urllib.request.Request(url, method="GET")
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with _LOOPBACK_OPENER.open(req, timeout=timeout) as resp:
         return int(resp.status), resp.read().decode("utf-8", errors="replace")
 
 
 def _run_self_test(args: argparse.Namespace) -> int:
+    _harden_windows_process()
     _bootstrap_paths()
 
     from app import db
@@ -290,13 +329,20 @@ def _run_self_test(args: argparse.Namespace) -> int:
         if not rasterizer_ok:
             raise AssertionError(f"PDF rasterizer hazir degil: {ocr_data}")
         ocr_ok = bool(ocr_data.get("available"))
+        win32_frozen = sys.platform == "win32" and getattr(sys, "frozen", False)
         if getattr(sys, "frozen", False) and not ocr_ok:
-            raise AssertionError(f"Frozen pakette OCR motoru hazir degil: {ocr_data}")
+            has_languages = bool(ocr_data.get("languages") or [])
+            if not win32_frozen or has_languages:
+                raise AssertionError(f"Frozen pakette OCR motoru hazir degil: {ocr_data}")
 
-        if ocr_ok and rasterizer_ok:
+        if rasterizer_ok:
             from PIL import Image, ImageDraw, ImageFont
 
-            from hidrostatik_test.services.report_ocr import extract_text
+            from hidrostatik_test.services.report_ocr import (
+                _iter_rendered_pdf_pages_with_windows_pdf,
+                extract_text,
+                windows_pdf_available,
+            )
 
             scanned_pdf = tmp_dir / "scanned_check.pdf"
             img = Image.new("RGB", (1200, 400), "white")
@@ -312,9 +358,43 @@ def _run_self_test(args: argparse.Namespace) -> int:
                 font=font,
             )
             img.save(scanned_pdf, "PDF", resolution=200.0)
-            pages = extract_text(scanned_pdf)
-            if not pages or pages[0].source != "ocr" or "80" not in pages[0].text:
-                raise AssertionError(f"Taranmis PDF OCR dogrulamasi basarisiz: {pages!r}")
+
+            if win32_frozen:
+                import importlib
+
+                for winrt_mod in (
+                    "winrt.windows.media.ocr",
+                    "winrt.windows.globalization",
+                    "winrt.windows.graphics.imaging",
+                    "winrt.windows.storage.streams",
+                    "winrt.windows.data.pdf",
+                ):
+                    importlib.import_module(winrt_mod)
+                if not windows_pdf_available():
+                    raise AssertionError("Windows.Data.Pdf WinRT API kullanilamiyor.")
+                rendered_pages = list(
+                    _iter_rendered_pdf_pages_with_windows_pdf(
+                        scanned_pdf,
+                        start_page=0,
+                        max_pages=1,
+                        dpi=150,
+                        rotate_deg=0,
+                        image_mod=Image,
+                    )
+                )
+                if (
+                    len(rendered_pages) != 1
+                    or rendered_pages[0].width <= 100
+                    or rendered_pages[0].height <= 100
+                ):
+                    raise AssertionError(
+                        f"Windows.Data.Pdf sayfa render dogrulamasi basarisiz: {rendered_pages!r}"
+                    )
+
+            if ocr_ok:
+                pages = extract_text(scanned_pdf)
+                if not pages or pages[0].source != "ocr" or "80" not in pages[0].text:
+                    raise AssertionError(f"Taranmis PDF OCR dogrulamasi basarisiz: {pages!r}")
 
         frontend_exists = (settings.frontend_dist / "index.html").is_file()
         if getattr(sys, "frozen", False) and not frontend_exists:
@@ -342,6 +422,7 @@ def _run_self_test(args: argparse.Namespace) -> int:
 
 
 def _run_controller_gui(args: argparse.Namespace) -> int:
+    _harden_windows_process()
     _bootstrap_paths()
 
     from app import db
@@ -358,7 +439,8 @@ def _run_controller_gui(args: argparse.Namespace) -> int:
     )
 
     host = args.host or "127.0.0.1"
-    preferred = args.port if args.port is not None else env_settings.port
+    env_port = (os.environ.get("HYDRO_PORT") or os.environ.get("HYDRO_WEB_PORT") or "").strip()
+    preferred = args.port if args.port is not None else (env_settings.port if env_port else None)
     port = _pick_port(host, preferred_port=preferred)
 
     database_url = (
@@ -398,11 +480,29 @@ def _run_controller_gui(args: argparse.Namespace) -> int:
 
     root = tk.Tk()
     root.title(f"HYDRO Web Sunucusu v{APP_VERSION}")
-    root.geometry("500x260")
-    root.minsize(460, 240)
+    try:
+        candidates = [
+            Path(__file__).resolve().parents[1] / "assets" / "icons" / "hydro-256.png",
+            Path(getattr(sys, "_MEIPASS", "")) / "assets" / "icons" / "hydro-256.png",
+            Path(sys.executable).resolve().parent / "assets" / "icons" / "hydro-256.png",
+            Path(sys.executable).resolve().parent
+            / "_internal"
+            / "assets"
+            / "icons"
+            / "hydro-256.png",
+        ]
+        icon_file = next((p for p in candidates if str(p) and p.is_file()), None)
+        if icon_file is not None and hasattr(root, "iconphoto"):
+            icon_img = tk.PhotoImage(file=str(icon_file))
+            root.iconphoto(True, icon_img)
+            root._hydro_icon_img = icon_img  # type: ignore[attr-defined]
+    except Exception:
+        pass
+    root.geometry("520x295")
+    root.minsize(480, 265)
     root.resizable(False, False)
 
-    state = {"opened": False, "closing": False}
+    state = {"opened": False, "closing": False, "verified": False}
 
     frame = ttk.Frame(root, padding=16)
     frame.pack(fill="both", expand=True)
@@ -425,9 +525,16 @@ def _run_controller_gui(args: argparse.Namespace) -> int:
     data_lbl = ttk.Label(
         frame,
         text=f"Veri Klasörü: {settings.data_dir}",
-        wraplength=460,
+        wraplength=480,
     )
-    data_lbl.pack(anchor="w", pady=(0, 12))
+    data_lbl.pack(anchor="w", pady=(0, 4))
+
+    note_lbl = ttk.Label(
+        frame,
+        text="Not: Tarayıcıda çalışırken bu pencereyi kapatmayın; küçültebilirsiniz.",
+        wraplength=480,
+    )
+    note_lbl.pack(anchor="w", pady=(0, 10))
 
     feedback_var = tk.StringVar(value="")
     feedback_lbl = ttk.Label(frame, textvariable=feedback_var)
@@ -466,13 +573,30 @@ def _run_controller_gui(args: argparse.Namespace) -> int:
         _cleanup_logging()
         root.destroy()
 
+    def _on_close_window(*_event: object) -> None:
+        if state["closing"]:
+            return
+        choice = messagebox.askyesnocancel(
+            "HYDRO Web Sunucusu",
+            "Bu pencereyi kapatmak yerel HYDRO Web sunucusunu durdurur ve açık tarayıcı sekmesinin bağlantısını keser.\n\n"
+            "Sunucuyu açık tutup pencereyi küçültmek ister misiniz?",
+            parent=root,
+        )
+        if choice is True:
+            root.iconify()
+        elif choice is False:
+            _shutdown()
+
     btn_row = ttk.Frame(frame)
     btn_row.pack(fill="x", pady=(4, 0))
 
     ttk.Button(btn_row, text="Tarayıcıda Aç", command=_open_browser).pack(side="left", padx=(0, 6))
     ttk.Button(btn_row, text="Adresi Kopyala", command=_copy_url).pack(side="left", padx=(0, 6))
     ttk.Button(btn_row, text="Veri Klasörünü Aç", command=_open_data).pack(side="left", padx=(0, 6))
+    ttk.Button(btn_row, text="Küçült", command=root.iconify).pack(side="left", padx=(0, 6))
     ttk.Button(btn_row, text="Sunucuyu Durdur ve Çık", command=_shutdown).pack(side="right")
+
+    expected_instance_id = getattr(app.state, "instance_id", None)
 
     def _poll_server() -> None:
         if state["closing"]:
@@ -487,14 +611,25 @@ def _run_controller_gui(args: argparse.Namespace) -> int:
             _shutdown()
             return
         if getattr(server, "started", False):
-            status_var.set("Durum: Çalışıyor")
-            if not state["opened"]:
-                state["opened"] = True
-                if not args.no_browser:
-                    _open_browser()
+            if not state["verified"]:
+                try:
+                    hstatus, hdata = _http_json(f"{url}/api/health", timeout=1.5)
+                    if hstatus == 200 and (
+                        expected_instance_id is None
+                        or hdata.get("instance_id") == expected_instance_id
+                    ):
+                        state["verified"] = True
+                except Exception:
+                    state["verified"] = False
+            if state["verified"]:
+                status_var.set("Durum: Çalışıyor")
+                if not state["opened"]:
+                    state["opened"] = True
+                    if not args.no_browser:
+                        _open_browser()
         root.after(150, _poll_server)
 
-    root.protocol("WM_DELETE_WINDOW", _shutdown)
+    root.protocol("WM_DELETE_WINDOW", _on_close_window)
     if sys.platform == "darwin":
         root.bind("<Command-q>", _shutdown)
     root.after(150, _poll_server)

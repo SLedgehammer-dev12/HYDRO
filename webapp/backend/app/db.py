@@ -34,8 +34,11 @@ def _install_sqlite_pragmas(engine: Engine, *, memory: bool) -> None:
         try:
             cursor.execute("PRAGMA foreign_keys=ON")
             if not memory:
-                cursor.execute("PRAGMA journal_mode=WAL")
-                cursor.execute("PRAGMA synchronous=NORMAL")
+                try:
+                    cursor.execute("PRAGMA journal_mode=WAL")
+                    cursor.execute("PRAGMA synchronous=NORMAL")
+                except Exception:
+                    cursor.execute("PRAGMA journal_mode=DELETE")
             cursor.execute("PRAGMA busy_timeout=5000")
         finally:
             cursor.close()

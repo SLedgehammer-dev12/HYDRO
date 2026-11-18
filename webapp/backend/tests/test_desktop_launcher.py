@@ -93,6 +93,14 @@ def test_pick_port_skips_busy_preferred_port():
         assert picked > 0
 
 
+def test_pick_port_defaults_to_uncontested_range():
+    from webapp import desktop_launcher
+
+    picked = desktop_launcher._pick_port("127.0.0.1", preferred_port=None)
+    assert picked != 8080
+    assert picked >= 18790
+
+
 def test_desktop_launcher_self_test_subprocess():
     repo_root = Path(__file__).resolve().parents[3]
     launcher = repo_root / "webapp" / "desktop_launcher.py"

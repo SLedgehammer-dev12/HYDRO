@@ -49,10 +49,11 @@ def analyze(
 
 @router.get("/status")
 def status(
+    refresh: bool = Query(default=False),
     db: OrmSession = Depends(get_db),
     workspace: Workspace = Depends(get_workspace),
 ) -> dict:
-    return json_safe(ocr_service.status_payload(db, workspace.hash))
+    return json_safe(ocr_service.status_payload(db, workspace.hash, refresh=bool(refresh)))
 
 
 @router.get("/analyses")

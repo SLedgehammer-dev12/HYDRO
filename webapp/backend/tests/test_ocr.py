@@ -516,3 +516,11 @@ def test_ocr_apply_recomputes_results_and_form_slots(client, tmp_path):
     assert {"air", "pressure"}.issubset(
         {item["test_type"] for item in results_resp.json()["items"]}
     )
+
+
+def test_ocr_status_refresh_and_text_layer_metadata(client):
+    res = client.get("/api/ocr/status?refresh=true")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["text_layer"]["available"] is True
+    assert "pypdf" in body["text_layer"]["engines"]

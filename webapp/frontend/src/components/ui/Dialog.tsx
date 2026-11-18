@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { Button, IconButton } from "./Button";
@@ -21,50 +21,98 @@ export function Modal({
   footer?: ReactNode;
   className?: string;
 }) {
-  const cardRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const headingId = useId();
+  const descId = useId();
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
-    if (!open) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    if (open) {
+      if (!dialog.open) {
+        dialog.showModal();
+      }
+    } else if (dialog.open) {
+      dialog.close();
+    }
+  }, [open]);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    const handleClose = () => {
+      dialog.returnValue = "";
+      onCloseRef.current();
     };
-    document.addEventListener("keydown", onKey);
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    const focusable = cardRef.current?.querySelector<HTMLElement>(
-      "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])",
-    );
-    focusable?.focus();
+    dialog.addEventListener("close", handleClose);
+
+    // Safari / <dialog> light-dismiss fallback when closedby="any" is unsupported
+    let cleanupFallback: (() => void) | undefined;
+    if (typeof HTMLDialogElement !== "undefined" && !("closedBy" in HTMLDialogElement.prototype)) {
+      let pressedOutside = false;
+      const outside = (e: PointerEvent) => {
+        const r = dialog.getBoundingClientRect();
+        return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+      };
+      const onPointerDown = (e: PointerEvent) => {
+        pressedOutside = e.target === dialog && outside(e);
+      };
+      const onPointerUp = (e: PointerEvent) => {
+        if (pressedOutside && e.target === dialog && outside(e) && dialog.open) {
+          dialog.close();
+        }
+        pressedOutside = false;
+      };
+      dialog.addEventListener("pointerdown", onPointerDown);
+      dialog.addEventListener("pointerup", onPointerUp);
+      cleanupFallback = () => {
+        dialog.removeEventListener("pointerdown", onPointerDown);
+        dialog.removeEventListener("pointerup", onPointerUp);
+      };
+    }
+
     return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = previous;
+      dialog.removeEventListener("close", handleClose);
+      cleanupFallback?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open || typeof document === "undefined") return null;
 
   return createPortal(
-    <div
-      className="fixed inset-0 z-[70] flex items-center justify-center p-4"
-      style={{ background: "var(--overlay)", backdropFilter: "blur(3px)" }}
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
+    <dialog
+      ref={dialogRef}
+      aria-labelledby={headingId}
+      aria-describedby={description ? descId : undefined}
+      {...({ closedby: "any" } as Record<string, unknown>)}
+      className={cn("modal-dialog", className)}
     >
-      <div ref={cardRef} className={cn("modal-card", className)} role="dialog" aria-modal="true" aria-label={typeof title === "string" ? title : "Diyalog"}>
-        <header className="flex items-start justify-between gap-3 border-b border-[var(--border)] px-5 py-4">
-          <div>
-            <h2 className="text-[19px] font-bold text-[var(--text)]">{title}</h2>
-            {description ? <p className="mt-1 text-[13px] text-[var(--text-muted)]">{description}</p> : null}
-          </div>
-          <IconButton label="Kapat" onClick={onClose}>
-            <X size={15} aria-hidden />
-          </IconButton>
-        </header>
-        <div className="px-5 py-4">{children}</div>
-        {footer ? <footer className="flex justify-end gap-2 border-t border-[var(--border)] px-5 py-3.5">{footer}</footer> : null}
-      </div>
-    </div>,
+      <header className="flex items-start justify-between gap-3 border-b border-[var(--border)] px-5 py-4">
+        <div className="min-w-0">
+          <h2 id={headingId} className="text-[19px] font-bold text-[var(--text)]">
+            {title}
+          </h2>
+          {description ? (
+            <p id={descId} className="mt-1 text-[13px] text-[var(--text-muted)]">
+              {description}
+            </p>
+          ) : null}
+        </div>
+        <IconButton label="Kapat" onClick={onClose}>
+          <X size={15} aria-hidden />
+        </IconButton>
+      </header>
+      <div className="px-5 py-4">{children}</div>
+      {footer ? (
+        <footer className="flex flex-wrap justify-end gap-2 border-t border-[var(--border)] px-5 py-3.5">
+          {footer}
+        </footer>
+      ) : null}
+    </dialog>,
     document.body,
   );
 }
@@ -95,7 +143,7 @@ export function ConfirmDialog({
       title={title}
       footer={
         <>
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="ghost" autoFocus={danger} onClick={onClose}>
             {cancelLabel}
           </Button>
           <Button

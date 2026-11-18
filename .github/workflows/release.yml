@@ -671,8 +671,14 @@ jobs:
           {
             echo "# Hidrostatik Test Degerlendirme & HYDRO Web v${{ needs.version_gate.outputs.app_version }}"
             echo ""
+            if [ -f WHATS_NEW.md ]; then
+              echo "## Neler Yeni (What's New)"
+              echo ""
+              sed -e '1d' WHATS_NEW.md
+              echo ""
+            fi
             echo "## Yenilikler (Changelog)"
-            echo "En guncel yenilikler ve tum surum gecmisi icin [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) dosyasina bakin."
+            echo "Ayrintili degisiklik kaydi icin [WHATS_NEW.md](https://github.com/${{ github.repository }}/blob/main/WHATS_NEW.md) ve [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) dosyalarina bakin."
             echo ""
             echo "## HYDRO Web Surumu (macOS M1+ arm64 & Windows x64)"
             echo ""
@@ -691,6 +697,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
+            WHATS_NEW.md
             web-windows-release/*-setup.exe
             web-windows-release/*-portable.zip
             web-windows-release/*.sig

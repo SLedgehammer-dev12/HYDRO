@@ -20,8 +20,7 @@ from hidrostatik_test.services.report_ocr import (
     ReportOcrError,
     analyze_report,
     effective_max_file_size_bytes,
-    ocr_available,
-    ocr_engine_name,
+    ocr_engine_details,
     ocr_status,
     pdf_rasterizer_status,
 )
@@ -155,31 +154,13 @@ def _http_error(exc: ReportOcrError, **details: Any) -> AppError:
 # ---------------------------------------------------------------------------
 
 
-def _engine_payload() -> dict[str, Any]:
-    name = ocr_engine_name()
-    if name == "vision":
-        import platform
-
-        return {
-            "name": "vision",
-            "version": platform.mac_ver()[0] or None,
-            "languages": ["tr-TR", "en-US"],
-            "default_language": "tr-TR",
-        }
-    version = None
-    languages: list[str] = []
-    try:
-        import pytesseract  # type: ignore
-
-        version = str(pytesseract.get_tesseract_version())
-        languages = sorted(pytesseract.get_languages(config=""))
-    except Exception:
-        version = None
+def _engine_payload(details: dict[str, Any] | None = None) -> dict[str, Any]:
+    info = details if details is not None else ocr_engine_details()
     return {
-        "name": "tesseract" if name == "tesseract" else None,
-        "version": version,
-        "languages": languages,
-        "default_language": os.environ.get("HYDRO_OCR_LANG", "tur+eng"),
+        "name": info.get("engine_name"),
+        "version": info.get("version"),
+        "languages": list(info.get("languages") or []),
+        "default_language": info.get("default_language"),
     }
 
 
@@ -190,7 +171,7 @@ def _rasterizer_payload() -> dict[str, Any]:
     return {
         "available": False,
         "engine": None,
-        "note": "Taranmis PDF icin pypdfium2, PyMuPDF veya pdf2image + Poppler gerekir.",
+        "note": "Taranmis PDF icin pypdfium2, PyMuPDF, Windows PDF (WinRT) veya pdf2image + Poppler gerekir.",
     }
 
 
@@ -207,7 +188,8 @@ def _queue_counts(db: OrmSession, workspace_hash: str) -> dict[str, int]:
     return counts
 
 
-def status_payload(db: OrmSession, workspace_hash: str) -> dict[str, Any]:
+def status_payload(db: OrmSession, workspace_hash: str, *, refresh: bool = False) -> dict[str, Any]:
+    details = ocr_engine_details(force_refresh=refresh)
     profiles = (
         db.execute(
             select(OcrMappingProfile)
@@ -219,10 +201,11 @@ def status_payload(db: OrmSession, workspace_hash: str) -> dict[str, Any]:
     )
     default_id = next((item.id for item in profiles if item.is_default), None)
     return {
-        "available": ocr_available(),
-        "status_text": ocr_status(),
-        "engine": _engine_payload(),
+        "available": bool(details["available"]),
+        "status_text": str(details["status_text"]),
+        "engine": _engine_payload(details),
         "pdf_rasterizer": _rasterizer_payload(),
+        "text_layer": {"available": True, "engines": ["pypdf", "openpyxl", "xlrd"]},
         "limits": {
             "max_file_size_bytes": effective_max_file_size_bytes(),
             "max_pdf_pages": MAX_PDF_PAGES,

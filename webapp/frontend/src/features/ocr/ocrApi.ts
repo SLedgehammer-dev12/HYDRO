@@ -111,8 +111,13 @@ async function request<T>(
   }
 }
 
-export async function getOcrStatus(signal?: AbortSignal): Promise<OcrStatus> {
-  return request<OcrStatus>("/ocr/status", { method: "GET", signal, timeoutMs: 6_000 });
+export async function getOcrStatus(signal?: AbortSignal, refresh = false): Promise<OcrStatus> {
+  const suffix = refresh ? "?refresh=true" : "";
+  return request<OcrStatus>(`/ocr/status${suffix}`, {
+    method: "GET",
+    signal,
+    timeoutMs: 15_000,
+  });
 }
 
 function buildAnalyzeBody(input: AnalyzeRequestInput): FormData {

@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.9.1 - 2026-11-18
+
+### Added
+
+- **Süreç-içi Windows 10/11 WinRT OCR & PDF Motoru (`hidrostatik_test/services/report_ocr.py`, `requirements-ocr.txt`)**:
+  - Harici `tesseract.exe` alt süreci başlatmadan çalışan Windows 10/11 `Windows.Media.Ocr` motoru (`tr-TR` öncelikli dil seçimi, `4096 px` güvenli ölçekleme ve çok sütunlu BOTAŞ form tablo satır eşlemesi) ile yerleşik `Windows.Data.Pdf` sayfa görüntüleme yedeği eklendi (`winrt-*~=3.2.1.0; sys_platform == "win32"`).
+- **Yeni Program İkonu & Marka Sistemi (`tools/generate_icons.py`, `assets/icons/*`, `webapp/frontend/public/*`, `HydroLogo.tsx`)**:
+  - Boru kesiti, hidrostatik su dalgası ve manometre temalı ikon seti (`.icns`, `.ico`, `favicon.svg`, `apple-touch-icon.png`, PWA `site.webmanifest`) masaüstü ve web sürümlerine entegre edildi.
+- **BOTAŞ Form Ağacı Filtreleri, Yapışkan Tablolar & Excel TSV Yapıştırma (`Sidebar.tsx`, `DecisionStrip.tsx`, `RightPanel.tsx`, `FormBodyEditor.tsx`, `AcceptanceFormEditor.tsx`, `MonitoringFormEditor.tsx`, `pasteUtils.ts`)**:
+  - Sol menüye `Tümü | Bulgulu | Eksik` filtre sekmeleri, üst karar şeridine `Formlar · Dolu/11` rozeti ve sağ panele `BOTAŞ Form Dosyası` ilerleme kartı eklendi.
+  - Geniş form tablolarına sabit başlık/ilk sütun, `@container` düzeni, klavye kaydırma erişilebilirliği ve Excel/Sheets'ten (`TSV`) çoklu hücre/satır yapıştırma desteği eklendi.
+- **Dashboard 3 Adımlı İş Akışı & Modüler Proje Modalları (`DashboardPage.tsx`, `ProjectsPage.tsx`, `PlanProfileScanModal.tsx`, `SectionFormsModal.tsx`)**:
+  - `Dashboard` üzerinde adım çubuğu eklendi; `ProjectsPage.tsx` bileşenleri ayrıştırıldı.
+- **Sürüm Yenilikleri Dokümanı (`WHATS_NEW.md`)**:
+  - Hem GitHub Release sayfasında hem uygulama içi Güncelleme Yöneticisi (`UpdateManagerModal`) penceresinde doğrudan görüntülenecek Türkçe sürüm yenilikleri belgesi oluşturuldu.
+
+### Changed
+
+- **Kurumsal Windows Başlatıcı & Paketleme (`desktop_launcher.py`, `HydroWeb.spec`, `build_web_exe.ps1`, `build_exe.ps1`, `installer/hydro_web.iss`)**:
+  - Varsayılan port aralığı `18790–18829` olarak güncellendi, başlatıcı penceresine **Küçült** düğmesi ve kapanış onay penceresi eklendi.
+  - `build_web_exe.ps1` içinde harici taşınabilir `tesseract.exe` paketlemesi varsayılan olarak kapatıldı (isteğe bağlı `-BundleTesseract`), böylece harici `.exe` alt süreç tetiklemeleri azaltıldı ve Inno Setup'a `PrivilegesRequiredOverridesAllowed=dialog commandline` eklendi.
+- **Erişilebilir Yerel `<dialog>` Pencereler & Form Koruması (`Dialog.tsx`, `Sidebar.tsx`, `SectionFormPage.tsx`, `styles.css`)**:
+  - Modallar ve mobil çekmece `.showModal()` / `closedby="any"` ve Safari geri dönüşüyle yerel `<dialog>` üzerine taşındı; form sayfalarına kaydedilmemiş değişiklik onayı ve yükleme iskeleti eklendi.
+- **Birleşik Release Notları (`.github/workflows/release.yml`)**:
+  - `Create unified release notes` adımı `WHATS_NEW.md` içeriğini doğrudan `unified-notes.md` gövdesine yerleştirip sürüm eki olarak da ekleyecek şekilde güncellendi.
+
+### Fixed
+
+- **Kurumsal Ortamlarda `"Sunucuya ulaşılamadı"` & OCR Tanı Hatası (`OcrPage.tsx`, `StatusPanel.tsx`, `ocrApi.ts`, `ocr.py`, `db.py`)**:
+  - `StatusPanel` bağlantı/zaman aşımı/HTTP hatalarını (`StatusErrorDetail`, `role="alert"`) açıkça ayıracak şekilde iyileştirildi ve sunucuya ulaşılamadığında sessizce sahte `DEMO_RESULT` gösterilmesi kaldırıldı.
+  - Başlatıcı tarafında `HTTP_PROXY` atlatmalı `127.0.0.1` + `instance_id` doğrulaması, `SetErrorMode`, `stdin=os.devnull`, `SO_EXCLUSIVEADDRUSE` ve SQLite `WAL -> DELETE` yedeklemesi sağlandı.
+
+### Security & Reliability
+
+- **Zaman Aşımlı & Önbellekli OCR Yoklaması (`report_ocr.py`, `/api/ocr/status`)**:
+  - `_probe_tesseract` alt süreç çağrıları `timeout=4.0`, `stdin=DEVNULL`, `CREATE_NO_WINDOW` ve TTL önbelleği ile korundu; `pypdfium2` yerel DLL hatalarında `OSError` yakalanarak süreç içi `Windows.Data.Pdf` / `Quartz` motoruna güvenli geçiş sağlandı.
+  - `HydroWeb --self-test` hem `pypdfium2`/`Windows.Data.Pdf` rasterizer hem de WinRT modül yükleme ve kurulum sonrası duman testini doğrular hale getirildi.
+
 ## 1.9.0 - 2026-11-18
 
 - **HYDRO Web Güncelleme Yöneticisi (`WebUpdateManager` & `/api/update/*`)**:

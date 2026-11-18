@@ -89,6 +89,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=_lifespan,
     )
     app.state.settings = resolved
+    app.state.instance_id = uuid.uuid4().hex
 
     @app.middleware("http")
     async def _context_middleware(request, call_next):  # noqa: ANN001

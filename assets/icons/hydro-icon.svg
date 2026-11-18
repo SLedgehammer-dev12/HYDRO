@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="hydro-bg" x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#131d33"/>
+      <stop offset="100%" stop-color="#070b14"/>
+    </linearGradient>
+    <linearGradient id="hydro-flange" x1="12" y1="14" x2="48" y2="52" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#64748b"/>
+      <stop offset="50%" stop-color="#334155"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <linearGradient id="hydro-water" x1="28" y1="30" x2="28" y2="49" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#22d3ee"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+    <clipPath id="hydro-bore-clip">
+      <circle cx="29" cy="35" r="13.5"/>
+    </clipPath>
+  </defs>
+
+  <!-- Base squircle -->
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#hydro-bg)" stroke="#22d3ee" stroke-opacity="0.32" stroke-width="1.5"/>
+
+  <!-- Pipeline flange + steel pipe wall -->
+  <circle cx="29" cy="35" r="20.5" fill="url(#hydro-flange)" stroke="#94a3b8" stroke-width="1.4"/>
+  <circle cx="29" cy="35" r="16" fill="#0f172a" stroke="#475569" stroke-width="1.2"/>
+  <circle cx="29" cy="35" r="13.5" fill="#070b14"/>
+
+  <!-- Flange bolts (6 radial bolts) -->
+  <circle cx="29" cy="16.8" r="1.35" fill="#cbd5e1"/>
+  <circle cx="44.8" cy="25.9" r="1.35" fill="#cbd5e1"/>
+  <circle cx="44.8" cy="44.1" r="1.35" fill="#cbd5e1"/>
+  <circle cx="29" cy="53.2" r="1.35" fill="#cbd5e1"/>
+  <circle cx="13.2" cy="44.1" r="1.35" fill="#cbd5e1"/>
+  <circle cx="13.2" cy="25.9" r="1.35" fill="#cbd5e1"/>
+
+  <!-- Pressurized hydrostatic water fill inside pipe bore -->
+  <g clip-path="url(#hydro-bore-clip)">
+    <path d="M14 33.5 Q21.5 30 29 33.5 T44 33.5 V52 H14 Z" fill="url(#hydro-water)"/>
+    <path d="M14 33.5 Q21.5 30 29 33.5 T44 33.5" stroke="#a5f3fc" stroke-width="1.5" stroke-linecap="round"/>
+    <circle cx="24" cy="41.5" r="1.4" fill="#cffafe" fill-opacity="0.7"/>
+    <circle cx="33.5" cy="39" r="1.0" fill="#cffafe" fill-opacity="0.6"/>
+  </g>
+  <circle cx="29" cy="35" r="13.5" stroke="#22d3ee" stroke-opacity="0.55" stroke-width="1"/>
+
+  <!-- Integrated pressure manometer dial (top-right) -->
+  <circle cx="46.5" cy="18.5" r="11.5" fill="#0f172a" stroke="#e2e8f0" stroke-width="1.8"/>
+  <circle cx="46.5" cy="18.5" r="9.2" fill="#070b14"/>
+  <!-- Gauge scale arc + emerald acceptance zone -->
+  <path d="M39.8 22.8 A8 8 0 1 1 53.2 22.8" stroke="#475569" stroke-width="2" stroke-linecap="round"/>
+  <path d="M47.8 10.6 A8 8 0 0 1 54.1 20.5" stroke="#34d399" stroke-width="2.3" stroke-linecap="round"/>
+  <!-- Needle pointing cleanly into PASS zone -->
+  <line x1="46.5" y1="18.5" x2="51.8" y2="14.2" stroke="#f8fafc" stroke-width="1.9" stroke-linecap="round"/>
+  <circle cx="46.5" cy="18.5" r="1.9" fill="#22d3ee"/>
+</svg>

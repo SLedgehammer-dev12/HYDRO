@@ -1,5 +1,5 @@
 #ifndef MyAppVersion
-  #define MyAppVersion "1.9.0"
+  #define MyAppVersion "1.9.1"
 #endif
 
 [Setup]
@@ -12,12 +12,13 @@ DefaultDirName={autopf}\HYDRO Web
 DefaultGroupName=HYDRO Web
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=dialog
+PrivilegesRequiredOverridesAllowed=dialog commandline
 OutputDir=..\release
 OutputBaseFilename=HydroWeb-v{#MyAppVersion}-windows-x64-setup
 Compression=lzma2/normal
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=..\assets\icons\hydro.ico
 UninstallDisplayIcon={app}\HydroWeb.exe
 #if VER >= EncodeVer(6,3,0)
 ArchitecturesAllowed=x64compatible

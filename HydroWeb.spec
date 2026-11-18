@@ -11,7 +11,7 @@ import platform
 import subprocess
 import sys
 
-from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules, copy_metadata
 
 PROJECT_ROOT = pathlib.Path(SPECPATH).resolve()
 BACKEND_ROOT = PROJECT_ROOT / 'webapp' / 'backend'
@@ -59,6 +59,14 @@ def _safe_collect_all(pkg_name):
         return [], [], []
 
 
+def _safe_copy_metadata(dist_name):
+    try:
+        return copy_metadata(dist_name)
+    except Exception as exc:
+        print(f'[HydroWeb.spec] copy_metadata({dist_name}) atlandi: {exc}')
+        return []
+
+
 def _target_arch():
     """Target Apple Silicon arm64 by default on M1+ compatible Python installs."""
     if sys.platform != 'darwin':
@@ -89,6 +97,9 @@ APP_VERSION = APP_METADATA.APP_VERSION
 WEB_BINARY_NAME = 'HydroWeb'
 WEB_DISPLAY_NAME = 'HYDRO Web'
 WEB_BUNDLE_IDENTIFIER = 'com.hidrostatik.web'
+ICON_ICO = PROJECT_ROOT / 'assets' / 'icons' / 'hydro.ico'
+ICON_ICNS = PROJECT_ROOT / 'assets' / 'icons' / 'hydro.icns'
+ICON_PNG = PROJECT_ROOT / 'assets' / 'icons' / 'hydro-256.png'
 
 datas = [
     ('hidrostatik_test/data/ab_control_table_v1.csv', 'hidrostatik_test/data'),
@@ -99,6 +110,8 @@ datas = [
     ('hidrostatik_test/data/water_property_table_v1.meta.json', 'hidrostatik_test/data'),
     (str(FRONTEND_DIST), 'webapp_frontend_dist'),
 ]
+if ICON_PNG.is_file():
+    datas.append((str(ICON_PNG), 'assets/icons'))
 
 binaries = []
 
@@ -163,11 +176,37 @@ for _full_pkg in ('pypdfium2', 'pypdfium2_raw') + (('ocrmac',) if sys.platform =
     hiddenimports.extend(_h)
 
 if sys.platform == 'win32':
-    for _win_pkg in ('numpy', 'scipy'):
+    for _win_pkg in ('numpy', 'scipy', 'winrt'):
         _d, _b, _h = _safe_collect_all(_win_pkg)
         datas.extend(_d)
         binaries.extend(_b)
         hiddenimports.extend(_h)
+    hiddenimports.extend([
+        'winrt',
+        'winrt.runtime',
+        'winrt.windows.foundation',
+        'winrt.windows.foundation.collections',
+        'winrt.windows.globalization',
+        'winrt.windows.graphics.imaging',
+        'winrt.windows.media.ocr',
+        'winrt.windows.storage',
+        'winrt.windows.storage.streams',
+        'winrt.windows.data.pdf',
+        'winrt.windows.ui',
+    ])
+    for _winrt_dist in (
+        'winrt-runtime',
+        'winrt-Windows.Foundation',
+        'winrt-Windows.Foundation.Collections',
+        'winrt-Windows.Globalization',
+        'winrt-Windows.Graphics.Imaging',
+        'winrt-Windows.Media.Ocr',
+        'winrt-Windows.Storage',
+        'winrt-Windows.Storage.Streams',
+        'winrt-Windows.Data.Pdf',
+        'winrt-Windows.UI',
+    ):
+        datas.extend(_safe_copy_metadata(_winrt_dist))
 
 hiddenimports = sorted(set(hiddenimports))
 
@@ -186,6 +225,8 @@ EXE_KWARGS = {
 }
 
 if sys.platform == 'win32':
+    if ICON_ICO.is_file():
+        EXE_KWARGS['icon'] = str(ICON_ICO)
     env_manifest = os.environ.get('HYDROWEB_WINDOWS_MANIFEST', '').strip()
     manifest_candidate = pathlib.Path(env_manifest) if env_manifest else (PROJECT_ROOT / 'windows_manifest.xml')
     if manifest_candidate.is_file():
@@ -243,7 +284,7 @@ if sys.platform == 'darwin':
     app = BUNDLE(
         coll,
         name=f'{WEB_BINARY_NAME}.app',
-        icon=None,
+        icon=str(ICON_ICNS) if ICON_ICNS.is_file() else None,
         bundle_identifier=WEB_BUNDLE_IDENTIFIER,
         info_plist={
             'NSPrincipalClass': 'NSApplication',

@@ -9,6 +9,7 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 from hidrostatik_test.domain.report_schema import (
@@ -1278,6 +1279,199 @@ class SpreadsheetExtractionTests(unittest.TestCase):
             self.assertTrue(all(p.source == "spreadsheet" for p in pages))
             rep = ocr.parse_report(pages)
             self.assertIsNone(rep.air_test.vp, xls_path.name)
+
+    def test_windows_ocr_word_clustering_and_multi_column_pairing(self) -> None:
+        lines_words = [
+            [
+                ("Boru", 40, 20, 42, 14),
+                ("Dış", 88, 20, 28, 14),
+                ("Çapı", 122, 20, 40, 14),
+                ("406,4", 260, 20, 46, 14),
+                ("Test", 560, 20, 38, 14),
+                ("Basıncı", 604, 20, 66, 14),
+                ("80", 780, 20, 24, 14),
+            ],
+            [
+                ("Et", 40, 52, 20, 14),
+                ("Kalınlığı", 66, 52, 74, 14),
+                ("8,74", 260, 52, 38, 14),
+            ],
+        ]
+        blocks = ocr._windows_ocr_words_to_vision_blocks(lines_words, img_w=1000, img_h=1000)
+        self.assertEqual(
+            [b[0] for b in blocks],
+            ["Boru Dış Çapı", "406,4", "Test Basıncı", "80", "Et Kalınlığı", "8,74"],
+        )
+        self.assertGreater(blocks[0][2][1], blocks[-1][2][1])
+
+        report = ocr.parse_report(ocr._vision_blocks_to_text(blocks))
+        self.assertIsNotNone(report.pipe_od_mm)
+        self.assertAlmostEqual(report.pipe_od_mm.as_float(), 406.4)
+        self.assertIsNotNone(report.wall_mm)
+        self.assertAlmostEqual(report.wall_mm.as_float(), 8.74)
+        self.assertIsNotNone(report.test_pressure_bar)
+        self.assertAlmostEqual(report.test_pressure_bar.as_float(), 80.0)
+
+    @unittest.skipUnless(HAVE_PIL, "Pillow yok: Windows OCR boyut testi atlandi")
+    def test_run_windows_ocr_downscales_and_parses_winrt_lines(self) -> None:
+        from PIL import Image
+
+        class _FakeRect:
+            def __init__(self, x: float, y: float, w: float, h: float) -> None:
+                self.x = x
+                self.y = y
+                self.width = w
+                self.height = h
+
+        class _FakeWord:
+            def __init__(self, text: str, x: float, y: float, w: float, h: float) -> None:
+                self.text = text
+                self.bounding_rect = _FakeRect(x, y, w, h)
+
+        class _FakeLine:
+            def __init__(self, words: list[_FakeWord]) -> None:
+                self.words = words
+
+        class _FakeEngine:
+            def __init__(self, tag: str) -> None:
+                self.recognizer_language = types.SimpleNamespace(language_tag=tag)
+
+            async def recognize_async(self, bitmap: Any) -> Any:
+                self.seen_bitmap = bitmap
+                return types.SimpleNamespace(
+                    text="Test Basıncı 80",
+                    lines=[
+                        _FakeLine(
+                            [
+                                _FakeWord("Test", 40, 20, 40, 14),
+                                _FakeWord("Basıncı", 86, 20, 68, 14),
+                                _FakeWord("80", 300, 20, 28, 14),
+                            ]
+                        )
+                    ],
+                )
+
+        fake_engine = _FakeEngine("en-US")
+
+        captured_png: list[bytes] = []
+
+        class _FakeStream:
+            async def write_async(self, buf: Any) -> int:
+                raw = bytes(memoryview(buf)[: buf.length])
+                captured_png.append(raw)
+                return len(raw)
+
+            async def flush_async(self) -> bool:
+                return True
+
+            def seek(self, _pos: int) -> None:
+                return None
+
+            def close(self) -> None:
+                return None
+
+        class _FakeBuffer:
+            def __init__(self, cap: int) -> None:
+                self._buf = bytearray(cap)
+                self.length = 0
+
+            def __buffer__(self, flags: int) -> memoryview:
+                return memoryview(self._buf)
+
+        class _FakeDecoder:
+            async def get_software_bitmap_async(self) -> Any:
+                return types.SimpleNamespace(closed=False, close=lambda: None)
+
+        fake_ocr_mod = types.SimpleNamespace(
+            OcrEngine=types.SimpleNamespace(
+                max_image_dimension=4096,
+                available_recognizer_languages=[types.SimpleNamespace(language_tag="en-US")],
+                try_create_from_language=lambda lang: fake_engine if lang.tag == "en-US" else None,
+                try_create_from_user_profile_languages=lambda: fake_engine,
+            )
+        )
+        fake_glob_mod = types.SimpleNamespace(Language=lambda tag: types.SimpleNamespace(tag=tag))
+        fake_img_mod = types.SimpleNamespace(
+            BitmapDecoder=types.SimpleNamespace(
+                create_async=lambda _stream: _async_val(_FakeDecoder())
+            )
+        )
+        fake_streams_mod = types.SimpleNamespace(
+            InMemoryRandomAccessStream=_FakeStream,
+            Buffer=_FakeBuffer,
+        )
+
+        async def _async_val(v: Any) -> Any:
+            return v
+
+        mod_map = {
+            "winrt.windows.media.ocr": fake_ocr_mod,
+            "winrt.windows.globalization": fake_glob_mod,
+            "winrt.windows.graphics.imaging": fake_img_mod,
+            "winrt.windows.storage.streams": fake_streams_mod,
+        }
+        large_img = Image.new("RGB", (5000, 2500), "white")
+        with mock.patch.object(ocr.importlib, "import_module", side_effect=lambda n: mod_map[n]):
+            text, conf, warn = ocr._run_windows_ocr(large_img)
+
+        self.assertEqual(len(captured_png), 1)
+        import io
+
+        with Image.open(io.BytesIO(captured_png[0])) as sent_img:
+            self.assertEqual(sent_img.size, (4096, 2048))
+        self.assertIn("Test Basıncı : 80", text)
+        self.assertAlmostEqual(conf, 0.90)
+        self.assertIn("tr-TR", warn)
+
+    def test_probe_tesseract_handles_timeout_oserror_systemexit_and_caches(self) -> None:
+        ocr.clear_ocr_probe_cache()
+        try:
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                fake_tess = Path(tmp_dir) / "tesseract.exe"
+                fake_tess.write_bytes(b"MZ")
+                with (
+                    mock.patch.object(ocr.importlib.util, "find_spec", return_value=object()),
+                    mock.patch.object(ocr, "_resolve_tesseract_cmd", return_value=fake_tess),
+                ):
+                    for err in (
+                        subprocess.TimeoutExpired(cmd="tesseract", timeout=4.0),
+                        OSError("blocked by policy"),
+                        SystemExit(1),
+                    ):
+                        ocr.clear_ocr_probe_cache()
+                        with mock.patch.object(ocr.subprocess, "run", side_effect=err) as run_mock:
+                            self.assertFalse(ocr._probe_tesseract()[0])
+                            self.assertFalse(ocr._probe_tesseract()[0])
+                            self.assertEqual(run_mock.call_count, 1)
+                            kwargs = run_mock.call_args.kwargs
+                            self.assertEqual(kwargs["stdin"], subprocess.DEVNULL)
+                            self.assertEqual(kwargs["timeout"], ocr._TESSERACT_PROBE_TIMEOUT_S)
+        finally:
+            ocr.clear_ocr_probe_cache()
+
+    def test_windows_prefers_windows_ocr_and_pypdfium2_oserror_falls_back(self) -> None:
+        ocr.clear_ocr_probe_cache()
+        try:
+            with (
+                mock.patch.object(sys, "platform", "win32"),
+                mock.patch.dict(os.environ, {"HYDRO_OCR_ENGINE": "auto"}),
+                mock.patch.object(ocr, "windows_ocr_available", return_value=True),
+                mock.patch.object(ocr, "_tesseract_available", return_value=True) as tess_mock,
+            ):
+                self.assertEqual(ocr._resolve_ocr_engine(), "windows_ocr")
+                self.assertEqual(tess_mock.call_count, 0)
+
+            with (
+                mock.patch.object(ocr.importlib.util, "find_spec", return_value=object()),
+                mock.patch.object(
+                    ocr.importlib,
+                    "import_module",
+                    side_effect=OSError("Blocked by AppLocker"),
+                ),
+            ):
+                self.assertFalse(ocr._pypdfium2_usable())
+        finally:
+            ocr.clear_ocr_probe_cache()
 
 
 if __name__ == "__main__":

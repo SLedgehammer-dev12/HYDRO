@@ -1,7 +1,9 @@
-import { ArrowUpRight, CircleDot } from "lucide-react";
+import { ArrowUpRight, CircleDot, FileText } from "lucide-react";
+import { BOTAS_FORM_BY_CODE } from "../../lib/constants";
 import { decisionLabel, num, statusTone } from "../../lib/format";
+import { useSessionForms } from "../../hooks/queries";
 import { useAppStore } from "../../store/useAppStore";
-import type { Decision, TabKey } from "../../lib/types";
+import type { BotasFormCode, Decision, TabKey } from "../../lib/types";
 import { cn } from "../../lib/utils";
 
 function marginUnit(tab: TabKey): string {
@@ -13,12 +15,24 @@ function marginUnit(tab: TabKey): string {
 export function DecisionStrip() {
   const tab = useAppStore((state) => state.tab);
   const setTab = useAppStore((state) => state.setTab);
+  const activeFormCode = useAppStore((state) => state.activeFormCode);
+  const openForm = useAppStore((state) => state.openForm);
+  const sessionId = useAppStore((state) => state.sessionId);
   const results = useAppStore((state) => state.results);
   const backend = useAppStore((state) => state.backend);
+
+  const { data: formsPayload } = useSessionForms(sessionId);
+  const summary = formsPayload?.summary;
 
   const air = results.air?.decision;
   const pressure = results.pressure?.decision;
   const profile = results.profile?.decision;
+
+  const activeFormSpec = tab === "forms" ? BOTAS_FORM_BY_CODE[activeFormCode] : undefined;
+  const activeFormRec =
+    tab === "forms"
+      ? formsPayload?.forms.find((f) => f.form_code === activeFormCode)
+      : undefined;
 
   const active: Decision | undefined =
     tab === "pressure" ? pressure : tab === "geometry" ? profile : tab === "air" ? air : air ?? pressure;
@@ -30,9 +44,30 @@ export function DecisionStrip() {
         ? "air"
         : "pressure";
 
-  const tone = statusTone(active?.status);
+  const formTone = summary?.failed_forms?.length
+    ? "fail"
+    : (summary?.warning_forms_count ?? 0) > 0
+      ? "warning"
+      : summary?.complete
+        ? "pass"
+        : "info";
+
+  const tone =
+    tab === "forms" && activeFormRec
+      ? activeFormRec.status === "passed"
+        ? "pass"
+        : activeFormRec.status === "failed"
+          ? "fail"
+          : activeFormRec.status === "warning"
+            ? "warning"
+            : "info"
+      : statusTone(active?.status);
+
   const margin = active?.margin;
   const unit = marginUnit(activeTab);
+
+  const issueTargetCode =
+    (summary?.first_issue_form_code as BotasFormCode | undefined) || "test_data";
 
   return (
     <div className="sticky top-[65px] z-30 border-b border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-2)_78%,transparent)] backdrop-blur-lg">
@@ -47,7 +82,7 @@ export function DecisionStrip() {
           className={cn(
             "badge transition-transform hover:-translate-y-px",
             air ? `badge-${statusTone(air.status)}` : "badge-pending",
-            activeTab === "air" && "ring-1 ring-[color-mix(in_srgb,var(--primary)_35%,transparent)]",
+            activeTab === "air" && tab !== "forms" && "ring-1 ring-[color-mix(in_srgb,var(--primary)_35%,transparent)]",
           )}
           onClick={() => setTab("air")}
           title="Hava içerik testi kararı"
@@ -60,7 +95,7 @@ export function DecisionStrip() {
           className={cn(
             "badge transition-transform hover:-translate-y-px",
             pressure ? `badge-${statusTone(pressure.status)}` : "badge-pending",
-            activeTab === "pressure" && "ring-1 ring-[color-mix(in_srgb,var(--primary)_35%,transparent)]",
+            activeTab === "pressure" && tab !== "forms" && "ring-1 ring-[color-mix(in_srgb,var(--primary)_35%,transparent)]",
           )}
           onClick={() => setTab("pressure")}
           title="Basınç değişim testi kararı"
@@ -74,7 +109,7 @@ export function DecisionStrip() {
             className={cn(
               "badge hidden transition-transform hover:-translate-y-px sm:inline-flex",
               `badge-${statusTone(profile.status)}`,
-              activeTab === "geometry" && "ring-1 ring-[color-mix(in_srgb,var(--primary)_35%,transparent)]",
+              activeTab === "geometry" && tab !== "forms" && "ring-1 ring-[color-mix(in_srgb,var(--primary)_35%,transparent)]",
             )}
             onClick={() => {
               setTab("geometry");
@@ -88,17 +123,48 @@ export function DecisionStrip() {
           </button>
         ) : null}
 
+        {summary ? (
+          <button
+            type="button"
+            className={cn(
+              "badge hidden transition-transform hover:-translate-y-px md:inline-flex",
+              `badge-${formTone}`,
+              tab === "forms" && "ring-1 ring-[color-mix(in_srgb,var(--primary)_35%,transparent)]",
+            )}
+            onClick={() => openForm(issueTargetCode)}
+            title="BOTAŞ Test Bölümü Formları durum özeti"
+          >
+            <FileText size={10} aria-hidden />
+            Formlar · {summary.filled_required}/{summary.required_total}
+          </button>
+        ) : null}
+
         <span className="hidden h-3.5 w-px bg-[var(--border-strong)] sm:block" aria-hidden />
 
         <span className={cn("hidden items-center gap-1.5 text-[11px] md:flex", `tone-${tone}`)}>
           <span className="status-dot" aria-hidden />
-          <span className="font-semibold">{active?.title ?? "Değerlendirme bekliyor"}</span>
-          {active?.rule ? (
-            <span className="font-mono text-[10.5px] text-[var(--text-faint)]">· {active.rule}</span>
-          ) : null}
+          {tab === "forms" && activeFormSpec ? (
+            <>
+              <span className="font-semibold">
+                {activeFormSpec.shortCode} · {activeFormSpec.shortTitle}
+              </span>
+              {activeFormRec?.findings?.length ? (
+                <span className="font-mono text-[10.5px] text-[var(--text-faint)]">
+                  · {activeFormRec.findings[0].ref || activeFormRec.findings[0].title}
+                </span>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <span className="font-semibold">{active?.title ?? "Değerlendirme bekliyor"}</span>
+              {active?.rule ? (
+                <span className="font-mono text-[10.5px] text-[var(--text-faint)]">· {active.rule}</span>
+              ) : null}
+            </>
+          )}
         </span>
 
-        {typeof margin === "number" ? (
+        {tab !== "forms" && typeof margin === "number" ? (
           <span className="ml-auto flex items-center gap-1 text-[10.5px] text-[var(--text-faint)]">
             Marj
             <span className={cn("font-mono font-semibold", `tone-${tone}`)}>
@@ -114,9 +180,15 @@ export function DecisionStrip() {
         <button
           type="button"
           className="ml-auto inline-flex items-center gap-0.5 text-[10.5px] font-semibold text-[var(--primary)] hover:underline"
-          onClick={() => setTab(activeTab)}
+          onClick={() => {
+            if (tab === "forms" && summary?.first_issue_form_code) {
+              openForm(summary.first_issue_form_code as BotasFormCode);
+            } else {
+              setTab(activeTab);
+            }
+          }}
         >
-          Detaya git
+          {tab === "forms" && summary?.first_issue_form_code ? "Bulgulu forma git" : "Detaya git"}
           <ArrowUpRight size={11} aria-hidden />
         </button>
       </div>

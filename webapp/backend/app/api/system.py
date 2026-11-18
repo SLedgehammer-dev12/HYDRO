@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session as OrmSession
 
@@ -21,10 +21,12 @@ router = APIRouter(tags=["system"])
 
 @router.get("/health")
 def health(
+    request: Request,
     strict: int = Query(default=0, ge=0, le=1),
     settings: Settings = Depends(get_settings),
 ) -> JSONResponse:
-    payload = system_service.health_payload(settings)
+    instance_id = getattr(request.app.state, "instance_id", None)
+    payload = system_service.health_payload(settings, instance_id=instance_id)
     status_code = 200
     if strict and payload["status"] != "ok":
         status_code = 503

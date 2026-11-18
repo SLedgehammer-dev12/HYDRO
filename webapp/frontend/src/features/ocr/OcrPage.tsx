@@ -140,6 +140,7 @@ export default function OcrPage() {
   const [status, setStatus] = useState<OcrStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
   const [statusError, setStatusError] = useState(false);
+  const [statusErrorDetail, setStatusErrorDetail] = useState<OcrApiError | null>(null);
 
   const [history, setHistory] = useState<OcrAnalysisSummary[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
@@ -221,7 +222,7 @@ export default function OcrPage() {
     }
   }, [applyMode, applyProjectId, applySessionId, targetSessions, activeSessionId]);
 
-  const demoMode = statusError;
+  const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
   const selectedProfile = useMemo(
     () => profiles.find((profile) => profile.id === selectedProfileId) ?? null,
     [profiles, selectedProfileId],
@@ -240,15 +241,17 @@ export default function OcrPage() {
   const editedCount = Object.keys(edits).length;
   const allSelected = fields.length > 0 && selectedFields.size === fields.length;
 
-  const loadStatus = useCallback(async () => {
+  const loadStatus = useCallback(async (refresh = false) => {
     setStatusLoading(true);
     try {
-      const data = await getOcrStatus();
+      const data = await getOcrStatus(undefined, refresh);
       setStatus(data);
       setStatusError(false);
-    } catch {
+      setStatusErrorDetail(null);
+    } catch (caught) {
       setStatus(null);
       setStatusError(true);
+      setStatusErrorDetail(toOcrApiError(caught));
     } finally {
       setStatusLoading(false);
     }
@@ -501,6 +504,9 @@ export default function OcrPage() {
       });
       if (final.status === "succeeded") {
         applyResult({ ...final, reused: Boolean(job.reused) }, false);
+        if (statusError) {
+          void loadStatus();
+        }
       } else if (final.status === "failed") {
         showFailure(final.error, "Analiz tamamlanamadı; sunucu hata ayrıntısı göndermedi.");
       } else if (final.status === "cancelled") {
@@ -915,7 +921,7 @@ export default function OcrPage() {
                 </div>
               </div>
               <span className="rounded-full border border-[var(--border)] bg-[var(--surface-3)] px-2.5 py-1 text-[10px] text-[var(--text-soft)]">
-                {demoMode ? "Çevrimdışı" : "Sunucu analizi"}
+                {demoMode ? "Demo modu" : statusError ? "Durum uyarısı" : "Sunucu analizi"}
               </span>
             </div>
 
@@ -942,10 +948,17 @@ export default function OcrPage() {
               />
             </div>
 
-            {demoMode ? (
+            {statusError && !demoMode ? (
               <p className="mt-3 rounded-lg border border-[var(--warning-border)] bg-[var(--warning-bg)] px-3 py-2 text-[11px] leading-relaxed text-[var(--warning)]">
-                Sunucu çevrimdışı: gerçek dosya analizi için sunucu bağlantısı gereklidir. Dosya
-                cihazdan çıkmaz.
+                OCR durum kontrolü yanıt veremedi (
+                {statusErrorDetail?.code === "aborted"
+                  ? "zaman aşımı"
+                  : statusErrorDetail && statusErrorDetail.status >= 400
+                    ? `HTTP ${statusErrorDetail.status}`
+                    : "bağlantı kontrol edilmeli"}
+                ); ancak <strong>Analiz Et</strong> dediğinizde dosya yine doğrudan yerel
+                sunucuya gönderilir (cihazdan çıkmaz). Metin katmanlı PDF, CAD ve Excel dosyaları
+                harici OCR olmadan da okunur.
               </p>
             ) : null}
 
@@ -1693,8 +1706,9 @@ export default function OcrPage() {
             status={status}
             loading={statusLoading}
             error={statusError}
+            errorDetail={statusErrorDetail}
             onRetry={() => {
-              void loadStatus();
+              void loadStatus(true);
             }}
           />
           <HistoryPanel

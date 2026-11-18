@@ -22,7 +22,8 @@
 }
 
 :root {
-  color-scheme: dark;
+  color-scheme: light dark;
+  accent-color: var(--primary);
   --canvas: #070b14;
   --canvas-glow-a: rgba(34, 211, 238, 0.1);
   --canvas-glow-b: rgba(45, 212, 191, 0.07);
@@ -72,6 +73,10 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 [data-theme="light"] {
@@ -734,6 +739,32 @@ pre {
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--surface-2);
+  container-type: inline-size;
+  overscroll-behavior: contain;
+}
+
+.table-sticky thead th {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 2;
+  background: var(--surface-2);
+  box-shadow: 0 1px 0 var(--border);
+}
+
+.table-sticky .sticky-col {
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: 1;
+  background: var(--surface-2);
+  box-shadow: 1px 0 0 var(--border);
+}
+
+.table-sticky thead th.sticky-col {
+  z-index: 3;
+}
+
+.table-sticky tbody tr:hover td.sticky-col {
+  background: color-mix(in srgb, var(--surface-3) 82%, var(--surface-2));
 }
 
 table.data {
@@ -957,6 +988,58 @@ table.data.compact {
   border: 1px solid var(--border);
   background: var(--surface);
   box-shadow: 0 40px 100px -30px rgba(0, 0, 0, 0.7);
+}
+
+dialog.modal-dialog {
+  margin: auto;
+  padding: 0;
+  width: calc(100vw - 32px);
+  max-width: 560px;
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 40px 100px -30px rgba(0, 0, 0, 0.72);
+}
+
+dialog.modal-dialog:modal {
+  overscroll-behavior: contain;
+}
+
+dialog.modal-dialog::backdrop {
+  background: var(--overlay);
+  backdrop-filter: blur(3px);
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+
+dialog.drawer-dialog {
+  margin: 0;
+  padding: 0;
+  inset-block: 0;
+  inset-inline-start: 0;
+  height: 100dvh;
+  max-height: 100dvh;
+  width: min(296px, 86vw);
+  max-width: none;
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 30px 90px -20px rgba(0, 0, 0, 0.75);
+}
+
+dialog.drawer-dialog:modal {
+  overscroll-behavior: contain;
+}
+
+dialog.drawer-dialog::backdrop {
+  background: var(--overlay);
+  backdrop-filter: blur(2px);
+  overflow: hidden;
+  overscroll-behavior: contain;
 }
 
 .scene-shell {

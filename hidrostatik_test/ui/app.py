@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import sys
 import threading
 import tkinter as tk
 from datetime import UTC, datetime
@@ -140,6 +141,7 @@ class HydrostaticTestApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title(f"{APP_TITLE} v{APP_VERSION}")
+        self._apply_window_icon()
         self._configure_window_geometry()
         self.ui_style = ttk.Style(self.root)
         self._configure_input_styles()
@@ -492,6 +494,28 @@ class HydrostaticTestApp:
         menu_bar.add_cascade(label="Hakkinda", menu=about_menu)
 
         self.root.configure(menu=menu_bar)
+
+    def _apply_window_icon(self) -> None:
+        if not hasattr(self.root, "iconphoto"):
+            return
+        try:
+            candidates = [
+                Path(__file__).resolve().parents[2] / "assets" / "icons" / "hydro-256.png",
+                Path(getattr(sys, "_MEIPASS", "")) / "assets" / "icons" / "hydro-256.png",
+                Path(sys.executable).resolve().parent / "assets" / "icons" / "hydro-256.png",
+                Path(sys.executable).resolve().parent
+                / "_internal"
+                / "assets"
+                / "icons"
+                / "hydro-256.png",
+            ]
+            icon_file = next((p for p in candidates if str(p) and p.is_file()), None)
+            if icon_file is not None:
+                icon_img = tk.PhotoImage(file=str(icon_file), master=self.root)
+                self.root.iconphoto(True, icon_img)
+                self._hydro_icon_img = icon_img
+        except Exception:
+            pass
 
     def _configure_window_geometry(self) -> None:
         screen_width = self.root.winfo_screenwidth()

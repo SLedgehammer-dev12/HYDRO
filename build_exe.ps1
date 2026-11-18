@@ -412,6 +412,22 @@ function Invoke-PyInstallerBuild {
             "--hidden-import", "pytesseract"
         )
     }
+    $hasWinrtOcr = & $PythonExe -c "import importlib.util; print('1' if importlib.util.find_spec('winrt.windows.media.ocr') else '0')"
+    if ($LASTEXITCODE -eq 0 -and $hasWinrtOcr.Trim() -eq "1") {
+        $pyinstallerArgs += @(
+            "--collect-all", "winrt",
+            "--hidden-import", "winrt.runtime",
+            "--hidden-import", "winrt.windows.foundation",
+            "--hidden-import", "winrt.windows.foundation.collections",
+            "--hidden-import", "winrt.windows.globalization",
+            "--hidden-import", "winrt.windows.graphics.imaging",
+            "--hidden-import", "winrt.windows.media.ocr",
+            "--hidden-import", "winrt.windows.storage",
+            "--hidden-import", "winrt.windows.storage.streams",
+            "--hidden-import", "winrt.windows.data.pdf",
+            "--hidden-import", "winrt.windows.ui"
+        )
+    }
     $pyinstallerArgs += $entryPoint
 
     & $PythonExe @pyinstallerArgs

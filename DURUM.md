@@ -3,8 +3,8 @@
 > Tek kaynak özet. Ayrıntı için "Ayrıntılı notlar" bölümündeki dosyalara bakın.
 >
 > **Son güncelleme:** 2026-11-18
-> **Dal:** `main` (`v1.9.0` — Web Güncelleme Yöneticisi ve BOTAŞ form denetim sayfaları)
-> **Son commit:** `80d5376` öncesi `v1.8.1` üzerine `v1.9.0` sürümü hazırlanıyor
+> **Dal:** `main` (`v1.9.1` — Kurumsal Windows WinRT OCR/PDF, Program İkon Sistemi & Faz 1–5 Web Arayüzü İyileştirmeleri)
+> **Son commit:** `hidrostatik-test-v1.9.1` sürüm hazırlığı (`v1.9.0` → `v1.9.1`)
 
 ---
 
@@ -12,12 +12,14 @@
 
 | Alan | Durum | Kanıt |
 | --- | --- | --- |
-| Masaüstü uygulaması | Çalışıyor, kararlı | 672 unittest PASS (`skipped=1`) |
-| Web backend (FastAPI) | Çalışıyor | 135 pytest PASS |
-| Web frontend (React 19) | Çalışıyor | `npm run typecheck` + `npm run build` PASS, 11/11 sekme + BOTAŞ form ağacı & Güncelleme Yöneticisi smoke PASS |
+| Masaüstü uygulaması | Çalışıyor, kararlı | 676 unittest PASS (`skipped=1`) |
+| Web backend (FastAPI) | Çalışıyor | 137 pytest PASS |
+| Web frontend (React 19) | Çalışıyor | `npm run typecheck` + `npm run build` PASS, `verify-tabs.mjs` 11/11 PASS, canlı tarayıcı smoke (0 konsol hatası) |
+| Program İkon & Marka Sistemi | Hazır | Boru kesiti + su dalgası + manometre ikonu (`tools/generate_icons.py`, `assets/icons/*`, `webapp/frontend/public/*`, `<HydroLogo />`, PyInstaller/Inno Setup/Tkinter) |
 | Web Güncelleme Yöneticisi | Çalışıyor | `/api/update/*`, SHA-256 + fail-closed Ed25519 `.sig` doğrulama, `UpdateManagerModal`, macOS `.dmg` / Win `.exe`/`.zip` kurulum |
 | BOTAŞ Test Bölümü Formları | Çalışıyor | Seçenek 1 sol menü (`015`..`023`, `KUR-001`, `KUR-002` + 5 ek), `SectionFormPage`, `rows`/`pig_runs`/`findings`, tekil OCR & `020`/`022` gömülü hesaplama |
-| Bağımsız Web paketleme | Hazır (`v1.9.0`) | `HydroWeb.spec`, `build_web_dmg.sh` (`arm64`, taranmış PDF `--self-test` PASS), `build_web_exe.ps1` + `installer/hydro_web.iss` |
+| Bağımsız Web paketleme | Hazır (`v1.9.1`) | `HydroWeb.spec`, `build_web_dmg.sh` (`arm64`, taranmış PDF `--self-test` PASS), `build_web_exe.ps1` (WinRT `Windows.Media.Ocr` + `Windows.Data.Pdf`) + `installer/hydro_web.iss` |
+| Kurumsal Windows OCR/PDF | Çalışıyor | Süreç-içi `Windows.Media.Ocr` + `Windows.Data.Pdf`, Proxy-bypass `127.0.0.1` + `instance_id` doğrulama, SQLite `WAL → DELETE` fallback |
 | Domain parity | Masaüstü ile aynı kaynak | `hidrostatik_test.domain` doğrudan import edilir |
 | Proje / Test Bölümü (Section) DB | Çalışıyor | `projects` + `sessions.project_id` + `inputs.section_meta` |
 | KP sürekliliği + Segment denetimi | Tamamlandı | `lib/kp.ts`, Geometri & Saha sayfası |
@@ -81,7 +83,15 @@
   - `#/forms/{form_code}` rotasında (`SectionFormPage.tsx` + `FormBodyEditor.tsx`) resmî `BOT-FRM` başlık/imza/tablo düzeni, satır içi düzenleme (`PUT /api/sessions/{id}/forms/{code}`), tekil form OCR tarama (`POST /api/sessions/{id}/forms/{code}/scan`), `form_details.py` ile yapılandırılmış `rows`/`pig_runs`/`drying`/`findings` kalıcılığı ve `4-NGTL 0-GN-P-002-5007 R4` şartname bulguları.
   - `020` (`air_acceptance`) ve `022` (`pressure_acceptance`) formlarında isteğe bağlı açılıp kapanan **"Detay Hesaplamaları Göster"** bandı ile mevcut `<AirPage embedded />` ve `<PressurePage embedded />` hesaplama modülleri satır içi gösterilir (`#/air` ve `#/pressure` doğrudan rotaları korunur).
   - `Projeler & Kesitler` sayfasında her kesit için genişletilmiş form bulgu özetleri (`findings_counts`, ilk bulgulu forma tek tıkla geçiş, `key_metrics`).
-- Bağımsız masaüstü Web dağıtımı (`v1.9.0`): `webapp/desktop_launcher.py` (yerel FastAPI + statik React + durum/durdurma penceresi + `--self-test`), `HydroWeb.spec`, macOS M1+ `arm64` `.dmg` (`build_web_dmg.sh`), Windows x64 Inno Setup kurulum `.exe` + taşınabilir `.zip` (`installer/hydro_web.iss`, `build_web_exe.ps1`).
+- Bağımsız masaüstü Web dağıtımı (`v1.9.1`): `webapp/desktop_launcher.py` (yerel FastAPI + statik React + durum/durdurma penceresi + `--self-test`), `HydroWeb.spec`, macOS M1+ `arm64` `.dmg` (`build_web_dmg.sh`), Windows x64 Inno Setup kurulum `.exe` + taşınabilir `.zip` (`installer/hydro_web.iss`, `build_web_exe.ps1`).
+- **Domain İkon Sistemi & Faz 1–5 Web Arayüzü İyileştirmeleri (`tasks/web_ui_plan.md`)**:
+  - Konuya özgü Boru Kesiti + Hidrostatik Su + Manometre ikon seti (`tools/generate_icons.py`, `assets/icons/*`, `webapp/frontend/public/*`, `site.webmanifest`, `<HydroLogo />` + `Sidebar`/`TopBar`/`UpdateManagerModal`, `HydroWeb.spec`/`HidrostatikTest.spec`/`installer/hydro_web.iss`/`webapp/desktop_launcher.py`/`hidrostatik_test/ui/app.py`).
+  - Modern Web & Erişilebilirlik: yerel `<dialog>` + `.showModal()` + `closedby="any"` + Safari pointer-coordinate light-dismiss fallback (`Dialog.tsx`, mobil `Sidebar.tsx` çekmecesi), `:root`/`[data-theme="dark"]` `color-scheme` + `accent-color` ve ilk boyama öncesi tema betiği (`index.html`, `styles.css`).
+  - Operatör Akışı & BOTAŞ Form Ergonomisi: `Sidebar.tsx` (`w-[280px]`, `Tümü | Bulgulu | Eksik` filtreleri), `DecisionStrip.tsx` (`Formlar · Dolu/11` + aktif form bağlamı) & `RightPanel.tsx` (`BOTAŞ Form Dosyası` ilerlemesi), `@container` yapışkan başlık/Saat sütunu (`role="region"`, `tabIndex={0}`), Excel/TSV çoklu satır yapıştırma (`pasteUtils.ts`, `FormTablePrimitives.tsx`, `MonitoringFormEditor.tsx`, `AcceptanceFormEditor.tsx`, `FormBodyEditor.tsx`), kaydedilmemiş değişiklik koruma diyaloğu + iskelet yükleyici (`SectionFormPage.tsx`), `DashboardPage.tsx` 3 adımlı iş akışı çubuğu ve `ProjectsPage.tsx` modülerleştirmesi (`SectionFormsModal.tsx`, `PlanProfileScanModal.tsx`).
+- **Kurumsal Windows Uyumluluğu & Yerleşik WinRT OCR/PDF Motoru**:
+  - `hidrostatik_test/services/report_ocr.py` ve `requirements-ocr.txt`: Windows 10/11 üzerinde harici imzasız `tesseract.exe` alt süreçleri yerine süreç-içi (in-process) Microsoft imzalı **WinRT `Windows.Media.Ocr`** ve **`Windows.Data.Pdf`** desteği (BCP-47 `tr-TR` öncelikli, `4096 px` ölçekleme, çok sütunlu BOTAŞ satır eşleyici ve `pypdfium2` `OSError` otomatik yedeği) + `4 sn` zaman aşımlı, `CREATE_NO_WINDOW`, `stdin=DEVNULL` ve TTL önbellekli (`clear_ocr_probe_cache`, `ocr_engine_details`) Tesseract yoklaması.
+  - Backend & Başlatıcı sertleştirmesi (`webapp/backend/app/services/ocr.py`, `system.py`, `main.py`, `db.py`, `webapp/desktop_launcher.py`): `/api/ocr/status?refresh=true` tek yoklamada önbellekli yanıt, `/api/health` içinde `instance_id` doğrulaması, SQLite `WAL -> DELETE` otomatik geçişi, `SetErrorMode`, `ProxyHandler({})` loopback koruması, `8080` yerine çakışmasız `18790..18829` port aralığı + Windows `SO_EXCLUSIVEADDRUSE`, `"Küçült"` düğmesi ve `WM_DELETE_WINDOW` kapatma koruması.
+  - Paketleme & Ön Uç tanılama (`HydroWeb.spec`, `build_web_exe.ps1`, `build_exe.ps1`, `installer/hydro_web.iss`, `StatusPanel.tsx`, `OcrPage.tsx`): varsayılan Windows paketinden harici `tesseract.exe` çıkarıldı (`-BundleTesseract` opsiyonel), `Program Files` kurulumu için `commandline` yetki yükseltme eklendi; `StatusPanel.tsx` / `OcrPage.tsx` zaman aşımı/HTTP hata/sunucu kapalı durumlarını ayırt eder ve sessiz sahte `DEMO_RESULT` düşüşü kaldırıldı.
 - Dockerfile, docker-compose, README, kod haritası, GitHub Actions `release.yml`.
 
 ---
@@ -163,10 +173,10 @@ python3 -m ruff check .                                        # All checks pass
 python3 -m mypy hidrostatik_test/domain/                       # Success: no issues found (12 files)
 
 # Web backend
-python3 -m pytest webapp/backend/tests -q                      # 135 passed
+python3 -m pytest webapp/backend/tests -q                      # 137 passed
 
 # Masaüstü
-python3 -m unittest discover -s tests -p "test_*.py"           # 672 passed (1 skipped)
+python3 -m unittest discover -s tests -p "test_*.py"           # 676 tests OK (skipped=1)
 
 # Masaüstü paketli Web self-test
 python3 webapp/desktop_launcher.py --self-test                 # SELF_TEST_OK
@@ -209,6 +219,7 @@ docker compose -f webapp/docker-compose.yml up --build
 | Dosya | İçerik |
 | --- | --- |
 | `tasks/todo.md` | Masaüstü açık işler (bölüm bazlı) — tarihsel, eski test sayıları |
+| `tasks/web_ui_plan.md` | Domain ikonu ve Web arayüzü Faz 1–5 uygulama planı (tamamlandı) |
 | `tasks/remediation.md` | Denetim remediasyonu + faz planı, işaretli maddeler |
 | `docs/remediation_report.md` | Remediasyon sonuç özeti ve kanıt tablosu |
 | `docs/continuity.md` | Masaüstü süreklilik/karar geçmişi |
@@ -221,6 +232,7 @@ docker compose -f webapp/docker-compose.yml up --build
 | `webapp/docs/architecture.md` | Web mimarisi |
 | `webapp/docs/ux_plan.md` | UX planı + açık UX kararları |
 | `webapp/docs/decisions.md` | Web karar kaydı |
+| `WHATS_NEW.md` | Sürüm bazlı yenilik özeti (`v1.9.1`) |
 | `CHANGELOG.md` | Sürüm bazlı yapılanlar |
 
 ---

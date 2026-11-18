@@ -3,7 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
     <meta name="theme-color" content="#0b1220" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <script>
+      try {
+        var raw = localStorage.getItem("hydro-app-v1");
+        if (raw) {
+          var parsed = JSON.parse(raw);
+          var theme = parsed && parsed.state && parsed.state.theme;
+          if (theme === "light" || theme === "dark") {
+            document.documentElement.dataset.theme = theme;
+          }
+        }
+      } catch (e) {}
+    </script>
     <title>HYDRO | Hidrostatik Test Platformu</title>
   </head>
   <body>

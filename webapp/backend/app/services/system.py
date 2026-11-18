@@ -40,7 +40,7 @@ from hidrostatik_test.services.report_ocr import (
     SUPPORTED_EXTENSIONS,
     effective_max_file_size_bytes,
     ocr_available,
-    ocr_status,
+    ocr_engine_details,
 )
 
 from .. import db
@@ -90,7 +90,7 @@ def _ocr_queue(db_session: Any) -> dict[str, int]:
     return counts
 
 
-def health_payload(settings: Settings) -> dict[str, Any]:
+def health_payload(settings: Settings, *, instance_id: str | None = None) -> dict[str, Any]:
     db_health = db.database_health()
     data_dir_ok = settings.data_dir.exists() and settings.data_dir.is_dir()
     writable = data_dir_ok and os.access(settings.data_dir, os.W_OK)
@@ -102,7 +102,8 @@ def health_payload(settings: Settings) -> dict[str, Any]:
         except Exception:
             queue = {"queued": 0, "running": 0}
 
-    ocr_ok = ocr_available()
+    ocr_details = ocr_engine_details()
+    ocr_ok = bool(ocr_details["available"])
     if not db_health.get("ok"):
         status = "fail"
     elif not writable or not ocr_ok:
@@ -113,12 +114,13 @@ def health_payload(settings: Settings) -> dict[str, Any]:
     return {
         "status": status,
         "version": APP_VERSION,
+        "instance_id": instance_id,
         "engine": "hidrostatik_test",
         "db": db_health,
         "data_dir": {"ok": data_dir_ok, "writable": writable},
         "ocr": {
             "available": ocr_ok,
-            "status": ocr_status(),
+            "status": str(ocr_details["status_text"]),
             "queue": queue,
         },
         "uptime_s": int(time.monotonic() - UPTIME_START),

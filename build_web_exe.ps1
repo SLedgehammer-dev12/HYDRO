@@ -2,6 +2,7 @@ param(
     [string]$PythonExe = "python",
     [switch]$SkipFrontendBuild,
     [switch]$SkipSigning,
+    [switch]$BundleTesseract,
     [switch]$SkipTesseractBundle
 )
 
@@ -200,6 +201,35 @@ function Resolve-IsccPath {
     throw "Inno Setup 6 (ISCC.exe) bulunamadi."
 }
 
+function Invoke-HydroSelfTest {
+    param(
+        [string]$ExePath,
+        [string]$Label
+    )
+
+    $outLog = [System.IO.Path]::GetTempFileName()
+    $errLog = [System.IO.Path]::GetTempFileName()
+    try {
+        $proc = Start-Process `
+            -FilePath $ExePath `
+            -ArgumentList "--self-test" `
+            -Wait `
+            -PassThru `
+            -NoNewWindow `
+            -RedirectStandardOutput $outLog `
+            -RedirectStandardError $errLog
+        $stdout = if (Test-Path -LiteralPath $outLog) { (Get-Content -LiteralPath $outLog -Raw) } else { "" }
+        $stderr = if (Test-Path -LiteralPath $errLog) { (Get-Content -LiteralPath $errLog -Raw) } else { "" }
+        if ($stdout) { Write-Host $stdout.TrimEnd() }
+        if ($stderr) { Write-Host $stderr.TrimEnd() }
+        if ($proc.ExitCode -ne 0 -or ($stdout -notmatch "SELF_TEST_OK")) {
+            throw "$Label --self-test basarisiz (exit code $($proc.ExitCode)).`nSTDOUT: $stdout`nSTDERR: $stderr"
+        }
+    } finally {
+        Remove-Item -LiteralPath $outLog, $errLog -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Resolve-TesseractExe {
     $candidates = @(
         "${env:ProgramFiles}\Tesseract-OCR\tesseract.exe",
@@ -353,13 +383,14 @@ if (-not (Test-Path -LiteralPath $exePath)) {
     throw "Beklenen HydroWeb.exe olusmadi: $exePath"
 }
 
-Install-BundledTesseract -TargetDir (Join-Path $distDir "tesseract")
+if ($BundleTesseract -and -not $SkipTesseractBundle) {
+    Install-BundledTesseract -TargetDir (Join-Path $distDir "tesseract")
+} else {
+    Write-Host "Harici tesseract.exe paketlenmedi; Windows 10/11 yerlesik WinRT OCR (Windows.Media.Ocr + Windows.Data.Pdf) kullanilacak."
+}
 
 Write-Host "Paketli HydroWeb.exe --self-test calistiriliyor..."
-$selfTestProc = Start-Process -FilePath $exePath -ArgumentList "--self-test" -Wait -PassThru
-if ($selfTestProc.ExitCode -ne 0) {
-    throw "HydroWeb.exe --self-test basarisiz (exit code $($selfTestProc.ExitCode))."
-}
+Invoke-HydroSelfTest -ExePath $exePath -Label "HydroWeb.exe"
 Write-Host "HydroWeb.exe --self-test basarili."
 
 # --- Tasinabilir ZIP --------------------------------------------------------
@@ -418,10 +449,7 @@ $installedExe = Join-Path $smokeInstallDir "HydroWeb.exe"
 if (-not (Test-Path -LiteralPath $installedExe)) {
     throw "Kurulan dizinde HydroWeb.exe bulunamadi: $installedExe"
 }
-$installedTestProc = Start-Process -FilePath $installedExe -ArgumentList "--self-test" -Wait -PassThru
-if ($installedTestProc.ExitCode -ne 0) {
-    throw "Kurulan HydroWeb.exe --self-test basarisiz (exit code $($installedTestProc.ExitCode))."
-}
+Invoke-HydroSelfTest -ExePath $installedExe -Label "Kurulan HydroWeb.exe"
 Remove-Item -LiteralPath $smokeInstallDir -Recurse -Force -ErrorAction SilentlyContinue
 Write-Host "Setup EXE sessiz kurulum ve --self-test dogrulandi."
 
@@ -460,6 +488,7 @@ $notes = @"
 1. ``$([System.IO.Path]::GetFileName($setupExePath))`` kurulum dosyasini calistirin (veya portable zip'i acip ``HydroWeb\HydroWeb.exe`` calistirin).
 2. SmartScreen uyarisi cikarsa "Daha fazla bilgi" -> "Yine de calistir" secin.
 3. Uygulama yerel sunucuyu baslatip varsayilan tarayicinizda HYDRO Web arayuzunu otomatik acar.
+4. OCR ve taranmis PDF islemleri Windows 10/11 yerlesik WinRT API'leri (``Windows.Media.Ocr`` ve ``Windows.Data.Pdf``) ile ek alt surec (.exe) baslatmadan calisir.
 "@
 
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)

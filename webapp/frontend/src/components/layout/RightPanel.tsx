@@ -1,15 +1,24 @@
-import { AlertTriangle, ArrowRight, CheckCircle2, CircleDashed, Sigma } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2, CircleDashed, FileText, Sigma } from "lucide-react";
 import { geometryForInputs } from "../../lib/mock";
 import { fmt, formatCoefficientState, num } from "../../lib/format";
-import { CHECK_DEFINITIONS } from "../../lib/constants";
+import { BOTAS_FORM_BY_CODE, CHECK_DEFINITIONS } from "../../lib/constants";
+import { useSessionForms } from "../../hooks/queries";
 import { useAppStore } from "../../store/useAppStore";
+import type { BotasFormCode } from "../../lib/types";
 import { Badge, CoefficientBadge } from "../ui/Badge";
 import { ProgressBar } from "../ui/Gauge";
 
 export function RightPanel() {
   const inputs = useAppStore((state) => state.inputs);
   const results = useAppStore((state) => state.results);
+  const sessionId = useAppStore((state) => state.sessionId);
   const setTab = useAppStore((state) => state.setTab);
+  const openForm = useAppStore((state) => state.openForm);
+
+  const { data: formsPayload } = useSessionForms(sessionId);
+  const formsSummary = formsPayload?.summary;
+  const firstMissingCode = formsPayload?.missing_required_forms?.[0]?.form_code as BotasFormCode | undefined;
+  const issueCode = (formsSummary?.first_issue_form_code as BotasFormCode | undefined) || firstMissingCode || "test_data";
 
   const geometry = results.geometry ?? geometryForInputs(inputs);
   const checked = CHECK_DEFINITIONS.filter((check) => inputs.checks[check.key]).length;
@@ -24,6 +33,12 @@ export function RightPanel() {
     missing.push("Basınç: Pa girilmedi.");
   if (!inputs.section_profile.smys_mpa)
     missing.push("Profil: malzeme kalitesi / SMYS seçilmedi.");
+
+  const formProgressTone = formsSummary?.failed_forms?.length
+    ? "fail"
+    : formsSummary?.complete
+      ? "pass"
+      : "info";
 
   return (
     <aside className="hidden w-[292px] shrink-0 xl:block">
@@ -83,6 +98,35 @@ export function RightPanel() {
               onClick={() => setTab("coefficients")}
             >
               A/B hazırla <ArrowRight size={11} />
+            </button>
+          </div>
+
+          <div className="mt-3 border-t border-[var(--border)] pt-2.5">
+            <div className="flex items-center justify-between">
+              <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-faint)]">
+                <FileText size={11} aria-hidden /> BOTAŞ Form Dosyası
+              </p>
+              <span className="font-mono text-[10.5px] text-[var(--text-muted)]">
+                {formsSummary?.filled_required ?? 0}/{formsSummary?.required_total ?? 11}
+              </span>
+            </div>
+            <ProgressBar
+              value={formsSummary?.filled_required ?? 0}
+              max={formsSummary?.required_total ?? 11}
+              tone={formProgressTone}
+              className="mt-1.5"
+            />
+            <button
+              type="button"
+              className="mt-2 inline-flex items-center gap-0.5 text-[10.5px] font-semibold text-[var(--primary)] hover:underline"
+              onClick={() => openForm(issueCode)}
+            >
+              {formsSummary?.first_issue_form_code
+                ? `Bulgulu form (${BOTAS_FORM_BY_CODE[formsSummary.first_issue_form_code as BotasFormCode]?.shortCode ?? "—"})`
+                : firstMissingCode
+                  ? `Sıradaki eksik (${BOTAS_FORM_BY_CODE[firstMissingCode]?.shortCode ?? "—"})`
+                  : "Form dosyasını aç"}{" "}
+              <ArrowRight size={11} />
             </button>
           </div>
 

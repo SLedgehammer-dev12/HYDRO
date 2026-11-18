@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowUpCircle,
@@ -6,7 +6,6 @@ import {
   ChevronDown,
   ChevronRight,
   Circle,
-  Droplet,
   FileText,
   FolderKanban,
   Gauge,
@@ -34,6 +33,7 @@ import {
   useUpdateStatus,
 } from "../../hooks/queries";
 import { useAppStore } from "../../store/useAppStore";
+import { HydroLogo } from "../ui/HydroLogo";
 import { cn } from "../../lib/utils";
 
 const ICONS: Record<TabKey, LucideIcon> = {
@@ -50,6 +50,8 @@ const ICONS: Record<TabKey, LucideIcon> = {
   ocr: ScanLine,
   settings: Settings,
 };
+
+type FormFilter = "all" | "issues" | "empty";
 
 function BackendDot({ backend }: { backend: BackendMode }) {
   return (
@@ -68,34 +70,49 @@ function BackendDot({ backend }: { backend: BackendMode }) {
 function FormStatusBadge({ status }: { status: string }) {
   if (status === "passed") {
     return (
-      <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-[var(--success-bg)] text-[var(--success)]" title="Kontrolden geçti">
+      <span
+        className="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-[var(--success-bg)] text-[var(--success)]"
+        title="Kontrolden geçti"
+      >
         <Check size={10} strokeWidth={2.8} aria-hidden />
       </span>
     );
   }
   if (status === "failed") {
     return (
-      <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-[var(--danger-bg)] text-[var(--danger)]" title="Bulgu / Hata var">
+      <span
+        className="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-[var(--danger-bg)] text-[var(--danger)]"
+        title="Bulgu / Hata var"
+      >
         <XCircle size={10} strokeWidth={2.5} aria-hidden />
       </span>
     );
   }
   if (status === "warning") {
     return (
-      <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-[var(--warning-bg)] text-[var(--warning)]" title="Uyarı / İnceleme gerekli">
+      <span
+        className="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-[var(--warning-bg)] text-[var(--warning)]"
+        title="Uyarı / İnceleme gerekli"
+      >
         <AlertTriangle size={10} strokeWidth={2.5} aria-hidden />
       </span>
     );
   }
   if (status === "filled") {
     return (
-      <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-[var(--primary-soft)] text-[var(--primary)]" title="Dolduruldu">
+      <span
+        className="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-[var(--primary-soft)] text-[var(--primary)]"
+        title="Dolduruldu"
+      >
         <Circle size={8} fill="currentColor" aria-hidden />
       </span>
     );
   }
   return (
-    <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-[var(--surface-3)] text-[var(--text-faint)]" title="Boş">
+    <span
+      className="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-[var(--surface-3)] text-[var(--text-faint)]"
+      title="Boş"
+    >
       <Circle size={8} aria-hidden />
     </span>
   );
@@ -124,9 +141,11 @@ export function Sidebar() {
   const { data: updateStatus } = useUpdateStatus();
   const checkUpdates = useCheckUpdates();
   const silentCheckFired = useRef(false);
+  const mobileDrawerRef = useRef<HTMLDialogElement>(null);
 
   const [formsExpanded, setFormsExpanded] = useState(true);
   const [extrasExpanded, setExtrasExpanded] = useState(false);
+  const [formFilter, setFormFilter] = useState<FormFilter>("all");
 
   useEffect(() => {
     if (backend === "online" && !silentCheckFired.current) {
@@ -135,12 +154,85 @@ export function Sidebar() {
     }
   }, [backend, checkUpdates]);
 
-  const mandatoryForms = BOTAS_FORM_NAV_ITEMS.filter((item) => item.required);
-  const extraForms = BOTAS_FORM_NAV_ITEMS.filter((item) => !item.required);
-  const formByCode = new Map(
-    (formsPayload?.forms ?? []).map((row) => [row.form_code, row]),
+  /* Mobil gezinme çekmecesi: yerel <dialog> top-layer */
+  useEffect(() => {
+    const dialog = mobileDrawerRef.current;
+    if (!dialog) return;
+    if (sidebarOpen) {
+      if (!dialog.open) dialog.showModal();
+    } else if (dialog.open) {
+      dialog.close();
+    }
+  }, [sidebarOpen]);
+
+  useEffect(() => {
+    const dialog = mobileDrawerRef.current;
+    if (!dialog) return;
+    const onClose = () => {
+      dialog.returnValue = "";
+      setSidebarOpen(false);
+    };
+    dialog.addEventListener("close", onClose);
+
+    let cleanupFallback: (() => void) | undefined;
+    if (typeof HTMLDialogElement !== "undefined" && !("closedBy" in HTMLDialogElement.prototype)) {
+      let pressedOutside = false;
+      const outside = (e: PointerEvent) => {
+        const r = dialog.getBoundingClientRect();
+        return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+      };
+      const onPointerDown = (e: PointerEvent) => {
+        pressedOutside = e.target === dialog && outside(e);
+      };
+      const onPointerUp = (e: PointerEvent) => {
+        if (pressedOutside && e.target === dialog && outside(e) && dialog.open) {
+          dialog.close();
+        }
+        pressedOutside = false;
+      };
+      dialog.addEventListener("pointerdown", onPointerDown);
+      dialog.addEventListener("pointerup", onPointerUp);
+      cleanupFallback = () => {
+        dialog.removeEventListener("pointerdown", onPointerDown);
+        dialog.removeEventListener("pointerup", onPointerUp);
+      };
+    }
+
+    return () => {
+      dialog.removeEventListener("close", onClose);
+      cleanupFallback?.();
+    };
+  }, [sidebarOpen, setSidebarOpen]);
+
+  const formByCode = useMemo(
+    () => new Map((formsPayload?.forms ?? []).map((row) => [row.form_code, row])),
+    [formsPayload?.forms],
   );
   const summary = formsPayload?.summary;
+
+  const mandatoryForms = useMemo(() => {
+    const base = BOTAS_FORM_NAV_ITEMS.filter((item) => item.required);
+    if (formFilter === "all") return base;
+    return base.filter((item) => {
+      const st = formByCode.get(item.code)?.status ?? "empty";
+      if (formFilter === "issues") return st === "failed" || st === "warning";
+      return st === "empty";
+    });
+  }, [formFilter, formByCode]);
+
+  const extraForms = useMemo(() => {
+    const base = BOTAS_FORM_NAV_ITEMS.filter((item) => !item.required);
+    if (formFilter === "all") return base;
+    return base.filter((item) => {
+      const st = formByCode.get(item.code)?.status ?? "empty";
+      if (formFilter === "issues") return st === "failed" || st === "warning";
+      return st === "empty";
+    });
+  }, [formFilter, formByCode]);
+
+  const issueCount =
+    (summary?.failed_forms?.length ?? 0) + (summary?.warning_forms_count ?? 0);
+  const missingCount = summary?.missing_required ?? 11;
 
   function renderFormNavRow(item: (typeof BOTAS_FORM_NAV_ITEMS)[number]) {
     const rec = formByCode.get(item.code);
@@ -157,7 +249,7 @@ export function Sidebar() {
         title={`${item.botasCode} — ${item.title}`}
         aria-current={isActive ? "page" : undefined}
         className={cn(
-          "flex w-full items-center justify-between gap-1.5 rounded-lg border px-2 py-1 text-left text-[11px] transition-colors",
+          "flex w-full items-center justify-between gap-1.5 rounded-lg border px-2 py-1.5 text-left text-[11px] transition-colors",
           isActive
             ? "border-[var(--primary-border)] bg-[var(--primary-soft)] font-semibold text-[var(--text)]"
             : "border-transparent text-[var(--text-soft)] hover:bg-[var(--surface-3)] hover:text-[var(--text)]",
@@ -172,7 +264,7 @@ export function Sidebar() {
           >
             {item.shortCode}
           </span>
-          <span className="truncate">{item.shortTitle}</span>
+          <span className="truncate leading-snug">{item.shortTitle}</span>
         </span>
         <span className="flex shrink-0 items-center gap-1">
           {item.hasDetailCalc ? (
@@ -187,19 +279,26 @@ export function Sidebar() {
   }
 
   const nav = (
-    <nav className="flex h-full flex-col gap-3">
+    <nav className="flex h-full flex-col gap-3" aria-label="Ana gezinme">
       <div className="flex items-center justify-between px-1">
-        <div className="flex items-center gap-2.5">
-          <span className="grid size-9 place-items-center rounded-xl border border-[color-mix(in_srgb,var(--primary)_35%,transparent)] bg-[var(--primary-soft)] text-[var(--primary-strong)]">
-            <Droplet size={18} strokeWidth={2} aria-hidden />
-          </span>
+        <button
+          type="button"
+          className="flex items-center gap-2.5 text-left"
+          onClick={() => {
+            setTab("dashboard");
+            setSidebarOpen(false);
+          }}
+        >
+          <HydroLogo size={38} />
           <div>
-            <p className="text-[17px] font-bold leading-none tracking-[-0.02em] text-[var(--text)]">HYDRO</p>
+            <p className="text-[17px] font-bold leading-none tracking-[-0.02em] text-[var(--text)]">
+              HYDRO
+            </p>
             <p className="mt-1 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
               Test Platformu
             </p>
           </div>
-        </div>
+        </button>
         <button
           type="button"
           className="btn btn-icon lg:hidden"
@@ -215,7 +314,10 @@ export function Sidebar() {
         <p className="text-[9.5px] font-bold uppercase tracking-[0.11em] text-[var(--primary)]">
           Aktif Proje &amp; Test Bölümü
         </p>
-        <p className="mt-0.5 truncate text-[11px] font-semibold text-[var(--text)]" title={projectName || "Proje seçilmedi"}>
+        <p
+          className="mt-0.5 truncate text-[11px] font-semibold text-[var(--text)]"
+          title={projectName || "Proje seçilmedi"}
+        >
           {projectName || "Genel Çalışma Alanı"}
         </p>
         {projectSessions && projectSessions.length > 0 ? (
@@ -243,7 +345,10 @@ export function Sidebar() {
         ) : (
           <button
             type="button"
-            onClick={() => setTab("projects")}
+            onClick={() => {
+              setTab("projects");
+              setSidebarOpen(false);
+            }}
             className="mt-1.5 block w-full truncate rounded-lg border border-[var(--border)] bg-[var(--canvas)] px-2 py-1 text-left text-[10.5px] text-[var(--text-muted)] hover:border-[var(--primary)]"
           >
             {sessionName || "Kesit seçin →"}
@@ -308,8 +413,48 @@ export function Sidebar() {
           </button>
 
           {formsExpanded ? (
-            <div className="mt-1 space-y-0.5">
-              {mandatoryForms.map((item) => renderFormNavRow(item))}
+            <div className="mt-1.5 space-y-1">
+              {/* Hızlı durum filtresi */}
+              <div
+                role="group"
+                aria-label="Form durum filtresi"
+                className="grid grid-cols-3 gap-1 px-0.5"
+              >
+                {(
+                  [
+                    ["all", "Tümü"],
+                    ["issues", `Bulgulu${issueCount ? ` (${issueCount})` : ""}`],
+                    ["empty", `Eksik (${missingCount})`],
+                  ] as const
+                ).map(([key, lbl]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    aria-pressed={formFilter === key}
+                    onClick={() => setFormFilter(key)}
+                    className={cn(
+                      "rounded-md border px-1.5 py-0.5 text-[9.5px] font-semibold transition-colors",
+                      formFilter === key
+                        ? "border-[var(--primary-border)] bg-[var(--primary-soft)] text-[var(--primary)]"
+                        : "border-[var(--border)] bg-[var(--surface)] text-[var(--text-faint)] hover:text-[var(--text-soft)]",
+                    )}
+                  >
+                    {lbl}
+                  </button>
+                ))}
+              </div>
+
+              {mandatoryForms.length === 0 ? (
+                <p className="px-2 py-2 text-center text-[10.5px] text-[var(--text-faint)]">
+                  {formFilter === "issues"
+                    ? "Bulgu veya uyarı içeren form yok."
+                    : "Eksik zorunlu form kalmadı."}
+                </p>
+              ) : (
+                <div className="space-y-0.5">
+                  {mandatoryForms.map((item) => renderFormNavRow(item))}
+                </div>
+              )}
 
               <div className="pt-1">
                 <button
@@ -328,7 +473,13 @@ export function Sidebar() {
                 </button>
                 {extrasExpanded ? (
                   <div className="mt-1 space-y-0.5 pl-1">
-                    {extraForms.map((item) => renderFormNavRow(item))}
+                    {extraForms.length === 0 ? (
+                      <p className="px-2 py-1 text-[10px] text-[var(--text-faint)]">
+                        Seçili filtreye uyan ek form yok.
+                      </p>
+                    ) : (
+                      extraForms.map((item) => renderFormNavRow(item))
+                    )}
                   </div>
                 ) : null}
               </div>
@@ -379,7 +530,7 @@ export function Sidebar() {
                 ? "Çevrimdışı mod"
                 : "Kontrol ediliyor"}
           </span>
-          <span className="font-mono text-[10px]">v{meta?.app.version ?? "1.9.0"}</span>
+          <span className="font-mono text-[10px]">v{meta?.app.version ?? "1.9.1"}</span>
         </div>
         <button
           type="button"
@@ -414,7 +565,7 @@ export function Sidebar() {
     <>
       <aside
         className={cn(
-          "hidden w-[264px] shrink-0 border-r border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-2)_72%,transparent)] px-3 py-3.5",
+          "hidden w-[280px] shrink-0 border-r border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-2)_72%,transparent)] px-3 py-3.5",
           desktopSidebarOpen && "lg:block",
         )}
       >
@@ -422,18 +573,14 @@ export function Sidebar() {
       </aside>
 
       {sidebarOpen ? (
-        <div className="fixed inset-0 z-[60] lg:hidden">
-          <button
-            type="button"
-            className="absolute inset-0"
-            style={{ background: "var(--overlay)" }}
-            aria-label="Menüyü kapat"
-            onClick={() => setSidebarOpen(false)}
-          />
-          <aside className="relative h-full w-[274px] border-r border-[var(--border)] bg-[var(--surface)] px-3 py-4 shadow-2xl">
-            {nav}
-          </aside>
-        </div>
+        <dialog
+          ref={mobileDrawerRef}
+          aria-label="Gezinme menüsü"
+          {...({ closedby: "any" } as Record<string, unknown>)}
+          className="drawer-dialog lg:hidden"
+        >
+          <div className="h-full px-3 py-4">{nav}</div>
+        </dialog>
       ) : null}
     </>
   );

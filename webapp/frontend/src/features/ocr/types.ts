@@ -276,8 +276,8 @@ export interface ListEnvelope<T> {
 }
 
 export interface OcrEngineInfo {
-  name: string;
-  version: string;
+  name: string | null;
+  version: string | null;
   languages: string[];
   default_language: string;
 }
@@ -286,6 +286,11 @@ export interface OcrPdfRasterizerInfo {
   available: boolean;
   engine: string | null;
   note: string;
+}
+
+export interface OcrTextLayerInfo {
+  available: boolean;
+  engines?: string[];
 }
 
 export interface OcrLimits {
@@ -308,6 +313,7 @@ export interface OcrStatus {
   status_text: string;
   engine?: OcrEngineInfo | null;
   pdf_rasterizer?: OcrPdfRasterizerInfo | null;
+  text_layer?: OcrTextLayerInfo | null;
   limits?: OcrLimits;
   queue?: { queued: number; running: number; max_concurrency: number };
   thresholds?: OcrThresholds;

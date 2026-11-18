@@ -5,10 +5,18 @@ import { formatBytes, formatNumber } from "../format";
 import type { OcrStatus } from "../types";
 import { TONE_BADGE_CLASSES } from "./tone";
 
+export interface StatusErrorDetail {
+  code: string;
+  status: number;
+  message: string;
+  requestId?: string | null;
+}
+
 export interface StatusPanelProps {
   status: OcrStatus | null;
   loading: boolean;
   error: boolean;
+  errorDetail?: StatusErrorDetail | null;
   onRetry: () => void;
 }
 
@@ -21,13 +29,62 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+function errorHeadline(detail: StatusErrorDetail | null | undefined): string {
+  if (!detail) return "Sunucuya ulaşılamadı. Bağlantıyı kontrol edip yeniden deneyin.";
+  if (detail.code === "aborted") {
+    return "OCR motoru durum sorgusu zaman aşımına uğradı.";
+  }
+  if (detail.status >= 400) {
+    return detail.message || `Sunucu OCR durumunu döndüremedi (HTTP ${detail.status}).`;
+  }
+  return "Yerel HYDRO Web sunucusuna ulaşılamadı.";
+}
+
+function errorGuidance(detail: StatusErrorDetail | null | undefined): string {
+  if (!detail) {
+    return "Servis kapalıysa tarama başlatılamaz; yüklediğiniz dosya cihazdan çıkmaz.";
+  }
+  if (detail.code === "aborted") {
+    return "Kurum antivirüs/EDR ilk taraması arka planda başlatmayı yavaşlatmış olabilir. Tekrar deneyin; metin katmanlı PDF ve Excel (.xlsx/.xls) dosyalarını yine doğrudan analiz edebilirsiniz.";
+  }
+  if (detail.status >= 400) {
+    const reqNote = detail.requestId ? ` · id: ${detail.requestId}` : "";
+    if (detail.status === 502 || detail.status === 503 || detail.status === 403) {
+      return `Kurum vekil sunucusu (proxy) veya yerel servis yanıtı kesti (${detail.code}${reqNote}). Adresin 127.0.0.1 üzerinden açıldığından emin olun.`;
+    }
+    return `Teknik kod: ${detail.code}${reqNote}. Yerel sunucu çalışıyorsa metin katmanlı PDF ve Excel analizini yine deneyebilirsiniz.`;
+  }
+  return '"HYDRO Web Sunucusu" masaüstü penceresini kapatmadığınızdan (simge durumunda açık bırakın), antivirüs/EDR engeli olmadığından ve adresin 127.0.0.1 üzerinden açıldığından emin olun. Dosyanız cihazdan çıkmaz.';
+}
+
 export default function StatusPanel({
   status,
   loading,
   error,
+  errorDetail,
   onRetry,
 }: StatusPanelProps) {
   const available = status?.available === true && !error;
+  const isTimeout = errorDetail?.code === "aborted";
+  const isHttpError = Boolean(errorDetail && errorDetail.status >= 400);
+  const badgeText = error
+    ? isTimeout
+      ? "Zaman aşımı"
+      : isHttpError
+        ? `Hata (${errorDetail?.status})`
+        : "Çevrimdışı"
+    : available
+      ? "Hazır"
+      : "Kullanılamıyor";
+
+  const engineLabel =
+    status?.engine?.name === "windows_ocr"
+      ? "Windows Yerleşik OCR"
+      : status?.engine?.name === "vision"
+        ? "macOS Vision"
+        : status?.engine?.name === "tesseract"
+          ? "Tesseract OCR"
+          : "Görüntü OCR";
 
   return (
     <section className="panel p-5" aria-labelledby="ocr-status-title" aria-busy={loading}>
@@ -54,25 +111,24 @@ export default function StatusPanel({
                   : TONE_BADGE_CLASSES.warning,
             )}
           >
-            {error ? "Çevrimdışı" : available ? "Hazır" : "Kullanılamıyor"}
+            {badgeText}
           </span>
         )}
       </div>
 
       {loading && !status ? (
-        <p className="mt-4 text-xs text-[var(--text-muted)]" role="status">
-          Tesseract ve PDF rasterizer durumu sorgulanıyor…
+        <p className="mt-4 text-xs text-[var(--text-muted)]">
+          OCR motoru ve PDF görüntüleyici durumu sorgulanıyor…
         </p>
       ) : null}
 
       {error ? (
-        <div className="mt-4 rounded-lg border border-[var(--danger-border)] bg-[var(--danger-bg)] px-3 py-3 text-xs leading-relaxed text-[var(--danger)]">
-          <p className="font-medium">
-            Sunucuya ulaşılamadı. Bağlantıyı kontrol edip yeniden deneyin.
-          </p>
-          <p className="mt-1 text-[11px] text-[var(--danger)]">
-            Servis kapalıysa analiz başlatılamaz; yüklediğiniz dosya cihazdan çıkmaz.
-          </p>
+        <div
+          role="alert"
+          className="mt-4 rounded-lg border border-[var(--danger-border)] bg-[var(--danger-bg)] px-3 py-3 text-xs leading-relaxed text-[var(--danger)]"
+        >
+          <p className="font-medium">{errorHeadline(errorDetail)}</p>
+          <p className="mt-1 text-[11px] text-[var(--danger)]">{errorGuidance(errorDetail)}</p>
           <div className="mt-2.5 flex flex-wrap gap-2">
             <button
               type="button"
@@ -90,12 +146,12 @@ export default function StatusPanel({
         <>
           <p className="mt-3 text-[11px] leading-relaxed text-[var(--text-muted)]">{status.status_text}</p>
           <dl className="mt-3">
-            <Row label="Tesseract">
-              {status.engine ? (
+            <Row label={engineLabel}>
+              {status.engine?.name ? (
                 <>
-                  <span className="numeric">{status.engine.version}</span>
+                  <span className="numeric">{status.engine.version || "Yerleşik"}</span>
                   <span className="block text-[10px] text-[var(--text-faint)]">
-                    {(status.engine.languages ?? []).join(", ") || "dil yok"} ·{" "}
+                    {(status.engine.languages ?? []).join(", ") || "dil bilgisi yok"} ·{" "}
                     {status.engine.default_language}
                   </span>
                 </>
@@ -109,6 +165,13 @@ export default function StatusPanel({
               ) : (
                 <span className="text-[var(--warning)]">Kapalı</span>
               )}
+            </Row>
+            <Row label="Metin PDF / Excel">
+              <span>
+                {status.text_layer?.available === false
+                  ? "Devre dışı"
+                  : "Her zaman aktif (pypdf · openpyxl)"}
+              </span>
             </Row>
             <Row label="Kuyruk">
               {status.queue ? (
@@ -145,14 +208,15 @@ export default function StatusPanel({
           {status.pdf_rasterizer && !status.pdf_rasterizer.available ? (
             <p className="mt-2 rounded-lg border border-[var(--warning-border)] bg-[var(--warning-bg)] px-2.5 py-2 text-[10px] leading-relaxed text-[var(--warning)]">
               {status.pdf_rasterizer.note ||
-                "Taranmış PDF desteği kapalı; metin katmanlı PDF ve görsel OCR çalışmaya devam eder."}
+                "Taranmış PDF desteği kapalı; metin katmanlı PDF, Excel ve görsel OCR çalışmaya devam eder."}
             </p>
           ) : null}
 
           {!status.available ? (
             <p className="mt-2 rounded-lg border border-[var(--danger-border)] bg-[var(--danger-bg)] px-2.5 py-2 text-[10px] leading-relaxed text-[var(--danger)]">
-              Taranmış belge için OCR kurulu değil. Yönetici kurulumu:{" "}
-              <span className="numeric">brew install tesseract tesseract-lang</span>
+              Taranmış belge/görsel için OCR motoru etkin değil; ancak metin katmanlı PDF, CAD
+              (.dwg/.dxf) ve Excel (.xlsx/.xls) raporları doğrudan analiz edilebilir. Kurumsal
+              Windows 10/11'de yerleşik Türkçe OCR (WinRT) veya yönetici onaylı Tesseract kullanılabilir.
             </p>
           ) : null}
         </>

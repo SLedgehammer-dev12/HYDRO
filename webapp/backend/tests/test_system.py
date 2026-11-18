@@ -16,6 +16,7 @@ def test_health_ok(client):
     assert body["db"]["ok"] is True
     assert body["db"]["dialect"] == "sqlite"
     assert body["data_dir"]["writable"] is True
+    assert isinstance(body["instance_id"], str) and len(body["instance_id"]) >= 8
     assert "queue" in body["ocr"]
     assert response.headers["X-Request-ID"]
 

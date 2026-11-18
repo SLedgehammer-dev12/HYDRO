@@ -124,6 +124,9 @@ APP_VERSION = APP_METADATA.APP_VERSION
 BINARY_NAME = APP_METADATA.BINARY_NAME
 APP_DISPLAY_NAME = APP_METADATA.APP_TITLE
 BUNDLE_IDENTIFIER = 'com.hidrostatik.degerlendirme'
+ICON_ICO = PROJECT_ROOT / 'assets' / 'icons' / 'hydro.ico'
+ICON_ICNS = PROJECT_ROOT / 'assets' / 'icons' / 'hydro.icns'
+ICON_PNG = PROJECT_ROOT / 'assets' / 'icons' / 'hydro-256.png'
 
 # windows_manifest.xml surum alanini build_exe.ps1 build sirasinda gunceller;
 # burada yalnizca mevcut dosya varsa kullanilir (macOS/Linux build'inde etkisiz).
@@ -140,6 +143,8 @@ EXE_KWARGS = {
     'codesign_identity': None,
     'entitlements_file': None,
 }
+if sys.platform == 'win32' and ICON_ICO.is_file():
+    EXE_KWARGS['icon'] = str(ICON_ICO)
 
 MANIFEST_PATH = PROJECT_ROOT / 'windows_manifest.xml'
 if sys.platform == 'win32' and MANIFEST_PATH.exists():
@@ -156,6 +161,8 @@ _extra_datas = [
     ('hidrostatik_test/data/water_property_table_v1.csv', 'hidrostatik_test/data'),
     ('hidrostatik_test/data/water_property_table_v1.meta.json', 'hidrostatik_test/data'),
 ]
+if ICON_PNG.is_file():
+    _extra_datas.append((str(ICON_PNG), 'assets/icons'))
 _extra_binaries = []
 _extra_hidden = [
     'CoolProp.CoolProp',
@@ -227,7 +234,7 @@ if sys.platform == 'darwin':
     app = BUNDLE(
         coll,
         name=f'{BINARY_NAME}.app',
-        icon=None,
+        icon=str(ICON_ICNS) if ICON_ICNS.is_file() else None,
         bundle_identifier=BUNDLE_IDENTIFIER,
         info_plist={
             'NSPrincipalClass': 'NSApplication',

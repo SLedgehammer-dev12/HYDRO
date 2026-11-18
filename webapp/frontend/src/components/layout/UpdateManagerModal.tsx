@@ -22,6 +22,7 @@ import { useAppStore } from "../../store/useAppStore";
 import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { Modal } from "../ui/Dialog";
+import { HydroLogo } from "../ui/HydroLogo";
 import { InlineNotice } from "../ui/State";
 
 function formatBytes(bytes: number): string {
@@ -100,7 +101,12 @@ export function UpdateManagerModal() {
     <Modal
       open={open}
       onClose={() => setOpen(false)}
-      title="HYDRO Web Güncelleme Yöneticisi"
+      title={
+        <span className="inline-flex items-center gap-2.5">
+          <HydroLogo size={24} />
+          <span>HYDRO Web Güncelleme Yöneticisi</span>
+        </span>
+      }
       description="GitHub Releases üzerinden yeni HydroWeb sürümlerini denetleyin, SHA-256 ve Ed25519 dijital imzasıyla doğrulayıp kurun."
       className="max-w-2xl"
       footer={
@@ -162,7 +168,7 @@ export function UpdateManagerModal() {
               Yüklü Sürüm
             </span>
             <p className="mt-1 font-mono text-base font-bold text-[var(--text)]">
-              v{status?.current_version ?? "1.9.0"}
+              v{status?.current_version ?? "1.9.1"}
             </p>
             <p className="mt-0.5 text-[10.5px] text-[var(--text-muted)]">
               {status?.runtime.frozen ? "Paketli Masaüstü (HydroWeb)" : "Kaynak / Web Sunucu Modu"}

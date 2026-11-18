@@ -3,6 +3,9 @@ import {
   ArrowRight,
   CheckCircle2,
   Circle,
+  FileScan,
+  FileText,
+  FolderKanban,
   Gauge,
   Layers,
   Map,
@@ -22,10 +25,11 @@ import { OfflineNotice, EmptyState, InlineNotice } from "../components/ui/State"
 import { ElevationProfileChart, TrendChart } from "../components/charts/Charts";
 import { RatioGauge, ProgressBar } from "../components/ui/Gauge";
 import { geometryForInputs } from "../lib/mock";
-import { CHECK_DEFINITIONS } from "../lib/constants";
+import { BOTAS_FORM_BY_CODE, CHECK_DEFINITIONS } from "../lib/constants";
 import { dateTime, fmt, num, relativeTime, statusTone } from "../lib/format";
+import type { BotasFormCode } from "../lib/types";
 import { useAppStore } from "../store/useAppStore";
-import { useMeta } from "../hooks/queries";
+import { useMeta, useSessionForms } from "../hooks/queries";
 import { cn } from "../lib/utils";
 
 export function DashboardPage() {
@@ -38,8 +42,17 @@ export function DashboardPage() {
   const projectId = useAppStore((state) => state.projectId);
   const projectName = useAppStore((state) => state.projectName);
   const projectCode = useAppStore((state) => state.projectCode);
+  const sessionId = useAppStore((state) => state.sessionId);
   const setTab = useAppStore((state) => state.setTab);
+  const openForm = useAppStore((state) => state.openForm);
   const { data: meta } = useMeta();
+  const { data: formsPayload } = useSessionForms(sessionId);
+  const formsSummary = formsPayload?.summary;
+  const targetFormCode = (
+    formsSummary?.first_issue_form_code ||
+    formsPayload?.missing_required_forms?.[0]?.form_code ||
+    "test_data"
+  ) as BotasFormCode;
 
   const geometry = results.geometry ?? geometryForInputs(inputs);
   const air = results.air;
@@ -98,6 +111,15 @@ export function DashboardPage() {
       ready: deltaReady,
       tab: "pressure" as const,
       detail: deltaReady ? `ΔT ${fmt.c(inputs.pressure.delta_t_c)} · Pa ${fmt.bar(inputs.pressure.actual_pressure_change_bar)}` : "Eksik",
+    },
+    {
+      label: `BOTAŞ Form Dosyası (${formsSummary?.filled_required ?? 0}/${formsSummary?.required_total ?? 11})`,
+      ready: Boolean(formsSummary?.complete && (formsSummary.failed_forms?.length ?? 0) === 0),
+      tab: "forms" as const,
+      formCode: targetFormCode,
+      detail: formsSummary
+        ? `${formsSummary.filled_required}/${formsSummary.required_total} zorunlu · ${(formsSummary.failed_forms?.length ?? 0) + (formsSummary.warning_forms_count ?? 0)} bulgu/uyarı`
+        : "Kesit seçildiğinde izlenir",
     },
   ];
 
@@ -179,6 +201,66 @@ export function DashboardPage() {
         />
       </div>
 
+      {/* Denetimli 3 Adımlı Hidrostatik Test İş Akışı */}
+      <div className="panel p-3.5">
+        <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--primary)]">
+            Denetimli Hidrostatik Test İş Akışı
+          </span>
+          <span className="text-[11px] text-[var(--text-muted)]">
+            Proje &amp; OCR → 11 BOTAŞ Formu (015→KUR-002) → Kabul &amp; Rapor
+          </span>
+        </div>
+        <div className="grid gap-2.5 md:grid-cols-3">
+          <button
+            type="button"
+            onClick={() => setTab("projects")}
+            className="flex items-start gap-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3 text-left transition-colors hover:border-[var(--primary)]"
+          >
+            <FolderKanban size={17} className="mt-0.5 shrink-0 text-[var(--primary)]" aria-hidden />
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold text-[var(--text)]">1. Proje &amp; Plan-Profil / OCR</p>
+              <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">
+                Projeyi seçin veya test raporu PDF&apos;ini doğrudan OCR&apos;dan yükleyin.
+              </p>
+            </div>
+            <ArrowRight size={13} className="mt-1 shrink-0 text-[var(--text-faint)]" aria-hidden />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => openForm(targetFormCode)}
+            className="flex items-start gap-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3 text-left transition-colors hover:border-[var(--primary)]"
+          >
+            <FileText size={17} className="mt-0.5 shrink-0 text-[var(--primary)]" aria-hidden />
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold text-[var(--text)]">
+                2. 11 BOTAŞ Formunu Denetle ({formsSummary?.filled_required ?? 0}/{formsSummary?.required_total ?? 11})
+              </p>
+              <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">
+                {BOTAS_FORM_BY_CODE[targetFormCode]?.shortCode ?? "015"} · Sıralı form ve şartname bulgularını açın.
+              </p>
+            </div>
+            <ArrowRight size={13} className="mt-1 shrink-0 text-[var(--text-faint)]" aria-hidden />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setTab("ocr")}
+            className="flex items-start gap-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3 text-left transition-colors hover:border-[var(--primary)]"
+          >
+            <FileScan size={17} className="mt-0.5 shrink-0 text-[var(--primary)]" aria-hidden />
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold text-[var(--text)]">3. OCR Rapor Kontrolü &amp; Çıktı</p>
+              <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">
+                Çok sayfalı hakediş PDF / Excel dosyalarını otomatik ayrıştırıp kaydedin.
+              </p>
+            </div>
+            <ArrowRight size={13} className="mt-1 shrink-0 text-[var(--text-faint)]" aria-hidden />
+          </button>
+        </div>
+      </div>
+
       <div className="grid gap-4 xl:grid-cols-[1fr_1fr_0.9fr]">
         <DecisionCard
           decision={air?.decision}
@@ -248,7 +330,10 @@ export function DashboardPage() {
                 <button
                   type="button"
                   className="flex w-full items-start gap-2 rounded-lg border border-transparent px-1.5 py-1.5 text-left transition-colors hover:border-[var(--border)] hover:bg-[var(--surface-2)]"
-                  onClick={() => setTab(item.tab)}
+                  onClick={() => {
+                    if ("formCode" in item && item.formCode) openForm(item.formCode);
+                    else setTab(item.tab);
+                  }}
                 >
                   {item.ready ? (
                     <CheckCircle2 size={14} className="mt-0.5 shrink-0 tone-pass" aria-hidden />

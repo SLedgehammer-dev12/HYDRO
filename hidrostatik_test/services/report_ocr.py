@@ -20,15 +20,20 @@ zorunlu degildir; yoksa metin katmani ile devam edilir ve anlasilir bir
 
 from __future__ import annotations
 
+import asyncio
 import difflib
 import importlib
 import importlib.util
 import io
 import math
 import os
+import platform
 import re
 import shutil
+import subprocess
 import sys
+import threading
+import time
 import zipfile
 from dataclasses import dataclass, replace
 from datetime import date as _date
@@ -850,16 +855,277 @@ def _configure_pytesseract(pytesseract_mod: Any) -> None:
         os.environ["TESSDATA_PREFIX"] = str(tessdata_dir)
 
 
+_OCR_PROBE_LOCK = threading.Lock()
+_TESSERACT_PROBE_CACHE: dict[
+    tuple[str, str], tuple[float, tuple[bool, str | None, tuple[str, ...]]]
+] = {}
+_WINDOWS_OCR_PROBE_CACHE: dict[
+    tuple[str, str], tuple[float, tuple[bool, str | None, tuple[str, ...], str]]
+] = {}
+_OCR_PROBE_SUCCESS_TTL_S: Final[float] = 120.0
+_OCR_PROBE_FAILURE_TTL_S: Final[float] = 30.0
+_TESSERACT_PROBE_TIMEOUT_S: Final[float] = 4.0
+_WIN_OCR_MAX_DIMENSION_FALLBACK: Final[int] = 4096
+
+
+def clear_ocr_probe_cache() -> None:
+    """Clear cached OCR engine probe results (next status check re-probes live)."""
+
+    with _OCR_PROBE_LOCK:
+        _TESSERACT_PROBE_CACHE.clear()
+        _WINDOWS_OCR_PROBE_CACHE.clear()
+
+
+def _subprocess_win_kwargs() -> dict[str, Any]:
+    if sys.platform == "win32":
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        return {"creationflags": flags}
+    return {}
+
+
+def _tesseract_subprocess_env(cmd_path: Path) -> dict[str, str]:
+    env = os.environ.copy()
+    tessdata_dir = cmd_path.parent / "tessdata"
+    if not env.get("TESSDATA_PREFIX") and tessdata_dir.is_dir():
+        env["TESSDATA_PREFIX"] = str(tessdata_dir)
+    return env
+
+
+def _probe_tesseract(*, force_refresh: bool = False) -> tuple[bool, str | None, tuple[str, ...]]:
+    """Safely probe Tesseract binary once with strict timeouts and TTL caching."""
+
+    if importlib.util.find_spec("pytesseract") is None or importlib.util.find_spec("PIL") is None:
+        return False, None, ()
+
+    cmd_path = _resolve_tesseract_cmd()
+    if cmd_path is None:
+        return False, None, ()
+
+    env = _tesseract_subprocess_env(cmd_path)
+    cache_key = (str(cmd_path), env.get("TESSDATA_PREFIX", ""))
+    now = time.monotonic()
+
+    if not force_refresh:
+        with _OCR_PROBE_LOCK:
+            cached = _TESSERACT_PROBE_CACHE.get(cache_key)
+            if cached is not None and cached[0] > now:
+                return cached[1]
+
+    result: tuple[bool, str | None, tuple[str, ...]] = (False, None, ())
+    try:
+        ver_proc = subprocess.run(
+            [str(cmd_path), "--version"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=_TESSERACT_PROBE_TIMEOUT_S,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            env=env,
+            **_subprocess_win_kwargs(),
+        )
+        if ver_proc.returncode == 0:
+            first_line = next(
+                (line.strip() for line in ver_proc.stdout.splitlines() if line.strip()),
+                "",
+            )
+            match = re.search(r"(\d+(?:\.\d+)+)", first_line)
+            version_str = match.group(1) if match else (first_line or None)
+
+            langs: list[str] = []
+            try:
+                lang_proc = subprocess.run(
+                    [str(cmd_path), "--list-langs"],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    timeout=_TESSERACT_PROBE_TIMEOUT_S,
+                    encoding="utf-8",
+                    errors="replace",
+                    check=False,
+                    env=env,
+                    **_subprocess_win_kwargs(),
+                )
+                if lang_proc.returncode in (0, 1) and lang_proc.stdout:
+                    for raw_line in lang_proc.stdout.splitlines():
+                        token = raw_line.strip()
+                        if re.fullmatch(r"[A-Za-z_]{2,12}", token):
+                            langs.append(token)
+            except (Exception, SystemExit):
+                langs = []
+
+            result = (True, version_str, tuple(sorted(set(langs))))
+    except (Exception, SystemExit):
+        result = (False, None, ())
+
+    ttl = _OCR_PROBE_SUCCESS_TTL_S if result[0] else _OCR_PROBE_FAILURE_TTL_S
+    with _OCR_PROBE_LOCK:
+        _TESSERACT_PROBE_CACHE[cache_key] = (time.monotonic() + ttl, result)
+    return result
+
+
 def _tesseract_available() -> bool:
-    if importlib.util.find_spec("pytesseract") is None:
-        return False
-    if importlib.util.find_spec("PIL") is None:
+    return _probe_tesseract()[0]
+
+
+def _run_winrt_coro(coro_factory: Any, *, timeout: float = 30.0) -> Any:
+    """Execute a WinRT async coroutine cleanly inside a dedicated MTA worker thread."""
+
+    box: dict[str, Any] = {}
+
+    def _worker() -> None:
+        try:
+            box["result"] = asyncio.run(coro_factory())
+        except BaseException as exc:  # noqa: BLE001
+            box["error"] = exc
+
+    thread = threading.Thread(target=_worker, name="hydro-winrt-ocr", daemon=True)
+    thread.start()
+    thread.join(timeout=timeout)
+    if thread.is_alive():
+        raise ReportOcrError(
+            "Windows yerlesik OCR/PDF islemi zaman asimina ugradi.",
+            ERROR_OCR_UNAVAILABLE,
+        )
+    if "error" in box:
+        exc = box["error"]
+        if isinstance(exc, ReportOcrError):
+            raise exc
+        raise exc
+    return box.get("result")
+
+
+def _select_windows_ocr_engine(ocr_mod: Any, language_cls: Any) -> tuple[Any, str, tuple[str, ...]]:
+    """Select the best Windows.Media.Ocr engine preferring Turkish then user/English."""
+
+    raw_langs = getattr(ocr_mod.OcrEngine, "available_recognizer_languages", ()) or ()
+    avail = tuple(
+        str(getattr(item, "language_tag", "") or "")
+        for item in raw_langs
+        if getattr(item, "language_tag", "")
+    )
+    candidates: list[str] = []
+    env_lang = os.environ.get("HYDRO_OCR_LANG", "").strip()
+    if env_lang and "+" not in env_lang:
+        candidates.append(env_lang)
+    candidates.append("tr-TR")
+    for tag in avail:
+        if tag.casefold().startswith("tr") and tag not in candidates:
+            candidates.append(tag)
+
+    for tag in candidates:
+        try:
+            engine = ocr_mod.OcrEngine.try_create_from_language(language_cls(tag))
+            if engine is not None:
+                resolved = str(
+                    getattr(getattr(engine, "recognizer_language", None), "language_tag", "") or tag
+                )
+                return engine, resolved, avail
+        except Exception:
+            continue
+
+    try:
+        profile_engine = ocr_mod.OcrEngine.try_create_from_user_profile_languages()
+        if profile_engine is not None:
+            resolved = str(
+                getattr(getattr(profile_engine, "recognizer_language", None), "language_tag", "")
+                or ""
+            )
+            return profile_engine, resolved, avail
+    except Exception:
+        pass
+
+    fallback_tags = ["en-US", *(t for t in avail if t.casefold().startswith("en")), *avail]
+    seen: set[str] = set()
+    for tag in fallback_tags:
+        if not tag or tag in seen:
+            continue
+        seen.add(tag)
+        try:
+            engine = ocr_mod.OcrEngine.try_create_from_language(language_cls(tag))
+            if engine is not None:
+                resolved = str(
+                    getattr(getattr(engine, "recognizer_language", None), "language_tag", "") or tag
+                )
+                return engine, resolved, avail
+        except Exception:
+            continue
+
+    return None, "", avail
+
+
+def _probe_windows_ocr(
+    *, force_refresh: bool = False
+) -> tuple[bool, str | None, tuple[str, ...], str]:
+    """Probe in-process Windows 10/11 WinRT OCR without spawning child processes."""
+
+    if sys.platform != "win32":
+        return False, None, (), ""
+    if (
+        importlib.util.find_spec("winrt.windows.media.ocr") is None
+        or importlib.util.find_spec("winrt.windows.globalization") is None
+        or importlib.util.find_spec("PIL") is None
+    ):
+        return False, None, (), ""
+
+    cache_key = (sys.platform, os.environ.get("HYDRO_OCR_LANG", ""))
+    now = time.monotonic()
+    if not force_refresh:
+        with _OCR_PROBE_LOCK:
+            cached = _WINDOWS_OCR_PROBE_CACHE.get(cache_key)
+            if cached is not None and cached[0] > now:
+                return cached[1]
+
+    result: tuple[bool, str | None, tuple[str, ...], str] = (False, None, (), "")
+    try:
+        ocr_mod = importlib.import_module("winrt.windows.media.ocr")
+        glob_mod = importlib.import_module("winrt.windows.globalization")
+        engine, active_lang, avail = _select_windows_ocr_engine(ocr_mod, glob_mod.Language)
+        if engine is not None:
+            win_ver = platform.version() or "WinRT"
+            result = (True, win_ver, avail or ((active_lang,) if active_lang else ()), active_lang)
+    except (Exception, SystemExit):
+        result = (False, None, (), "")
+
+    ttl = _OCR_PROBE_SUCCESS_TTL_S if result[0] else _OCR_PROBE_FAILURE_TTL_S
+    with _OCR_PROBE_LOCK:
+        _WINDOWS_OCR_PROBE_CACHE[cache_key] = (time.monotonic() + ttl, result)
+    return result
+
+
+def windows_ocr_available() -> bool:
+    """Return ``True`` when Windows 10/11 built-in WinRT OCR is usable in-process."""
+
+    return _probe_windows_ocr()[0]
+
+
+def _pypdfium2_usable() -> bool:
+    """Return ``True`` only if ``pypdfium2`` and its native DLL load cleanly."""
+
+    if importlib.util.find_spec("pypdfium2") is None:
         return False
     try:
-        pytesseract = importlib.import_module("pytesseract")
-        _configure_pytesseract(pytesseract)
-        pytesseract.get_tesseract_version()
-    except Exception:
+        importlib.import_module("pypdfium2")
+    except (ImportError, OSError):
+        return False
+    return True
+
+
+def windows_pdf_available() -> bool:
+    """Return ``True`` when built-in Windows 10/11 ``Windows.Data.Pdf`` WinRT API is usable."""
+
+    if sys.platform != "win32":
+        return False
+    if (
+        importlib.util.find_spec("winrt.windows.data.pdf") is None
+        or importlib.util.find_spec("winrt.windows.storage.streams") is None
+    ):
+        return False
+    try:
+        importlib.import_module("winrt.windows.data.pdf")
+        importlib.import_module("winrt.windows.storage.streams")
+    except (ImportError, OSError):
         return False
     return True
 
@@ -868,7 +1134,7 @@ def pdf_rasterizer_status() -> tuple[bool, str | None]:
     """Return ``(available, engine_name)`` for rendering scanned PDF pages to images."""
     if importlib.util.find_spec("fitz") is not None:
         return True, "PyMuPDF"
-    if importlib.util.find_spec("pypdfium2") is not None:
+    if _pypdfium2_usable():
         return True, "pypdfium2"
     if (
         sys.platform == "darwin"
@@ -876,6 +1142,8 @@ def pdf_rasterizer_status() -> tuple[bool, str | None]:
         and importlib.util.find_spec("CoreFoundation") is not None
     ):
         return True, "macOS Quartz"
+    if windows_pdf_available():
+        return True, "Windows PDF (WinRT)"
     if importlib.util.find_spec("pdf2image") is not None:
         return True, "pdf2image"
     return False, None
@@ -897,27 +1165,27 @@ def vision_available() -> bool:
 
 
 def ocr_available() -> bool:
-    """Return ``True`` when at least one OCR engine is usable.
+    """Return ``True`` when at least one OCR engine is usable."""
 
-    Sirasiyla Tesseract (tum platformlar) ve macOS Vision (``ocrmac``)
-    denenir. Ikisi de yoksa taranmis belgeler okunamaz.
-    """
-
-    return _tesseract_available() or vision_available()
+    return bool(_resolve_ocr_engine())
 
 
 def _resolve_ocr_engine() -> str:
-    """Return ``"tesseract"``, ``"vision"`` or ``""``.
+    """Return ``"windows_ocr"``, ``"tesseract"``, ``"vision"`` or ``""``.
 
     ``HYDRO_OCR_ENGINE`` ile zorlanabilir: ``auto`` (varsayilan),
-    ``tesseract`` veya ``vision``.
+    ``windows_ocr`` / ``winrt``, ``tesseract`` veya ``vision``.
     """
 
     requested = os.environ.get("HYDRO_OCR_ENGINE", "auto").strip().casefold()
+    if requested in {"windows_ocr", "winrt"}:
+        return "windows_ocr" if windows_ocr_available() else ""
     if requested == "tesseract":
         return "tesseract" if _tesseract_available() else ""
     if requested == "vision":
         return "vision" if vision_available() else ""
+    if sys.platform == "win32" and windows_ocr_available():
+        return "windows_ocr"
     if _tesseract_available():
         return "tesseract"
     if vision_available():
@@ -926,28 +1194,78 @@ def _resolve_ocr_engine() -> str:
 
 
 def ocr_engine_name() -> str:
-    """Return the active OCR engine name: ``tesseract``, ``vision`` or ``""``."""
+    """Return active engine name: ``windows_ocr``, ``tesseract``, ``vision`` or ``""``."""
 
     return _resolve_ocr_engine()
+
+
+def ocr_engine_details(*, force_refresh: bool = False) -> dict[str, Any]:
+    """Return normalized engine availability, metadata, languages and status text."""
+
+    if force_refresh:
+        clear_ocr_probe_cache()
+
+    engine = _resolve_ocr_engine()
+    if engine == "windows_ocr":
+        _, win_ver, langs, active_lang = _probe_windows_ocr()
+        return {
+            "available": True,
+            "engine_name": "windows_ocr",
+            "version": win_ver,
+            "languages": list(langs),
+            "default_language": active_lang or "tr-TR",
+            "status_text": "OCR hazir (Windows yerlesik WinRT OCR + Pillow).",
+        }
+    if engine == "tesseract":
+        _, ver, langs = _probe_tesseract()
+        return {
+            "available": True,
+            "engine_name": "tesseract",
+            "version": ver,
+            "languages": list(langs),
+            "default_language": os.environ.get("HYDRO_OCR_LANG", "tur+eng"),
+            "status_text": "OCR hazir (Tesseract + Pillow).",
+        }
+    if engine == "vision":
+        return {
+            "available": True,
+            "engine_name": "vision",
+            "version": platform.mac_ver()[0] or None,
+            "languages": ["tr-TR", "en-US"],
+            "default_language": "tr-TR",
+            "status_text": "OCR hazir (macOS Vision, ocrmac).",
+        }
+
+    if importlib.util.find_spec("PIL") is None:
+        status_text = "OCR yok: Pillow kurulu degil (requirements-ocr.txt)."
+    elif sys.platform == "win32":
+        status_text = "OCR yok: Windows OCR dil paketi (WinRT) veya Tesseract calistirilabilir dosyasi kullanilamadi."
+    elif importlib.util.find_spec("pytesseract") is None:
+        if sys.platform == "darwin":
+            status_text = "OCR yok: pytesseract/ocrmac kurulu degil (requirements-ocr.txt)."
+        else:
+            status_text = "OCR yok: pytesseract kurulu degil (requirements-ocr.txt)."
+    elif sys.platform == "darwin":
+        status_text = "OCR yok: tesseract calistirilabilir dosyasi ve macOS Vision kullanilamadi."
+    else:
+        status_text = "OCR yok: tesseract calistirilabilir dosyasi bulunamadi."
+
+    return {
+        "available": False,
+        "engine_name": None,
+        "version": None,
+        "languages": [],
+        "default_language": (
+            "tr-TR" if sys.platform == "win32" else os.environ.get("HYDRO_OCR_LANG", "tur+eng")
+        ),
+        "status_text": status_text,
+    }
 
 
 def ocr_status() -> str:
     """Return a short human-readable OCR availability note."""
 
-    engine = _resolve_ocr_engine()
-    if engine == "tesseract":
-        return "OCR hazir (Tesseract + Pillow)."
-    if engine == "vision":
-        return "OCR hazir (macOS Vision, ocrmac)."
-    if importlib.util.find_spec("pytesseract") is None:
-        if sys.platform == "darwin":
-            return "OCR yok: pytesseract/ocrmac kurulu degil (requirements-ocr.txt)."
-        return "OCR yok: pytesseract kurulu degil (requirements-ocr.txt)."
-    if importlib.util.find_spec("PIL") is None:
-        return "OCR yok: Pillow kurulu degil (requirements-ocr.txt)."
-    if sys.platform == "darwin":
-        return "OCR yok: tesseract calistirilabilir dosyasi ve macOS Vision kullanilamadi."
-    return "OCR yok: tesseract calistirilabilir dosyasi bulunamadi."
+    return str(ocr_engine_details()["status_text"])
 
 
 def _ocr_prerequisites_available() -> bool:
@@ -1015,6 +1333,8 @@ def _iter_rendered_pdf_pages_with_pypdfium2(
     pdfium = importlib.import_module("pypdfium2")
     try:
         document = pdfium.PdfDocument(str(path))
+    except OSError:
+        raise
     except Exception as exc:
         msg = str(exc).lower()
         code = ERROR_ENCRYPTED_PDF if "password" in msg else ERROR_CORRUPT_DOCUMENT
@@ -1039,6 +1359,8 @@ def _iter_rendered_pdf_pages_with_pypdfium2(
                 pil_img = pil_img.rotate(-norm_rot, expand=True)
             yield pil_img
     except ReportOcrError:
+        raise
+    except OSError:
         raise
     except Exception as exc:
         raise ReportOcrError(
@@ -1128,6 +1450,130 @@ def _iter_rendered_pdf_pages_with_quartz(
         yield pil_img
 
 
+def _iter_rendered_pdf_pages_with_windows_pdf(
+    path: Path,
+    *,
+    start_page: int,
+    max_pages: int,
+    dpi: int,
+    rotate_deg: int,
+    image_mod: Any,
+) -> Iterator[Any]:
+    """Render PDF pages in-process using built-in Windows 10/11 ``Windows.Data.Pdf``."""
+
+    try:
+        pdf_bytes = path.read_bytes()
+    except OSError as exc:
+        raise ReportOcrError(
+            "PDF dosyasi okunamadi.", ERROR_FILE_NOT_FOUND, detail=str(exc)
+        ) from exc
+    if not pdf_bytes:
+        raise ReportOcrError("PDF dosyasi bos.", ERROR_EMPTY_FILE)
+
+    async def _render_pages() -> list[bytes]:
+        pdf_mod = importlib.import_module("winrt.windows.data.pdf")
+        streams_mod = importlib.import_module("winrt.windows.storage.streams")
+
+        white_color = None
+        try:
+            ui_mod = importlib.import_module("winrt.windows.ui")
+            if hasattr(ui_mod, "ColorHelper"):
+                white_color = ui_mod.ColorHelper.from_argb(255, 255, 255, 255)
+            elif hasattr(ui_mod, "Color"):
+                white_color = ui_mod.Color(255, 255, 255, 255)
+        except Exception:
+            white_color = None
+
+        pdf_stream = streams_mod.InMemoryRandomAccessStream()
+        try:
+            in_buf = streams_mod.Buffer(len(pdf_bytes))
+            in_buf.length = len(pdf_bytes)
+            with memoryview(in_buf) as mv:
+                mv[:] = pdf_bytes
+            await pdf_stream.write_async(in_buf)
+            await pdf_stream.flush_async()
+            pdf_stream.seek(0)
+
+            try:
+                doc = await pdf_mod.PdfDocument.load_from_stream_async(pdf_stream)
+            except Exception as exc:
+                msg = str(exc).lower()
+                code = (
+                    ERROR_ENCRYPTED_PDF
+                    if "password" in msg or "encrypt" in msg
+                    else ERROR_CORRUPT_DOCUMENT
+                )
+                raise ReportOcrError(
+                    "PDF Windows PDF okuyucu ile acilamadi.", code, detail=str(exc)
+                ) from exc
+
+            if getattr(doc, "is_password_protected", False):
+                raise ReportOcrError(
+                    "PDF sifreli; sifre girilmeden rapor okunamaz.",
+                    ERROR_ENCRYPTED_PDF,
+                )
+
+            page_count = int(getattr(doc, "page_count", 0) or 0)
+            end = min(page_count, start_page + max_pages)
+            png_pages: list[bytes] = []
+            for index in range(start_page, end):
+                page = doc.get_page(index)
+                out_stream = streams_mod.InMemoryRandomAccessStream()
+                try:
+                    options = pdf_mod.PdfPageRenderOptions()
+                    size = page.size
+                    if float(size.width) > 0 and float(size.height) > 0:
+                        options.destination_width = max(
+                            1, int(round(float(size.width) * dpi / 96.0))
+                        )
+                        options.destination_height = max(
+                            1, int(round(float(size.height) * dpi / 96.0))
+                        )
+                    if white_color is not None:
+                        options.background_color = white_color
+                    await page.render_to_stream_async(out_stream, options)
+                    out_size = int(out_stream.size)
+                    if out_size > 0:
+                        reader = streams_mod.DataReader(out_stream.get_input_stream_at(0))
+                        try:
+                            loaded = await reader.load_async(out_size)
+                            out_buf = reader.read_buffer(loaded)
+                            png_pages.append(bytes(out_buf))
+                        finally:
+                            if hasattr(reader, "close"):
+                                reader.close()
+                finally:
+                    if hasattr(out_stream, "close"):
+                        out_stream.close()
+                    if hasattr(page, "close"):
+                        page.close()
+            return png_pages
+        finally:
+            if hasattr(pdf_stream, "close"):
+                pdf_stream.close()
+
+    try:
+        png_list: list[bytes] = _run_winrt_coro(
+            _render_pages,
+            timeout=max(45.0, float(max_pages) * 5.0),
+        )
+    except ReportOcrError:
+        raise
+    except Exception as exc:
+        raise ReportOcrError(
+            "PDF sayfasi Windows yerlesik PDF motoru ile goruntuye cevrilemedi.",
+            ERROR_CORRUPT_DOCUMENT,
+            detail=str(exc),
+        ) from exc
+
+    norm_rot = rotate_deg % 360
+    for png_bytes in png_list:
+        pil_img = image_mod.open(io.BytesIO(png_bytes)).convert("RGB")
+        if norm_rot:
+            pil_img = pil_img.rotate(-norm_rot, expand=True)
+        yield pil_img
+
+
 def _iter_rendered_pdf_pages(
     path: Path,
     *,
@@ -1159,15 +1605,22 @@ def _iter_rendered_pdf_pages(
         )
         return
 
-    if importlib.util.find_spec("pypdfium2") is not None:
-        yield from _iter_rendered_pdf_pages_with_pypdfium2(
-            path,
-            start_page=first,
-            max_pages=limit,
-            dpi=dpi,
-            rotate_deg=norm_rot,
-        )
-        return
+    if _pypdfium2_usable():
+        yielded_any = False
+        try:
+            for pil_img in _iter_rendered_pdf_pages_with_pypdfium2(
+                path,
+                start_page=first,
+                max_pages=limit,
+                dpi=dpi,
+                rotate_deg=norm_rot,
+            ):
+                yielded_any = True
+                yield pil_img
+            return
+        except (ImportError, OSError):
+            if yielded_any:
+                raise
 
     if (
         sys.platform == "darwin"
@@ -1175,6 +1628,17 @@ def _iter_rendered_pdf_pages(
         and importlib.util.find_spec("CoreFoundation") is not None
     ):
         yield from _iter_rendered_pdf_pages_with_quartz(
+            path,
+            start_page=first,
+            max_pages=limit,
+            dpi=dpi,
+            rotate_deg=norm_rot,
+            image_mod=Image,
+        )
+        return
+
+    if windows_pdf_available():
+        yield from _iter_rendered_pdf_pages_with_windows_pdf(
             path,
             start_page=first,
             max_pages=limit,
@@ -1206,7 +1670,7 @@ def _iter_rendered_pdf_pages(
         return
 
     raise ReportOcrError(
-        "Taranmis PDF'ler icin pypdfium2, PyMuPDF veya pdf2image gerekli (requirements-ocr.txt).",
+        "Taranmis PDF'ler icin pypdfium2, PyMuPDF, Windows PDF (WinRT) veya pdf2image gerekli.",
         ERROR_OCR_UNAVAILABLE,
     )
 
@@ -1218,11 +1682,13 @@ def _render_pdf_pages(path: Path) -> list[Any]:
 
 def _ocr_pdf_pages(path: Path) -> list[PageText]:
     engine = _resolve_ocr_engine()
+    if engine == "windows_ocr":
+        return _ocr_pdf_pages_with_windows_ocr(path)
     if engine == "vision":
         return _ocr_pdf_pages_with_vision(path)
     if engine != "tesseract":
         raise ReportOcrError(
-            "Taranmis PDF icin OCR motoru bulunamadi (Tesseract veya macOS Vision).",
+            "Taranmis PDF icin OCR motoru bulunamadi (Windows OCR, Tesseract veya macOS Vision).",
             ERROR_OCR_UNAVAILABLE,
         )
 
@@ -1262,6 +1728,25 @@ def _ocr_pdf_pages_with_vision(path: Path) -> list[PageText]:
     return pages
 
 
+def _ocr_pdf_pages_with_windows_ocr(path: Path) -> list[PageText]:
+    """OCR PDF pages sequentially in-process with Windows 10/11 WinRT OCR."""
+    pages: list[PageText] = []
+    for index, image in enumerate(
+        _iter_rendered_pdf_pages(path, max_pages=_max_ocr_pages(), dpi=200)
+    ):
+        text, confidence, warning = _run_windows_ocr(image)
+        pages.append(
+            PageText(
+                page_number=index + 1,
+                text=text,
+                source=TEXT_SOURCE_OCR,
+                confidence=confidence,
+                warning=warning,
+            )
+        )
+    return pages
+
+
 def ocr_pdf_page_rotated(
     path: str | os.PathLike[str],
     *,
@@ -1273,7 +1758,7 @@ def ocr_pdf_page_rotated(
     if not ocr_available():
         return None
     engine = _resolve_ocr_engine()
-    if engine not in {"vision", "tesseract"}:
+    if engine not in {"windows_ocr", "vision", "tesseract"}:
         return None
 
     resolved = validate_input_path(path)
@@ -1294,7 +1779,9 @@ def ocr_pdf_page_rotated(
         return None
     image = rendered[0]
 
-    if engine == "vision":
+    if engine == "windows_ocr":
+        text, confidence, warning = _run_windows_ocr(image)
+    elif engine == "vision":
         text, confidence, warning = _run_vision(image)
     else:
         text, confidence, warning = _run_tesseract(image)
@@ -1310,23 +1797,29 @@ def ocr_pdf_page_rotated(
 def _ocr_image_page(path: Path) -> PageText:
     image = _load_image(path)
     engine = _resolve_ocr_engine()
-    if engine == "vision":
+    if engine == "windows_ocr":
+        text, confidence, warning = _run_windows_ocr(image)
+    elif engine == "vision":
         text, confidence, warning = _run_vision(image)
     elif engine == "tesseract":
         text, confidence, warning = _run_tesseract(image)
     else:
-        has_ocr_pkg = importlib.util.find_spec("pytesseract") is not None or (
-            sys.platform == "darwin" and importlib.util.find_spec("ocrmac") is not None
+        has_ocr_pkg = (
+            importlib.util.find_spec("pytesseract") is not None
+            or (sys.platform == "darwin" and importlib.util.find_spec("ocrmac") is not None)
+            or (
+                sys.platform == "win32"
+                and importlib.util.find_spec("winrt.windows.media.ocr") is not None
+            )
         )
         if not has_ocr_pkg:
             raise ReportOcrError(
-                "Goruntu OCR icin pytesseract/Pillow veya macOS Vision (ocrmac) gerekli "
+                "Goruntu OCR icin pytesseract/Pillow, Windows WinRT veya macOS Vision (ocrmac) gerekli "
                 "(requirements-ocr.txt).",
                 ERROR_DEPENDENCY_MISSING,
             )
         raise ReportOcrError(
-            "Goruntu OCR motoru kullanilamiyor (Tesseract calistirilabilir dosyasi veya "
-            "macOS Vision bulunamadi).",
+            "Goruntu OCR motoru kullanilamiyor (Windows OCR, Tesseract veya macOS Vision bulunamadi).",
             ERROR_OCR_UNAVAILABLE,
         )
     if not text.strip():
@@ -1376,12 +1869,8 @@ def _choose_tesseract_language() -> tuple[str, str]:
     if override:
         return override, ""
 
-    try:
-        pytesseract = importlib.import_module("pytesseract")
-        _configure_pytesseract(pytesseract)
-        available = set(pytesseract.get_languages(config=""))
-    except Exception:
-        available = set()
+    ok, _, cached_langs = _probe_tesseract()
+    available = set(cached_langs) if ok else set()
 
     selected = [language for language in ("tur", "eng") if language in available]
     if selected:
@@ -1402,8 +1891,9 @@ def _run_tesseract(image: Any) -> tuple[str, float | None, str]:
             image,
             lang=language,
             output_type=pytesseract.Output.DICT,
+            timeout=60,
         )
-    except Exception as exc:
+    except (Exception, SystemExit) as exc:
         raise ReportOcrError(
             "OCR calistirilamadi; tesseract kurulumunu ve dil paketlerini kontrol edin.",
             ERROR_OCR_UNAVAILABLE,
@@ -1661,6 +2151,178 @@ def _run_vision(image: Any) -> tuple[str, float | None, str]:
     text = _vision_blocks_to_text(blocks)
     confidences = [float(confidence) for _, confidence, _ in blocks]
     mean_confidence = (sum(confidences) / len(confidences)) if confidences else None
+    return text, mean_confidence, warning
+
+
+def _windows_ocr_words_to_vision_blocks(
+    lines_words: Sequence[Sequence[tuple[str, float, float, float, float]]],
+    img_w: int,
+    img_h: int,
+) -> list[tuple[str, float, tuple[float, float, float, float]]]:
+    """Convert Windows.Media.Ocr line/word boxes (px) into normalized Vision blocks."""
+
+    if img_w <= 0 or img_h <= 0:
+        return []
+
+    blocks: list[tuple[str, float, tuple[float, float, float, float]]] = []
+    min_gap_px = 0.022 * float(img_w)
+
+    for raw_line in lines_words:
+        words = sorted(
+            (
+                (str(text).strip(), float(x), float(y), max(0.0, float(w)), max(0.0, float(h)))
+                for text, x, y, w, h in raw_line
+                if str(text).strip()
+            ),
+            key=lambda item: item[1],
+        )
+        if not words:
+            continue
+
+        cluster: list[tuple[str, float, float, float, float]] = []
+
+        def _flush_cluster() -> None:
+            if not cluster:
+                return
+            joined = " ".join(part[0] for part in cluster).strip()
+            if not joined or joined == ":":
+                cluster.clear()
+                return
+            x0 = min(part[1] for part in cluster)
+            y0 = min(part[2] for part in cluster)
+            x1 = max(part[1] + part[3] for part in cluster)
+            y1 = max(part[2] + part[4] for part in cluster)
+            norm_x = max(0.0, min(1.0, x0 / float(img_w)))
+            norm_w = max(0.0, min(1.0 - norm_x, (x1 - x0) / float(img_w)))
+            norm_y = max(0.0, min(1.0, 1.0 - (y1 / float(img_h))))
+            norm_h = max(0.0, min(1.0, (y1 - y0) / float(img_h)))
+            blocks.append((joined, 0.90, (norm_x, norm_y, norm_w, norm_h)))
+            cluster.clear()
+
+        for word in words:
+            wtext, wx, _wy, _ww, wh = word
+            if wtext == ":":
+                _flush_cluster()
+                continue
+            if not cluster:
+                cluster.append(word)
+                continue
+            prev_text, px, _py, pw, ph = cluster[-1]
+            prev_right = px + pw
+            avg_h = max(ph, wh, 1.0)
+            threshold = max(1.8 * avg_h, min_gap_px)
+            gap = wx - prev_right
+            if gap > threshold or prev_text.endswith(":"):
+                _flush_cluster()
+            cluster.append(word)
+
+        _flush_cluster()
+
+    return blocks
+
+
+def _run_windows_ocr(image: Any) -> tuple[str, float | None, str]:
+    """OCR one page in-process with Windows 10/11 ``Windows.Media.Ocr``."""
+
+    try:
+        ocr_mod = importlib.import_module("winrt.windows.media.ocr")
+        glob_mod = importlib.import_module("winrt.windows.globalization")
+        img_mod = importlib.import_module("winrt.windows.graphics.imaging")
+        streams_mod = importlib.import_module("winrt.windows.storage.streams")
+    except ImportError as exc:
+        raise ReportOcrError(
+            "Windows yerlesik OCR modulu yuklenemedi.",
+            ERROR_OCR_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+    from PIL import Image  # noqa: PLC0415
+
+    pil_img = image if isinstance(image, Image.Image) else Image.open(image)
+    rgb = pil_img.convert("RGB")
+    max_dim = _WIN_OCR_MAX_DIMENSION_FALLBACK
+    raw_limit = getattr(ocr_mod.OcrEngine, "max_image_dimension", None)
+    if isinstance(raw_limit, int) and raw_limit > 0:
+        max_dim = raw_limit
+    if max(rgb.width, rgb.height) > max_dim:
+        scale = float(max_dim) / float(max(rgb.width, rgb.height))
+        rgb = rgb.resize(
+            (max(1, int(round(rgb.width * scale))), max(1, int(round(rgb.height * scale)))),
+            Image.Resampling.LANCZOS,
+        )
+
+    png_buf = io.BytesIO()
+    rgb.save(png_buf, format="PNG")
+    png_bytes = png_buf.getvalue()
+    if not png_bytes:
+        raise ReportOcrError("Bos goruntu OCR islenemedi.", ERROR_CORRUPT_IMAGE)
+
+    async def _recognize() -> tuple[str, list[list[tuple[str, float, float, float, float]]], str]:
+        stream = streams_mod.InMemoryRandomAccessStream()
+        bitmap = None
+        try:
+            ibuf = streams_mod.Buffer(len(png_bytes))
+            ibuf.length = len(png_bytes)
+            with memoryview(ibuf) as mv:
+                mv[:] = png_bytes
+            await stream.write_async(ibuf)
+            await stream.flush_async()
+            stream.seek(0)
+
+            decoder = await img_mod.BitmapDecoder.create_async(stream)
+            bitmap = await decoder.get_software_bitmap_async()
+            engine, active_lang, _ = _select_windows_ocr_engine(ocr_mod, glob_mod.Language)
+            if engine is None:
+                raise ReportOcrError(
+                    "Windows yerlesik OCR dil paketi bulunamadi (tr-TR / en-US).",
+                    ERROR_OCR_UNAVAILABLE,
+                )
+            ocr_result = await engine.recognize_async(bitmap)
+            raw_text = str(getattr(ocr_result, "text", "") or "")
+            extracted_lines: list[list[tuple[str, float, float, float, float]]] = []
+            for line in getattr(ocr_result, "lines", ()) or ():
+                row_words: list[tuple[str, float, float, float, float]] = []
+                for word in getattr(line, "words", ()) or ():
+                    wtext = str(getattr(word, "text", "") or "").strip()
+                    rect = getattr(word, "bounding_rect", None)
+                    if not wtext or rect is None:
+                        continue
+                    row_words.append(
+                        (
+                            wtext,
+                            float(rect.x),
+                            float(rect.y),
+                            float(rect.width),
+                            float(rect.height),
+                        )
+                    )
+                if row_words:
+                    extracted_lines.append(row_words)
+            return raw_text, extracted_lines, active_lang
+        finally:
+            if bitmap is not None and hasattr(bitmap, "close"):
+                bitmap.close()
+            if hasattr(stream, "close"):
+                stream.close()
+
+    try:
+        raw_text, lines_words, active_lang = _run_winrt_coro(_recognize, timeout=45.0)
+    except ReportOcrError:
+        raise
+    except (Exception, SystemExit) as exc:
+        raise ReportOcrError(
+            "Windows yerlesik OCR calistirilamadi.",
+            ERROR_OCR_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+    blocks = _windows_ocr_words_to_vision_blocks(lines_words, rgb.width, rgb.height)
+    structured = _vision_blocks_to_text(blocks) if blocks else ""
+    text = structured.strip() and structured or raw_text
+    warning = ""
+    if active_lang and not active_lang.casefold().startswith("tr"):
+        warning = f"Windows OCR 'tr-TR' dil paketi bulunamadi; OCR '{active_lang}' ile yapildi."
+    mean_confidence = 0.90 if text.strip() else None
     return text, mean_confidence, warning
 
 
@@ -3065,12 +3727,14 @@ __all__ = [
     "SUPPORTED_EXTENSIONS",
     "TEXT_SOURCE_SPREADSHEET",
     "analyze_report",
+    "clear_ocr_probe_cache",
     "compare_with_calculated",
     "effective_max_file_size_bytes",
     "extract_text",
     "has_blocking_discrepancies",
     "normalize_result",
     "ocr_available",
+    "ocr_engine_details",
     "ocr_engine_name",
     "ocr_pdf_page_rotated",
     "ocr_status",
@@ -3080,4 +3744,6 @@ __all__ = [
     "pdf_rasterizer_status",
     "validate_input_path",
     "vision_available",
+    "windows_ocr_available",
+    "windows_pdf_available",
 ]

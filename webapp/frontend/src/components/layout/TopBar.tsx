@@ -31,6 +31,7 @@ import { toApiInputs } from "../../lib/normalize";
 import { Badge } from "../ui/Badge";
 import { Button, IconButton } from "../ui/Button";
 import { ConfirmDialog } from "../ui/Dialog";
+import { HydroLogo } from "../ui/HydroLogo";
 import { cn } from "../../lib/utils";
 
 export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
@@ -154,6 +155,21 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
           >
             <Menu size={20} />
           </IconButton>
+
+          <button
+            type="button"
+            className={cn(
+              "items-center gap-2 rounded-lg px-1 py-0.5 text-left transition-opacity hover:opacity-85",
+              desktopSidebarOpen ? "inline-flex lg:hidden" : "inline-flex",
+            )}
+            onClick={() => setTab("dashboard")}
+            aria-label="HYDRO Ana Sayfa"
+          >
+            <HydroLogo size={28} />
+            <span className="hidden text-sm font-extrabold tracking-tight text-[var(--text)] sm:inline">
+              HYDRO
+            </span>
+          </button>
 
           <div className="relative min-w-0" ref={pickerRef}>
             <button

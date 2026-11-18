@@ -30,6 +30,7 @@ import { PressurePage } from "./PressurePage";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { SectionCard } from "../components/ui/Card";
+import { Modal } from "../components/ui/Dialog";
 import { InlineNotice } from "../components/ui/State";
 
 function statusMeta(status: SectionFormRecord["status"] | string) {
@@ -101,8 +102,18 @@ export function SectionFormPage() {
   const [draftData, setDraftData] = useState<Record<string, unknown>>({});
   const [dirty, setDirty] = useState(false);
   const [showDetailCalc, setShowDetailCalc] = useState(false);
+  const [pendingNavCode, setPendingNavCode] = useState<BotasFormCode | null>(null);
 
   const uploadInputId = useId();
+
+  function requestNavigate(nextCode: BotasFormCode) {
+    if (nextCode === spec.code) return;
+    if (dirty && !isDemoOrOffline) {
+      setPendingNavCode(nextCode);
+      return;
+    }
+    openForm(nextCode);
+  }
 
   /* Form veya kesit değişince sunucudaki güncel veriyi forma yükle */
   useEffect(() => {
@@ -111,6 +122,7 @@ export function SectionFormPage() {
     setDraftData(ext);
     setDirty(false);
     setShowDetailCalc(false);
+    setPendingNavCode(null);
   }, [sessionId, spec.code, formRecord?.revision, formRecord?.updated_at]);
 
   /* Alt + Sol/Sağ Ok ile formlar arasında hızlı geçiş */
@@ -122,15 +134,17 @@ export function SectionFormPage() {
       }
       if (e.altKey && e.key === "ArrowLeft") {
         e.preventDefault();
-        openForm(prevSpec.code);
+        if (dirty) setPendingNavCode(prevSpec.code);
+        else openForm(prevSpec.code);
       } else if (e.altKey && e.key === "ArrowRight") {
         e.preventDefault();
-        openForm(nextSpec.code);
+        if (dirty) setPendingNavCode(nextSpec.code);
+        else openForm(nextSpec.code);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openForm, prevSpec.code, nextSpec.code]);
+  }, [openForm, prevSpec.code, nextSpec.code, dirty]);
 
   const issueForms = useMemo(
     () => (payload?.forms ?? []).filter((f) => f.form_code !== spec.code && (f.status === "failed" || f.status === "warning")),
@@ -186,7 +200,7 @@ export function SectionFormPage() {
     setDirty(true);
   }
 
-  function handleSave() {
+  function handleSave(onSaved?: () => void) {
     if (isDemoOrOffline) {
       pushToast("warning", "Sunucu veya aktif kesit yok", "Formu veritabanına kaydetmek için Projeler & Kesitler ekranından bir kesit seçin.");
       return;
@@ -202,7 +216,10 @@ export function SectionFormPage() {
         },
       },
       {
-        onSuccess: () => setDirty(false),
+        onSuccess: () => {
+          setDirty(false);
+          onSaved?.();
+        },
       },
     );
   }
@@ -232,7 +249,7 @@ export function SectionFormPage() {
               size="sm"
               variant="ghost"
               icon={<ArrowLeft size={13} />}
-              onClick={() => openForm(prevSpec.code)}
+              onClick={() => requestNavigate(prevSpec.code)}
               title={`Önceki: ${prevSpec.shortCode} ${prevSpec.shortTitle} (Alt+←)`}
             >
               {prevSpec.shortCode}
@@ -262,7 +279,7 @@ export function SectionFormPage() {
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => openForm(nextSpec.code)}
+              onClick={() => requestNavigate(nextSpec.code)}
               title={`Sonraki: ${nextSpec.shortCode} ${nextSpec.shortTitle} (Alt+→)`}
             >
               <span>{nextSpec.shortCode}</span>
@@ -274,7 +291,7 @@ export function SectionFormPage() {
                 size="sm"
                 variant="ghost"
                 icon={<AlertTriangle size={13} className="text-[var(--warning)]" />}
-                onClick={() => openForm(nextIssueForm.form_code as BotasFormCode)}
+                onClick={() => requestNavigate(nextIssueForm.form_code as BotasFormCode)}
               >
                 Sonraki Bulgulu ({BOTAS_FORM_BY_CODE[nextIssueForm.form_code]?.shortCode ?? nextIssueForm.botas_code})
               </Button>
@@ -306,7 +323,7 @@ export function SectionFormPage() {
               variant="primary"
               icon={<Save size={13} />}
               loading={updateForm.isPending}
-              onClick={handleSave}
+              onClick={() => handleSave()}
             >
               Kaydet &amp; Kontrol Et
             </Button>
@@ -333,7 +350,7 @@ export function SectionFormPage() {
               <button
                 key={item.code}
                 type="button"
-                onClick={() => openForm(item.code)}
+                onClick={() => requestNavigate(item.code)}
                 title={`${item.shortCode} — ${item.title}`}
                 className={`rounded-md border px-2 py-0.5 font-mono text-[10px] font-semibold transition-all ${dotCls} ${
                   isActive ? "ring-2 ring-[var(--primary)] ring-offset-1 ring-offset-[var(--surface)]" : "opacity-85 hover:opacity-100"
@@ -395,7 +412,29 @@ export function SectionFormPage() {
         </div>
       ) : null}
 
-      {/* Ana İki Sütunlu BOTAŞ Formu + Şartname Kontrolleri */}
+      {formsQuery.isLoading && !payload && !isDemoOrOffline ? (
+        <div
+          className="grid gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(340px,1fr)]"
+          aria-busy="true"
+          aria-label="Form yükleniyor"
+        >
+          <div className="space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+            <div className="skeleton h-16 w-full" />
+            <div className="grid grid-cols-3 gap-2">
+              <div className="skeleton h-12" />
+              <div className="skeleton h-12" />
+              <div className="skeleton h-12" />
+            </div>
+            <div className="skeleton h-52 w-full" />
+          </div>
+          <div className="space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+            <div className="skeleton h-10 w-full" />
+            <div className="skeleton h-28 w-full" />
+            <div className="skeleton h-28 w-full" />
+          </div>
+        </div>
+      ) : (
+      /* Ana İki Sütunlu BOTAŞ Formu + Şartname Kontrolleri */
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(340px,1fr)]">
         {/* Sol Sütun: Resmî BOT-FRM Form Sayfası */}
         <div className="overflow-hidden rounded-2xl border border-[var(--border-strong)] bg-[var(--surface)] shadow-sm">
@@ -723,6 +762,54 @@ export function SectionFormPage() {
           </SectionCard>
         </div>
       </div>
+      )}
+
+      <Modal
+        open={Boolean(pendingNavCode)}
+        onClose={() => setPendingNavCode(null)}
+        title="Kaydedilmemiş Form Değişiklikleri"
+        description="Bu formdaki düzenlemeler henüz veritabanına kaydedilmedi."
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setPendingNavCode(null)}>
+              Vazgeç
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                const target = pendingNavCode;
+                setPendingNavCode(null);
+                setDirty(false);
+                if (target) openForm(target);
+              }}
+            >
+              Kaydetmeden Geç
+            </Button>
+            <Button
+              variant="primary"
+              icon={<Save size={13} />}
+              loading={updateForm.isPending}
+              onClick={() => {
+                const target = pendingNavCode;
+                handleSave(() => {
+                  setPendingNavCode(null);
+                  if (target) openForm(target);
+                });
+              }}
+            >
+              Kaydet ve Geç
+            </Button>
+          </>
+        }
+      >
+        <p className="text-xs leading-relaxed text-[var(--text-soft)]">
+          <strong>
+            {spec.shortCode} — {spec.title}
+          </strong>{" "}
+          formundan ayrılmadan önce değişiklikleri kaydedip şartname kontrollerini yenilemek ister
+          misiniz?
+        </p>
+      </Modal>
     </div>
   );
 }
