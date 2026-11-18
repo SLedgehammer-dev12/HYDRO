@@ -101,11 +101,12 @@ def test_pick_port_defaults_to_uncontested_range():
     assert picked >= 18790
 
 
-def test_desktop_launcher_self_test_subprocess():
+def test_desktop_launcher_self_test_subprocess(tmp_path):
     repo_root = Path(__file__).resolve().parents[3]
     launcher = repo_root / "webapp" / "desktop_launcher.py"
+    log_file = tmp_path / "self_test.log"
     proc = subprocess.run(
-        [sys.executable, str(launcher), "--self-test"],
+        [sys.executable, str(launcher), "--self-test", "--self-test-log", str(log_file)],
         cwd=str(repo_root),
         capture_output=True,
         text=True,
@@ -114,3 +115,25 @@ def test_desktop_launcher_self_test_subprocess():
     )
     assert proc.returncode == 0, f"stdout={proc.stdout}\nstderr={proc.stderr}"
     assert "SELF_TEST_OK" in proc.stdout
+    assert log_file.is_file()
+    assert "SELF_TEST_OK" in log_file.read_text(encoding="utf-8")
+
+
+def test_desktop_launcher_self_test_catches_exceptions_without_crashing(monkeypatch, tmp_path):
+    from app import main as app_main
+
+    from webapp import desktop_launcher
+
+    log_file = tmp_path / "failed_self_test.log"
+
+    def _boom(_settings):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(app_main, "create_app", _boom)
+    args = desktop_launcher._parse_args(["--self-test", "--self-test-log", str(log_file)])
+    exit_code = desktop_launcher._run_self_test(args)
+    assert exit_code == 1
+    assert log_file.is_file()
+    log_text = log_file.read_text(encoding="utf-8")
+    assert "SELF_TEST_FAILED" in log_text
+    assert "boom" in log_text

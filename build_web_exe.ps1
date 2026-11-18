@@ -207,26 +207,25 @@ function Invoke-HydroSelfTest {
         [string]$Label
     )
 
-    $outLog = [System.IO.Path]::GetTempFileName()
-    $errLog = [System.IO.Path]::GetTempFileName()
+    $logFile = Join-Path ([System.IO.Path]::GetTempPath()) ("hydroweb-selftest-" + [Guid]::NewGuid().ToString("N") + ".log")
     try {
         $proc = Start-Process `
             -FilePath $ExePath `
-            -ArgumentList "--self-test" `
-            -Wait `
-            -PassThru `
-            -NoNewWindow `
-            -RedirectStandardOutput $outLog `
-            -RedirectStandardError $errLog
-        $stdout = if (Test-Path -LiteralPath $outLog) { (Get-Content -LiteralPath $outLog -Raw) } else { "" }
-        $stderr = if (Test-Path -LiteralPath $errLog) { (Get-Content -LiteralPath $errLog -Raw) } else { "" }
-        if ($stdout) { Write-Host $stdout.TrimEnd() }
-        if ($stderr) { Write-Host $stderr.TrimEnd() }
-        if ($proc.ExitCode -ne 0 -or ($stdout -notmatch "SELF_TEST_OK")) {
-            throw "$Label --self-test basarisiz (exit code $($proc.ExitCode)).`nSTDOUT: $stdout`nSTDERR: $stderr"
+            -ArgumentList @("--self-test", "--self-test-log", $logFile) `
+            -PassThru
+        if (-not $proc.WaitForExit(120000)) {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            $partial = if (Test-Path -LiteralPath $logFile) { Get-Content -LiteralPath $logFile -Raw } else { "(log yok)" }
+            throw "$Label --self-test 120s icinde tamamlanamadi (timeout).`nLOG: $partial"
+        }
+        $proc.WaitForExit()
+        $logContent = if (Test-Path -LiteralPath $logFile) { (Get-Content -LiteralPath $logFile -Raw) } else { "" }
+        if ($logContent) { Write-Host $logContent.TrimEnd() }
+        if ($proc.ExitCode -ne 0 -or ($logContent -notmatch "SELF_TEST_OK")) {
+            throw "$Label --self-test basarisiz (exit code $($proc.ExitCode)).`nLOG: $logContent"
         }
     } finally {
-        Remove-Item -LiteralPath $outLog, $errLog -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $logFile -Force -ErrorAction SilentlyContinue
     }
 }
 
