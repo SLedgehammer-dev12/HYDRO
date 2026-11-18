@@ -40,6 +40,9 @@ import type {
   ReferenceCompareResponse,
   ReferenceTableMeta,
   ScheduleOption,
+  SectionFormScanResponse,
+  SectionFormUpdatePayload,
+  SectionFormUpdateResponse,
   Session,
   SessionFormsResponse,
   SessionListItem,
@@ -49,6 +52,7 @@ import type {
   TablePointResponse,
   TestResultRecord,
   TestType,
+  UpdateManagerStatus,
 } from "./types";
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? "/api";
@@ -444,6 +448,36 @@ export const api = {
   sessionForms: (sessionId: string, signal?: AbortSignal) =>
     apiFetch<SessionFormsResponse>(`/sessions/${sessionId}/forms`, { signal }),
 
+  updateSessionForm: (
+    sessionId: string,
+    formCode: string,
+    body: SectionFormUpdatePayload,
+    signal?: AbortSignal,
+  ) =>
+    apiFetch<SectionFormUpdateResponse>(`/sessions/${sessionId}/forms/${formCode}`, {
+      method: "PUT",
+      body,
+      signal,
+    }),
+
+  scanSessionForm: (
+    sessionId: string,
+    formCode: string,
+    file: File,
+    overwrite = true,
+    signal?: AbortSignal,
+  ) => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("overwrite", overwrite ? "true" : "false");
+    return apiFetch<SectionFormScanResponse>(`/sessions/${sessionId}/forms/${formCode}/scan`, {
+      method: "POST",
+      body: form,
+      signal,
+      timeoutMs: 120_000,
+    });
+  },
+
   createSession: (
     body: { name?: string; project_id?: string | null; inputs?: Record<string, unknown> },
     signal?: AbortSignal,
@@ -561,4 +595,37 @@ export const api = {
 
   ocrStatus: (signal?: AbortSignal) =>
     apiFetch<OcrStatusResponse>("/ocr/status", { signal }),
+
+  updateStatus: (signal?: AbortSignal) =>
+    apiFetch<UpdateManagerStatus>("/update/status", { signal, timeoutMs: 5_000 }),
+
+  checkUpdates: (force = true, signal?: AbortSignal) =>
+    apiFetch<UpdateManagerStatus>(`/update/check?force=${force ? "true" : "false"}`, {
+      method: "POST",
+      signal,
+      timeoutMs: 15_000,
+    }),
+
+  startUpdateDownload: (assetName?: string, signal?: AbortSignal) => {
+    const qs = assetName ? `?asset_name=${encodeURIComponent(assetName)}` : "";
+    return apiFetch<UpdateManagerStatus>(`/update/download${qs}`, {
+      method: "POST",
+      signal,
+      timeoutMs: 30_000,
+    });
+  },
+
+  applyUpdate: (signal?: AbortSignal) =>
+    apiFetch<UpdateManagerStatus>("/update/apply", {
+      method: "POST",
+      signal,
+      timeoutMs: 60_000,
+    }),
+
+  downloadVerifiedUpdateFile: (fallbackFilename: string, signal?: AbortSignal) =>
+    apiDownload("/update/download/file", {
+      signal,
+      fallbackFilename,
+      timeoutMs: 120_000,
+    }),
 };

@@ -55,6 +55,7 @@ import {
 } from "../lib/kp";
 import { dateTime, num, relativeTime } from "../lib/format";
 import type {
+  BotasFormCode,
   DraftSectionItem,
   PlanProfileScanResponse,
   Project,
@@ -104,6 +105,7 @@ export function ProjectsPage() {
   const projects = projectsQuery.data ?? [];
 
   const setTab = useAppStore((state) => state.setTab);
+  const openForm = useAppStore((state) => state.openForm);
   const projectId = useAppStore((state) => state.projectId);
   const setProject = useAppStore((state) => state.setProject);
   const setSceneScope = useAppStore((state) => state.setSceneScope);
@@ -272,6 +274,15 @@ export function ProjectsPage() {
     if (project) setProject(project);
     openSession.mutate(session.id, {
       onSuccess: () => setTab("geometry"),
+    });
+  }
+
+  function openSectionForms(session: SessionListItem, formCode?: BotasFormCode | string | null) {
+    const project = projects.find((item) => item.id === session.project_id) ?? selected;
+    if (project) setProject(project);
+    const targetCode = (formCode || session.forms_summary?.first_issue_form_code || "test_data") as BotasFormCode;
+    openSession.mutate(session.id, {
+      onSuccess: () => openForm(targetCode),
     });
   }
 
@@ -940,11 +951,40 @@ export function ProjectsPage() {
                           </td>
                           <td>
                             {fs ? (
-                              <div className="space-y-0.5">
-                                <Badge tone={formTone}>
-                                  {fs.filled_required} / {fs.required_total} Form
-                                </Badge>
-                                {fs.failed_forms.length > 0 ? (
+                              <div className="space-y-1">
+                                <div className="flex flex-wrap items-center gap-1">
+                                  <Badge tone={formTone}>
+                                    {fs.filled_required} / {fs.required_total} Form
+                                  </Badge>
+                                  {fs.supplementary_filled > 0 ? (
+                                    <Badge tone="info">+{fs.supplementary_filled} Ek</Badge>
+                                  ) : null}
+                                </div>
+                                {fs.findings_counts &&
+                                (fs.findings_counts.passed +
+                                  fs.findings_counts.warning +
+                                  fs.findings_counts.failed >
+                                  0) ? (
+                                  <div className="flex flex-wrap gap-1 font-mono text-[9.5px]">
+                                    <span className="tone-pass">✓{fs.findings_counts.passed}</span>
+                                    {fs.findings_counts.warning > 0 ? (
+                                      <span className="tone-warning">!{fs.findings_counts.warning}</span>
+                                    ) : null}
+                                    {fs.findings_counts.failed > 0 ? (
+                                      <span className="text-[var(--danger)]">✕{fs.findings_counts.failed}</span>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                                {fs.key_metrics?.air_excess_pct !== undefined &&
+                                fs.key_metrics?.air_excess_pct !== null ? (
+                                  <span className="block font-mono text-[9.5px] text-[var(--text-muted)]">
+                                    Hava %{num(fs.key_metrics.air_excess_pct, 2)}
+                                    {fs.key_metrics.pa_minus_pt_bar !== undefined &&
+                                    fs.key_metrics.pa_minus_pt_bar !== null
+                                      ? ` · ΔP ${num(fs.key_metrics.pa_minus_pt_bar, 2)}b`
+                                      : ""}
+                                  </span>
+                                ) : fs.failed_forms.length > 0 ? (
                                   <span className="block text-[10px] font-medium text-[var(--danger)]">
                                     {fs.failed_forms.length} form başarısız
                                   </span>
@@ -972,8 +1012,11 @@ export function ProjectsPage() {
                               <Button size="sm" variant="ghost" icon={<FolderOpen size={11} />} onClick={() => openSection(session)}>
                                 Aç
                               </Button>
-                              <Button size="sm" variant="ghost" icon={<FileCheck2 size={11} />} onClick={() => setFormsModalSession(session)}>
-                                Formlar
+                              <Button size="sm" variant="primary" icon={<FileCheck2 size={11} />} onClick={() => openSectionForms(session)}>
+                                Sıralı İncele
+                              </Button>
+                              <Button size="sm" variant="ghost" onClick={() => setFormsModalSession(session)}>
+                                Özet
                               </Button>
                               <Button size="sm" variant="ghost" icon={<Copy size={11} />} onClick={() => copySection(session)}>
                                 Kopyala
@@ -1646,8 +1689,18 @@ export function ProjectsPage() {
                               ? "Dolu"
                               : "Boş";
                     return (
-                      <tr key={row.id}>
-                        <td className="font-mono text-[10.5px]">{row.botas_code}</td>
+                      <tr
+                        key={row.id}
+                        className="cursor-pointer hover:bg-[var(--surface-2)]"
+                        title={`${row.form_title} formunu aç`}
+                        onClick={() => {
+                          if (!formsModalSession) return;
+                          const s = formsModalSession;
+                          setFormsModalSession(null);
+                          openSectionForms(s, row.form_code);
+                        }}
+                      >
+                        <td className="font-mono text-[10.5px] text-[var(--primary)]">{row.botas_code}</td>
                         <td className="font-medium text-[var(--text)]">{row.form_title}</td>
                         <td>
                           <Badge tone={row.required ? "info" : "neutral"}>

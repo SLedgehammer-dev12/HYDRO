@@ -1,4 +1,5 @@
 import type {
+  BotasFormCode,
   CheckKey,
   LocationClassRule,
   PigModeOption,
@@ -6,6 +7,44 @@ import type {
   SteelModel,
   TabKey,
 } from "./types";
+
+export interface BotasFormNavItem {
+  code: BotasFormCode;
+  shortCode: string;
+  botasCode: string;
+  title: string;
+  shortTitle: string;
+  required: boolean;
+  order: number;
+  hasDetailCalc?: "air" | "pressure";
+}
+
+export const BOTAS_FORM_NAV_ITEMS: BotasFormNavItem[] = [
+  { code: "test_data", shortCode: "015", botasCode: "BOT-FRM-İNB-001-015_1", title: "Hidrostatik Test Verileri", shortTitle: "Hidrostatik Test Verileri", required: true, order: 1 },
+  { code: "cleaning", shortCode: "016", botasCode: "BOT-FRM-İNB-001-016", title: "Temizlik Kabul Raporu", shortTitle: "Temizlik Kabul Raporu", required: true, order: 2 },
+  { code: "filling", shortCode: "017", botasCode: "BOT-FRM-İNB-001-017", title: "Su Dolum Raporu", shortTitle: "Su Dolum Raporu", required: true, order: 3 },
+  { code: "leak_stabilization", shortCode: "018", botasCode: "BOT-FRM-İNB-001-018", title: "Dengeleme İçin Kaçak Test Raporu", shortTitle: "Dengeleme Kaçak Testi", required: true, order: 4 },
+  { code: "strength", shortCode: "019", botasCode: "BOT-FRM-İNB-001-019", title: "Mukavemet Test Raporu", shortTitle: "Mukavemet Test Raporu", required: true, order: 5 },
+  { code: "air_acceptance", shortCode: "020", botasCode: "BOT-FRM-İNB-001-020", title: "Hava İçerik Testi Kabul Raporu", shortTitle: "Hava İçerik Kabul", required: true, order: 6, hasDetailCalc: "air" },
+  { code: "pressure_test", shortCode: "021", botasCode: "BOT-FRM-İNB-001-021", title: "Basınç Testi Raporu", shortTitle: "Basınç Testi (24 Sa)", required: true, order: 7 },
+  { code: "pressure_acceptance", shortCode: "022", botasCode: "BOT-FRM-İNB-001-022", title: "Basınç Testi Kabul Raporu", shortTitle: "Basınç Testi Kabul", required: true, order: 8, hasDetailCalc: "pressure" },
+  { code: "dewatering", shortCode: "023", botasCode: "BOT-FRM-İNB-001-023", title: "Boşaltma Kabul Raporu", shortTitle: "Boşaltma Kabul Raporu", required: true, order: 9 },
+  { code: "pre_drying", shortCode: "KUR-001", botasCode: "BOT-FRM-KUR-001", title: "Ön Kurutma Kabul Raporu", shortTitle: "Ön Kurutma Raporu", required: true, order: 10 },
+  { code: "final_drying", shortCode: "KUR-002", botasCode: "BOT-FRM-KUR-002", title: "Nihai Kurutma Kabul Raporu", shortTitle: "Nihai Kurutma Raporu", required: true, order: 11 },
+  { code: "pressurization", shortCode: "EK-014", botasCode: "BOT-FRM-EK-014", title: "Basınçlandırma Test Raporu", shortTitle: "Basınçlandırma Testi", required: false, order: 12 },
+  { code: "spool_test", shortCode: "EK-SPL", botasCode: "BOT-FRM-EK-SPL", title: "Spool Test Verileri", shortTitle: "Spool Test Verileri", required: false, order: 13 },
+  { code: "calculation_sheet", shortCode: "001-027", botasCode: "BOT-FRM-001-027", title: "Hidrostatik Test Hesap Tablosu", shortTitle: "Test Hesap Tablosu", required: false, order: 14 },
+  { code: "chart_recorder", shortCode: "EK-KRT", botasCode: "BOT-FRM-EK-KRT", title: "Basınç-Sıcaklık Kayıt Diyagramı (Chart)", shortTitle: "Chart Recorder Diski", required: false, order: 15 },
+  { code: "caliper_pig", shortCode: "EK-KLP", botasCode: "BOT-FRM-EK-KLP", title: "Kalibrasyon / Kaliper Pig Raporu", shortTitle: "Kaliper Pig Raporu", required: false, order: 16 },
+];
+
+export const BOTAS_FORM_BY_CODE: Record<BotasFormCode, BotasFormNavItem> = BOTAS_FORM_NAV_ITEMS.reduce(
+  (acc, item) => {
+    acc[item.code] = item;
+    return acc;
+  },
+  {} as Record<BotasFormCode, BotasFormNavItem>,
+);
 
 export interface TabMeta {
   key: TabKey;
@@ -46,23 +85,34 @@ export const TABS: TabMeta[] = [
     key: "air",
     label: "Hava İçerik",
     path: "/air",
-    index: 4,
+    index: 0,
     group: "calisma",
     description: "Hava içerik testi değerlendirmesi",
+    hidden: true,
   },
   {
     key: "pressure",
     label: "Basınç Değişim",
     path: "/pressure",
-    index: 5,
+    index: 0,
     group: "calisma",
     description: "Basınç değişim testi değerlendirmesi",
+    hidden: true,
+  },
+  {
+    key: "forms",
+    label: "Test Bölümü Formları",
+    path: "/forms",
+    index: 0,
+    group: "calisma",
+    description: "BOTAŞ hidrostatik test formları sıralı denetimi",
+    hidden: true,
   },
   {
     key: "reports",
     label: "Raporlar",
     path: "/reports",
-    index: 6,
+    index: 4,
     group: "cikti",
     description: "Rapor önizleme ve dışa aktarma",
   },
@@ -70,7 +120,7 @@ export const TABS: TabMeta[] = [
     key: "ocr",
     label: "OCR",
     path: "/ocr",
-    index: 7,
+    index: 5,
     group: "cikti",
     description: "Rapor yükleme, alan onayı, uyuşmazlık",
   },
@@ -78,7 +128,7 @@ export const TABS: TabMeta[] = [
     key: "settings",
     label: "Ayarlar",
     path: "/settings",
-    index: 8,
+    index: 6,
     group: "cikti",
     description: "Backend, görünüm ve oturum yönetimi",
   },
@@ -86,7 +136,7 @@ export const TABS: TabMeta[] = [
     key: "coefficients",
     label: "Katsayılar",
     path: "/coefficients",
-    index: 9,
+    index: 7,
     group: "cikti",
     description: "A/B hazırlama, üç kaynak, backend ve A onarım karşılaştırması",
   },
@@ -126,13 +176,29 @@ export function tabFromHash(hash: string): TabKey {
   /* Eski `#/field` ve `#/coefficient-detail` bağlantıları birleşik sayfalara gider. */
   if (path === "/field") return "geometry";
   if (path === "/coefficient-detail") return "coefficients";
+  if (path === "/forms" || path.startsWith("/forms/")) return "forms";
+  if (path === "/air") return "air";
+  if (path === "/pressure") return "pressure";
   const found = TABS.find((tab) => !tab.hidden && tab.path === path);
   return found?.key ?? "dashboard";
 }
 
-export function hashForTab(tab: TabKey): string {
+export function formCodeFromHash(hash: string): BotasFormCode | null {
+  const path = hash.replace(/^#/, "").split("?")[0] || "/";
+  if (!path.startsWith("/forms/")) return null;
+  const raw = path.slice("/forms/".length).trim();
+  const match = BOTAS_FORM_NAV_ITEMS.find((item) => item.code === raw);
+  return match ? match.code : null;
+}
+
+export function hashForForm(code: BotasFormCode): string {
+  return `#/forms/${code}`;
+}
+
+export function hashForTab(tab: TabKey, activeFormCode?: BotasFormCode): string {
   if (tab === "field") return "#/geometry";
   if (tab === "coefficient_detail") return "#/coefficients";
+  if (tab === "forms") return hashForForm(activeFormCode ?? "test_data");
   return `#${TAB_BY_KEY[tab].path}`;
 }
 

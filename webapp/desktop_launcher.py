@@ -261,6 +261,10 @@ def _run_self_test(args: argparse.Namespace) -> int:
         if meta_status != 200 or meta_data.get("app", {}).get("version") != APP_VERSION:
             raise AssertionError(f"/api/meta dogrulamasi basarisiz: {meta_data}")
 
+        upd_status, upd_data = _http_json(f"{base_url}/api/update/status", timeout=5.0)
+        if upd_status != 200 or upd_data.get("current_version") != APP_VERSION:
+            raise AssertionError(f"/api/update/status dogrulamasi basarisiz: {upd_data}")
+
         coef_status, coef_data = _http_json(
             f"{base_url}/api/coefficients/a",
             method="POST",

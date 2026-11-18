@@ -16,6 +16,7 @@ from typing import Any, Sequence
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as OrmSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from hidrostatik_test.data.pipe_catalog import API_5L_PSL2_GRADES
 from hidrostatik_test.domain import (
@@ -51,6 +52,12 @@ from ..models import HydroSession, OcrAnalysis, Project, SectionForm, new_uuid
 from . import audit
 from . import projects as project_service
 from . import sessions as session_service
+from .form_details import (
+    build_form_structured_payload,
+    compute_extended_summary,
+    evaluate_all_form_findings,
+    reconcile_form_extracted_data,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1782,10 +1789,17 @@ def _extract_form_specific_data(form_code: str, text: str) -> dict[str, Any]:
         factor = 1.5 if ("Class 3" in loc_str or "Class 4" in loc_str) else 1.25
         header["design_pressure_bar"] = round(float(header["min_test_pressure_bar"]) / factor, 4)
 
+    if proj_title := extract_project_name_from_text(text, max_lines=35):
+        header.setdefault("project_name", proj_title)
+    if sec_id := extract_page_section_no(text):
+        header.setdefault("section_no", sec_id)
+
     payload: dict[str, Any] = {"header": header, "form_date": _extract_form_date(text)}
+    log_entries: list[dict[str, Any]] = []
 
     if form_code == "filling":
         log = _parse_time_log(text)
+        log_entries = list(log.get("entries") or [])
         temps: list[float] = []
         volumes: list[float] = []
         pressures: list[float] = []
@@ -1813,6 +1827,7 @@ def _extract_form_specific_data(form_code: str, text: str) -> dict[str, Any]:
 
     elif form_code in {"leak_stabilization", "pressure_test"}:
         log = _parse_time_log(text)
+        log_entries = list(log.get("entries") or [])
         block_stats = _extract_four_hour_temp_delta(log["entries"])
         pressures = [
             ent["nums"][0]
@@ -1859,6 +1874,7 @@ def _extract_form_specific_data(form_code: str, text: str) -> dict[str, Any]:
 
     elif form_code in {"strength", "pressurization"}:
         log = _parse_time_log(text)
+        log_entries = list(log.get("entries") or [])
         vp = _parse_num_after_label(text, (r"teorik\s*hacim\s*\(?v",), min_val=0.0001, max_val=100)
         vpa = _parse_num_after_label(text, (r"olculen\s*hacim\s*\(?v",), min_val=0.0, max_val=100)
         ratio_excess = _parse_num_after_label(
@@ -2007,6 +2023,14 @@ def _extract_form_specific_data(form_code: str, text: str) -> dict[str, Any]:
 
     elif form_code in {"cleaning", "dewatering", "pre_drying", "final_drying"}:
         payload["pig_events"] = _extract_pig_events(text)
+
+    struct_ext = build_form_structured_payload(form_code, text, time_log_entries=log_entries)
+    for k, v in (struct_ext.get("header_extras") or {}).items():
+        if v:
+            header.setdefault(k, v)
+    for opt_key in ("notes", "signatures", "test_data", "rows", "pig_runs", "drying", "parameters"):
+        if opt_key in struct_ext and struct_ext[opt_key] is not None:
+            payload[opt_key] = struct_ext[opt_key]
 
     return payload
 
@@ -2987,6 +3011,37 @@ def _apply_calc_statuses_to_forms(
             forms_by_code["test_data"]["status"] = prof_st
 
 
+def _apply_findings_and_statuses(
+    merged_header: dict[str, Any],
+    forms_by_code: dict[str, dict[str, Any]],
+    calculations: dict[str, Any],
+    check_details: dict[str, dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    findings_by_code = evaluate_all_form_findings(
+        merged_header, forms_by_code, calculations, check_details
+    )
+    for code, entry in forms_by_code.items():
+        if entry.get("status") == "empty":
+            continue
+        ext = dict(entry.get("extracted_data") or {})
+        f_list = findings_by_code.get(code, [])
+        ext["findings"] = f_list
+        entry["extracted_data"] = ext
+        statuses = [str((f or {}).get("status") or "") for f in f_list]
+        if "failed" in statuses:
+            entry["status"] = "failed"
+        elif "warning" in statuses:
+            if (
+                code not in {"air_acceptance", "pressure_acceptance"}
+                or entry.get("status") == "filled"
+            ):
+                entry["status"] = "warning"
+        elif "passed" in statuses:
+            if entry.get("status") in {"filled", "warning", "passed"}:
+                entry["status"] = "passed"
+    return findings_by_code
+
+
 def _synthesize_fallback_section(
     fallback_report: dict[str, Any],
     *,
@@ -3135,6 +3190,7 @@ def _synthesize_fallback_section(
     calcs = evaluate_section_calculations(header, forms_by_code)
     _apply_calc_statuses_to_forms(forms_by_code, calcs)
     checks_bool, check_details = evaluate_operational_checks(header, forms_by_code, calcs)
+    _apply_findings_and_statuses(header, forms_by_code, calcs, check_details)
     present_list = [forms_by_code[s.code] for s in BOTAS_FORM_CATALOG if s.code in forms_by_code]
     missing_required = [
         {"form_code": s.code, "botas_code": s.botas_code, "form_title": s.title}
@@ -3301,6 +3357,7 @@ def analyze_dossier_pages(
         calcs = evaluate_section_calculations(header, forms_by_code)
         _apply_calc_statuses_to_forms(forms_by_code, calcs)
         checks_bool, check_details = evaluate_operational_checks(header, forms_by_code, calcs)
+        _apply_findings_and_statuses(header, forms_by_code, calcs, check_details)
 
         present_list = [
             forms_by_code[spec.code] for spec in BOTAS_FORM_CATALOG if spec.code in forms_by_code
@@ -3379,29 +3436,10 @@ def analyze_dossier_pages(
 # ---------------------------------------------------------------------------
 
 
-def compute_forms_summary(forms: Sequence[SectionForm]) -> dict[str, Any]:
-    by_code = {f.form_code: f for f in forms}
-    filled_req = 0
-    missing_titles: list[str] = []
-    failed_forms: list[str] = []
-    for spec in REQUIRED_FORM_SPECS:
-        row = by_code.get(spec.code)
-        if row is not None and row.status != "empty":
-            filled_req += 1
-            if row.status == "failed":
-                failed_forms.append(spec.title)
-        else:
-            missing_titles.append(spec.title)
-    supp_filled = sum(1 for f in forms if not f.required and f.status != "empty")
-    return {
-        "required_total": len(REQUIRED_FORM_SPECS),
-        "filled_required": filled_req,
-        "missing_required": len(missing_titles),
-        "missing_titles": missing_titles,
-        "supplementary_filled": supp_filled,
-        "failed_forms": failed_forms,
-        "complete": filled_req == len(REQUIRED_FORM_SPECS) and not failed_forms,
-    }
+def compute_forms_summary(
+    forms: Sequence[SectionForm], *, calculations: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    return compute_extended_summary(forms, calculations=calculations)
 
 
 def ensure_section_form_slots(
@@ -3769,11 +3807,6 @@ def _cumulative_recompute_section(
         segments=inputs.get("segments"),
     )
     _apply_calc_statuses_to_forms(filled_by_code, calcs)
-    # Sync updated calculation pass/fail status back into DB SectionForm rows
-    for row in all_forms:
-        updated = filled_by_code.get(row.form_code)
-        if updated and row.status != updated["status"]:
-            row.status = updated["status"]
 
     prev_checks = dict(inputs.get("checks") or {})
     checks_bool, check_details = evaluate_operational_checks(merged_header, filled_by_code, calcs)
@@ -3781,6 +3814,20 @@ def _cumulative_recompute_section(
         if detail.get("status") == "pending" and prev_checks.get(k) is True:
             checks_bool[k] = True
             detail["checked"] = True
+
+    _apply_findings_and_statuses(merged_header, filled_by_code, calcs, check_details)
+    # Sync updated calculation pass/fail status & findings back into DB SectionForm rows
+    for row in all_forms:
+        updated = filled_by_code.get(row.form_code)
+        if updated:
+            row_ext = dict(row.extracted_data or {})
+            new_findings = (updated.get("extracted_data") or {}).get("findings") or []
+            if row_ext.get("findings") != new_findings:
+                row_ext["findings"] = json_safe(new_findings)
+                row.extracted_data = json_safe(row_ext)
+                flag_modified(row, "extracted_data")
+            if row.status != updated["status"]:
+                row.status = updated["status"]
 
     # Merge header/calc fields into session.inputs while preserving Plan-Profil points & landmarks
     sec_meta = dict(inputs.get("section_meta") or {})
@@ -3947,7 +3994,7 @@ def _cumulative_recompute_section(
 
     inputs["checks"] = checks_bool
     inputs["check_details"] = check_details
-    summary = compute_forms_summary(all_forms)
+    summary = compute_forms_summary(all_forms, calculations=calcs)
     inputs["forms_summary"] = summary
 
     session.inputs = session_service.normalize_inputs(inputs)
@@ -4453,32 +4500,126 @@ def commit_dossier_to_project(
     }
 
 
-def get_session_forms_payload(db: OrmSession, session: HydroSession) -> dict[str, Any]:
-    """Return all mandatory + supplementary BOTAŞ form tracking rows and operational checks for one section."""
-    rows = ensure_section_form_slots(db, session, commit=True)
-    summary = compute_forms_summary(rows)
+def _build_session_calc_context(
+    session: HydroSession,
+    rows: Sequence[SectionForm],
+) -> tuple[dict[str, Any], dict[str, Any]]:
     inputs = session.inputs or {}
-    checks = inputs.get("checks") or {}
-    check_details = inputs.get("check_details") or {}
-
-    items = [
-        {
-            "id": row.id,
+    filled_by_code = {
+        row.form_code: {
             "form_code": row.form_code,
             "botas_code": row.botas_code,
             "form_title": row.form_title,
             "required": row.required,
             "status": row.status,
-            "analysis_id": row.analysis_id,
-            "source_filename": row.source_filename,
+            "extracted_data": row.extracted_data or {},
             "pages": row.pages or [],
             "form_date": row.form_date,
-            "warnings": row.warnings or [],
-            "revision": row.revision,
-            "filled_at": iso_z(row.filled_at),
-            "updated_at": iso_z(row.updated_at),
         }
         for row in rows
+        if row.status != "empty"
+    }
+    merged_header = _merge_section_header(filled_by_code)
+    geom = dict(inputs.get("geometry") or {})
+    for g_key in ("outside_diameter_mm", "wall_thickness_mm", "length_m"):
+        if not merged_header.get(g_key) and geom.get(g_key):
+            merged_header[g_key] = geom[g_key]
+    sp = dict(inputs.get("section_profile") or {})
+    for sp_key in (
+        "design_pressure_bar",
+        "smys_mpa",
+        "highest_elevation_m",
+        "lowest_elevation_m",
+        "start_elevation_m",
+        "end_elevation_m",
+    ):
+        if merged_header.get(sp_key) is None and sp.get(sp_key) is not None:
+            merged_header[sp_key] = sp[sp_key]
+    sec_meta = inputs.get("section_meta") or {}
+    if sec_meta.get("section_no") and not merged_header.get("section_no"):
+        merged_header["section_no"] = sec_meta["section_no"]
+    if sec_meta.get("start_kp") and not merged_header.get("start_kp"):
+        merged_header["start_kp"] = sec_meta["start_kp"]
+    if sec_meta.get("end_kp") and not merged_header.get("end_kp"):
+        merged_header["end_kp"] = sec_meta["end_kp"]
+    calcs = evaluate_section_calculations(
+        merged_header,
+        filled_by_code,
+        segments=inputs.get("segments"),
+    )
+    return merged_header, calcs
+
+
+def _serialize_form_row(
+    spec: FormSpec,
+    row: SectionForm | None,
+    session_id: str,
+) -> dict[str, Any]:
+    if row is None:
+        return {
+            "id": f"slot-{session_id}-{spec.code}",
+            "form_code": spec.code,
+            "botas_code": spec.botas_code,
+            "form_title": spec.title,
+            "required": spec.required,
+            "order": spec.order,
+            "status": "empty",
+            "analysis_id": None,
+            "source_filename": "",
+            "pages": [],
+            "form_date": "",
+            "extracted_data": {},
+            "findings": [],
+            "warnings": [],
+            "revision": 0,
+            "filled_at": None,
+            "updated_at": None,
+        }
+    ext = dict(row.extracted_data or {}) if isinstance(row.extracted_data, dict) else {}
+    return {
+        "id": row.id,
+        "form_code": row.form_code,
+        "botas_code": row.botas_code,
+        "form_title": row.form_title,
+        "required": row.required,
+        "order": spec.order,
+        "status": row.status,
+        "analysis_id": row.analysis_id,
+        "source_filename": row.source_filename,
+        "pages": row.pages or [],
+        "form_date": row.form_date,
+        "extracted_data": ext,
+        "findings": list(ext.get("findings") or []),
+        "warnings": row.warnings or [],
+        "revision": row.revision,
+        "filled_at": iso_z(row.filled_at),
+        "updated_at": iso_z(row.updated_at),
+    }
+
+
+def get_session_forms_payload(db: OrmSession, session: HydroSession) -> dict[str, Any]:
+    """Return all mandatory + supplementary BOTAŞ form tracking rows and operational checks for one section."""
+    rows = ensure_section_form_slots(db, session, commit=True)
+    # Upgrade legacy filled rows lazily if findings were not persisted yet
+    needs_findings = any(
+        row.status != "empty" and not isinstance((row.extracted_data or {}).get("findings"), list)
+        for row in rows
+    )
+    if needs_findings:
+        recompute_session_from_inputs_and_forms(db, session)
+        db.commit()
+        rows = ensure_section_form_slots(db, session, commit=True)
+
+    merged_header, calcs = _build_session_calc_context(session, rows)
+    summary = compute_forms_summary(rows, calculations=calcs)
+    inputs = session.inputs or {}
+    checks = inputs.get("checks") or {}
+    check_details = inputs.get("check_details") or {}
+
+    row_by_code = {row.form_code: row for row in rows}
+    items = [
+        _serialize_form_row(spec, row_by_code.get(spec.code), session.id)
+        for spec in BOTAS_FORM_CATALOG
     ]
 
     checkpoints = []
@@ -4504,6 +4645,8 @@ def get_session_forms_payload(db: OrmSession, session: HydroSession) -> dict[str
         "section_no": sec_meta.get("section_no") or session.name,
         "session_name": session.name,
         "summary": summary,
+        "merged_header": merged_header,
+        "calculations": calcs,
         "forms": items,
         "missing_required_forms": [
             {
@@ -4515,6 +4658,308 @@ def get_session_forms_payload(db: OrmSession, session: HydroSession) -> dict[str
             if item["required"] and item["status"] == "empty"
         ],
         "checkpoints": checkpoints,
+    }
+
+
+def _require_form_spec(form_code: str) -> FormSpec:
+    spec = FORM_SPEC_BY_CODE.get(form_code)
+    if spec is None:
+        raise AppError(
+            "form_not_found",
+            f"Bilinmeyen BOTAŞ form kodu: {form_code}",
+            status_code=404,
+            details={"form_code": form_code},
+        )
+    return spec
+
+
+def get_single_session_form_payload(
+    db: OrmSession,
+    session: HydroSession,
+    form_code: str,
+) -> dict[str, Any]:
+    _require_form_spec(form_code)
+    payload = get_session_forms_payload(db, session)
+    item = next(f for f in payload["forms"] if f["form_code"] == form_code)
+    return {
+        "form": item,
+        "merged_header": payload["merged_header"],
+        "calculations": payload["calculations"],
+        "summary": payload["summary"],
+        "checkpoints": payload["checkpoints"],
+    }
+
+
+def update_session_form(
+    db: OrmSession,
+    session: HydroSession,
+    *,
+    workspace_hash: str,
+    form_code: str,
+    form_date: str | None = None,
+    extracted_data: dict[str, Any] | None = None,
+    overwrite_session_inputs: bool = True,
+) -> dict[str, Any]:
+    spec = _require_form_spec(form_code)
+    ensure_section_form_slots(db, session, commit=False)
+    row = db.execute(
+        select(SectionForm).where(
+            SectionForm.session_id == session.id, SectionForm.form_code == form_code
+        )
+    ).scalar_one_or_none()
+
+    now = utcnow()
+    if row is None:
+        row = SectionForm(
+            id=new_uuid(),
+            workspace_id_hash=workspace_hash,
+            project_id=session.project_id,
+            session_id=session.id,
+            form_code=spec.code,
+            botas_code=spec.botas_code,
+            form_title=spec.title,
+            required=spec.required,
+            status="filled",
+            revision=0,
+            filled_at=now,
+        )
+        db.add(row)
+        db.flush()
+
+    merged_ext = copy.deepcopy(row.extracted_data or {})
+    if extracted_data:
+        for k, v in extracted_data.items():
+            if k == "findings":
+                continue
+            if isinstance(v, dict) and isinstance(merged_ext.get(k), dict):
+                merged_ext[k] = {**merged_ext[k], **v}
+            else:
+                merged_ext[k] = v
+
+    reconciled = reconcile_form_extracted_data(form_code, merged_ext)
+    if form_date is not None:
+        row.form_date = str(form_date).strip()
+        reconciled["form_date"] = row.form_date
+    elif reconciled.get("form_date") and not row.form_date:
+        row.form_date = str(reconciled["form_date"])
+
+    row.extracted_data = json_safe(reconciled)
+    flag_modified(row, "extracted_data")
+    if row.status == "empty":
+        row.status = "filled"
+    row.filled_at = row.filled_at or now
+    row.revision = int(row.revision or 0) + 1
+    row.updated_at = now
+    db.flush()
+
+    recomp = _cumulative_recompute_section(
+        db,
+        session,
+        header_hint=reconciled.get("header") or {},
+        overwrite_values=bool(overwrite_session_inputs),
+        prefer_header_hint=bool(overwrite_session_inputs),
+    )
+    _persist_formal_test_results(db, session, recomp.get("merged_header"))
+    audit.record(
+        db,
+        action="form.update",
+        entity_type="section_form",
+        entity_id=row.id,
+        session_id=session.id,
+        workspace_hash=workspace_hash,
+        after={"form_code": form_code, "revision": row.revision, "status": row.status},
+    )
+    db.commit()
+    db.refresh(session)
+
+    forms_payload = get_session_forms_payload(db, session)
+    item = next(f for f in forms_payload["forms"] if f["form_code"] == form_code)
+    return {
+        "form": item,
+        "forms_payload": forms_payload,
+        "session": session_service.serialize_session(session),
+    }
+
+
+def scan_single_form_upload(
+    db: OrmSession,
+    settings: Any,
+    *,
+    workspace_hash: str,
+    session: HydroSession,
+    form_code: str,
+    file_name: str | None,
+    stream: Any,
+    language: str | None = None,
+    overwrite: bool = True,
+) -> dict[str, Any]:
+    """Scan a single form PDF/image/spreadsheet directly into the active section's target form."""
+    from hidrostatik_test.services.report_ocr import extract_text
+
+    from ..models import Attachment
+    from . import ocr as ocr_service
+    from .storage import resolve_stored_path
+
+    spec = _require_form_spec(form_code)
+    ensure_section_form_slots(db, session, commit=False)
+
+    analysis, _ = ocr_service.analyze_upload(
+        db,
+        settings,
+        workspace_hash,
+        file_name=file_name,
+        stream=stream,
+        calculated_raw=None,
+        session_id=session.id,
+        mapping_profile_id=None,
+        language=language,
+        force=True,
+    )
+
+    sec_meta = (session.inputs or {}).get("section_meta") or {}
+    target_sec_norm = normalize_section_no(sec_meta.get("section_no") or "")
+    dossier = analysis.dossier if isinstance(analysis.dossier, dict) else {}
+    sections = list(dossier.get("sections") or [])
+
+    chosen_incoming: dict[str, Any] | None = None
+    extra_forms: list[dict[str, Any]] = []
+
+    if sections:
+        matched_sec = None
+        if target_sec_norm:
+            for sec in sections:
+                if (
+                    normalize_section_no(sec.get("section_no")) or sec.get("section_no")
+                ) == target_sec_norm:
+                    matched_sec = sec
+                    break
+        if matched_sec is None:
+            for sec in sections:
+                if any(f.get("form_code") == form_code for f in (sec.get("present_forms") or [])):
+                    matched_sec = sec
+                    break
+        if matched_sec is None:
+            matched_sec = sections[0]
+
+        for f in matched_sec.get("present_forms") or []:
+            if f.get("form_code") == form_code:
+                chosen_incoming = f
+            else:
+                extra_forms.append(f)
+
+    attachment = db.get(Attachment, analysis.attachment_id)
+    src_filename = attachment.filename if attachment else (file_name or "")
+
+    if chosen_incoming is None and attachment is not None:
+        stored_path = resolve_stored_path(settings.uploads_dir, attachment.stored_path)
+        pages = extract_text(stored_path)
+        combined_text = "\n".join(pg.text for pg in pages)
+        ext_data = _extract_form_specific_data(form_code, combined_text)
+        chosen_incoming = {
+            "form_code": spec.code,
+            "botas_code": spec.botas_code,
+            "form_title": spec.title,
+            "required": spec.required,
+            "status": "filled",
+            "source_filename": src_filename,
+            "pages": [pg.page_number for pg in pages],
+            "form_date": ext_data.get("form_date") or "",
+            "extracted_data": ext_data,
+            "warnings": [],
+        }
+
+    if chosen_incoming is None:
+        raise AppError(
+            "form_scan_empty",
+            "Yuklenen dokumandan forma ait okunabilir veri cikarilamadi.",
+            status_code=422,
+        )
+
+    existing_rows = {
+        r.form_code: r
+        for r in db.execute(select(SectionForm).where(SectionForm.session_id == session.id))
+        .scalars()
+        .all()
+    }
+
+    updated_codes: list[str] = []
+    now = utcnow()
+    to_apply = [chosen_incoming] + [
+        ef
+        for ef in extra_forms
+        if (
+            ef.get("form_code") not in existing_rows
+            or existing_rows[ef["form_code"]].status == "empty"
+            or overwrite
+        )
+    ]
+
+    for incoming in to_apply:
+        fcode = str(incoming["form_code"])
+        fspec = FORM_SPEC_BY_CODE.get(fcode)
+        if not fspec:
+            continue
+        row = existing_rows.get(fcode)
+        if row is None:
+            row = SectionForm(
+                id=new_uuid(),
+                workspace_id_hash=workspace_hash,
+                project_id=session.project_id,
+                session_id=session.id,
+                form_code=fspec.code,
+                botas_code=fspec.botas_code,
+                form_title=fspec.title,
+                required=fspec.required,
+            )
+            db.add(row)
+            existing_rows[fcode] = row
+        elif row.status != "empty" and not overwrite and fcode == form_code:
+            # Target form scan always updates when explicitly invoked for that form unless overwrite disabled
+            continue
+
+        row.status = str(incoming.get("status") or "filled")
+        row.analysis_id = analysis.id
+        row.attachment_id = analysis.attachment_id
+        row.source_filename = str(incoming.get("source_filename") or src_filename)
+        row.pages = list(incoming.get("pages") or [])
+        row.form_date = str(incoming.get("form_date") or "")
+        ext = reconcile_form_extracted_data(fcode, incoming.get("extracted_data") or {})
+        row.extracted_data = json_safe(ext)
+        flag_modified(row, "extracted_data")
+        row.warnings = list(incoming.get("warnings") or [])
+        row.revision = int(row.revision or 0) + 1
+        row.filled_at = now
+        row.updated_at = now
+        updated_codes.append(fcode)
+
+    db.flush()
+    recomp = _cumulative_recompute_section(
+        db,
+        session,
+        header_hint=(chosen_incoming.get("extracted_data") or {}).get("header") or {},
+        overwrite_values=bool(overwrite),
+    )
+    _persist_formal_test_results(db, session, recomp.get("merged_header"))
+    audit.record(
+        db,
+        action="form.scan",
+        entity_type="section_form",
+        entity_id=existing_rows[form_code].id if form_code in existing_rows else session.id,
+        session_id=session.id,
+        workspace_hash=workspace_hash,
+        after={"form_code": form_code, "analysis_id": analysis.id, "updated_forms": updated_codes},
+    )
+    db.commit()
+    db.refresh(session)
+
+    forms_payload = get_session_forms_payload(db, session)
+    item = next(f for f in forms_payload["forms"] if f["form_code"] == form_code)
+    return {
+        "analysis_id": analysis.id,
+        "updated_form_codes": updated_codes,
+        "form": item,
+        "forms_payload": forms_payload,
+        "session": session_service.serialize_session(session),
     }
 
 
@@ -4536,5 +4981,8 @@ __all__ = [
     "extract_project_name_from_text",
     "find_similar_projects",
     "get_session_forms_payload",
+    "get_single_session_form_payload",
     "normalize_section_no",
+    "scan_single_form_upload",
+    "update_session_form",
 ]

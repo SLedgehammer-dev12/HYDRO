@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Header, Query, Response
+from fastapi import APIRouter, Depends, File, Form, Header, Query, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session as OrmSession
 
@@ -110,6 +110,66 @@ def get_session_forms(
 ) -> dict:
     session = session_service.get_session(db, session_id, workspace.hash)
     return json_safe(dossier_service.get_session_forms_payload(db, session))
+
+
+@router.get("/{session_id}/forms/{form_code}")
+def get_single_session_form(
+    session_id: str,
+    form_code: str,
+    db: OrmSession = Depends(get_db),
+    workspace: Workspace = Depends(get_workspace),
+) -> dict:
+    session = session_service.get_session(db, session_id, workspace.hash)
+    return json_safe(dossier_service.get_single_session_form_payload(db, session, form_code))
+
+
+@router.put("/{session_id}/forms/{form_code}")
+def update_session_form(
+    session_id: str,
+    form_code: str,
+    payload: schemas.SectionFormUpdateRequest,
+    db: OrmSession = Depends(get_db),
+    workspace: Workspace = Depends(get_workspace),
+) -> dict:
+    session = session_service.get_session(db, session_id, workspace.hash)
+    return json_safe(
+        dossier_service.update_session_form(
+            db,
+            session,
+            workspace_hash=workspace.hash,
+            form_code=form_code,
+            form_date=payload.form_date,
+            extracted_data=payload.extracted_data,
+            overwrite_session_inputs=payload.overwrite_session_inputs,
+        )
+    )
+
+
+@router.post("/{session_id}/forms/{form_code}/scan")
+def scan_single_form(
+    session_id: str,
+    form_code: str,
+    file: UploadFile = File(...),
+    language: str | None = Form(default=None),
+    overwrite: bool = Form(default=True),
+    db: OrmSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    workspace: Workspace = Depends(get_workspace),
+) -> dict:
+    session = session_service.get_session(db, session_id, workspace.hash)
+    return json_safe(
+        dossier_service.scan_single_form_upload(
+            db,
+            settings,
+            workspace_hash=workspace.hash,
+            session=session,
+            form_code=form_code,
+            file_name=file.filename,
+            stream=file.file,
+            language=language or None,
+            overwrite=bool(overwrite),
+        )
+    )
 
 
 @router.put("/{session_id}")

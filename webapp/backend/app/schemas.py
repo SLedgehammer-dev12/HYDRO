@@ -314,6 +314,12 @@ class OcrDossierCommitRequest(StrictModel):
     selected_sections: list[str] | None = None
 
 
+class SectionFormUpdateRequest(StrictModel):
+    form_date: str | None = Field(default=None, max_length=40)
+    extracted_data: dict[str, Any] = Field(default_factory=dict)
+    overwrite_session_inputs: bool = True
+
+
 class MappingProfileCreate(StrictModel):
     name: str = Field(min_length=1, max_length=200)
     format_key: str = Field(min_length=1, max_length=120)
@@ -360,6 +366,7 @@ __all__ = [
     "ReferenceCompareRequest",
     "ReportExportRequest",
     "ResultCreate",
+    "SectionFormUpdateRequest",
     "SectionLandmarkIn",
     "SectionProfilePointIn",
     "SessionCreate",

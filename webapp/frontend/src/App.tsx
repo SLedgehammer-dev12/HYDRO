@@ -5,6 +5,7 @@ import { TopBar } from "./components/layout/TopBar";
 import { DecisionStrip } from "./components/layout/DecisionStrip";
 import { RightPanel } from "./components/layout/RightPanel";
 import { HelpDialog } from "./components/layout/HelpDialog";
+import { UpdateManagerModal } from "./components/layout/UpdateManagerModal";
 import { ToastHost } from "./components/ui/ToastHost";
 import { PageErrorBoundary } from "./components/PageErrorBoundary";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -13,12 +14,20 @@ import { GeometryPage } from "./pages/GeometryPage";
 import { CoefficientsPage } from "./pages/CoefficientsPage";
 import { AirPage } from "./pages/AirPage";
 import { PressurePage } from "./pages/PressurePage";
+import { SectionFormPage } from "./pages/SectionFormPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import OcrPage from "./features/ocr/OcrPage";
 import { hydrateSessionResults, useBackendProbe, useProjects, useSaveSession, useSessions } from "./hooks/queries";
 import { useAppStore } from "./store/useAppStore";
-import { TAB_BY_KEY, VISIBLE_TABS, hashForTab, tabFromHash } from "./lib/constants";
+import {
+  BOTAS_FORM_BY_CODE,
+  TAB_BY_KEY,
+  VISIBLE_TABS,
+  formCodeFromHash,
+  hashForTab,
+  tabFromHash,
+} from "./lib/constants";
 import { api, apiErrorMessage } from "./lib/api";
 import { createEmptyInputs } from "./lib/mock";
 import { toApiInputs } from "./lib/normalize";
@@ -32,14 +41,20 @@ function isTyping(target: EventTarget | null): boolean {
 /* Derin bağlantı: kalıcı sekme yüklenmeden önce URL hash'i önceliklidir. */
 if (typeof window !== "undefined" && window.location.hash.length > 1) {
   const initial = tabFromHash(window.location.hash);
+  const initialForm = formCodeFromHash(window.location.hash);
   if (initial !== useAppStore.getState().tab) {
     useAppStore.getState().setTab(initial);
+  }
+  if (initialForm && initialForm !== useAppStore.getState().activeFormCode) {
+    useAppStore.getState().setActiveFormCode(initialForm);
   }
 }
 
 export default function App() {
   const tab = useAppStore((state) => state.tab);
   const setTab = useAppStore((state) => state.setTab);
+  const activeFormCode = useAppStore((state) => state.activeFormCode);
+  const setActiveFormCode = useAppStore((state) => state.setActiveFormCode);
   const theme = useAppStore((state) => state.theme);
   const rightPanelOpen = useAppStore((state) => state.rightPanelOpen);
   const backend = useAppStore((state) => state.backend);
@@ -65,18 +80,28 @@ export default function App() {
 
   /* Hash yönlendirme */
   useEffect(() => {
-    const onHash = () => setTab(tabFromHash(window.location.hash));
+    const onHash = () => {
+      const nextTab = tabFromHash(window.location.hash);
+      const nextForm = formCodeFromHash(window.location.hash);
+      setTab(nextTab);
+      if (nextForm) setActiveFormCode(nextForm);
+    };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
-  }, [setTab]);
+  }, [setTab, setActiveFormCode]);
 
   useEffect(() => {
-    const target = hashForTab(tab);
+    const target = hashForTab(tab, activeFormCode);
     if (window.location.hash !== target) {
       window.history.replaceState(null, "", target);
     }
-    document.title = `${TAB_BY_KEY[tab].label} · HYDRO`;
-  }, [tab]);
+    if (tab === "forms") {
+      const spec = BOTAS_FORM_BY_CODE[activeFormCode];
+      document.title = spec ? `${spec.shortCode} ${spec.title} · HYDRO` : "Test Bölümü Formları · HYDRO";
+    } else {
+      document.title = `${TAB_BY_KEY[tab].label} · HYDRO`;
+    }
+  }, [tab, activeFormCode]);
 
   /* Oturum geri yükleme (backend bağlıysa) */
   useEffect(() => {
@@ -203,6 +228,8 @@ export default function App() {
         return <AirPage />;
       case "pressure":
         return <PressurePage />;
+      case "forms":
+        return <SectionFormPage />;
       case "field":
         /* Eski `#/field` bağlantısı birleşik Geometri & Saha sayfasına gider. */
         return <GeometryPage />;
@@ -254,6 +281,7 @@ export default function App() {
       </div>
 
       <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
+      <UpdateManagerModal />
       <ToastHost />
     </div>
   );

@@ -20,7 +20,7 @@ import { fmt, num, relativeTime } from "../lib/format";
 import { geometryForInputs, sectionsFromInputs } from "../lib/mock";
 import type { AirContentRequest } from "../lib/types";
 
-export function AirPage() {
+export function AirPage({ embedded = false }: { embedded?: boolean } = {}) {
   const inputs = useAppStore((state) => state.inputs);
   const results = useAppStore((state) => state.results);
   const history = useAppStore((state) => state.history);
@@ -156,29 +156,27 @@ export function AirPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader
-        kicker="Hava İçerik Testi"
-        title="Hava içerik değerlendirmesi"
-        description="Şartname 13: tam 1,0 bar basınç artışıyla yapılır ve Vpa < 1,06 × Vp kuralı uygulanır. Tam sınır değeri başarısızdır."
-        meta={
-          <>
+      {embedded ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3.5 py-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-bold text-[var(--text)]">
+              Detay Hesaplama — Hava İçerik Testi (Şartname 13)
+            </span>
             <Badge tone={air?.passed ? "pass" : air ? "fail" : "pending"}>
               {air ? (air.passed ? "Kabul" : "Red") : "Değerlendirme bekliyor"}
             </Badge>
             <span className="text-[10.5px] text-[var(--text-faint)]">
               Kural: Vpa &lt; 1,06 × Vp
             </span>
-          </>
-        }
-        actions={
-          <>
-            <Button size="lg" variant="ghost" icon={<Sigma size={15} />} onClick={() => setTab("coefficients")}>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" variant="ghost" icon={<Sigma size={14} />} onClick={() => setTab("coefficients")}>
               Katsayılar & Detay
             </Button>
             <Button
-              size="lg"
+              size="sm"
               variant="primary"
-              icon={<CheckCircle2 size={15} />}
+              icon={<CheckCircle2 size={14} />}
               loading={calculateAir.isPending}
               disabled={missing.length > 0}
               title={missing.length ? `Eksik: ${missing.join(", ")}` : "Testi değerlendir"}
@@ -186,9 +184,43 @@ export function AirPage() {
             >
               Testi değerlendir
             </Button>
-          </>
-        }
-      />
+          </div>
+        </div>
+      ) : (
+        <PageHeader
+          kicker="Hava İçerik Testi"
+          title="Hava içerik değerlendirmesi"
+          description="Şartname 13: tam 1,0 bar basınç artışıyla yapılır ve Vpa < 1,06 × Vp kuralı uygulanır. Tam sınır değeri başarısızdır."
+          meta={
+            <>
+              <Badge tone={air?.passed ? "pass" : air ? "fail" : "pending"}>
+                {air ? (air.passed ? "Kabul" : "Red") : "Değerlendirme bekliyor"}
+              </Badge>
+              <span className="text-[10.5px] text-[var(--text-faint)]">
+                Kural: Vpa &lt; 1,06 × Vp
+              </span>
+            </>
+          }
+          actions={
+            <>
+              <Button size="lg" variant="ghost" icon={<Sigma size={15} />} onClick={() => setTab("coefficients")}>
+                Katsayılar & Detay
+              </Button>
+              <Button
+                size="lg"
+                variant="primary"
+                icon={<CheckCircle2 size={15} />}
+                loading={calculateAir.isPending}
+                disabled={missing.length > 0}
+                title={missing.length ? `Eksik: ${missing.join(", ")}` : "Testi değerlendir"}
+                onClick={evaluate}
+              >
+                Testi değerlendir
+              </Button>
+            </>
+          }
+        />
+      )}
 
       {missing.length > 0 ? (
         <InlineNotice tone="warning" title="Eksik alanlar" icon={Lock}>

@@ -592,6 +592,34 @@ export interface CheckAutoDetail {
   metrics?: Record<string, unknown>;
 }
 
+export type BotasFormCode =
+  | "test_data"
+  | "cleaning"
+  | "filling"
+  | "leak_stabilization"
+  | "strength"
+  | "air_acceptance"
+  | "pressure_test"
+  | "pressure_acceptance"
+  | "dewatering"
+  | "pre_drying"
+  | "final_drying"
+  | "pressurization"
+  | "spool_test"
+  | "calculation_sheet"
+  | "chart_recorder"
+  | "caliper_pig";
+
+export interface FormFinding {
+  code: string;
+  title: string;
+  status: "passed" | "warning" | "failed" | "info";
+  message: string;
+  ref: string;
+  expected?: string;
+  actual?: string;
+}
+
 export interface SectionFormsSummary {
   required_total: number;
   filled_required: number;
@@ -599,20 +627,37 @@ export interface SectionFormsSummary {
   missing_titles: string[];
   supplementary_filled: number;
   failed_forms: string[];
+  warning_forms?: string[];
+  passed_forms_count?: number;
+  warning_forms_count?: number;
+  findings_counts?: { passed: number; warning: number; failed: number };
+  first_issue_form_code?: string | null;
+  key_metrics?: {
+    air_excess_pct?: number | null;
+    air_passed?: boolean | null;
+    pa_minus_pt_bar?: number | null;
+    pressure_passed?: boolean | null;
+    thermal_delta_c?: number | null;
+    filled_volume_m3?: number | null;
+    dew_point_c?: number | null;
+  };
   complete: boolean;
 }
 
 export interface SectionFormRecord {
   id: string;
-  form_code: string;
+  form_code: BotasFormCode;
   botas_code: string;
   form_title: string;
   required: boolean;
+  order?: number;
   status: "empty" | "filled" | "passed" | "failed" | "warning";
   analysis_id: string | null;
   source_filename: string;
   pages: number[];
   form_date: string;
+  extracted_data?: Record<string, unknown>;
+  findings?: FormFinding[];
   warnings: string[];
   revision: number;
   filled_at: string | null;
@@ -635,6 +680,8 @@ export interface SessionFormsResponse {
   section_no: string;
   session_name: string;
   summary: SectionFormsSummary;
+  merged_header?: Record<string, unknown>;
+  calculations?: Record<string, Record<string, unknown>>;
   forms: SectionFormRecord[];
   missing_required_forms: Array<{
     form_code: string;
@@ -642,6 +689,84 @@ export interface SessionFormsResponse {
     form_title: string;
   }>;
   checkpoints: SessionFormCheckpoint[];
+}
+
+export interface SectionFormUpdatePayload {
+  form_date?: string | null;
+  extracted_data: Record<string, unknown>;
+  overwrite_session_inputs?: boolean;
+}
+
+export interface SectionFormUpdateResponse {
+  form: SectionFormRecord;
+  forms_payload: SessionFormsResponse;
+  session: Session;
+}
+
+export interface SectionFormScanResponse extends SectionFormUpdateResponse {
+  analysis_id: string;
+  updated_form_codes: string[];
+}
+
+export interface UpdateWebAsset {
+  name: string;
+  download_url: string;
+  size: number;
+  kind: string;
+}
+
+export interface UpdateJobState {
+  state:
+    | "idle"
+    | "checking"
+    | "available"
+    | "up_to_date"
+    | "downloading"
+    | "verifying"
+    | "ready_to_install"
+    | "installing"
+    | "restarting"
+    | "failed";
+  target_version: string;
+  asset_name: string;
+  download_url: string;
+  downloaded_bytes: number;
+  total_bytes: number;
+  progress_pct: number;
+  sha256_verified: boolean;
+  signature_verified: boolean;
+  verified_path: string;
+  verified_sha256: string;
+  error: string;
+  message: string;
+  updated_at: string;
+}
+
+export interface UpdateManagerStatus {
+  current_version: string;
+  runtime: {
+    frozen: boolean;
+    platform: string;
+    arch: string;
+    install_mode: string;
+    can_self_install: boolean;
+    executable_path: string;
+    install_dir: string;
+    prefer_kind?: string;
+  };
+  checked: boolean;
+  checked_at: string | null;
+  latest_version: string | null;
+  tag_name: string | null;
+  html_url: string;
+  release_notes: string;
+  published_at: string;
+  source_repository: string;
+  update_available: boolean;
+  check_error: string;
+  selected_asset: UpdateWebAsset | null;
+  all_assets: UpdateWebAsset[];
+  job: UpdateJobState;
 }
 
 export interface PlanProfileCommitRequest {
@@ -971,6 +1096,7 @@ export type TabKey =
   | "coefficient_detail"
   | "air"
   | "pressure"
+  | "forms"
   | "field"
   | "reports"
   | "ocr"

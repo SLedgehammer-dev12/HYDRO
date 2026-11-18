@@ -25,7 +25,7 @@ const round = (value: number, digits = 6) => {
   return Math.round(value * factor) / factor;
 };
 
-export function PressurePage() {
+export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) {
   const inputs = useAppStore((state) => state.inputs);
   const results = useAppStore((state) => state.results);
   const history = useAppStore((state) => state.history);
@@ -151,29 +151,27 @@ export function PressurePage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader
-        kicker="Basınç Değişim Testi"
-        title="Basınç değişim değerlendirmesi"
-        description="Pt teorik basınç değişimidir. Kabul kuralı (Pa − Pt) ≤ 0,3 bar; negatif B geçerlidir ve dP işareti döner."
-        meta={
-          <>
+      {embedded ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3.5 py-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-bold text-[var(--text)]">
+              Detay Hesaplama — Basınç Değişim Testi (Şartname 15)
+            </span>
             <Badge tone={pressure?.passed ? "pass" : pressure ? "fail" : "pending"}>
               {pressure ? (pressure.passed ? "Kabul" : "Red") : "Değerlendirme bekliyor"}
             </Badge>
             <span className="text-[10.5px] text-[var(--text-faint)]">
               Kural: (Pa − Pt) ≤ 0,3 bar
             </span>
-          </>
-        }
-        actions={
-          <>
-            <Button size="lg" variant="ghost" icon={<Sigma size={15} />} onClick={() => setTab("coefficients")}>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" variant="ghost" icon={<Sigma size={14} />} onClick={() => setTab("coefficients")}>
               Katsayılar & Detay
             </Button>
             <Button
-              size="lg"
+              size="sm"
               variant="primary"
-              icon={<CheckCircle2 size={15} />}
+              icon={<CheckCircle2 size={14} />}
               loading={calculate.isPending}
               disabled={missing.length > 0}
               title={missing.length ? `Eksik: ${missing.join(", ")}` : "Testi değerlendir"}
@@ -181,9 +179,43 @@ export function PressurePage() {
             >
               Testi değerlendir
             </Button>
-          </>
-        }
-      />
+          </div>
+        </div>
+      ) : (
+        <PageHeader
+          kicker="Basınç Değişim Testi"
+          title="Basınç değişim değerlendirmesi"
+          description="Pt teorik basınç değişimidir. Kabul kuralı (Pa − Pt) ≤ 0,3 bar; negatif B geçerlidir ve dP işareti döner."
+          meta={
+            <>
+              <Badge tone={pressure?.passed ? "pass" : pressure ? "fail" : "pending"}>
+                {pressure ? (pressure.passed ? "Kabul" : "Red") : "Değerlendirme bekliyor"}
+              </Badge>
+              <span className="text-[10.5px] text-[var(--text-faint)]">
+                Kural: (Pa − Pt) ≤ 0,3 bar
+              </span>
+            </>
+          }
+          actions={
+            <>
+              <Button size="lg" variant="ghost" icon={<Sigma size={15} />} onClick={() => setTab("coefficients")}>
+                Katsayılar & Detay
+              </Button>
+              <Button
+                size="lg"
+                variant="primary"
+                icon={<CheckCircle2 size={15} />}
+                loading={calculate.isPending}
+                disabled={missing.length > 0}
+                title={missing.length ? `Eksik: ${missing.join(", ")}` : "Testi değerlendir"}
+                onClick={evaluate}
+              >
+                Testi değerlendir
+              </Button>
+            </>
+          }
+        />
+      )}
 
       {missing.length > 0 ? (
         <InlineNotice tone="warning" title="Eksik alanlar" icon={Lock}>

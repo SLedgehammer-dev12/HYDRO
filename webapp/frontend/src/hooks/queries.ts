@@ -58,6 +58,10 @@ import type {
   ProjectSceneResponse,
   ReferenceTableMeta,
   ResultBundle,
+  SectionFormRecord,
+  SectionFormScanResponse,
+  SectionFormUpdatePayload,
+  SectionFormUpdateResponse,
   Session,
   SessionFormsResponse,
   SessionListItem,
@@ -66,7 +70,9 @@ import type {
   TablePointResponse,
   TestResultRecord,
   TestType,
+  UpdateManagerStatus,
 } from "../lib/types";
+import { BOTAS_FORM_NAV_ITEMS, CHECK_DEFINITIONS } from "../lib/constants";
 import { toApiInputs } from "../lib/normalize";
 
 export interface Resolved<T> {
@@ -559,12 +565,160 @@ export function useCommitPlanProfile() {
   });
 }
 
+function buildFallbackSessionForms(sessionId: string): SessionFormsResponse {
+  const state = useAppStore.getState();
+  const forms: SectionFormRecord[] = BOTAS_FORM_NAV_ITEMS.map((item) => ({
+    id: `slot-${sessionId}-${item.code}`,
+    form_code: item.code,
+    botas_code: item.botasCode,
+    form_title: item.title,
+    required: item.required,
+    order: item.order,
+    status: "empty",
+    analysis_id: null,
+    source_filename: "",
+    pages: [],
+    form_date: state.inputs.section_meta.test_date || "",
+    extracted_data: {},
+    findings: [],
+    warnings: [],
+    revision: 0,
+    filled_at: null,
+    updated_at: null,
+  }));
+  const reqForms = BOTAS_FORM_NAV_ITEMS.filter((i) => i.required);
+  return {
+    session_id: sessionId,
+    project_id: state.projectId,
+    section_no: state.inputs.section_meta.section_no || state.sessionName || "Kesit",
+    session_name: state.sessionName,
+    summary: {
+      required_total: reqForms.length,
+      filled_required: 0,
+      missing_required: reqForms.length,
+      missing_titles: reqForms.map((i) => i.title),
+      supplementary_filled: 0,
+      failed_forms: [],
+      warning_forms: [],
+      passed_forms_count: 0,
+      warning_forms_count: 0,
+      findings_counts: { passed: 0, warning: 0, failed: 0 },
+      first_issue_form_code: null,
+      key_metrics: {},
+      complete: false,
+    },
+    merged_header: {
+      section_no: state.inputs.section_meta.section_no,
+      start_kp: state.inputs.section_meta.start_kp,
+      end_kp: state.inputs.section_meta.end_kp,
+      outside_diameter_mm: state.inputs.geometry.outside_diameter_mm,
+      wall_thickness_mm: state.inputs.geometry.wall_thickness_mm,
+      length_m: state.inputs.geometry.length_m,
+      design_pressure_bar: state.inputs.section_profile.design_pressure_bar,
+      smys_mpa: state.inputs.section_profile.smys_mpa,
+    },
+    calculations: {},
+    forms,
+    missing_required_forms: reqForms.map((i) => ({
+      form_code: i.code,
+      botas_code: i.botasCode,
+      form_title: i.title,
+    })),
+    checkpoints: CHECK_DEFINITIONS.map((chk) => ({
+      key: chk.key,
+      label: chk.label,
+      ref: chk.ref,
+      checked: Boolean(state.inputs.checks[chk.key]),
+      status: state.inputs.checks[chk.key] ? "passed" : "pending",
+      message: state.inputs.check_details?.[chk.key]?.message ?? "",
+      source_forms: state.inputs.check_details?.[chk.key]?.source_forms ?? [],
+    })),
+  };
+}
+
 export function useSessionForms(sessionId: string | null) {
   return useQuery<SessionFormsResponse>({
     queryKey: ["session-forms", sessionId],
-    queryFn: () => api.sessionForms(sessionId!),
+    queryFn: async () => {
+      const state = useAppStore.getState();
+      if (!sessionId || state.backend !== "online" || sessionId.startsWith("demo-")) {
+        return buildFallbackSessionForms(sessionId ?? "demo-session");
+      }
+      return api.sessionForms(sessionId);
+    },
     enabled: Boolean(sessionId),
     staleTime: 10_000,
+    retry: false,
+  });
+}
+
+export function useUpdateSessionForm() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    SectionFormUpdateResponse,
+    Error,
+    { sessionId: string; formCode: string; payload: SectionFormUpdatePayload }
+  >({
+    mutationFn: async ({ sessionId, formCode, payload }) =>
+      api.updateSessionForm(sessionId, formCode, payload),
+    onSuccess: (res) => {
+      const store = useAppStore.getState();
+      queryClient.setQueryData(["session-forms", res.session.id], res.forms_payload);
+      queryClient.setQueryData(["session", res.session.id], res.session);
+      store.applySessionInputs(res.session.inputs);
+      store.setSessionMeta({
+        id: res.session.id,
+        name: res.session.name,
+        revision: res.session.revision,
+        status: res.session.status,
+      });
+      store.markSaved(res.session.revision);
+      void hydrateSessionResults(res.session.id);
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      store.pushToast(
+        "success",
+        "Form kaydedildi ve kontrol edildi",
+        `${res.form.botas_code} · Revizyon ${res.form.revision}`,
+      );
+    },
+    onError: (error) => {
+      useAppStore.getState().pushToast("error", "Form kaydedilemedi", error.message);
+    },
+  });
+}
+
+export function useScanSessionForm() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    SectionFormScanResponse,
+    Error,
+    { sessionId: string; formCode: string; file: File; overwrite?: boolean }
+  >({
+    mutationFn: async ({ sessionId, formCode, file, overwrite = true }) =>
+      api.scanSessionForm(sessionId, formCode, file, overwrite),
+    onSuccess: (res) => {
+      const store = useAppStore.getState();
+      queryClient.setQueryData(["session-forms", res.session.id], res.forms_payload);
+      queryClient.setQueryData(["session", res.session.id], res.session);
+      store.applySessionInputs(res.session.inputs);
+      store.setSessionMeta({
+        id: res.session.id,
+        name: res.session.name,
+        revision: res.session.revision,
+        status: res.session.status,
+      });
+      store.markSaved(res.session.revision);
+      void hydrateSessionResults(res.session.id);
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      store.pushToast(
+        "success",
+        "Doküman forma aktarıldı",
+        `${res.form.form_title} tarandı ve kontroller güncellendi.`,
+      );
+    },
+    onError: (error) => {
+      useAppStore.getState().pushToast("error", "Doküman taranamadı", error.message);
+    },
   });
 }
 
@@ -1108,6 +1262,99 @@ export function useOcrStatus() {
     initialData: DEMO_OCR_STATUS,
     initialDataUpdatedAt: 0,
     staleTime: 30_000,
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Güncelleme Yöneticisi                                               */
+/* ------------------------------------------------------------------ */
+
+export function useUpdateStatus() {
+  const backend = useAppStore((state) => state.backend);
+  return useQuery<UpdateManagerStatus>({
+    queryKey: ["update", "status"],
+    queryFn: () => api.updateStatus(),
+    enabled: backend === "online",
+    staleTime: 30_000,
+    retry: false,
+    refetchInterval: (query) => {
+      const st = query.state.data?.job?.state;
+      return st === "checking" || st === "downloading" || st === "verifying" || st === "installing"
+        ? 1_000
+        : false;
+    },
+  });
+}
+
+export function useCheckUpdates() {
+  const queryClient = useQueryClient();
+  return useMutation<UpdateManagerStatus, Error, { force?: boolean; silent?: boolean } | void>({
+    mutationFn: async (opts) => api.checkUpdates(opts?.force ?? true),
+    onSuccess: (status, vars) => {
+      queryClient.setQueryData(["update", "status"], status);
+      if (vars && vars.silent) return;
+      if (status.check_error) {
+        useAppStore
+          .getState()
+          .pushToast("warning", "Güncelleme denetimi başarısız", status.check_error);
+      } else if (status.update_available && status.latest_version) {
+        useAppStore
+          .getState()
+          .pushToast(
+            "info",
+            `Yeni sürüm hazır: v${status.latest_version}`,
+            "Güncelleme Yöneticisi üzerinden indirip doğrulayabilirsiniz.",
+          );
+      } else {
+        useAppStore
+          .getState()
+          .pushToast("success", "Uygulama güncel", `Sürüm v${status.current_version} en güncel sürümdür.`);
+      }
+    },
+    onError: (error, vars) => {
+      if (vars && vars.silent) return;
+      useAppStore.getState().pushToast("warning", "Güncelleme kontrolü yapılamadı", error.message);
+    },
+  });
+}
+
+export function useStartUpdateDownload() {
+  const queryClient = useQueryClient();
+  return useMutation<UpdateManagerStatus, Error, { assetName?: string } | void>({
+    mutationFn: async (opts) => api.startUpdateDownload(opts?.assetName),
+    onSuccess: (status) => {
+      queryClient.setQueryData(["update", "status"], status);
+      useAppStore
+        .getState()
+        .pushToast(
+          "info",
+          "Güncelleme indiriliyor",
+          "SHA-256 ve Ed25519 dijital imza doğrulaması otomatik yapılacaktır.",
+        );
+    },
+    onError: (error) => {
+      useAppStore.getState().pushToast("error", "İndirme başlatılamadı", error.message);
+    },
+  });
+}
+
+export function useApplyUpdate() {
+  const queryClient = useQueryClient();
+  return useMutation<UpdateManagerStatus, Error, void>({
+    mutationFn: async () => api.applyUpdate(),
+    onSuccess: (status) => {
+      queryClient.setQueryData(["update", "status"], status);
+      useAppStore
+        .getState()
+        .pushToast(
+          "success",
+          "Kurulum başlatıldı",
+          status.job?.message || "Uygulama güncellenip yeniden başlatılıyor...",
+        );
+    },
+    onError: (error) => {
+      useAppStore.getState().pushToast("error", "Kurulum başlatılamadı", error.message);
+    },
   });
 }
 

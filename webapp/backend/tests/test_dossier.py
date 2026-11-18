@@ -1268,3 +1268,195 @@ def test_strict_domain_invariants_and_boundary_guards():
     )
     assert pv_no_vol["pressurization_volume"]["status"] == "warning"
     assert pv_no_vol["pressurization_volume"]["checked"] is False
+
+
+def test_forms_catalog_structured_rows_inline_edit_and_single_form_scan(client, headers, tmp_path):
+    commit_pp = client.post(
+        "/api/projects/plan-profile/commit",
+        json={
+            "project_name": "Form Detay Test Projesi",
+            "project_code": "FDT-01",
+            "sections": [
+                {
+                    "section_no": "Bölüm 1",
+                    "start_kp": "0+000",
+                    "end_kp": "2+000",
+                    "length_m": 2000.0,
+                    "outside_diameter_mm": 355.6,
+                    "wall_thickness_mm": 5.2,
+                    "design_pressure_bar": 75.0,
+                }
+            ],
+        },
+        headers=headers,
+    )
+    assert commit_pp.status_code == 201, commit_pp.text
+    pp_data = commit_pp.json()
+    project_id = pp_data["project_id"]
+    sess_id = pp_data["items"][0]["id"]
+
+    # 1) Upload a multi-form dossier (Su Dolum + Temizlik Pigleri) -> commit to project
+    pdf_multi = _make_multipage_pdf(
+        tmp_path / "form_details_multi.pdf",
+        [
+            [
+                "SU DOLUM RAPORU",
+                "Proje Adi : Form Detay Test Projesi",
+                "Test Bolum No : Bolum 1",
+                "Tarih : 10.11.2026",
+                "Dis Cap : 355.6 mm",
+                "Et Kalinligi : 5.2 mm",
+                "Hat Uzunlugu : 2000 m",
+                "08:00 10.0 10.0 60.0 12.0 4.5",
+                "09:00 20.0 10.0 120.0 13.0 5.0",
+            ],
+            [
+                "TEMIZLIK KABUL RAPORU",
+                "Proje Adi : Form Detay Test Projesi",
+                "Test Bolum No : Bolum 1",
+                "Tarih : 09.11.2026",
+                "Pig Izleme Tablosu",
+                "Firca Pigi-1 08:00 08:30",
+            ],
+        ],
+    )
+    a1 = client.post(
+        "/api/ocr/analyze",
+        files={"file": (pdf_multi.name, pdf_multi.read_bytes(), "application/pdf")},
+        headers=headers,
+    )
+    assert a1.status_code == 201, a1.text
+    c1 = client.post(
+        f"/api/ocr/analyses/{a1.json()['id']}/commit-dossier",
+        json={
+            "target_project_id": project_id,
+            "create_new_project": False,
+            "overwrite_filled": True,
+        },
+        headers=headers,
+    )
+    assert c1.status_code == 200, c1.text
+
+    forms_resp = client.get(f"/api/sessions/{sess_id}/forms", headers=headers)
+    assert forms_resp.status_code == 200, forms_resp.text
+    forms_body = forms_resp.json()
+    assert len(forms_body["forms"]) == 16
+    assert sum(1 for f in forms_body["forms"] if f["required"]) == 11
+    assert sum(1 for f in forms_body["forms"] if not f["required"]) == 5
+    assert "findings_counts" in forms_body["summary"]
+    assert "key_metrics" in forms_body["summary"]
+
+    by_code = {f["form_code"]: f for f in forms_body["forms"]}
+    fill_ext = by_code["filling"]["extracted_data"]
+    assert isinstance(fill_ext.get("rows"), list) and len(fill_ext["rows"]) == 2
+    assert fill_ext["rows"][1]["total_volume_m3"] == pytest.approx(120.0)
+    assert isinstance(by_code["filling"].get("findings"), list) and by_code["filling"]["findings"]
+
+    clean_ext = by_code["cleaning"]["extracted_data"]
+    assert isinstance(clean_ext.get("pig_runs"), list) and len(clean_ext["pig_runs"]) == 1
+    assert clean_ext["pig_runs"][0]["duration_min"] == pytest.approx(30.0)
+
+    # 2) Inline edit via PUT /api/sessions/{id}/forms/air_acceptance & filling
+    r_put_air = client.put(
+        f"/api/sessions/{sess_id}/forms/air_acceptance",
+        json={
+            "form_date": "12.11.2026",
+            "extracted_data": {
+                "air_acceptance": {
+                    "a_micro_per_bar": 45.4,
+                    "k_factor": 1.02,
+                    "vpa_m3": 0.0250,
+                }
+            },
+            "overwrite_session_inputs": True,
+        },
+        headers=headers,
+    )
+    assert r_put_air.status_code == 200, r_put_air.text
+    air_body = r_put_air.json()
+    assert air_body["form"]["revision"] == 1
+    assert air_body["forms_payload"]["calculations"]["air"]["status"] == "failed"
+    assert any(fd["status"] == "failed" for fd in (air_body["form"].get("findings") or []))
+
+    r_put_fill = client.put(
+        f"/api/sessions/{sess_id}/forms/filling",
+        json={
+            "form_date": "13.11.2026",
+            "extracted_data": {
+                "rows": [
+                    {
+                        "time_str": "08:00",
+                        "meter_reading_m3": 100.0,
+                        "delta_volume_m3": 100.0,
+                        "total_volume_m3": 100.0,
+                        "water_inlet_temp_c": 12.0,
+                        "water_pressure_bar": 5.0,
+                    },
+                    {
+                        "time_str": "09:30",
+                        "meter_reading_m3": 185.5,
+                        "delta_volume_m3": 85.5,
+                        "total_volume_m3": 185.5,
+                        "water_inlet_temp_c": 14.0,
+                        "water_pressure_bar": 6.0,
+                    },
+                ]
+            },
+        },
+        headers=headers,
+    )
+    assert r_put_fill.status_code == 200, r_put_fill.text
+    fill_body = r_put_fill.json()
+    assert fill_body["form"]["revision"] >= 2
+    assert fill_body["form"]["extracted_data"]["filling"]["total_filled_m3"] == pytest.approx(185.5)
+    assert fill_body["form"]["extracted_data"]["time_log"]["duration_hours"] == pytest.approx(1.5)
+
+    # 3) Single-form OCR upload (both titled PDF and untitled cropped table-only PDF)
+    titled_pdf = _make_multipage_pdf(
+        tmp_path / "single_filling_titled.pdf",
+        [
+            [
+                "SU DOLUM RAPORU",
+                "Proje Adi : Form Detay Test Projesi",
+                "Test Bolum No : Bolum 1",
+                "Tarih : 14.11.2026",
+                "10:00 10.0 10.0 190.0 12.5 5.0",
+                "11:00 15.0 5.0 195.0 13.0 5.5",
+            ]
+        ],
+    )
+    r_scan_titled = client.post(
+        f"/api/sessions/{sess_id}/forms/filling/scan",
+        files={"file": (titled_pdf.name, titled_pdf.read_bytes(), "application/pdf")},
+        data={"overwrite": "true"},
+        headers=headers,
+    )
+    assert r_scan_titled.status_code == 200, r_scan_titled.text
+    titled_body = r_scan_titled.json()
+    assert titled_body["form"]["extracted_data"]["filling"]["total_filled_m3"] == pytest.approx(
+        195.0
+    )
+    rev_after_titled = titled_body["form"]["revision"]
+
+    untitled_pdf = _make_multipage_pdf(
+        tmp_path / "single_filling_cropped.pdf",
+        [
+            [
+                "07:00 50.0 50.0 210.0 11.5 4.2",
+                "08:00 40.0 40.0 250.0 12.0 4.8",
+            ]
+        ],
+    )
+    r_scan_untitled = client.post(
+        f"/api/sessions/{sess_id}/forms/filling/scan",
+        files={"file": (untitled_pdf.name, untitled_pdf.read_bytes(), "application/pdf")},
+        data={"overwrite": "true"},
+        headers=headers,
+    )
+    assert r_scan_untitled.status_code == 200, r_scan_untitled.text
+    untitled_body = r_scan_untitled.json()
+    assert untitled_body["form"]["revision"] == rev_after_titled + 1
+    assert untitled_body["form"]["extracted_data"]["filling"]["total_filled_m3"] == pytest.approx(
+        250.0
+    )
+    assert len(untitled_body["form"]["extracted_data"]["rows"]) == 2

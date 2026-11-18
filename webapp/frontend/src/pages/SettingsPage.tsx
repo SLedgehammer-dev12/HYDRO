@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  ArrowUpCircle,
   Database,
   Eye,
   Info,
@@ -20,7 +21,7 @@ import { Button } from "../components/ui/Button";
 import { SelectField } from "../components/ui/Field";
 import { ConfirmDialog } from "../components/ui/Dialog";
 import { InlineNotice, OfflineNotice } from "../components/ui/State";
-import { useMeta, useOcrStatus } from "../hooks/queries";
+import { useCheckUpdates, useMeta, useOcrStatus, useUpdateStatus } from "../hooks/queries";
 import { useAppStore } from "../store/useAppStore";
 import { getWorkspaceId } from "../lib/api";
 import { STEEL_MODEL_OPTIONS, STEEL_PRESETS } from "../lib/constants";
@@ -52,6 +53,10 @@ export function SettingsPage() {
   const clearLocalData = useAppStore((state) => state.clearLocalData);
   const pushToast = useAppStore((state) => state.pushToast);
   const setTab = useAppStore((state) => state.setTab);
+  const setUpdateModalOpen = useAppStore((state) => state.setUpdateModalOpen);
+
+  const updateStatus = useUpdateStatus().data;
+  const checkUpdates = useCheckUpdates();
 
   const [confirmReset, setConfirmReset] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -351,6 +356,57 @@ export function SettingsPage() {
           </p>
         </SectionCard>
       </div>
+
+      <SectionCard
+        title="Güncelleme Yöneticisi (HydroWeb)"
+        description="GitHub Releases üzerinden yeni HydroWeb sürümlerini denetleyin, SHA-256 ve Ed25519 dijital imzasıyla doğrulayıp kurun."
+        icon={ArrowUpCircle}
+        action={
+          <Badge tone={updateStatus?.update_available ? "pass" : "info"}>
+            {updateStatus?.update_available && updateStatus.latest_version
+              ? `Yeni sürüm v${updateStatus.latest_version}`
+              : `v${updateStatus?.current_version ?? meta?.app.version ?? "1.9.0"}`}
+          </Badge>
+        }
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-1 text-xs text-[var(--text-soft)]">
+            <p>
+              Yüklü sürüm: <strong className="font-mono text-[var(--text)]">v{updateStatus?.current_version ?? meta?.app.version ?? "1.9.0"}</strong>
+              {updateStatus?.latest_version ? (
+                <>
+                  {" · "}Son sürüm: <strong className="font-mono text-[var(--text)]">v{updateStatus.latest_version}</strong>
+                </>
+              ) : null}
+            </p>
+            <p className="text-[11px] text-[var(--text-muted)]">
+              {updateStatus?.runtime.can_self_install
+                ? "Paketli masaüstü uygulaması aktif: tek tıkla yerinde kurulum (.dmg / .exe) ve yeniden başlatma desteklenir."
+                : "Web sunucu / geliştirme modu: SHA-256 ve Ed25519 imza doğrulaması sunucuda yapılıp paket indirilebilir."}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<RefreshCw size={13} />}
+              loading={checkUpdates.isPending}
+              disabled={backend !== "online"}
+              onClick={() => checkUpdates.mutate({ force: true })}
+            >
+              Denetle
+            </Button>
+            <Button
+              size="sm"
+              variant="primary"
+              icon={<ArrowUpCircle size={13} />}
+              onClick={() => setUpdateModalOpen(true)}
+            >
+              Güncelleme Yöneticisini Aç
+            </Button>
+          </div>
+        </div>
+      </SectionCard>
 
       <SectionCard title="Hakkında" description="Sürüm, şartname ve özellikler." icon={Info}>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.9.0 - 2026-11-18
+
+- **HYDRO Web Güncelleme Yöneticisi (`WebUpdateManager` & `/api/update/*`)**:
+  - GitHub Releases (`SLedgehammer-dev12/HYDRO`) üzerinden `HydroWeb-v*-macos-arm64.dmg` (macOS M1+),
+    `HydroWeb-v*-windows-x64-setup.exe` ve `HydroWeb-v*-windows-x64-portable.zip` paketlerini
+    denetleme, sürüm notlarını görüntüleme ve ilerleme takibiyle indirme.
+  - Zorunlu SHA-256 ve **fail-closed** Ed25519 `.sig` imza doğrulaması; doğrulanmayan dosyaların
+    anında reddedilip silinmesi.
+  - Paketli `HydroWeb` çalıştırmalarında tek tıkla yerinde kurulum (macOS `.dmg` / Windows
+    Inno Setup `.exe` & portable `.zip`) ve yeniden başlatma; `TopBar`, `Sidebar`, `SettingsPage`
+    ve `UpdateManagerModal` arayüzü.
+- **BOTAŞ Test Bölümü Formları Ağacı & Sıralı Form Denetim Sayfaları (`Seçenek 1`)**:
+  - Sol menüde (`Sidebar`) aktif **Proje & Test Bölümü** seçici kartı, 11 zorunlu form
+    (`015`..`023`, `KUR-001`, `KUR-002`) ve katlanabilir 5 ek form (`EK-014`, `EK-SPL`,
+    `001-027`, `EK-KRT`, `EK-KLP`) için canlı durum göstergeli gezinme ağacı.
+  - `#/forms/{form_code}` rotasında (`SectionFormPage` & `FormBodyEditor`) resmî `BOT-FRM`
+    başlık, imza, notlar ve çok satırlı tablo düzeni (`rows`, `pig_runs`, `drying`, `findings`),
+    satır içi düzenleme (`PUT /api/sessions/{session_id}/forms/{form_code}`) ve form içinden tekil
+    doküman OCR tarama (`POST /api/sessions/{session_id}/forms/{form_code}/scan`).
+  - `020` (**Hava İçerik Testi Kabul**) ve `022` (**Basınç Testi Kabul**) formlarında isteğe bağlı
+    **"Detay Hesaplamaları Göster"** bandı ile mevcut `Hava İçerik Testi` ve `Basınç Değişim Testi`
+    hesaplama modüllerinin form içi açılır/kapanır entegrasyonu (`#/air` ve `#/pressure` doğrudan
+    rotaları korundu).
+  - `Projeler & Kesitler` sayfasında her test bölümü için bulgu özet sayacı, anahtar metrikler ve
+    ilk bulgulu forma tek tıkla geçiş desteği.
+
 ## 1.8.1 - 2026-11-17
 
 - **Taranmis PDF OCR Rasterizer & Paketli Tesseract Cozumu**:

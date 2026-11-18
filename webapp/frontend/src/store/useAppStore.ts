@@ -3,6 +3,7 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import type {
   AppInputs,
   BackendMode,
+  BotasFormCode,
   ExportEntry,
   HealthResponse,
   HistoryEntry,
@@ -35,6 +36,8 @@ const initial = freshState();
 
 export interface AppStore {
   tab: TabKey;
+  activeFormCode: BotasFormCode;
+  updateModalOpen: boolean;
   sessionId: string | null;
   sessionName: string;
   sessionStatus: SessionStatus;
@@ -65,6 +68,9 @@ export interface AppStore {
   toasts: ToastItem[];
 
   setTab: (tab: TabKey) => void;
+  setActiveFormCode: (code: BotasFormCode) => void;
+  openForm: (code: BotasFormCode) => void;
+  setUpdateModalOpen: (open: boolean) => void;
   setSessionMeta: (meta: {
     id?: string | null;
     name?: string;
@@ -113,6 +119,8 @@ export const useAppStore = create<AppStore>()(
   persist(
     (set, get) => ({
       tab: "dashboard",
+      activeFormCode: "test_data",
+      updateModalOpen: false,
       sessionId: null,
       sessionName: "Bölüm 12–13 · Doğu Hattı",
       sessionStatus: "active",
@@ -142,6 +150,9 @@ export const useAppStore = create<AppStore>()(
       toasts: [],
 
       setTab: (tab) => set({ tab }),
+      setActiveFormCode: (activeFormCode) => set({ activeFormCode }),
+      openForm: (activeFormCode) => set({ tab: "forms", activeFormCode }),
+      setUpdateModalOpen: (updateModalOpen) => set({ updateModalOpen }),
 
       setSessionMeta: (meta) =>
         set((state) => ({
@@ -368,6 +379,7 @@ export const useAppStore = create<AppStore>()(
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         tab: state.tab,
+        activeFormCode: state.activeFormCode,
         sessionId: state.sessionId,
         sessionName: state.sessionName,
         sessionStatus: state.sessionStatus,

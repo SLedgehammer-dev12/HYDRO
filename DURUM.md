@@ -2,9 +2,9 @@
 
 > Tek kaynak özet. Ayrıntı için "Ayrıntılı notlar" bölümündeki dosyalara bakın.
 >
-> **Son güncelleme:** 2026-11-17
-> **Dal:** `main` (`v1.8.1`)
-> **Son commit:** `174c02a` — `v1.8.0` release; sırada `v1.8.1` (`pypdfium2` + macOS `Quartz` rasterizer ve Windows bundled Tesseract)
+> **Son güncelleme:** 2026-11-18
+> **Dal:** `main` (`v1.9.0` — Web Güncelleme Yöneticisi ve BOTAŞ form denetim sayfaları)
+> **Son commit:** `80d5376` öncesi `v1.8.1` üzerine `v1.9.0` sürümü hazırlanıyor
 
 ---
 
@@ -13,9 +13,11 @@
 | Alan | Durum | Kanıt |
 | --- | --- | --- |
 | Masaüstü uygulaması | Çalışıyor, kararlı | 672 unittest PASS (`skipped=1`) |
-| Web backend (FastAPI) | Çalışıyor | 131 pytest PASS |
-| Web frontend (React 19) | Çalışıyor | `npm run typecheck` + `npm run build` PASS, 11/11 sekme smoke |
-| Bağımsız Web paketleme | Hazır (`v1.8.1`) | `HydroWeb.spec`, `build_web_dmg.sh` (`arm64`, taranmış PDF `--self-test` PASS), `build_web_exe.ps1` + `installer/hydro_web.iss` |
+| Web backend (FastAPI) | Çalışıyor | 135 pytest PASS |
+| Web frontend (React 19) | Çalışıyor | `npm run typecheck` + `npm run build` PASS, 11/11 sekme + BOTAŞ form ağacı & Güncelleme Yöneticisi smoke PASS |
+| Web Güncelleme Yöneticisi | Çalışıyor | `/api/update/*`, SHA-256 + fail-closed Ed25519 `.sig` doğrulama, `UpdateManagerModal`, macOS `.dmg` / Win `.exe`/`.zip` kurulum |
+| BOTAŞ Test Bölümü Formları | Çalışıyor | Seçenek 1 sol menü (`015`..`023`, `KUR-001`, `KUR-002` + 5 ek), `SectionFormPage`, `rows`/`pig_runs`/`findings`, tekil OCR & `020`/`022` gömülü hesaplama |
+| Bağımsız Web paketleme | Hazır (`v1.9.0`) | `HydroWeb.spec`, `build_web_dmg.sh` (`arm64`, taranmış PDF `--self-test` PASS), `build_web_exe.ps1` + `installer/hydro_web.iss` |
 | Domain parity | Masaüstü ile aynı kaynak | `hidrostatik_test.domain` doğrudan import edilir |
 | Proje / Test Bölümü (Section) DB | Çalışıyor | `projects` + `sessions.project_id` + `inputs.section_meta` |
 | KP sürekliliği + Segment denetimi | Tamamlandı | `lib/kp.ts`, Geometri & Saha sayfası |
@@ -73,7 +75,13 @@
 - Plan-Profil PDF tarama: metin katmanı/OCR ile taslak test bölümleri, düzenlenebilir tablo, toplu kaydet.
 - 3D sahne: zemin, segmentler, ekipman, pig, akış, kesit, kamera presetleri, `SceneHtml` DOM etiket katmanı.
 - Sekme başlıkları ve ana aksiyon butonları büyütüldü (25/30 px başlık, `btn-lg`).
-- Bağımsız masaüstü Web dağıtımı (`v1.8.0`): `webapp/desktop_launcher.py` (yerel FastAPI + statik React + durum/durdurma penceresi + `--self-test`), `HydroWeb.spec`, macOS M1+ `arm64` `.dmg` (`build_web_dmg.sh`), Windows x64 Inno Setup kurulum `.exe` + taşınabilir `.zip` (`installer/hydro_web.iss`, `build_web_exe.ps1`).
+- **Web Güncelleme Yöneticisi**: `webapp/backend/app/services/web_updater.py` (`WEB_UPDATE_MANAGER`) ve `/api/update/status|check|download|download/file|apply` uçları ile GitHub Releases (`SLedgehammer-dev12/HYDRO`) üzerinden sürüm denetimi, SHA-256 + fail-closed Ed25519 `.sig` doğrulaması, doğrulanmış paket indirme ve paketli `HydroWeb` (.dmg / Inno Setup `.exe` / portable `.zip`) üzerinde tek tıkla yerinde kurulum/yeniden başlatma; `TopBar`, `Sidebar`, `SettingsPage` ve `UpdateManagerModal` arayüzü.
+- **Test Bölümü Formları Ağacı & Sıralı Form Denetim Sayfaları (`Seçenek 1`)**:
+  - Sol menüde (`Sidebar.tsx`) aktif proje & test bölümü hızlı seçici kartı, **`Test Bölümü Formları (Dolu/11)`** (`015`..`023`, `KUR-001`, `KUR-002`) ve **`Ek Raporlar (Dolu/5)`** (`EK-014`, `EK-SPL`, `001-027`, `EK-KRT`, `EK-KLP`) durum rozetli ağaç listesi.
+  - `#/forms/{form_code}` rotasında (`SectionFormPage.tsx` + `FormBodyEditor.tsx`) resmî `BOT-FRM` başlık/imza/tablo düzeni, satır içi düzenleme (`PUT /api/sessions/{id}/forms/{code}`), tekil form OCR tarama (`POST /api/sessions/{id}/forms/{code}/scan`), `form_details.py` ile yapılandırılmış `rows`/`pig_runs`/`drying`/`findings` kalıcılığı ve `4-NGTL 0-GN-P-002-5007 R4` şartname bulguları.
+  - `020` (`air_acceptance`) ve `022` (`pressure_acceptance`) formlarında isteğe bağlı açılıp kapanan **"Detay Hesaplamaları Göster"** bandı ile mevcut `<AirPage embedded />` ve `<PressurePage embedded />` hesaplama modülleri satır içi gösterilir (`#/air` ve `#/pressure` doğrudan rotaları korunur).
+  - `Projeler & Kesitler` sayfasında her kesit için genişletilmiş form bulgu özetleri (`findings_counts`, ilk bulgulu forma tek tıkla geçiş, `key_metrics`).
+- Bağımsız masaüstü Web dağıtımı (`v1.9.0`): `webapp/desktop_launcher.py` (yerel FastAPI + statik React + durum/durdurma penceresi + `--self-test`), `HydroWeb.spec`, macOS M1+ `arm64` `.dmg` (`build_web_dmg.sh`), Windows x64 Inno Setup kurulum `.exe` + taşınabilir `.zip` (`installer/hydro_web.iss`, `build_web_exe.ps1`).
 - Dockerfile, docker-compose, README, kod haritası, GitHub Actions `release.yml`.
 
 ---
@@ -147,22 +155,26 @@ Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen iş
 
 ---
 
-## 6. Doğrulama (son çalıştırma: 2026-11-17)
+## 6. Doğrulama (son çalıştırma: 2026-11-18)
 
 ```bash
+# Lint & domain tip denetimi
+python3 -m ruff check .                                        # All checks passed
+python3 -m mypy hidrostatik_test/domain/                       # Success: no issues found (12 files)
+
 # Web backend
-python3 -m pytest webapp/backend/tests -q                      # 131 passed
+python3 -m pytest webapp/backend/tests -q                      # 135 passed
 
 # Masaüstü
 python3 -m unittest discover -s tests -p "test_*.py"           # 672 passed (1 skipped)
 
-# OCR (gerçek form fixture'ları dahil)
-python3 -m pytest tests/test_report_ocr.py -q                  # 66 passed, 1 skipped
+# Masaüstü paketli Web self-test
+python3 webapp/desktop_launcher.py --self-test                 # SELF_TEST_OK
 
 # Frontend derleme
 cd webapp/frontend && npm run typecheck && npm run build       # PASS
 
-# Sekme smoke (uygulama 8099'da izole DB ile çalışırken)
+# Sekme + BOTAŞ Form Ağacı & 020/022 Gömülü Hesaplama & Güncelleme Yöneticisi smoke (port 8099, izole DB)
 cd webapp/frontend && HYDRO_APP_URL=http://127.0.0.1:8099 \
   node scripts/verify-tabs.mjs                                 # 11/11 PASS
 ```

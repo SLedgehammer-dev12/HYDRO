@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  ArrowUpCircle,
   Check,
   ChevronDown,
   HelpCircle,
@@ -17,7 +18,14 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { api, apiErrorMessage } from "../../lib/api";
 import { relativeTime } from "../../lib/format";
-import { useMeta, useProjects, useSessions, useCreateSession, useSaveSession } from "../../hooks/queries";
+import {
+  useCreateSession,
+  useMeta,
+  useProjects,
+  useSaveSession,
+  useSessions,
+  useUpdateStatus,
+} from "../../hooks/queries";
 import { useAppStore } from "../../store/useAppStore";
 import { toApiInputs } from "../../lib/normalize";
 import { Badge } from "../ui/Badge";
@@ -47,11 +55,13 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
   const setSessionName = useAppStore((state) => state.setSessionName);
   const applySessionInputs = useAppStore((state) => state.applySessionInputs);
   const resetSession = useAppStore((state) => state.resetSession);
+  const setUpdateModalOpen = useAppStore((state) => state.setUpdateModalOpen);
   const pushToast = useAppStore((state) => state.pushToast);
 
   const { data: sessions } = useSessions();
   const { data: projects } = useProjects();
   const { data: meta } = useMeta();
+  const { data: updateStatus } = useUpdateStatus();
   const saveSession = useSaveSession();
   const createSession = useCreateSession();
   const queryClient = useQueryClient();
@@ -304,6 +314,18 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
             >
               Yeni Oturum
             </Button>
+
+            {updateStatus?.update_available && updateStatus.latest_version ? (
+              <button
+                type="button"
+                className="badge badge-pass hidden md:inline-flex"
+                title={`Yeni sürüm v${updateStatus.latest_version} mevcut — Güncelleme Yöneticisini aç`}
+                onClick={() => setUpdateModalOpen(true)}
+              >
+                <ArrowUpCircle size={12} aria-hidden />
+                v{updateStatus.latest_version} Güncelle
+              </button>
+            ) : null}
 
             <button
               type="button"
