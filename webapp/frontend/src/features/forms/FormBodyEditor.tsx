@@ -500,7 +500,8 @@ export function FormBodyEditor({
               </span>
               <CellInput
                 type="number"
-                value={numVal(drying, "target_dew_point_c") || "-20"}
+                value={numVal(drying, "target_dew_point_c")}
+                placeholder="-20"
                 onChange={(v) => setNestedKey("drying", "target_dew_point_c", parseCellNum(v))}
                 ariaLabel="Hedef dew point"
                 align="left"

@@ -485,11 +485,30 @@ export interface ResultSummaryEntry {
 /* Projeler ve kesitler                                                */
 /* ------------------------------------------------------------------ */
 
+export type ProjectStatus = "active" | "completed" | "archived";
+
+export interface ProjectDefaults {
+  outside_diameter_mm?: number | null;
+  wall_thickness_mm?: number | null;
+  material_grade?: string;
+  smys_mpa?: number | null;
+  design_pressure_bar?: number | null;
+  location_class?: string;
+  pump_location?: string;
+  k_factor?: number | null;
+  steel_alpha_micro_per_c?: number | null;
+}
+
 export interface Project {
   id: string;
   code: string;
   name: string;
   client: string | null;
+  contractor?: string | null;
+  supervisor?: string | null;
+  pipeline_length_m?: number | null;
+  status?: ProjectStatus;
+  defaults?: ProjectDefaults;
   description: string | null;
   section_count: number;
   created_at: string;
@@ -500,6 +519,11 @@ export interface ProjectInput {
   name: string;
   code?: string;
   client?: string;
+  contractor?: string;
+  supervisor?: string;
+  pipeline_length_m?: number | null;
+  status?: ProjectStatus;
+  defaults?: ProjectDefaults;
   description?: string;
 }
 
@@ -1101,3 +1125,238 @@ export type TabKey =
   | "reports"
   | "ocr"
   | "settings";
+
+/* ------------------------------------------------------------------ */
+/* Veritabanı Yönetimi, Proje Veri Merkezi ve Arşiv Tipleri           */
+/* ------------------------------------------------------------------ */
+
+export type ProjectExportFormat = "xlsx" | "pdf" | "csv" | "json";
+
+export interface ProjectDatasetFormCell {
+  status: string;
+  revision: number;
+  page_count: number;
+  short_code: string;
+}
+
+export interface ProjectDatasetSection {
+  session_id: string;
+  section_no: string;
+  name: string;
+  status: SessionStatus;
+  revision: number;
+  start_kp: string;
+  end_kp: string;
+  length_m: number | null;
+  outside_diameter_mm: number | null;
+  wall_thickness_mm: number | null;
+  material_grade: string;
+  smys_mpa: number | null;
+  internal_volume_m3: number | null;
+  design_pressure_bar: number | null;
+  window_min_bar: number | null;
+  window_max_bar: number | null;
+  air_ratio: number | null;
+  air_status: DecisionStatus;
+  pressure_pt_bar: number | null;
+  pressure_pa_bar: number | null;
+  pressure_margin_bar: number | null;
+  delta_t_c: number | null;
+  pressure_status: DecisionStatus;
+  dew_point_c: number | null;
+  forms_filled: number;
+  forms_required: number;
+  failed_forms: string[];
+  warning_forms: string[];
+  overall_status: DecisionStatus | "KISMI";
+  test_date: string;
+  updated_at: string;
+}
+
+export interface ProjectDatasetSummary {
+  section_count: number;
+  total_length_m: number;
+  total_volume_m3: number;
+  continuity_ok: boolean;
+  continuity_gaps: Array<{
+    from_section: string;
+    to_section: string;
+    prev_end_kp: string;
+    next_start_kp: string;
+    delta_m: number;
+  }>;
+  evaluated_count: number;
+  passed_count: number;
+  failed_count: number;
+  pending_count: number;
+  forms_filled_total: number;
+  forms_required_total: number;
+  forms_completion_pct: number;
+}
+
+export interface ProjectDatasetResponse {
+  project: Project;
+  summary: ProjectDatasetSummary;
+  sections: ProjectDatasetSection[];
+  form_catalog: Array<{ code: string; botas_code: string; title: string; required: boolean }>;
+  forms_matrix: Array<{
+    session_id: string;
+    section_no: string;
+    start_kp: string;
+    end_kp: string;
+    forms: Record<string, ProjectDatasetFormCell>;
+  }>;
+  generated_at: string;
+}
+
+export interface ProjectGenerateSectionsPayload {
+  start_kp_m?: number;
+  total_length_m: number;
+  max_section_length_m?: number;
+  respect_volume_limit?: boolean;
+  section_prefix?: string;
+  start_index?: number;
+  outside_diameter_mm?: number | null;
+  wall_thickness_mm?: number | null;
+  material_grade?: string | null;
+  smys_mpa?: number | null;
+  design_pressure_bar?: number | null;
+  location_class?: string | null;
+  test_date?: string | null;
+  create_form_slots?: boolean;
+}
+
+export interface ProjectGenerateSectionsResponse {
+  project_id: string;
+  created_count: number;
+  target_section_length_m: number;
+  volume_limited_length_m: number | null;
+  items: SessionListItem[];
+}
+
+export interface ProjectSyncFormsResponse {
+  project_id: string;
+  sessions_processed: number;
+  updated_forms: number;
+}
+
+export interface SampleProjectPayload {
+  scenario: "passing" | "mixed" | "failing";
+  section_count?: number;
+  name?: string | null;
+  code?: string | null;
+  include_time_series?: boolean;
+  include_forms?: boolean;
+}
+
+export interface ProjectClonePayload {
+  name?: string | null;
+  code?: string | null;
+  mode: "template" | "full";
+}
+
+export interface ArchiveImportResponse {
+  project: Project;
+  imported_sections: number;
+  imported_forms: number;
+  imported_results: number;
+  imported_time_series: number;
+  imported_attachments: number;
+}
+
+export interface DesktopDbImportResponse {
+  project: Project;
+  imported_sessions: number;
+  imported_results: number;
+  imported_time_series: number;
+}
+
+export interface WorkspaceInfo {
+  workspace_hash: string;
+  hash_short: string;
+  is_current: boolean;
+  project_count: number;
+  section_count: number;
+  last_updated_at: string | null;
+  sample_projects: string[];
+}
+
+export interface WorkspacesResponse {
+  current_workspace_hash: string;
+  items: WorkspaceInfo[];
+}
+
+export interface DbStatsResponse {
+  dialect: string;
+  is_sqlite: boolean;
+  db_path: string | null;
+  schema_migration: string;
+  db_size_bytes: number;
+  wal_size_bytes: number;
+  shm_size_bytes: number;
+  journal_mode: string;
+  integrity_status: string;
+  table_counts: Record<string, number>;
+  storage: {
+    uploads_bytes: number;
+    uploads_files: number;
+    exports_bytes: number;
+    exports_files: number;
+    backups_bytes: number;
+    backups_count: number;
+  };
+  workspace_count: number;
+  current_workspace_hash: string;
+}
+
+export interface DbBackupItem {
+  filename: string;
+  size_bytes: number;
+  created_at: string | null;
+  reason?: string;
+}
+
+export interface DbBackupsResponse {
+  items: DbBackupItem[];
+  total: number;
+  backups_dir: string;
+}
+
+export interface DbRestoreResponse {
+  restored: boolean;
+  source: string;
+  pre_restore_backup: DbBackupItem | null;
+  stats: DbStatsResponse;
+}
+
+export interface TrashItem {
+  entity_type: "project" | "session";
+  id: string;
+  name: string;
+  code: string;
+  project_id: string | null;
+  section_count: number | null;
+  deleted_at: string | null;
+}
+
+export interface TrashResponse {
+  items: TrashItem[];
+  total: number;
+}
+
+export interface DbMaintenancePayload {
+  checkpoint_wal: boolean;
+  vacuum: boolean;
+  clean_exports: boolean;
+  clean_orphan_uploads: boolean;
+}
+
+export interface DbMaintenanceResponse {
+  integrity_status: string;
+  wal_checkpointed: boolean;
+  vacuumed: boolean;
+  removed_export_files: number;
+  reclaimed_export_bytes: number;
+  removed_orphan_files: number;
+  reclaimed_upload_bytes: number;
+}

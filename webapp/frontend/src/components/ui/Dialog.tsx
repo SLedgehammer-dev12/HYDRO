@@ -7,6 +7,7 @@ import { cn } from "../../lib/utils";
 export function Modal({
   open,
   onClose,
+  dismissible = true,
   title,
   description,
   children,
@@ -15,6 +16,7 @@ export function Modal({
 }: {
   open: boolean;
   onClose: () => void;
+  dismissible?: boolean;
   title: ReactNode;
   description?: ReactNode;
   children: ReactNode;
@@ -48,11 +50,21 @@ export function Modal({
       dialog.returnValue = "";
       onCloseRef.current();
     };
+    const handleCancel = (e: Event) => {
+      if (!dismissible) {
+        e.preventDefault();
+      }
+    };
     dialog.addEventListener("close", handleClose);
+    dialog.addEventListener("cancel", handleCancel);
 
     // Safari / <dialog> light-dismiss fallback when closedby="any" is unsupported
     let cleanupFallback: (() => void) | undefined;
-    if (typeof HTMLDialogElement !== "undefined" && !("closedBy" in HTMLDialogElement.prototype)) {
+    if (
+      dismissible &&
+      typeof HTMLDialogElement !== "undefined" &&
+      !("closedBy" in HTMLDialogElement.prototype)
+    ) {
       let pressedOutside = false;
       const outside = (e: PointerEvent) => {
         const r = dialog.getBoundingClientRect();
@@ -77,9 +89,10 @@ export function Modal({
 
     return () => {
       dialog.removeEventListener("close", handleClose);
+      dialog.removeEventListener("cancel", handleCancel);
       cleanupFallback?.();
     };
-  }, [open]);
+  }, [open, dismissible]);
 
   if (!open || typeof document === "undefined") return null;
 
@@ -88,7 +101,7 @@ export function Modal({
       ref={dialogRef}
       aria-labelledby={headingId}
       aria-describedby={description ? descId : undefined}
-      {...({ closedby: "any" } as Record<string, unknown>)}
+      {...({ closedby: dismissible ? "any" : "none" } as Record<string, unknown>)}
       className={cn("modal-dialog", className)}
     >
       <header className="flex items-start justify-between gap-3 border-b border-[var(--border)] px-5 py-4">

@@ -91,6 +91,10 @@ export default function App() {
   }, [setTab, setActiveFormCode]);
 
   useEffect(() => {
+    window.scrollTo({ top: 0 });
+  }, [tab, activeFormCode]);
+
+  useEffect(() => {
     const target = hashForTab(tab, activeFormCode);
     if (window.location.hash !== target) {
       window.history.replaceState(null, "", target);
@@ -189,6 +193,10 @@ export default function App() {
       const modifier = event.metaKey || event.ctrlKey;
       if (modifier && event.key.toLowerCase() === "s") {
         event.preventDefault();
+        if (useAppStore.getState().tab === "forms") {
+          window.dispatchEvent(new CustomEvent("hydro:save"));
+          return;
+        }
         if (!saveSession.isPending) saveSession.mutate();
         return;
       }
@@ -245,7 +253,7 @@ export default function App() {
   })();
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen overflow-x-clip">
       <div className="flex min-h-screen">
         <Sidebar />
         <div className="flex min-w-0 flex-1 flex-col">
@@ -254,6 +262,15 @@ export default function App() {
 
           <div className="mx-auto flex w-full max-w-[1500px] flex-1 gap-5 px-3 py-4 sm:px-4 sm:py-5">
             <main className="min-w-0 flex-1">
+              {backend !== "online" ? (
+                <div
+                  role="status"
+                  className="mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200"
+                >
+                  <strong className="font-semibold">DEMO / ÇEVRİMDIŞI MOD</strong> — Sunucu bağlantısı yok;
+                  hesaplamalar tarayıcı içinde çalışıyor, resmi PDF/XLSX çıktısı devre dışıdır.
+                </div>
+              ) : null}
               <PageErrorBoundary resetKey={tab} title={`${TAB_BY_KEY[tab].label} yüklenemedi`}>
                 {/*
                   ÖNEMLİ: Sayfa geçişini AnimatePresence/motion ile sarmalamayın.
@@ -275,7 +292,9 @@ export default function App() {
               </footer>
             </main>
 
-            {rightPanelOpen ? <RightPanel /> : null}
+            {rightPanelOpen && tab !== "forms" && tab !== "ocr" && tab !== "projects" ? (
+              <RightPanel />
+            ) : null}
           </div>
         </div>
       </div>

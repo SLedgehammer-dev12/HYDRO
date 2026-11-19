@@ -109,9 +109,18 @@ export function AirPage({ embedded = false }: { embedded?: boolean } = {}) {
   }
 
   function prepareA() {
-    if (inputs.air.temperature_c === null || inputs.air.pressure_bar === null) {
+    const effectivePressure =
+      inputs.air.pressure_bar ??
+      inputs.field.monitored_pressure_bar ??
+      (inputs.section_profile.design_pressure_bar
+        ? Number((inputs.section_profile.design_pressure_bar * 1.25).toFixed(2))
+        : null);
+    if (inputs.air.temperature_c === null || effectivePressure === null) {
       pushToast("error", "A hazırlanamadı", "Su sıcaklığı ve basıncı gerekli.");
       return;
+    }
+    if (inputs.air.pressure_bar === null) {
+      patchInputs({ air: { pressure_bar: effectivePressure } });
     }
     if (mode === "manual") {
       pushToast("info", "Manuel A", "Manuel modda A değeri doğrudan kullanılır.");
@@ -122,7 +131,7 @@ export function AirPage({ embedded = false }: { embedded?: boolean } = {}) {
         {
           table: inputs.modes.air_a_reference.includes("GAIL") ? "gail" : "institutional",
           temperature_c: inputs.air.temperature_c,
-          pressure_bar: inputs.air.pressure_bar,
+          pressure_bar: effectivePressure,
         },
         {
           onSuccess: ({ data }) => {
@@ -140,7 +149,7 @@ export function AirPage({ embedded = false }: { embedded?: boolean } = {}) {
     coefficientA.mutate(
       {
         temperature_c: inputs.air.temperature_c,
-        pressure_bar: inputs.air.pressure_bar,
+        pressure_bar: effectivePressure,
         backend: inputs.modes.air_a_reference || "table_v1",
       },
       {
@@ -242,8 +251,8 @@ export function AirPage({ embedded = false }: { embedded?: boolean } = {}) {
                 unit="°C"
                 value={inputs.air.temperature_c}
                 onChange={(value) => patchInputs({ air: { temperature_c: value } })}
-                help={temperatureWarning ?? "A hesabı için gerekli."}
-                error={temperatureWarning ? undefined : undefined}
+                help="A hesabı için gerekli."
+                error={temperatureWarning}
                 min={-5}
                 max={60}
               />
@@ -313,7 +322,7 @@ export function AirPage({ embedded = false }: { embedded?: boolean } = {}) {
                 disabled={mode === "manual"}
                 onClick={prepareA}
               >
-                A’yı hazırla
+                T &amp; P'den A'yı Doldur
               </Button>
             </div>
 

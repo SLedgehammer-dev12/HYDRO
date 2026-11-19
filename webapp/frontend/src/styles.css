@@ -22,6 +22,7 @@
 }
 
 :root {
+  --target-size: 24px;
   color-scheme: light dark;
   accent-color: var(--primary);
   --canvas: #070b14;
@@ -128,6 +129,10 @@
 
 * {
   box-sizing: border-box;
+}
+
+html {
+  scroll-padding-top: 5.75rem;
 }
 
 html,
@@ -361,9 +366,9 @@ pre {
 }
 
 .btn-icon {
-  width: 42px;
-  height: 42px;
-  min-height: 42px;
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
   padding: 0;
   border-radius: 11px;
   background: var(--surface-3);
@@ -1175,6 +1180,35 @@ dialog.drawer-dialog::backdrop {
   to {
     opacity: 1;
     transform: none;
+  }
+}
+
+button,
+select,
+input:not([type="checkbox"]):not([type="radio"]):not(.visually-hidden) {
+  min-height: var(--target-size);
+  min-width: var(--target-size);
+}
+
+@media (pointer: coarse) {
+  :root {
+    --target-size: 44px;
+  }
+  button,
+  select,
+  input:not([type="checkbox"]):not([type="radio"]):not(.visually-hidden),
+  .btn,
+  .btn-icon,
+  .nav-item,
+  .sidebar-subitem,
+  .link-button {
+    min-height: var(--target-size);
+  }
+  button,
+  select,
+  input:not([type="checkbox"]):not([type="radio"]):not(.visually-hidden),
+  .btn-icon {
+    min-width: var(--target-size);
   }
 }
 

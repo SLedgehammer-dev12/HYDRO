@@ -41,8 +41,8 @@ export function RightPanel() {
       : "info";
 
   return (
-    <aside className="hidden w-[292px] shrink-0 xl:block">
-      <div className="sticky top-[104px] max-h-[calc(100vh-120px)] space-y-3 overflow-y-auto pb-6 pr-0.5 scroll-thin">
+    <aside className="hidden w-[292px] shrink-0 2xl:block">
+      <div className="sticky top-[92px] max-h-[calc(100vh-108px)] space-y-3 overflow-y-auto pb-6 pr-0.5 scroll-thin">
         <div className="panel p-3.5">
           <div className="flex items-center justify-between">
             <p className="eyebrow">Canlı Özet</p>

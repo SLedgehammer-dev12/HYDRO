@@ -87,6 +87,17 @@ function uuid(): string {
   return `ws-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+export function setWorkspaceId(workspaceKey: string): string {
+  const clean = workspaceKey.trim();
+  if (!clean) return getWorkspaceId();
+  try {
+    localStorage.setItem(WORKSPACE_KEY, clean);
+  } catch {
+    /* depolama kapalı olabilir */
+  }
+  return clean;
+}
+
 export function getWorkspaceId(): string {
   try {
     const existing = localStorage.getItem(WORKSPACE_KEY);
@@ -263,15 +274,7 @@ export async function apiDownload(
 }
 
 export function isRecoverableError(error: unknown): boolean {
-  if (!(error instanceof ApiError)) return false;
-  return (
-    error.status === 0 ||
-    error.status === 404 ||
-    error.status === 500 ||
-    error.status === 501 ||
-    error.status === 502 ||
-    error.status === 503
-  );
+  return error instanceof ApiError && error.status === 0 && error.code !== "aborted";
 }
 
 export function apiErrorMessage(error: unknown): string {
@@ -463,18 +466,26 @@ export const api = {
   scanSessionForm: (
     sessionId: string,
     formCode: string,
-    file: File,
-    overwrite = true,
+    filesInput: File | File[],
+    options: { overwrite?: boolean; mode?: "replace" | "append" } = {},
     signal?: AbortSignal,
   ) => {
+    const list = Array.isArray(filesInput) ? filesInput : [filesInput];
     const form = new FormData();
-    form.append("file", file);
-    form.append("overwrite", overwrite ? "true" : "false");
+    if (list.length === 1) {
+      form.append("file", list[0]);
+    } else {
+      for (const f of list) {
+        form.append("files", f);
+      }
+    }
+    form.append("overwrite", (options.overwrite ?? true) ? "true" : "false");
+    form.append("mode", options.mode ?? "replace");
     return apiFetch<SectionFormScanResponse>(`/sessions/${sessionId}/forms/${formCode}/scan`, {
       method: "POST",
       body: form,
       signal,
-      timeoutMs: 120_000,
+      timeoutMs: 180_000,
     });
   },
 
@@ -627,5 +638,209 @@ export const api = {
       signal,
       fallbackFilename,
       timeoutMs: 120_000,
+    }),
+
+  /* ---------------------------------------------------------------- */
+  /* Proje Veri Merkezi, Üreticiler ve Veritabanı Yönetimi           */
+  /* ---------------------------------------------------------------- */
+
+  projectDataset: (projectId: string, signal?: AbortSignal) =>
+    apiFetch<import("./types").ProjectDatasetResponse>(`/projects/${projectId}/dataset`, { signal }),
+
+  exportProjectDataset: (
+    projectId: string,
+    format: import("./types").ProjectExportFormat,
+    signal?: AbortSignal,
+  ) =>
+    apiDownload(`/projects/${projectId}/export`, {
+      method: "POST",
+      body: { format },
+      signal,
+      fallbackFilename: `proje_veri_ozeti.${format}`,
+      timeoutMs: 90_000,
+    }),
+
+  generateProjectSections: (
+    projectId: string,
+    body: import("./types").ProjectGenerateSectionsPayload,
+    signal?: AbortSignal,
+  ) =>
+    apiFetch<import("./types").ProjectGenerateSectionsResponse>(
+      `/projects/${projectId}/generate-sections`,
+      { method: "POST", body, signal },
+    ),
+
+  syncProjectForms: (
+    projectId: string,
+    body: { overwrite_existing?: boolean; form_codes?: string[] },
+    signal?: AbortSignal,
+  ) =>
+    apiFetch<import("./types").ProjectSyncFormsResponse>(`/projects/${projectId}/sync-forms`, {
+      method: "POST",
+      body,
+      signal,
+    }),
+
+  generateSampleProject: (body: import("./types").SampleProjectPayload, signal?: AbortSignal) =>
+    apiFetch<{ project: Project; sections: SessionListItem[] }>("/projects/generate-sample", {
+      method: "POST",
+      body,
+      signal,
+      timeoutMs: 60_000,
+    }),
+
+  cloneProject: (
+    projectId: string,
+    body: import("./types").ProjectClonePayload,
+    signal?: AbortSignal,
+  ) =>
+    apiFetch<{ project: Project; section_count: number; mode: string }>(
+      `/projects/${projectId}/clone`,
+      { method: "POST", body, signal },
+    ),
+
+  downloadProjectArchive: (
+    projectId: string,
+    includeAttachments = true,
+    signal?: AbortSignal,
+  ) =>
+    apiDownload(
+      `/projects/${projectId}/archive?include_attachments=${includeAttachments ? "true" : "false"}`,
+      {
+        signal,
+        fallbackFilename: "proje_arsivi.hydroproj.zip",
+        timeoutMs: 120_000,
+      },
+    ),
+
+  importProjectArchive: (
+    params: {
+      file: File;
+      targetProjectName?: string;
+      targetProjectCode?: string;
+      includeAttachments?: boolean;
+    },
+    signal?: AbortSignal,
+  ) => {
+    const form = new FormData();
+    form.append("file", params.file);
+    if (params.targetProjectName?.trim()) {
+      form.append("target_project_name", params.targetProjectName.trim());
+    }
+    if (params.targetProjectCode?.trim()) {
+      form.append("target_project_code", params.targetProjectCode.trim());
+    }
+    form.append("include_attachments", (params.includeAttachments ?? true) ? "true" : "false");
+    return apiFetch<import("./types").ArchiveImportResponse>("/projects/import-archive", {
+      method: "POST",
+      body: form,
+      signal,
+      timeoutMs: 120_000,
+    });
+  },
+
+  importDesktopDb: (
+    params: { file: File; projectName?: string; projectCode?: string },
+    signal?: AbortSignal,
+  ) => {
+    const form = new FormData();
+    form.append("file", params.file);
+    if (params.projectName?.trim()) form.append("project_name", params.projectName.trim());
+    if (params.projectCode?.trim()) form.append("project_code", params.projectCode.trim());
+    return apiFetch<import("./types").DesktopDbImportResponse>("/import/desktop-db", {
+      method: "POST",
+      body: form,
+      signal,
+      timeoutMs: 120_000,
+    });
+  },
+
+  workspaces: (signal?: AbortSignal) =>
+    apiFetch<import("./types").WorkspacesResponse>("/system/workspaces", { signal }),
+
+  claimWorkspace: (sourceWorkspaceHash: string, sourceWorkspaceKey?: string, signal?: AbortSignal) =>
+    apiFetch<{
+      source_workspace_hash: string;
+      target_workspace_hash: string;
+      moved: Record<string, number>;
+    }>("/system/workspaces/claim", {
+      method: "POST",
+      body: {
+        source_workspace_hash: sourceWorkspaceHash,
+        ...(sourceWorkspaceKey ? { source_workspace_key: sourceWorkspaceKey } : {}),
+      },
+      signal,
+    }),
+
+  dbStats: (signal?: AbortSignal) =>
+    apiFetch<import("./types").DbStatsResponse>("/system/db-stats", { signal }),
+
+  dbBackups: (signal?: AbortSignal) =>
+    apiFetch<import("./types").DbBackupsResponse>("/system/db-backups", { signal }),
+
+  createDbBackup: (reason = "manual", signal?: AbortSignal) =>
+    apiFetch<import("./types").DbBackupItem>("/system/db-backup", {
+      method: "POST",
+      body: { reason },
+      signal,
+    }),
+
+  downloadDbBackup: (filename: string, signal?: AbortSignal) =>
+    apiDownload(`/system/db-backups/${encodeURIComponent(filename)}`, {
+      signal,
+      fallbackFilename: filename,
+      timeoutMs: 120_000,
+    }),
+
+  restoreDbBackup: (
+    params: { backupFilename?: string; file?: File },
+    signal?: AbortSignal,
+  ) => {
+    if (params.file) {
+      const form = new FormData();
+      form.append("file", params.file);
+      return apiFetch<import("./types").DbRestoreResponse>("/system/db-restore", {
+        method: "POST",
+        body: form,
+        signal,
+        timeoutMs: 120_000,
+      });
+    }
+    return apiFetch<import("./types").DbRestoreResponse>("/system/db-restore", {
+      method: "POST",
+      body: { backup_filename: params.backupFilename ?? "" },
+      signal,
+      timeoutMs: 120_000,
+    });
+  },
+
+  trash: (signal?: AbortSignal) =>
+    apiFetch<import("./types").TrashResponse>("/system/trash", { signal }),
+
+  restoreTrash: (entityType: "project" | "session", entityId: string, signal?: AbortSignal) =>
+    apiFetch<{ entity_type: string; id: string; restored_sessions: number }>(
+      "/system/trash/restore",
+      {
+        method: "POST",
+        body: { entity_type: entityType, entity_id: entityId },
+        signal,
+      },
+    ),
+
+  purgeTrash: (entityType: "project" | "session", entityId: string, signal?: AbortSignal) =>
+    apiFetch<{ purged: boolean; entity_type: string; id: string }>(
+      `/system/trash/${entityType}/${encodeURIComponent(entityId)}`,
+      { method: "DELETE", signal },
+    ),
+
+  runDbMaintenance: (
+    body: import("./types").DbMaintenancePayload,
+    signal?: AbortSignal,
+  ) =>
+    apiFetch<import("./types").DbMaintenanceResponse>("/system/db-maintenance", {
+      method: "POST",
+      body,
+      signal,
+      timeoutMs: 60_000,
     }),
 };

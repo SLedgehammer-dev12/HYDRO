@@ -5,8 +5,10 @@ import {
   Building2,
   CheckCircle2,
   Copy,
+  Database,
   FileCheck2,
   FileScan,
+  FileUp,
   FolderOpen,
   GitCompareArrows,
   Layers,
@@ -14,6 +16,7 @@ import {
   Plus,
   Rows3,
   Ruler,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 import { PageHeader } from "../components/layout/PageHeader";
@@ -21,9 +24,11 @@ import { SectionCard, KpiCard } from "../components/ui/Card";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { ConfirmDialog, Modal } from "../components/ui/Dialog";
-import { FieldGrid, NumberField, TextField } from "../components/ui/Field";
+import { FieldGrid, NumberField, SelectField, TextField } from "../components/ui/Field";
 import { EmptyState, InlineNotice } from "../components/ui/State";
 import { PlanProfileScanModal } from "../features/projects/PlanProfileScanModal";
+import { ProjectDataCenterModal } from "../features/projects/ProjectDataCenterModal";
+import { ProjectImportModal, SampleProjectModal } from "../features/projects/SampleAndImportModals";
 import { SectionFormsModal } from "../features/projects/SectionFormsModal";
 const PipelineScene = lazy(() => import("../components/three/PipelineScene"));
 import {
@@ -53,6 +58,8 @@ import { dateTime, num, relativeTime } from "../lib/format";
 import type {
   BotasFormCode,
   Project,
+  ProjectDefaults,
+  ProjectStatus,
   SectionMeta,
   SessionListItem,
   SessionStatus,
@@ -62,6 +69,16 @@ interface ProjectForm {
   name: string;
   code: string;
   client: string;
+  contractor: string;
+  supervisor: string;
+  pipeline_length_m: number | null;
+  status: ProjectStatus;
+  outside_diameter_mm: number | null;
+  wall_thickness_mm: number | null;
+  design_pressure_bar: number | null;
+  material_grade: string;
+  smys_mpa: number | null;
+  location_class: string;
   description: string;
 }
 
@@ -74,7 +91,34 @@ interface SectionForm {
   notes: string;
 }
 
-const EMPTY_FORM: ProjectForm = { name: "", code: "", client: "", description: "" };
+const EMPTY_FORM: ProjectForm = {
+  name: "",
+  code: "",
+  client: "",
+  contractor: "",
+  supervisor: "",
+  pipeline_length_m: null,
+  status: "active",
+  outside_diameter_mm: null,
+  wall_thickness_mm: null,
+  design_pressure_bar: null,
+  material_grade: "",
+  smys_mpa: null,
+  location_class: "",
+  description: "",
+};
+
+function projectStatusLabel(status?: ProjectStatus): string {
+  if (status === "completed") return "Tamamlandı";
+  if (status === "archived") return "Arşiv";
+  return "Aktif";
+}
+
+function projectStatusTone(status?: ProjectStatus): "pass" | "info" | "neutral" {
+  if (status === "completed") return "pass";
+  if (status === "archived") return "neutral";
+  return "info";
+}
 
 function statusTone(status: SessionStatus): "pass" | "info" | "pending" | "neutral" {
   if (status === "completed") return "pass";
@@ -165,6 +209,10 @@ export function ProjectsPage() {
 
   /* Plan-Profil PDF/CAD çoklu pafta tarama ve taslak kesit üretimi modal durumu */
   const [scanDialogOpen, setScanDialogOpen] = useState(false);
+  const [dataCenterOpen, setDataCenterOpen] = useState(false);
+  const [sampleModalOpen, setSampleModalOpen] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [showDefaults, setShowDefaults] = useState(false);
   const [showProjectScene, setShowProjectScene] = useState(false);
   const projectSceneQuery = useProjectScene(
     selected?.id ?? null,
@@ -197,15 +245,36 @@ export function ProjectsPage() {
   function openCreateProject() {
     setEditing(null);
     setForm(EMPTY_FORM);
+    setShowDefaults(false);
     setDialogOpen(true);
   }
 
   function openEditProject(project: Project) {
     setEditing(project);
+    const d = project.defaults ?? {};
+    const hasDefaults = Boolean(
+      d.outside_diameter_mm ||
+        d.wall_thickness_mm ||
+        d.design_pressure_bar ||
+        d.material_grade ||
+        d.smys_mpa ||
+        d.location_class,
+    );
+    setShowDefaults(hasDefaults);
     setForm({
       name: project.name,
       code: project.code ?? "",
       client: project.client ?? "",
+      contractor: project.contractor ?? "",
+      supervisor: project.supervisor ?? "",
+      pipeline_length_m: project.pipeline_length_m ?? null,
+      status: project.status ?? "active",
+      outside_diameter_mm: d.outside_diameter_mm ?? null,
+      wall_thickness_mm: d.wall_thickness_mm ?? null,
+      design_pressure_bar: d.design_pressure_bar ?? null,
+      material_grade: d.material_grade ?? "",
+      smys_mpa: d.smys_mpa ?? null,
+      location_class: d.location_class ?? "",
       description: project.description ?? "",
     });
     setDialogOpen(true);
@@ -216,10 +285,23 @@ export function ProjectsPage() {
       pushToast("warning", "Proje adı gerekli", "Proje adı boş olamaz.");
       return;
     }
+    const defaults: ProjectDefaults = {};
+    if (form.outside_diameter_mm !== null) defaults.outside_diameter_mm = form.outside_diameter_mm;
+    if (form.wall_thickness_mm !== null) defaults.wall_thickness_mm = form.wall_thickness_mm;
+    if (form.design_pressure_bar !== null) defaults.design_pressure_bar = form.design_pressure_bar;
+    if (form.material_grade.trim()) defaults.material_grade = form.material_grade.trim();
+    if (form.smys_mpa !== null) defaults.smys_mpa = form.smys_mpa;
+    if (form.location_class.trim()) defaults.location_class = form.location_class.trim();
+
     const payload = {
       name: form.name.trim(),
       code: form.code.trim(),
       client: form.client.trim(),
+      contractor: form.contractor.trim(),
+      supervisor: form.supervisor.trim(),
+      pipeline_length_m: form.pipeline_length_m,
+      status: form.status,
+      defaults,
       description: form.description.trim(),
     };
     if (editing) {
@@ -381,6 +463,12 @@ export function ProjectsPage() {
           <>
             <Button size="lg" variant="ghost" icon={<Rows3 size={15} />} onClick={() => setTab("geometry")}>
               Geometri & Saha
+            </Button>
+            <Button size="lg" icon={<Sparkles size={15} />} onClick={() => setSampleModalOpen(true)}>
+              Örnek Proje Üret
+            </Button>
+            <Button size="lg" icon={<FileUp size={15} />} onClick={() => setImportModalOpen(true)}>
+              Paket / DB İçe Aktar
             </Button>
             <Button size="lg" variant="primary" icon={<Plus size={15} />} onClick={openCreateProject}>
               Yeni proje
@@ -612,6 +700,15 @@ export function ProjectsPage() {
               <div className="flex flex-wrap items-center gap-1.5">
                 <Button
                   size="lg"
+                  variant="default"
+                  icon={<Database size={15} />}
+                  disabled={!selected}
+                  onClick={() => setDataCenterOpen(true)}
+                >
+                  Proje Veri Merkezi
+                </Button>
+                <Button
+                  size="lg"
                   variant={showProjectScene ? "primary" : "default"}
                   icon={<Layers size={15} />}
                   disabled={!selected || rawSections.length === 0}
@@ -651,14 +748,39 @@ export function ProjectsPage() {
             }
           >
             {selected ? (
-              <div className="mb-3 grid gap-2 sm:grid-cols-3">
+              <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
                 <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-2">
-                  <p className="eyebrow">Proje kodu</p>
-                  <p className="mt-1 truncate font-mono text-[11.5px] text-[var(--text-soft)]">{selected.code || "—"}</p>
+                  <p className="eyebrow">Proje kodu &amp; durum</p>
+                  <div className="mt-1 flex items-center gap-1.5">
+                    <span className="truncate font-mono text-[11.5px] text-[var(--text-soft)]">
+                      {selected.code || "—"}
+                    </span>
+                    <Badge tone={projectStatusTone(selected.status)}>
+                      {projectStatusLabel(selected.status)}
+                    </Badge>
+                  </div>
                 </div>
                 <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-2">
                   <p className="eyebrow">Müşteri</p>
                   <p className="mt-1 truncate text-[11.5px] text-[var(--text-soft)]">{selected.client || "—"}</p>
+                </div>
+                <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-2">
+                  <p className="eyebrow">Yüklenici / Müşavir</p>
+                  <p className="mt-1 truncate text-[11.5px] text-[var(--text-soft)]">
+                    {selected.contractor || "—"}
+                    {selected.supervisor ? ` · ${selected.supervisor}` : ""}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-2">
+                  <p className="eyebrow">Varsayılan Boru &amp; Basınç</p>
+                  <p className="mt-1 truncate font-mono text-[11px] text-[var(--text-soft)]">
+                    {selected.defaults?.outside_diameter_mm
+                      ? `OD ${num(selected.defaults.outside_diameter_mm, 0)} × ${num(selected.defaults.wall_thickness_mm ?? null, 1)} mm`
+                      : "Tanımlanmadı"}
+                    {selected.defaults?.design_pressure_bar
+                      ? ` · ${num(selected.defaults.design_pressure_bar, 1)} bar`
+                      : ""}
+                  </p>
                 </div>
                 <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-2">
                   <p className="eyebrow">Son güncelleme</p>
@@ -895,8 +1017,9 @@ export function ProjectsPage() {
       <Modal
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
+        className="max-w-2xl"
         title={editing ? "Projeyi düzenle" : "Yeni proje"}
-        description="Proje adı zorunludur; kod ve müşteri bilgisi isteğe bağlıdır."
+        description="Proje adı zorunludur; yüklenici, müşavir ve varsayılan mühendislik parametreleri yeni açılacak kesitlere otomatik devredilir."
         footer={
           <>
             <Button variant="ghost" onClick={() => setDialogOpen(false)}>
@@ -912,36 +1035,138 @@ export function ProjectsPage() {
           </>
         }
       >
-        <FieldGrid cols={2}>
-          <TextField
-            label="Proje adı"
-            value={form.name}
-            onChange={(value) => setForm((current) => ({ ...current, name: value }))}
-            placeholder="Doğu Hattı Hidrostatik Testi"
-            required
-            maxLength={200}
-          />
-          <TextField
-            label="Proje kodu"
-            value={form.code}
-            onChange={(value) => setForm((current) => ({ ...current, code: value }))}
-            placeholder="PRJ-DOGU-12"
-            maxLength={64}
-          />
-          <TextField
-            label="Müşteri"
-            value={form.client}
-            onChange={(value) => setForm((current) => ({ ...current, client: value }))}
-            placeholder="BOTAŞ"
-            maxLength={200}
-          />
-          <TextField
-            label="Açıklama"
-            value={form.description}
-            onChange={(value) => setForm((current) => ({ ...current, description: value }))}
-            placeholder="Kısa kapsam notu"
-          />
-        </FieldGrid>
+        <div className="space-y-3">
+          <FieldGrid cols={2}>
+            <TextField
+              label="Proje adı"
+              value={form.name}
+              onChange={(value) => setForm((current) => ({ ...current, name: value }))}
+              placeholder="Doğu Hattı Hidrostatik Testi"
+              required
+              maxLength={200}
+            />
+            <TextField
+              label="Proje kodu"
+              value={form.code}
+              onChange={(value) => setForm((current) => ({ ...current, code: value }))}
+              placeholder="PRJ-DOGU-12"
+              maxLength={64}
+            />
+            <TextField
+              label="Müşteri / İşveren"
+              value={form.client}
+              onChange={(value) => setForm((current) => ({ ...current, client: value }))}
+              placeholder="BOTAŞ"
+              maxLength={200}
+            />
+            <SelectField
+              label="Proje durumu"
+              value={form.status}
+              onChange={(value) =>
+                setForm((current) => ({
+                  ...current,
+                  status: value === "completed" ? "completed" : value === "archived" ? "archived" : "active",
+                }))
+              }
+              options={[
+                { value: "active", label: "Aktif" },
+                { value: "completed", label: "Tamamlandı" },
+                { value: "archived", label: "Arşiv" },
+              ]}
+            />
+            <TextField
+              label="Yüklenici"
+              value={form.contractor}
+              onChange={(value) => setForm((current) => ({ ...current, contractor: value }))}
+              placeholder="Ör: XYZ Boru İnşaat A.Ş."
+              maxLength={200}
+            />
+            <TextField
+              label="Kontrol / Müşavir"
+              value={form.supervisor}
+              onChange={(value) => setForm((current) => ({ ...current, supervisor: value }))}
+              placeholder="Ör: Denetim Mühendislik"
+              maxLength={200}
+            />
+            <NumberField
+              label="Planlanan toplam hat boyu"
+              unit="m"
+              value={form.pipeline_length_m}
+              onChange={(value) => setForm((current) => ({ ...current, pipeline_length_m: value }))}
+              min={0}
+              placeholder="Ör: 45000"
+            />
+            <TextField
+              label="Açıklama"
+              value={form.description}
+              onChange={(value) => setForm((current) => ({ ...current, description: value }))}
+              placeholder="Kısa kapsam notu"
+            />
+          </FieldGrid>
+
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between text-left text-[12px] font-semibold text-[var(--text-soft)]"
+              onClick={() => setShowDefaults((prev) => !prev)}
+            >
+              <span>Varsayılan Boru &amp; Test Parametreleri (Kesit Mirası)</span>
+              <span className="text-[11px] font-normal text-[var(--primary)]">
+                {showDefaults ? "Gizle" : "Göster"}
+              </span>
+            </button>
+            {showDefaults ? (
+              <div className="mt-3">
+                <FieldGrid cols={3}>
+                  <NumberField
+                    label="Dış çap (OD)"
+                    unit="mm"
+                    value={form.outside_diameter_mm}
+                    onChange={(v) => setForm((c) => ({ ...c, outside_diameter_mm: v }))}
+                    min={50}
+                    placeholder="1016"
+                  />
+                  <NumberField
+                    label="Et kalınlığı (WT)"
+                    unit="mm"
+                    value={form.wall_thickness_mm}
+                    onChange={(v) => setForm((c) => ({ ...c, wall_thickness_mm: v }))}
+                    min={1}
+                    placeholder="12.7"
+                  />
+                  <NumberField
+                    label="Dizayn basıncı"
+                    unit="bar"
+                    value={form.design_pressure_bar}
+                    onChange={(v) => setForm((c) => ({ ...c, design_pressure_bar: v }))}
+                    min={1}
+                    placeholder="75"
+                  />
+                  <TextField
+                    label="Çelik kalitesi"
+                    value={form.material_grade}
+                    onChange={(v) => setForm((c) => ({ ...c, material_grade: v }))}
+                    placeholder="API 5L PSL2 X65..."
+                  />
+                  <NumberField
+                    label="SMYS"
+                    unit="MPa"
+                    value={form.smys_mpa}
+                    onChange={(v) => setForm((c) => ({ ...c, smys_mpa: v }))}
+                    min={100}
+                    placeholder="450"
+                  />
+                  <TextField
+                    label="Lokasyon sınıfı"
+                    value={form.location_class}
+                    onChange={(v) => setForm((c) => ({ ...c, location_class: v }))}
+                    placeholder="Class 1 - min 1.25 x dizayn basinci"
+                  />
+                </FieldGrid>
+              </div>
+            ) : null}
+          </div>
+        </div>
       </Modal>
 
       <Modal
@@ -1119,6 +1344,34 @@ export function ProjectsPage() {
         onClose={() => setFormsModalSession(null)}
         onOpenSection={openSection}
         onOpenSectionForm={openSectionForms}
+      />
+
+      <ProjectDataCenterModal
+        open={dataCenterOpen}
+        project={selected}
+        onClose={() => setDataCenterOpen(false)}
+        onProjectCloned={(cloned) => {
+          setSelectedId(cloned.id);
+          setProject(cloned);
+        }}
+      />
+
+      <SampleProjectModal
+        open={sampleModalOpen}
+        onClose={() => setSampleModalOpen(false)}
+        onCreated={(created) => {
+          setSelectedId(created.id);
+          setProject(created);
+        }}
+      />
+
+      <ProjectImportModal
+        open={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+        onImported={(imported) => {
+          setSelectedId(imported.id);
+          setProject(imported);
+        }}
       />
     </div>
   );

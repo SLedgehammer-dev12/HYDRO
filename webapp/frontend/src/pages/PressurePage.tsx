@@ -7,7 +7,13 @@ import { NumberField, FieldGrid, ReadonlyValue } from "../components/ui/Field";
 import { DecisionCard } from "../components/ui/DecisionCard";
 import { MarginGauge } from "../components/ui/Gauge";
 import { EmptyState, InlineNotice } from "../components/ui/State";
-import { useCalculatePressure, useSaveTestResult } from "../hooks/queries";
+import {
+  useCalculatePressure,
+  useCoefficientA,
+  useCoefficientB,
+  useSaveTestResult,
+  useTablePoint,
+} from "../hooks/queries";
 import { useAppStore } from "../store/useAppStore";
 import { useEvaluateShortcut } from "../hooks/useEvaluateShortcut";
 import { STEEL_MODEL_OPTIONS } from "../lib/constants";
@@ -34,8 +40,82 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
   const pushToast = useAppStore((state) => state.pushToast);
 
   const calculate = useCalculatePressure();
+  const coefficientA = useCoefficientA();
+  const coefficientB = useCoefficientB();
+  const tablePoint = useTablePoint();
   const saveResult = useSaveTestResult();
   useEvaluateShortcut(evaluate);
+
+  function prepareAB() {
+    const tempC = inputs.pressure.temperature_c ?? inputs.air.temperature_c ?? 20;
+    const pressBar =
+      inputs.pressure.pressure_bar ??
+      inputs.air.pressure_bar ??
+      inputs.field.monitored_pressure_bar ??
+      (inputs.section_profile.design_pressure_bar
+        ? Number((inputs.section_profile.design_pressure_bar * 1.25).toFixed(2))
+        : 80);
+
+    if (inputs.pressure.temperature_c === null || inputs.pressure.pressure_bar === null) {
+      patchInputs({
+        pressure: {
+          ...(inputs.pressure.temperature_c === null ? { temperature_c: tempC } : {}),
+          ...(inputs.pressure.pressure_bar === null ? { pressure_bar: pressBar } : {}),
+        },
+      });
+    }
+
+    coefficientB.mutate(
+      {
+        source: inputs.modes.pressure_b_source,
+        temperature_c: tempC,
+        pressure_bar: pressBar,
+        steel_alpha_micro_per_c: inputs.helper.steel_alpha_micro_per_c,
+        steel_model: inputs.modes.steel_model,
+      },
+      {
+        onSuccess: ({ data }) => {
+          patchInputs({ pressure: { b_micro_per_c: data.b_micro_per_c } });
+          pushToast("success", "B katsayısı hazırlandı", fmt.b(data.b_micro_per_c));
+        },
+        onError: (error) => pushToast("error", "B hazırlanamadı", error.message),
+      },
+    );
+
+    if (inputs.pressure.a_micro_per_bar === null) {
+      if (inputs.air.a_micro_per_bar !== null) {
+        patchInputs({ pressure: { a_micro_per_bar: inputs.air.a_micro_per_bar } });
+      } else if (inputs.modes.air_a_mode === "table") {
+        tablePoint.mutate(
+          {
+            table: inputs.modes.air_a_reference.includes("GAIL") ? "gail" : "institutional",
+            temperature_c: tempC,
+            pressure_bar: pressBar,
+          },
+          {
+            onSuccess: ({ data }) => {
+              patchInputs({ pressure: { a_micro_per_bar: data.a_micro_per_bar } });
+              pushToast("success", "A tablodan alındı", fmt.a(data.a_micro_per_bar));
+            },
+          },
+        );
+      } else if (inputs.modes.air_a_mode !== "manual") {
+        coefficientA.mutate(
+          {
+            temperature_c: tempC,
+            pressure_bar: pressBar,
+            backend: inputs.modes.air_a_reference || "table_v1",
+          },
+          {
+            onSuccess: ({ data }) => {
+              patchInputs({ pressure: { a_micro_per_bar: data.a_micro_per_bar } });
+              pushToast("success", "A hesaplandı", fmt.a(data.a_micro_per_bar));
+            },
+          },
+        );
+      }
+    }
+  }
 
   const pressure = results.pressure;
   const geometry = results.geometry ?? geometryForInputs(inputs);
@@ -277,9 +357,20 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
                 </span>{" "}
                 · {STEEL_MODEL_OPTIONS.find((model) => model.value === inputs.modes.steel_model)?.label ?? inputs.modes.steel_model}
               </span>
-              <Button size="sm" variant="ghost" icon={<Sigma size={12} />} onClick={() => setTab("coefficients")}>
-                B’yi hazırla
-              </Button>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Button
+                  size="sm"
+                  variant="default"
+                  icon={<Sigma size={12} />}
+                  loading={coefficientB.isPending || coefficientA.isPending || tablePoint.isPending}
+                  onClick={prepareAB}
+                >
+                  A &amp; B'yi Otomatik Doldur
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setTab("coefficients")}>
+                  Katsayılar
+                </Button>
+              </div>
             </div>
 
             <div className="mt-4 border-t border-[var(--border)] pt-3">
@@ -314,7 +405,7 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
                   onChange={(value) =>
                     setTemperatures(value, inputs.pressure.t_final_c, inputs.pressure.derive_delta_t)
                   }
-                  help="Opsiyonel (parity+)."
+                  help="İsteğe bağlı; girilirse ΔT = Tilk − Tson otomatik hesaplanır."
                 />
                 <NumberField
                   label="Bitiş sıcaklığı Tson"
@@ -323,7 +414,7 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
                   onChange={(value) =>
                     setTemperatures(inputs.pressure.t_initial_c, value, inputs.pressure.derive_delta_t)
                   }
-                  help="Opsiyonel (parity+)."
+                  help="İsteğe bağlı; girilirse ΔT = Tilk − Tson otomatik hesaplanır."
                 />
               </FieldGrid>
 

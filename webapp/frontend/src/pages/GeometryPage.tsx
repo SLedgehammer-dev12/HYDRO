@@ -22,6 +22,7 @@ import { SectionCard, KpiCard, ResultTile } from "../components/ui/Card";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { NumberField, SelectField, FieldGrid, ReadonlyValue } from "../components/ui/Field";
+import { ConfirmDialog } from "../components/ui/Dialog";
 import { InlineNotice, EmptyState } from "../components/ui/State";
 import { ElevationProfileChart, UtilizationChart } from "../components/charts/Charts";
 import { FieldPage } from "./FieldPage";
@@ -95,6 +96,7 @@ export function GeometryPage() {
   const { pipes, grades } = useCatalog();
   const { data: meta } = useMeta();
   const calculate = useCalculateGeometry();
+  const [confirmClearSegments, setConfirmClearSegments] = useState(false);
 
   const selectedPipe = pipes.find((pipe) => pipe.option_label === inputs.geometry_catalog.size_option);
   const scheduleOptions = selectedPipe?.schedules ?? [];
@@ -326,8 +328,8 @@ export function GeometryPage() {
               unit="m"
               value={inputs.geometry.length_m}
               onChange={(value) => patchInputs({ geometry: { length_m: value } })}
-              help={lengthWarning ?? "Şartname limiti 20.000 m"}
-              error={lengthWarning ? undefined : undefined}
+              help="Şartname limiti 20.000 m"
+              error={lengthWarning}
               min={0.1}
               required
               className="sm:col-span-2"
@@ -367,7 +369,7 @@ export function GeometryPage() {
               variant="ghost"
               icon={<Trash2 size={12} />}
               disabled={inputs.segments.length === 0}
-              onClick={() => setSegments([])}
+              onClick={() => setConfirmClearSegments(true)}
             >
               Temizle
             </Button>
@@ -696,6 +698,16 @@ export function GeometryPage() {
       ) : null}
 
       <FieldPage embedded />
+
+      <ConfirmDialog
+        open={confirmClearSegments}
+        title="Segment tablosu temizlensin mi?"
+        message="Tüm boru segment satırları listeden kaldırılır; hesaplama tek kesit moduna döner."
+        confirmLabel="Tümünü Temizle"
+        danger
+        onConfirm={() => setSegments([])}
+        onClose={() => setConfirmClearSegments(false)}
+      />
     </div>
   );
 }

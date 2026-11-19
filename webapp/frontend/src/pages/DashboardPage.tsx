@@ -60,6 +60,21 @@ export function DashboardPage() {
   const profile = results.profile;
   const checked = CHECK_DEFINITIONS.filter((check) => inputs.checks[check.key]).length;
 
+  const monSourceForm =
+    formsPayload?.forms?.find((f) => f.form_code === "pressure_test" && f.status !== "empty") ??
+    formsPayload?.forms?.find((f) => f.form_code === "leak_stabilization" && f.status !== "empty") ??
+    formsPayload?.forms?.find((f) => f.form_code === "pressure_test");
+  const monExt = monSourceForm?.extracted_data as Record<string, unknown> | undefined;
+  const monNested = monExt?.monitoring as Record<string, unknown> | undefined;
+  const rawTrendRows = Array.isArray(monNested?.rows)
+    ? monNested.rows
+    : Array.isArray(monExt?.rows)
+      ? monExt.rows
+      : [];
+  const trendRows = rawTrendRows.filter(
+    (r): r is Record<string, unknown> => Boolean(r && typeof r === "object"),
+  );
+
   function open3DScene() {
     setTab("geometry");
     window.setTimeout(() => {
@@ -126,14 +141,11 @@ export function DashboardPage() {
   return (
     <div className="space-y-5">
       <PageHeader
-        kicker="Dashboard"
-        title={`Merhaba, ${inputs.report.operator || "operatör"}`}
+        kicker={projectCode ? `Dashboard · ${projectCode}` : "Dashboard"}
+        title={projectName ? `${projectName} · ${sessionName}` : sessionName || "Test Bölümü Özeti"}
         description={
           <>
-            <span className="font-medium text-[var(--text-soft)]">{projectName || "Proje seçilmedi"}</span>
-            {projectCode ? <span className="font-mono text-[11px] text-[var(--text-faint)]"> · {projectCode}</span> : null}
-            <span className="text-[var(--text-faint)]"> · </span>
-            <span className="font-medium text-[var(--text-soft)]">{sessionName}</span> kesitinin durumu.
+            Operatör: <span className="font-medium text-[var(--text-soft)]">{inputs.report.operator || "belirtilmedi"}</span>.
             Değerlendirme sonuçları şartname kurallarına göre hesaplanır; son kabul her zaman
             yetkili personel tarafından verilir.
           </>
@@ -168,9 +180,9 @@ export function DashboardPage() {
 
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <KpiCard
-          label="Segment"
+          label="Boru Segmenti"
           value={geometry ? num(geometry.section_count, 0) : "—"}
-          unit="kesit"
+          unit="segment"
           icon={Layers}
           hint={geometry ? `Et kalınlığı ${fmt.mm(inputs.geometry.wall_thickness_mm)}` : "Geometri girilmedi"}
         />
@@ -201,63 +213,62 @@ export function DashboardPage() {
         />
       </div>
 
-      {/* Denetimli 3 Adımlı Hidrostatik Test İş Akışı */}
+      {/* Denetimli İki Yollu Hidrostatik Test İş Akışı */}
       <div className="panel p-3.5">
         <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
           <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--primary)]">
             Denetimli Hidrostatik Test İş Akışı
           </span>
           <span className="text-[11px] text-[var(--text-muted)]">
-            Proje &amp; OCR → 11 BOTAŞ Formu (015→KUR-002) → Kabul &amp; Rapor
+            1. Mevcut Rapor / OCR Denetimi · 2. Sıfırdan Mühendislik Hesabı
           </span>
         </div>
-        <div className="grid gap-2.5 md:grid-cols-3">
-          <button
-            type="button"
-            onClick={() => setTab("projects")}
-            className="flex items-start gap-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3 text-left transition-colors hover:border-[var(--primary)]"
-          >
-            <FolderKanban size={17} className="mt-0.5 shrink-0 text-[var(--primary)]" aria-hidden />
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-bold text-[var(--text)]">1. Proje &amp; Plan-Profil / OCR</p>
-              <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">
-                Projeyi seçin veya test raporu PDF&apos;ini doğrudan OCR&apos;dan yükleyin.
-              </p>
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="flex flex-col justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3.5">
+            <div className="flex items-start gap-2.5">
+              <FileScan size={18} className="mt-0.5 shrink-0 text-[var(--primary)]" aria-hidden />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold text-[var(--text)]">
+                  1. Mevcut Rapor / 11 BOTAŞ Form Denetimi ({formsSummary?.filled_required ?? 0}/{formsSummary?.required_total ?? 11})
+                </p>
+                <p className="mt-1 text-[11px] leading-relaxed text-[var(--text-muted)]">
+                  Sahadan gelen taranmış PDF/Excel hakediş formlarını çok sayfalı OCR ile ayrıştırın ve
+                  {" "}{BOTAS_FORM_BY_CODE[targetFormCode]?.shortCode ?? "015"} sırasıyla denetleyin.
+                </p>
+              </div>
             </div>
-            <ArrowRight size={13} className="mt-1 shrink-0 text-[var(--text-faint)]" aria-hidden />
-          </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="primary" icon={<FileText size={13} />} onClick={() => openForm(targetFormCode)}>
+                Formları Aç ({BOTAS_FORM_BY_CODE[targetFormCode]?.shortCode ?? "015"})
+              </Button>
+              <Button size="sm" variant="default" icon={<FileScan size={13} />} onClick={() => setTab("ocr")}>
+                OCR Rapor Yükle
+              </Button>
+            </div>
+          </div>
 
-          <button
-            type="button"
-            onClick={() => openForm(targetFormCode)}
-            className="flex items-start gap-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3 text-left transition-colors hover:border-[var(--primary)]"
-          >
-            <FileText size={17} className="mt-0.5 shrink-0 text-[var(--primary)]" aria-hidden />
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-bold text-[var(--text)]">
-                2. 11 BOTAŞ Formunu Denetle ({formsSummary?.filled_required ?? 0}/{formsSummary?.required_total ?? 11})
-              </p>
-              <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">
-                {BOTAS_FORM_BY_CODE[targetFormCode]?.shortCode ?? "015"} · Sıralı form ve şartname bulgularını açın.
-              </p>
+          <div className="flex flex-col justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3.5">
+            <div className="flex items-start gap-2.5">
+              <FolderKanban size={18} className="mt-0.5 shrink-0 text-[var(--primary)]" aria-hidden />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold text-[var(--text)]">
+                  2. Sıfırdan Mühendislik Hesabı
+                </p>
+                <p className="mt-1 text-[11px] leading-relaxed text-[var(--text-muted)]">
+                  Proje ve Test Bölümü tanımlayın; boru segmentleri, plan-profil kotları, A/B katsayıları,
+                  hava içerik ve basınç değişim analizini adım adım hesaplayın.
+                </p>
+              </div>
             </div>
-            <ArrowRight size={13} className="mt-1 shrink-0 text-[var(--text-faint)]" aria-hidden />
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setTab("ocr")}
-            className="flex items-start gap-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3 text-left transition-colors hover:border-[var(--primary)]"
-          >
-            <FileScan size={17} className="mt-0.5 shrink-0 text-[var(--primary)]" aria-hidden />
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-bold text-[var(--text)]">3. OCR Rapor Kontrolü &amp; Çıktı</p>
-              <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">
-                Çok sayfalı hakediş PDF / Excel dosyalarını otomatik ayrıştırıp kaydedin.
-              </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="primary" icon={<FolderKanban size={13} />} onClick={() => setTab("projects")}>
+                Proje &amp; Kesit Seç
+              </Button>
+              <Button size="sm" variant="default" icon={<Ruler size={13} />} onClick={() => setTab("geometry")}>
+                Geometri &amp; Saha
+              </Button>
             </div>
-            <ArrowRight size={13} className="mt-1 shrink-0 text-[var(--text-faint)]" aria-hidden />
-          </button>
+          </div>
         </div>
       </div>
 
@@ -415,14 +426,15 @@ export function DashboardPage() {
       <div className="grid gap-4 xl:grid-cols-[1.15fr_1fr]">
         <SectionCard
           title="Son 24 saat eğilimi"
-          description="Basınç ve sıcaklık seyri (24 saatlik izleme grafiği)."
+          description="BOT-FRM-021 / 018 saatlik izleme kayıtlarından basınç ve sıcaklık seyri."
           icon={Activity}
+          action={
+            <Button size="sm" variant="ghost" icon={<ArrowRight size={12} />} onClick={() => openForm("pressure_test")}>
+              021 Formu
+            </Button>
+          }
         >
-          <TrendChart
-            pressure={inputs.field.monitored_pressure_bar ?? inputs.air.pressure_bar ?? 80}
-            temperature={inputs.air.temperature_c ?? 20}
-            height={180}
-          />
+          <TrendChart rows={trendRows} height={180} />
           <div className="mt-1 flex gap-4 text-[10px] text-[var(--text-faint)]">
             <span className="flex items-center gap-1"><span className="legend-dot bg-[var(--chart-1)]" /> Basınç (bar)</span>
             <span className="flex items-center gap-1"><span className="legend-dot bg-[var(--chart-3)]" /> Sıcaklık (°C)</span>
@@ -431,7 +443,7 @@ export function DashboardPage() {
 
         <SectionCard
           title="Son işlemler"
-          description="Bu oturumdaki son hesaplamalar ve katsayı hazırlıkları."
+          description="Bu Test Bölümündeki son hesaplamalar ve katsayı hazırlıkları."
           icon={Activity}
           bodyClassName="pt-2"
         >

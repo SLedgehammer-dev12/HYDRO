@@ -44,14 +44,61 @@ export function CellInput({
   ariaLabel: string;
   className?: string;
 }) {
+  const [focused, setFocused] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const isNumeric = type === "number";
+  const displayValue = isNumeric && focused ? draft : value;
+
   return (
     <input
-      type={type === "number" ? "text" : type}
-      inputMode={type === "number" ? "decimal" : undefined}
-      value={value}
+      type="text"
+      inputMode={isNumeric ? "decimal" : undefined}
+      autoCorrect="off"
+      spellCheck={false}
+      value={displayValue}
       placeholder={placeholder}
       aria-label={ariaLabel}
-      onChange={(e) => onChange(e.target.value)}
+      onFocus={() => {
+        setFocused(true);
+        setDraft(value);
+      }}
+      onBlur={() => {
+        setFocused(false);
+      }}
+      onChange={(e) => {
+        const raw = e.target.value;
+        setDraft(raw);
+        const normalized =
+          isNumeric && raw.includes(",") && !raw.includes(".") ? raw.replace(",", ".") : raw;
+        onChange(normalized);
+      }}
+      onKeyDown={(e) => {
+        if (e.nativeEvent.isComposing) return;
+        if (e.key !== "Enter" && e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+        const input = e.currentTarget;
+        const cell = input.closest("td, th");
+        const row = cell?.closest("tr");
+        const tbody = row?.parentElement;
+        if (!cell || !row || !tbody) return;
+        const cellIndex = Array.from(row.children).indexOf(cell);
+        if (cellIndex < 0) return;
+        const rows = Array.from(tbody.children).filter(
+          (el): el is HTMLTableRowElement => el.tagName === "TR",
+        );
+        const rowIndex = rows.indexOf(row as HTMLTableRowElement);
+        const delta = e.key === "ArrowUp" ? -1 : 1;
+        const targetRow = rows[rowIndex + delta];
+        if (!targetRow) return;
+        const targetCell = targetRow.children[cellIndex];
+        const targetInput = targetCell?.querySelector<HTMLInputElement>(
+          "input:not([disabled]):not([readonly])",
+        );
+        if (targetInput) {
+          e.preventDefault();
+          targetInput.focus();
+          targetInput.select();
+        }
+      }}
       className={`h-7 rounded border border-[var(--border)] bg-[var(--canvas)] px-2 font-mono text-[11px] text-[var(--text)] focus:border-[var(--primary)] focus:outline-none ${
         align === "right" ? "text-right" : "text-left"
       } ${className}`}

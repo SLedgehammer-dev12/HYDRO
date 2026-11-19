@@ -70,9 +70,9 @@ export function DecisionStrip() {
     (summary?.first_issue_form_code as BotasFormCode | undefined) || "test_data";
 
   return (
-    <div className="sticky top-[65px] z-30 border-b border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-2)_78%,transparent)] backdrop-blur-lg">
-      <div className="mx-auto flex max-w-[1500px] flex-wrap items-center gap-x-2 gap-y-1.5 px-4 py-1.5">
-        <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">
+    <div className="w-full max-w-full overflow-hidden border-b border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-2)_78%,transparent)] backdrop-blur-lg sm:sticky sm:top-[45px] sm:z-30">
+      <div className="mx-auto flex w-full max-w-[1500px] flex-nowrap items-center gap-x-2 overflow-x-auto px-3 py-0 scroll-thin sm:px-4 sm:py-0.5">
+        <span className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">
           <CircleDot size={11} aria-hidden />
           Aktif karar
         </span>
@@ -179,7 +179,7 @@ export function DecisionStrip() {
 
         <button
           type="button"
-          className="ml-auto inline-flex items-center gap-0.5 text-[10.5px] font-semibold text-[var(--primary)] hover:underline"
+          className="ml-auto inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap text-[10.5px] font-semibold text-[var(--primary)] hover:underline"
           onClick={() => {
             if (tab === "forms" && summary?.first_issue_form_code) {
               openForm(summary.first_issue_form_code as BotasFormCode);

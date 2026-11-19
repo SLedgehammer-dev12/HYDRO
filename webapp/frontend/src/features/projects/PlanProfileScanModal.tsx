@@ -201,8 +201,9 @@ export function PlanProfileScanModal({
   return (
     <Modal
       open={open}
+      dismissible={!isScanningSheets && !createDraftBatch.isPending}
       onClose={() => {
-        if (!isScanningSheets) onClose();
+        if (!isScanningSheets && !createDraftBatch.isPending) onClose();
       }}
       title="Plan-Profil Paftalarından Taslak Kesit (Section) Üret"
       description="Tek bir toplu paftayı veya her test bölümünün ayrı paftalarını sırayla tarayarak uç uca eşleşen taslak kesitler oluşturun."

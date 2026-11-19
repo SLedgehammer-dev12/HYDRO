@@ -1,4 +1,5 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { CellInput } from "../features/forms/FormTablePrimitives";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -7,6 +8,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  FilePlus2,
   FileScan,
   FolderKanban,
   Info,
@@ -105,6 +107,7 @@ export function SectionFormPage() {
   const [pendingNavCode, setPendingNavCode] = useState<BotasFormCode | null>(null);
 
   const uploadInputId = useId();
+  const appendUploadInputId = useId();
 
   function requestNavigate(nextCode: BotasFormCode) {
     if (nextCode === spec.code) return;
@@ -115,14 +118,39 @@ export function SectionFormPage() {
     openForm(nextCode);
   }
 
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const loadedTargetRef = useRef<string | null>(null);
+  const saveHandlerRef = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    saveHandlerRef.current = () => handleSave();
+  });
+
+  useEffect(() => {
+    function onGlobalSave() {
+      saveHandlerRef.current();
+    }
+    window.addEventListener("hydro:save", onGlobalSave);
+    return () => window.removeEventListener("hydro:save", onGlobalSave);
+  }, []);
+
   /* Form veya kesit değişince sunucudaki güncel veriyi forma yükle */
   useEffect(() => {
+    const targetKey = `${sessionId}::${spec.code}`;
+    const contextChanged = loadedTargetRef.current !== targetKey;
+    if (!contextChanged && dirtyRef.current) {
+      return;
+    }
+    loadedTargetRef.current = targetKey;
     const ext = formRecord?.extracted_data ? structuredClone(formRecord.extracted_data) : {};
     setDraftDate(formRecord?.form_date || "");
     setDraftData(ext);
     setDirty(false);
-    setShowDetailCalc(false);
-    setPendingNavCode(null);
+    if (contextChanged) {
+      setShowDetailCalc(false);
+      setPendingNavCode(null);
+    }
   }, [sessionId, spec.code, formRecord?.revision, formRecord?.updated_at]);
 
   /* Alt + Sol/Sağ Ok ile formlar arasında hızlı geçiş */
@@ -224,18 +252,38 @@ export function SectionFormPage() {
     );
   }
 
-  function handleUploadSingleForm(fileList: FileList | null) {
-    const file = fileList?.[0];
-    if (!file) return;
+  async function handleUploadFormFiles(
+    fileList: FileList | null,
+    mode: "replace" | "append" = "replace",
+  ) {
+    const files = Array.from(fileList ?? []);
+    if (files.length === 0) return;
     if (isDemoOrOffline) {
       pushToast("warning", "Aktif kesit seçili değil", "Önce Projeler & Kesitler sayfasından bir proje kesiti açın.");
       return;
     }
+    if (mode === "append" && dirty) {
+      try {
+        await updateForm.mutateAsync({
+          sessionId: sessionId!,
+          formCode: spec.code,
+          payload: {
+            form_date: draftDate,
+            extracted_data: draftData,
+            overwrite_session_inputs: true,
+          },
+        });
+        setDirty(false);
+      } catch {
+        return;
+      }
+    }
     scanForm.mutate({
       sessionId: sessionId!,
       formCode: spec.code,
-      file,
+      files,
       overwrite: true,
+      mode,
     });
   }
 
@@ -264,6 +312,9 @@ export function SectionFormPage() {
                   {spec.required ? "Zorunlu" : "Ek Form"}
                 </Badge>
                 <Badge tone={stMeta.tone}>{stMeta.label}</Badge>
+                {formRecord && formRecord.pages.length > 1 ? (
+                  <Badge tone="neutral">Sayfalar: {formRecord.pages.length}</Badge>
+                ) : null}
                 {dirty ? <Badge tone="warning">Kaydedilmedi</Badge> : null}
               </div>
               <h1 className="truncate text-base font-bold tracking-tight text-[var(--text)]">
@@ -297,25 +348,56 @@ export function SectionFormPage() {
               </Button>
             ) : null}
 
-            <div className="relative">
-              <input
-                id={uploadInputId}
-                type="file"
-                accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.xls,.xlsx,.docx"
-                className="visually-hidden"
-                disabled={scanForm.isPending}
-                onChange={(e) => {
-                  handleUploadSingleForm(e.target.files);
-                  e.target.value = "";
-                }}
-              />
-              <label
-                htmlFor={uploadInputId}
-                className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-2)] px-3 text-xs font-semibold text-[var(--text-soft)] transition-colors hover:border-[var(--primary)] hover:text-[var(--text)]"
-              >
-                <FileScan size={13} aria-hidden />
-                {scanForm.isPending ? "Taranıyor..." : "Bu Forma Doküman Tara"}
-              </label>
+            <div className="relative flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <input
+                  id={uploadInputId}
+                  name="files"
+                  type="file"
+                  multiple
+                  accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,.xls,.xlsx"
+                  className="visually-hidden peer"
+                  disabled={scanForm.isPending}
+                  onChange={(e) => {
+                    void handleUploadFormFiles(e.target.files, "replace");
+                    e.target.value = "";
+                  }}
+                />
+                <label
+                  htmlFor={uploadInputId}
+                  title="Tek veya birden fazla sayfa dosyası (.pdf, .jpg, .png, .xlsx) seçebilirsiniz"
+                  className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-2)] px-3 text-xs font-semibold text-[var(--text-soft)] transition-colors hover:border-[var(--primary)] hover:text-[var(--text)] peer-focus-visible:outline-none peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--primary)] peer-focus-visible:ring-offset-1"
+                >
+                  <FileScan size={13} aria-hidden />
+                  {scanForm.isPending ? "Taranıyor..." : "Doküman Tara"}
+                </label>
+              </div>
+
+              {formRecord && formRecord.status !== "empty" ? (
+                <div className="relative">
+                  <input
+                    id={appendUploadInputId}
+                    name="append_files"
+                    type="file"
+                    multiple
+                    accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,.xls,.xlsx"
+                    className="visually-hidden peer"
+                    disabled={scanForm.isPending}
+                    onChange={(e) => {
+                      void handleUploadFormFiles(e.target.files, "append");
+                      e.target.value = "";
+                    }}
+                  />
+                  <label
+                    htmlFor={appendUploadInputId}
+                    title="Yeni sayfadaki satırları, notları ve imzaları mevcut form verileriyle birleştirir"
+                    className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-[var(--primary-border)] bg-[var(--primary-soft)] px-3 text-xs font-semibold text-[var(--primary)] transition-colors hover:bg-[var(--primary)] hover:text-white peer-focus-visible:outline-none peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--primary)] peer-focus-visible:ring-offset-1"
+                  >
+                    <FilePlus2 size={13} aria-hidden />
+                    Devam Sayfası Ekle
+                  </label>
+                </div>
+              ) : null}
             </div>
 
             <Button
@@ -414,7 +496,7 @@ export function SectionFormPage() {
 
       {formsQuery.isLoading && !payload && !isDemoOrOffline ? (
         <div
-          className="grid gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(340px,1fr)]"
+          className="grid gap-4 2xl:grid-cols-[minmax(0,1.5fr)_minmax(340px,1fr)]"
           aria-busy="true"
           aria-label="Form yükleniyor"
         >
@@ -435,11 +517,11 @@ export function SectionFormPage() {
         </div>
       ) : (
       /* Ana İki Sütunlu BOTAŞ Formu + Şartname Kontrolleri */
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(340px,1fr)]">
+      <div className="grid gap-4 2xl:grid-cols-[minmax(0,1.5fr)_minmax(340px,1fr)]">
         {/* Sol Sütun: Resmî BOT-FRM Form Sayfası */}
-        <div className="overflow-hidden rounded-2xl border border-[var(--border-strong)] bg-[var(--surface)] shadow-sm">
+        <div className="min-w-0 overflow-hidden rounded-2xl border border-[var(--border-strong)] bg-[var(--surface)] shadow-sm">
           {/* 3 Sütunlu Resmî BOTAŞ Başlık Bloğu */}
-          <div className="grid border-b border-[var(--border-strong)] bg-[var(--surface-2)] sm:grid-cols-[160px_1fr_195px]">
+          <div className="grid border-b border-[var(--border-strong)] bg-[var(--surface-2)] md:grid-cols-[180px_minmax(0,1fr)_220px]">
             <div className="flex flex-col justify-center border-b border-[var(--border)] px-3.5 py-2.5 sm:border-b-0 sm:border-r">
               <span className="text-xs font-extrabold tracking-wide text-[var(--text)]">BOTAŞ</span>
               <span className="text-[10px] text-[var(--text-muted)]">
@@ -516,12 +598,14 @@ export function SectionFormPage() {
                 return (
                   <label key={k} className="block rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1.5">
                     <span className="block text-[9.5px] font-medium text-[var(--text-muted)]">{label}</span>
-                    <input
-                      type="text"
+                    <CellInput
+                      type={isNumeric ? "number" : "text"}
+                      align={isNumeric ? "right" : "left"}
+                      ariaLabel={String(label)}
                       value={own}
                       placeholder={inherited || "—"}
-                      onChange={(e) => setHeaderField(k, isNumeric ? parseMaybeNum(e.target.value) : e.target.value)}
-                      className="mt-0.5 h-6 w-full rounded border border-[var(--border)] bg-[var(--canvas)] px-2 font-mono text-[11px] text-[var(--text)] focus:border-[var(--primary)] focus:outline-none"
+                      onChange={(val) => setHeaderField(k, isNumeric ? parseMaybeNum(val) : val)}
+                      className="mt-0.5 h-7 w-full"
                     />
                   </label>
                 );

@@ -136,6 +136,7 @@ function buildAnalyzeBody(input: AnalyzeRequestInput): FormData {
   if (input.force) {
     body.append("force", "true");
   }
+  body.append("async_mode", "true");
   return body;
 }
 
@@ -147,8 +148,11 @@ export async function analyzeOcr(
     method: "POST",
     body: buildAnalyzeBody(input),
     signal,
-    timeoutMs: 600_000,
-    headers: { "Idempotency-Key": currentSessionId() + "-" + Date.now().toString(36) },
+    timeoutMs: 120_000,
+    headers: {
+      "Idempotency-Key": currentSessionId() + "-" + Date.now().toString(36),
+      Prefer: "respond-async",
+    },
   });
 }
 
@@ -300,7 +304,7 @@ export async function waitForAnalysis(
     timeoutMs?: number;
   } = {},
 ): Promise<OcrAnalysisResult> {
-  const { signal, onProgress, pollIntervalMs = 1200, timeoutMs = 630_000 } = options;
+  const { signal, onProgress, pollIntervalMs = 750, timeoutMs = 630_000 } = options;
   const startedAt = Date.now();
 
   for (;;) {
@@ -358,6 +362,10 @@ export function errorHint(code: string): string {
       return "Hesaplanan değer JSON'u geçersiz. 'Örnek doldur' ile şemayı karşılaştırıp yeniden deneyin.";
     case "ocr_timeout":
       return "Süre sınırı aşıldı. Daha az sayfalı veya daha küçük dosyayla yeniden deneyin.";
+    case "ocr_cancelled":
+      return "Analiz kullanıcı tarafından iptal edildi.";
+    case "worker_interrupted":
+      return "Sunucu yeniden başlatıldığı için yarıda kalan analiz sonlandırıldı; lütfen tekrar deneyin.";
     case "ocr_already_running":
       return "Aynı dosya için analiz sürüyor. Geçmiş analizler listesinden mevcut kaydı açın.";
     case "rate_limited":

@@ -27,7 +27,7 @@ import type { BackendMode, BotasFormCode, TabKey } from "../../lib/types";
 import {
   useCheckUpdates,
   useMeta,
-  useOpenSession,
+  useSafeSwitchSession,
   useSessionForms,
   useSessions,
   useUpdateStatus,
@@ -136,7 +136,7 @@ export function Sidebar() {
 
   const { data: meta } = useMeta();
   const { data: projectSessions } = useSessions(projectId);
-  const openSession = useOpenSession();
+  const safeSwitchSession = useSafeSwitchSession();
   const { data: formsPayload } = useSessionForms(sessionId);
   const { data: updateStatus } = useUpdateStatus();
   const checkUpdates = useCheckUpdates();
@@ -153,6 +153,20 @@ export function Sidebar() {
       checkUpdates.mutate({ force: false, silent: true });
     }
   }, [backend, checkUpdates]);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const onMediaChange = () => {
+      if (mq.matches) {
+        setSidebarOpen(false);
+      }
+    };
+    if (mq.matches && sidebarOpen) {
+      setSidebarOpen(false);
+    }
+    mq.addEventListener("change", onMediaChange);
+    return () => mq.removeEventListener("change", onMediaChange);
+  }, [sidebarOpen, setSidebarOpen]);
 
   /* Mobil gezinme çekmecesi: yerel <dialog> top-layer */
   useEffect(() => {
@@ -327,7 +341,7 @@ export function Sidebar() {
             onChange={(e) => {
               const nextId = e.target.value;
               if (nextId && nextId !== sessionId) {
-                openSession.mutate(nextId);
+                safeSwitchSession.switchSession(nextId);
               }
             }}
             className="mt-1.5 h-7 w-full rounded-lg border border-[var(--border)] bg-[var(--canvas)] px-2 text-[11px] font-medium text-[var(--text)] focus:border-[var(--primary)] focus:outline-none"

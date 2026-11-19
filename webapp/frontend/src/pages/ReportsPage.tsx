@@ -17,7 +17,7 @@ import { Badge } from "../components/ui/Badge";
 import { Button, IconButton } from "../components/ui/Button";
 import { TextField } from "../components/ui/Field";
 import { InlineNotice, EmptyState } from "../components/ui/State";
-import { useMeta, useSessions } from "../hooks/queries";
+import { useMeta, useSafeSwitchSession, useSessions } from "../hooks/queries";
 import { useAppStore } from "../store/useAppStore";
 import { api, apiErrorMessage } from "../lib/api";
 import { buildReportText, buildSnapshot, downloadJson, downloadText, reportFileName } from "../lib/report";
@@ -50,16 +50,20 @@ export function ReportsPage() {
 
   const { data: meta } = useMeta();
   const { data: sessions } = useSessions();
+  const safeSwitchSession = useSafeSwitchSession();
 
   const [generatedAt, setGeneratedAt] = useState(() => new Date());
   const [busy, setBusy] = useState<Format | null>(null);
   const [snapshotBusy, setSnapshotBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const isOffline = backend !== "online";
 
-  const reportText = useMemo(
-    () => buildReportText(inputs, results, meta, generatedAt),
-    [inputs, results, meta, generatedAt],
-  );
+  const reportText = useMemo(() => {
+    const base = buildReportText(inputs, results, meta, generatedAt);
+    return isOffline
+      ? `[TASLAK / ÇEVRİMDIŞI DEMO — RESMİ KABUL DEĞİLDİR]\nSunucu bağlantısı olmadan tarayıcıda üretilmiştir.\n\n${base}`
+      : base;
+  }, [inputs, results, meta, generatedAt, isOffline]);
 
   const sectionsStatus = [
     { label: "Geometri", ready: Boolean(results.geometry), detail: results.geometry ? fmt.m(results.geometry.total_length_m, 0) : "hesap yok" },
@@ -97,16 +101,21 @@ export function ReportsPage() {
   }
 
   async function exportReport(format: Format) {
+    if ((format === "pdf" || format === "xlsx") && (isOffline || !sessionId)) {
+      pushToast(
+        "warning",
+        `${FORMAT_META[format].label} çıktısı çevrimdışı/demo modda kapalı`,
+        "Resmi PDF/Excel çıktısı için sunucuya bağlanın ve aktif oturum seçin.",
+      );
+      return;
+    }
     setBusy(format);
     try {
-      if (format === "txt" && (backend !== "online" || !sessionId)) {
+      if (format === "txt" && (isOffline || !sessionId)) {
         localTxt();
         return;
       }
-      if (backend !== "online" || !sessionId) {
-        localTxt(
-          `${FORMAT_META[format].label} çıktısı backend gerektirir; rapor TXT olarak indirildi ve dışa aktarma geçmişine eklendi.`,
-        );
+      if (!sessionId) {
         return;
       }
       const { blob, filename } = await api.exportSession(sessionId, format);
@@ -189,27 +198,12 @@ export function ReportsPage() {
     }
   }
 
-  async function openSession(id: string) {
-    if (backend !== "online") {
-      pushToast("info", "Çevrimdışı oturum", "Kayıtlı oturum açma yalnızca sunucu bağlıyken çalışır.");
-      return;
-    }
-    try {
-      const session = await api.session(id);
-      applySessionInputs(session.inputs);
-      setSessionMeta({ id: session.id, name: session.name, revision: session.revision, status: session.status });
-      pushToast("success", "Oturum açıldı", session.name);
-    } catch (error) {
-      pushToast("error", "Oturum açılamadı", apiErrorMessage(error));
-    }
-  }
-
   return (
     <div className="space-y-5">
       <PageHeader
         kicker="Raporlar"
         title="Rapor önizleme ve dışa aktarma"
-        description="Önizleme salt okunurdur; düzeltmeler ilgili sekmelerde yapılır. Rapor kimliği oturum bazlıdır."
+        description="Önizleme salt okunurdur; düzeltmeler ilgili sekmelerde yapılır. Rapor kimliği Test Bölümü bazlıdır."
         meta={
           <>
             <Badge tone="info">{inputs.report.report_no || "Rapor no yok"}</Badge>
@@ -227,7 +221,9 @@ export function ReportsPage() {
             <Button
               variant="primary"
               icon={<Download size={14} />}
+              disabled={isOffline || !sessionId}
               loading={busy === "pdf"}
+              title={isOffline || !sessionId ? "Çevrimdışı/demo modda resmi PDF kapalı" : undefined}
               onClick={() => void exportReport("pdf")}
             >
               PDF indir
@@ -300,12 +296,14 @@ export function ReportsPage() {
             <div className="grid grid-cols-3 gap-2">
               {(Object.keys(FORMAT_META) as Format[]).map((format) => {
                 const Icon = FORMAT_META[format].icon;
+                const officialDisabled = format !== "txt" && (isOffline || !sessionId);
                 return (
                   <button
                     key={format}
                     type="button"
                     className="flex flex-col items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-2 py-3 transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-3)] disabled:opacity-50"
-                    disabled={busy !== null}
+                    disabled={busy !== null || officialDisabled}
+                    title={officialDisabled ? "Çevrimdışı/demo modda kapalı" : undefined}
                     onClick={() => void exportReport(format)}
                   >
                     <span className="grid size-8 place-items-center rounded-lg border border-[var(--border)] bg-[var(--surface)]">
@@ -313,7 +311,7 @@ export function ReportsPage() {
                     </span>
                     <span className="text-[11.5px] font-semibold">{FORMAT_META[format].label}</span>
                     <span className="text-[9.5px] text-[var(--text-faint)]">
-                      {busy === format ? "Hazırlanıyor…" : "İndir"}
+                      {busy === format ? "Hazırlanıyor…" : officialDisabled ? "Çevrimdışı kapalı" : "İndir"}
                     </span>
                   </button>
                 );
@@ -382,7 +380,7 @@ export function ReportsPage() {
 
           <SectionCard
             title="Dışa aktarma geçmişi"
-            description="Bu tarayıcı oturumundaki indirmeler."
+            description="Bu tarayıcıdaki Test Bölümü indirmeleri."
             icon={History}
             action={<Badge tone="neutral">{exports.length} kayıt</Badge>}
           >
@@ -409,21 +407,21 @@ export function ReportsPage() {
           </SectionCard>
 
           <SectionCard
-            title="Oturum geçmişi"
-            description="Son oturumlar ve test durumları."
+            title="Test Bölümü geçmişi"
+            description="Son Test Bölümleri ve test durumları."
             icon={History}
             action={
               <Button size="sm" variant="ghost" icon={<ArrowRight size={12} />} onClick={() => setTab("settings")}>
-                Oturum yönetimi
+                Bölüm yönetimi
               </Button>
             }
           >
             <div className="table-wrap scroll-thin">
               <table className="data">
-                <caption>Bu çalışma alanındaki oturumlar</caption>
+                <caption>Bu çalışma alanındaki Test Bölümleri</caption>
                 <thead>
                   <tr>
-                    <th scope="col">Oturum</th>
+                    <th scope="col">Test Bölümü</th>
                     <th scope="col">Durum</th>
                     <th scope="col" className="num">Rev.</th>
                     <th scope="col">Güncelleme</th>
@@ -448,7 +446,8 @@ export function ReportsPage() {
                         <button
                           type="button"
                           className="link-button"
-                          onClick={() => void openSession(session.id)}
+                          disabled={safeSwitchSession.isPending}
+                          onClick={() => safeSwitchSession.switchSession(session.id)}
                         >
                           Aç
                         </button>

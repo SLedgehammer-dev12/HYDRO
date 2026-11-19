@@ -18,12 +18,13 @@ export function RatioGauge({
   thresholdLabel?: string;
   className?: string;
 }) {
-  const safeRatio = typeof ratio === "number" && Number.isFinite(ratio) ? Math.max(0, ratio) : 0;
+  const hasRatio = typeof ratio === "number" && Number.isFinite(ratio);
+  const safeRatio = hasRatio ? Math.max(0, ratio) : 0;
   const max = limit * 1.15;
-  const fraction = Math.min(safeRatio / max, 1);
+  const fraction = hasRatio ? Math.min(safeRatio / max, 1) : 0;
   const thresholdFraction = limit / max;
   const arcLength = Math.PI * 80;
-  const positive = passed ?? (safeRatio < limit);
+  const positive = hasRatio ? (passed ?? safeRatio < limit) : true;
 
   const angle = Math.PI * (1 - thresholdFraction);
   const tickX = 100 + 80 * Math.cos(angle);
@@ -33,7 +34,12 @@ export function RatioGauge({
 
   return (
     <div className={cn("relative", className)}>
-      <svg viewBox="0 0 200 118" className="w-full" role="img" aria-label={`${title}: ${num(safeRatio, 6)}`}>
+      <svg
+        viewBox="0 0 200 118"
+        className="w-full"
+        role="img"
+        aria-label={hasRatio ? `${title}: ${num(safeRatio, 6)}` : `${title}: Hesaplanmadı`}
+      >
         <defs>
           <linearGradient id="ratio-gradient" x1="0" y1="0" x2="1" y2="0">
             <stop offset="0%" stopColor="var(--chart-1)" />
@@ -51,10 +57,10 @@ export function RatioGauge({
         <path
           d="M 20 100 A 80 80 0 0 1 180 100"
           fill="none"
-          stroke={!positive ? "var(--danger)" : "url(#ratio-gradient)"}
+          stroke={!hasRatio ? "var(--border-strong)" : !positive ? "var(--danger)" : "url(#ratio-gradient)"}
           strokeWidth="13"
           strokeLinecap="round"
-          strokeDasharray={`${Math.max(fraction * arcLength, 0.01)} ${arcLength}`}
+          strokeDasharray={`${hasRatio ? Math.max(fraction * arcLength, 0.01) : 0.01} ${arcLength}`}
         />
         <line
           x1={tickX}
@@ -68,7 +74,7 @@ export function RatioGauge({
         <circle cx={20} cy={100} r="2.5" fill="var(--text-faint)" />
         <circle cx={180} cy={100} r="2.5" fill="var(--text-faint)" />
         <text x="100" y="72" textAnchor="middle" className="fill-[var(--text)]" style={{ fontSize: 23, fontWeight: 600, fontFamily: "var(--font-mono)" }}>
-          {num(safeRatio, 6)}
+          {hasRatio ? num(safeRatio, 6) : "—"}
         </text>
         <text x="100" y="89" textAnchor="middle" className="fill-[var(--text-faint)]" style={{ fontSize: 9.5, letterSpacing: "0.08em" }}>
           {title}
@@ -101,14 +107,15 @@ export function MarginGauge({
   unit?: string;
   className?: string;
 }) {
-  const value = typeof margin === "number" && Number.isFinite(margin) ? margin : 0;
+  const hasMargin = typeof margin === "number" && Number.isFinite(margin);
+  const value = hasMargin ? margin : 0;
   const min = -0.4;
   const max = 0.6;
   const clamp = (v: number) => Math.min(max, Math.max(min, v));
   const fraction = (clamp(value) - min) / (max - min);
   const toleranceFraction = (tolerance - min) / (max - min);
   const zeroFraction = (0 - min) / (max - min);
-  const positive = passed ?? value <= tolerance;
+  const positive = hasMargin ? (passed ?? value <= tolerance) : true;
 
   return (
     <div className={className}>
@@ -134,22 +141,31 @@ export function MarginGauge({
           title={`Kabul sınırı ${tolerance} ${unit}`}
           aria-hidden
         />
-        <div
-          className={cn(
-            "absolute top-1/2 h-5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full",
-            positive ? "bg-[var(--success)]" : "bg-[var(--danger)]",
-          )}
-          style={{ left: `${fraction * 100}%` }}
-          aria-hidden
-        />
+        {hasMargin ? (
+          <div
+            className={cn(
+              "absolute top-1/2 h-5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full",
+              positive ? "bg-[var(--success)]" : "bg-[var(--danger)]",
+            )}
+            style={{ left: `${fraction * 100}%` }}
+            aria-hidden
+          />
+        ) : null}
       </div>
       <div className="mt-1 flex justify-between font-mono text-[9.5px] text-[var(--text-faint)]">
         <span>-0,4</span>
         <span className="text-[var(--warning)]">+{num(tolerance, 2)} {unit}</span>
         <span>+0,6</span>
       </div>
-      <p className={cn("mt-1.5 text-[11px] font-semibold", positive ? "tone-pass" : "tone-fail")}>
-        Marj {num(value, 3)} {unit} · {positive ? "kabul sınırı içinde" : "kabul sınırı dışında"}
+      <p
+        className={cn(
+          "mt-1.5 text-[11px] font-semibold",
+          !hasMargin ? "text-[var(--text-faint)]" : positive ? "tone-pass" : "tone-fail",
+        )}
+      >
+        {hasMargin
+          ? `Marj ${num(value, 3)} ${unit} · ${positive ? "kabul sınırı içinde" : "kabul sınırı dışında"}`
+          : "Marj — · henüz değerlendirilmedi"}
       </p>
     </div>
   );

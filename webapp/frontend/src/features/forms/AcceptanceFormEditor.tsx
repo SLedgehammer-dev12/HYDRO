@@ -127,7 +127,8 @@ export function AcceptanceFormEditor({
                 <td className="num">
                   <CellInput
                     type="number"
-                    value={numVal(airRaw, "pressure_rise_bar") || "1"}
+                    value={numVal(airRaw, "pressure_rise_bar")}
+                    placeholder="1"
                     onChange={(v) =>
                       setNestedKey("air_acceptance", "pressure_rise_bar", parseCellNum(v))
                     }
@@ -167,7 +168,8 @@ export function AcceptanceFormEditor({
                 <td className="num">
                   <CellInput
                     type="number"
-                    value={numVal(airRaw, "k_factor") || "1.02"}
+                    value={numVal(airRaw, "k_factor")}
+                    placeholder="1.02"
                     onChange={(v) => setNestedKey("air_acceptance", "k_factor", parseCellNum(v))}
                     ariaLabel="K faktörü"
                     className="w-28"

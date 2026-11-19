@@ -206,6 +206,8 @@ export function buildSnapshot(
       b_micro_per_c: str(inputs.pressure.b_micro_per_c),
       delta_t_c: str(inputs.pressure.delta_t_c),
       actual_pressure_change_bar: str(inputs.pressure.actual_pressure_change_bar),
+      t_initial_c: str(inputs.pressure.t_initial_c),
+      t_final_c: str(inputs.pressure.t_final_c),
     },
     field: {
       ambient_temperature_c: str(inputs.field.ambient_temperature_c),

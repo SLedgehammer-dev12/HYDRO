@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CheckCircle2,
   Download,
@@ -55,8 +55,21 @@ export function UpdateManagerModal() {
   const [chosenAsset, setChosenAsset] = useState<string>("");
   const [savingFile, setSavingFile] = useState(false);
 
+  const autoCheckedOnOpenRef = useRef(false);
+
   useEffect(() => {
-    if (open && backend === "online" && status && !status.checked && !checkUpdates.isPending) {
+    if (!open) {
+      autoCheckedOnOpenRef.current = false;
+      return;
+    }
+    if (
+      backend === "online" &&
+      status &&
+      !status.checked &&
+      !checkUpdates.isPending &&
+      !autoCheckedOnOpenRef.current
+    ) {
+      autoCheckedOnOpenRef.current = true;
       checkUpdates.mutate({ force: false, silent: true });
     }
   }, [open, backend, status, checkUpdates]);

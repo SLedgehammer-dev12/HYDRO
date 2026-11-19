@@ -92,11 +92,7 @@ async function resolveWithMock<T>(
     return { data: await real(), mode: "live" };
   } catch (error) {
     if (isRecoverableError(error)) {
-      // Yalnızca ağ hatasında tüm uygulamayı demo moduna al. 404/500 gibi
-      // uç-bazlı eksikler yerel yedeğe düşer, sağlık durumu korunur.
-      if (error instanceof ApiError && error.status === 0) {
-        useAppStore.getState().setBackend("demo");
-      }
+      useAppStore.getState().setBackend("demo");
       return { data: await mock(), mode: "demo" };
     }
     throw error;
@@ -147,13 +143,22 @@ function normalizeHealth(raw: Record<string, unknown>): HealthResponse {
 }
 
 export function useBackendProbe() {
+  const queryClient = useQueryClient();
   return useQuery<HealthResponse | null>({
     queryKey: ["health"],
     queryFn: async () => {
+      const prevBackend = useAppStore.getState().backend;
       try {
         const raw = await api.health();
         const health = normalizeHealth(raw as unknown as Record<string, unknown>);
         useAppStore.getState().setBackend("online", health);
+        if (prevBackend !== "online") {
+          void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+          void queryClient.invalidateQueries({ queryKey: ["projects"] });
+          void queryClient.invalidateQueries({ queryKey: ["session-forms"] });
+          void queryClient.invalidateQueries({ queryKey: ["project-scene"] });
+          void queryClient.invalidateQueries({ queryKey: ["session"] });
+        }
         return health;
       } catch {
         useAppStore.getState().setBackend("demo", null);
@@ -268,9 +273,10 @@ export function useSessions(
   projectId?: string | null,
   options?: { enabled?: boolean },
 ) {
+  const backend = useAppStore((state) => state.backend);
   return useQuery<SessionListItem[]>({
     queryKey: ["sessions", projectId ?? "all"],
-    enabled: options?.enabled ?? true,
+    enabled: (options?.enabled ?? true) && backend !== "checking",
     queryFn: async () => {
       const state = useAppStore.getState();
       const fallback = () => ({
@@ -311,8 +317,10 @@ function DEMO_SESSION_LIST_FALLBACK(projectId?: string | null): SessionListItem[
 /* ------------------------------------------------------------------ */
 
 export function useProjects() {
+  const backend = useAppStore((state) => state.backend);
   return useQuery<Project[]>({
     queryKey: ["projects"],
+    enabled: backend !== "checking",
     queryFn: async () => {
       const state = useAppStore.getState();
       if (state.backend === "demo") return demoProjects();
@@ -637,6 +645,7 @@ function buildFallbackSessionForms(sessionId: string): SessionFormsResponse {
 }
 
 export function useSessionForms(sessionId: string | null) {
+  const backend = useAppStore((state) => state.backend);
   return useQuery<SessionFormsResponse>({
     queryKey: ["session-forms", sessionId],
     queryFn: async () => {
@@ -646,7 +655,7 @@ export function useSessionForms(sessionId: string | null) {
       }
       return api.sessionForms(sessionId);
     },
-    enabled: Boolean(sessionId),
+    enabled: Boolean(sessionId) && backend !== "checking",
     staleTime: 10_000,
     retry: false,
   });
@@ -692,11 +701,17 @@ export function useScanSessionForm() {
   return useMutation<
     SectionFormScanResponse,
     Error,
-    { sessionId: string; formCode: string; file: File; overwrite?: boolean }
+    {
+      sessionId: string;
+      formCode: string;
+      files: File | File[];
+      overwrite?: boolean;
+      mode?: "replace" | "append";
+    }
   >({
-    mutationFn: async ({ sessionId, formCode, file, overwrite = true }) =>
-      api.scanSessionForm(sessionId, formCode, file, overwrite),
-    onSuccess: (res) => {
+    mutationFn: async ({ sessionId, formCode, files, overwrite = true, mode = "replace" }) =>
+      api.scanSessionForm(sessionId, formCode, files, { overwrite, mode }),
+    onSuccess: (res, vars) => {
       const store = useAppStore.getState();
       queryClient.setQueryData(["session-forms", res.session.id], res.forms_payload);
       queryClient.setQueryData(["session", res.session.id], res.session);
@@ -712,8 +727,10 @@ export function useScanSessionForm() {
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
       store.pushToast(
         "success",
-        "Doküman forma aktarıldı",
-        `${res.form.form_title} tarandı ve kontroller güncellendi.`,
+        vars.mode === "append" ? "Devam sayfası eklendi" : "Doküman forma aktarıldı",
+        vars.mode === "append"
+          ? `${res.form.form_title} verileri birleştirildi ve kontroller güncellendi.`
+          : `${res.form.form_title} tarandı ve kontroller güncellendi.`,
       );
     },
     onError: (error) => {
@@ -723,9 +740,10 @@ export function useScanSessionForm() {
 }
 
 export function useProjectScene(projectId: string | null, enabled = true) {
+  const backend = useAppStore((state) => state.backend);
   return useQuery<ProjectSceneResponse>({
     queryKey: ["project-scene", projectId],
-    enabled: Boolean(projectId) && enabled,
+    enabled: Boolean(projectId) && enabled && backend !== "checking",
     queryFn: async () => {
       const state = useAppStore.getState();
       if (!projectId || state.backend !== "online" || projectId.startsWith("demo-")) {
@@ -836,10 +854,30 @@ export function useOpenSession() {
   });
 }
 
+export function useSafeSwitchSession() {
+  const openSession = useOpenSession();
+  return {
+    isPending: openSession.isPending,
+    switchSession: (id: string) => {
+      const state = useAppStore.getState();
+      if (!id || id === state.sessionId) return;
+      if (
+        state.dirty &&
+        typeof window !== "undefined" &&
+        !window.confirm("Kaydedilmemiş değişiklikler var. Başka test bölümüne geçilsin mi?")
+      ) {
+        return;
+      }
+      openSession.mutate(id);
+    },
+  };
+}
+
 export function useSessionDetail(id: string | null) {
+  const backend = useAppStore((state) => state.backend);
   return useQuery<Session>({
     queryKey: ["session", id],
-    enabled: Boolean(id) && isOnline(),
+    enabled: Boolean(id) && backend === "online",
     queryFn: async () => {
       const state = useAppStore.getState();
       if (!id) return createDemoSession();
@@ -855,9 +893,10 @@ export function useSessionDetail(id: string | null) {
 }
 
 export function useSessionResults(id: string | null) {
+  const backend = useAppStore((state) => state.backend);
   return useQuery<TestResultRecord[]>({
     queryKey: ["session", id, "results"],
-    enabled: Boolean(id) && isOnline(),
+    enabled: Boolean(id) && backend === "online",
     queryFn: async () => {
       if (!id) return [];
       const result = await resolveWithMock(
@@ -1367,4 +1406,356 @@ export function refreshDerivedPreview() {
   const results = buildDemoResults(state.inputs);
   state.setResults(results);
   return results;
+}
+
+/* ------------------------------------------------------------------ */
+/* Proje Veri Merkezi, Üreticiler, Arşiv & DB Yönetimi Hooks           */
+/* ------------------------------------------------------------------ */
+
+export function useProjectDataset(projectId: string | null, enabled = true) {
+  const backend = useAppStore((state) => state.backend);
+  return useQuery<import("../lib/types").ProjectDatasetResponse>({
+    queryKey: ["project-dataset", projectId],
+    enabled: Boolean(projectId) && enabled && backend === "online",
+    queryFn: () => api.projectDataset(projectId!),
+    staleTime: 10_000,
+    retry: false,
+  });
+}
+
+export function useGenerateProjectSections() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    import("../lib/types").ProjectGenerateSectionsResponse,
+    Error,
+    { projectId: string; payload: import("../lib/types").ProjectGenerateSectionsPayload }
+  >({
+    mutationFn: ({ projectId, payload }) => api.generateProjectSections(projectId, payload),
+    onSuccess: (data) => {
+      void queryClient.invalidateQueries({ queryKey: ["projects"] });
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      void queryClient.invalidateQueries({ queryKey: ["project-dataset", data.project_id] });
+      void queryClient.invalidateQueries({ queryKey: ["project-scene"] });
+      useAppStore
+        .getState()
+        .pushToast(
+          "success",
+          "Toplu kesitler oluşturuldu",
+          `${data.created_count} kesit (${Math.round(data.target_section_length_m)} m hedef aralıkla) projeye eklendi.`,
+        );
+    },
+    onError: (error) => {
+      useAppStore.getState().pushToast("error", "Toplu kesit oluşturulamadı", error.message);
+    },
+  });
+}
+
+export function useSyncProjectForms() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    import("../lib/types").ProjectSyncFormsResponse,
+    Error,
+    { projectId: string; overwriteExisting?: boolean; formCodes?: string[] }
+  >({
+    mutationFn: ({ projectId, overwriteExisting = false, formCodes }) =>
+      api.syncProjectForms(projectId, {
+        overwrite_existing: overwriteExisting,
+        form_codes: formCodes,
+      }),
+    onSuccess: (data) => {
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      void queryClient.invalidateQueries({ queryKey: ["session-forms"] });
+      void queryClient.invalidateQueries({ queryKey: ["project-dataset", data.project_id] });
+      useAppStore
+        .getState()
+        .pushToast(
+          "success",
+          "Form başlıkları eşitlendi",
+          `${data.sessions_processed} kesitte ${data.updated_forms} BOTAŞ formu güncellendi.`,
+        );
+    },
+    onError: (error) => {
+      useAppStore.getState().pushToast("error", "Form eşitleme başarısız", error.message);
+    },
+  });
+}
+
+export function useGenerateSampleProject() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    { project: Project; sections: SessionListItem[] },
+    Error,
+    import("../lib/types").SampleProjectPayload
+  >({
+    mutationFn: (payload) => api.generateSampleProject(payload),
+    onSuccess: (data) => {
+      void queryClient.invalidateQueries({ queryKey: ["projects"] });
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      void queryClient.invalidateQueries({ queryKey: ["db-stats"] });
+      useAppStore
+        .getState()
+        .pushToast(
+          "success",
+          "Örnek proje üretildi",
+          `${data.project.name} (${data.sections.length} kesit) veritabanına kaydedildi.`,
+        );
+    },
+    onError: (error) => {
+      useAppStore.getState().pushToast("error", "Örnek proje üretilemedi", error.message);
+    },
+  });
+}
+
+export function useCloneProject() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    { project: Project; section_count: number; mode: string },
+    Error,
+    { projectId: string; payload: import("../lib/types").ProjectClonePayload }
+  >({
+    mutationFn: ({ projectId, payload }) => api.cloneProject(projectId, payload),
+    onSuccess: (data) => {
+      void queryClient.invalidateQueries({ queryKey: ["projects"] });
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      void queryClient.invalidateQueries({ queryKey: ["db-stats"] });
+      useAppStore
+        .getState()
+        .pushToast(
+          "success",
+          "Proje klonlandı",
+          `${data.project.name} (${data.section_count} kesit · ${data.mode === "template" ? "Şablon" : "Tam"}) oluşturuldu.`,
+        );
+    },
+    onError: (error) => {
+      useAppStore.getState().pushToast("error", "Proje klonlanamadı", error.message);
+    },
+  });
+}
+
+export function useImportProjectArchive() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    import("../lib/types").ArchiveImportResponse,
+    Error,
+    { file: File; targetProjectName?: string; targetProjectCode?: string; includeAttachments?: boolean }
+  >({
+    mutationFn: (params) => api.importProjectArchive(params),
+    onSuccess: (data) => {
+      void queryClient.invalidateQueries({ queryKey: ["projects"] });
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      void queryClient.invalidateQueries({ queryKey: ["db-stats"] });
+      useAppStore
+        .getState()
+        .pushToast(
+          "success",
+          "Proje arşivi içe aktarıldı",
+          `${data.project.name}: ${data.imported_sections} kesit, ${data.imported_forms} form, ${data.imported_attachments} ek yüklendi.`,
+        );
+    },
+    onError: (error) => {
+      useAppStore.getState().pushToast("error", "Arşiv içe aktarılamadı", error.message);
+    },
+  });
+}
+
+export function useImportDesktopDb() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    import("../lib/types").DesktopDbImportResponse,
+    Error,
+    { file: File; projectName?: string; projectCode?: string }
+  >({
+    mutationFn: (params) => api.importDesktopDb(params),
+    onSuccess: (data) => {
+      void queryClient.invalidateQueries({ queryKey: ["projects"] });
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      void queryClient.invalidateQueries({ queryKey: ["db-stats"] });
+      useAppStore
+        .getState()
+        .pushToast(
+          "success",
+          "Masaüstü veritabanı aktarıldı",
+          `${data.project.name}: ${data.imported_sessions} kesit, ${data.imported_results} sonuç, ${data.imported_time_series} zaman kaydı eklendi.`,
+        );
+    },
+    onError: (error) => {
+      useAppStore.getState().pushToast("error", "Masaüstü DB aktarılamadı", error.message);
+    },
+  });
+}
+
+export function useDbStats(enabled = true) {
+  const backend = useAppStore((state) => state.backend);
+  return useQuery<import("../lib/types").DbStatsResponse>({
+    queryKey: ["db-stats"],
+    enabled: backend === "online" && enabled,
+    queryFn: () => api.dbStats(),
+    staleTime: 10_000,
+    retry: false,
+  });
+}
+
+export function useDbBackups(enabled = true) {
+  const backend = useAppStore((state) => state.backend);
+  return useQuery<import("../lib/types").DbBackupsResponse>({
+    queryKey: ["db-backups"],
+    enabled: backend === "online" && enabled,
+    queryFn: () => api.dbBackups(),
+    staleTime: 10_000,
+    retry: false,
+  });
+}
+
+export function useCreateDbBackup() {
+  const queryClient = useQueryClient();
+  return useMutation<import("../lib/types").DbBackupItem, Error, string | void>({
+    mutationFn: (reason) => api.createDbBackup(reason || "manual"),
+    onSuccess: (data) => {
+      void queryClient.invalidateQueries({ queryKey: ["db-backups"] });
+      void queryClient.invalidateQueries({ queryKey: ["db-stats"] });
+      useAppStore
+        .getState()
+        .pushToast("success", "Anlık yedek alındı", `${data.filename} başarıyla kaydedildi.`);
+    },
+    onError: (error) => {
+      useAppStore.getState().pushToast("error", "Yedek alınamadı", error.message);
+    },
+  });
+}
+
+export function useRestoreDbBackup() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    import("../lib/types").DbRestoreResponse,
+    Error,
+    { backupFilename?: string; file?: File }
+  >({
+    mutationFn: (params) => api.restoreDbBackup(params),
+    onSuccess: (data) => {
+      void queryClient.invalidateQueries();
+      useAppStore
+        .getState()
+        .pushToast(
+          "success",
+          "Veritabanı geri yüklendi",
+          `Kaynak: ${data.source}. Güvenlik amacıyla geri yükleme öncesi yedek de alındı.`,
+        );
+    },
+    onError: (error) => {
+      useAppStore.getState().pushToast("error", "Geri yükleme başarısız", error.message);
+    },
+  });
+}
+
+export function useTrash(enabled = true) {
+  const backend = useAppStore((state) => state.backend);
+  return useQuery<import("../lib/types").TrashResponse>({
+    queryKey: ["trash"],
+    enabled: backend === "online" && enabled,
+    queryFn: () => api.trash(),
+    staleTime: 10_000,
+    retry: false,
+  });
+}
+
+export function useRestoreTrashItem() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    { entity_type: string; id: string; restored_sessions: number },
+    Error,
+    { entityType: "project" | "session"; entityId: string }
+  >({
+    mutationFn: ({ entityType, entityId }) => api.restoreTrash(entityType, entityId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["trash"] });
+      void queryClient.invalidateQueries({ queryKey: ["projects"] });
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      void queryClient.invalidateQueries({ queryKey: ["db-stats"] });
+      useAppStore.getState().pushToast("success", "Kayıt geri yüklendi");
+    },
+    onError: (error) => {
+      useAppStore.getState().pushToast("error", "Geri yüklenemedi", error.message);
+    },
+  });
+}
+
+export function usePurgeTrashItem() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    { purged: boolean; entity_type: string; id: string },
+    Error,
+    { entityType: "project" | "session"; entityId: string }
+  >({
+    mutationFn: ({ entityType, entityId }) => api.purgeTrash(entityType, entityId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["trash"] });
+      void queryClient.invalidateQueries({ queryKey: ["db-stats"] });
+      useAppStore.getState().pushToast("info", "Kayıt kalıcı olarak silindi");
+    },
+    onError: (error) => {
+      useAppStore.getState().pushToast("error", "Kalıcı silme başarısız", error.message);
+    },
+  });
+}
+
+export function useWorkspaces(enabled = true) {
+  const backend = useAppStore((state) => state.backend);
+  return useQuery<import("../lib/types").WorkspacesResponse>({
+    queryKey: ["workspaces"],
+    enabled: backend === "online" && enabled,
+    queryFn: () => api.workspaces(),
+    staleTime: 15_000,
+    retry: false,
+  });
+}
+
+export function useClaimWorkspace() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    { source_workspace_hash: string; target_workspace_hash: string; moved: Record<string, number> },
+    Error,
+    { sourceHash: string; sourceKey?: string }
+  >({
+    mutationFn: ({ sourceHash, sourceKey }) => api.claimWorkspace(sourceHash, sourceKey),
+    onSuccess: (data) => {
+      void queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+      void queryClient.invalidateQueries({ queryKey: ["projects"] });
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      void queryClient.invalidateQueries({ queryKey: ["db-stats"] });
+      useAppStore
+        .getState()
+        .pushToast(
+          "success",
+          "Çalışma alanı devralındı",
+          `${data.moved.projects ?? 0} proje ve ${data.moved.sessions ?? 0} kesit mevcut çalışma alanına taşındı.`,
+        );
+    },
+    onError: (error) => {
+      useAppStore.getState().pushToast("error", "Devralma başarısız", error.message);
+    },
+  });
+}
+
+export function useRunDbMaintenance() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    import("../lib/types").DbMaintenanceResponse,
+    Error,
+    import("../lib/types").DbMaintenancePayload
+  >({
+    mutationFn: (payload) => api.runDbMaintenance(payload),
+    onSuccess: (data) => {
+      void queryClient.invalidateQueries({ queryKey: ["db-stats"] });
+      useAppStore
+        .getState()
+        .pushToast(
+          "success",
+          "Veritabanı bakımı tamamlandı",
+          `Bütünlük: ${data.integrity_status} · Silinen çıktı: ${data.removed_export_files} · Yetim dosya: ${data.removed_orphan_files}`,
+        );
+    },
+    onError: (error) => {
+      useAppStore.getState().pushToast("error", "Bakım çalıştırılamadı", error.message);
+    },
+  });
 }

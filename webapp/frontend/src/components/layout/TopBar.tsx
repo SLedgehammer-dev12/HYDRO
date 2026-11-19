@@ -35,6 +35,8 @@ import { HydroLogo } from "../ui/HydroLogo";
 import { cn } from "../../lib/utils";
 
 export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
+  const tab = useAppStore((state) => state.tab);
+  const projectId = useAppStore((state) => state.projectId);
   const sessionName = useAppStore((state) => state.sessionName);
   const sessionStatus = useAppStore((state) => state.sessionStatus);
   const sessionId = useAppStore((state) => state.sessionId);
@@ -97,10 +99,10 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
       setSessionMeta({ name: item.name, revision: item.revision, status: item.status });
       pushToast(
         "info",
-        "Yerel oturum görünümü",
+        "Yerel Test Bölümü görünümü",
         sessionApiReady === false
-          ? "Oturum servisi hazır değil; yerel oturum verileri gösteriliyor."
-          : "Sunucu bağlı olmadığı için yerel oturum verileri gösteriliyor.",
+          ? "Bölüm servisi hazır değil; yerel bölüm verileri gösteriliyor."
+          : "Sunucu bağlı olmadığı için yerel bölüm verileri gösteriliyor.",
       );
       return;
     }
@@ -119,25 +121,24 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
       else if (session.project_id) setProject({ id: session.project_id, name: "" });
       else setProject(null);
       queryClient.setQueryData(["session", session.id], session);
-      pushToast("success", "Oturum açıldı", `${session.name} · revizyon ${session.revision}`);
+      pushToast("success", "Test Bölümü açıldı", `${session.name} · revizyon ${session.revision}`);
     } catch (error) {
-      pushToast("error", "Oturum açılamadı", apiErrorMessage(error));
+      pushToast("error", "Test Bölümü açılamadı", apiErrorMessage(error));
     } finally {
       setSwitching(false);
     }
   }
 
   function createNew() {
-    resetSession();
-    const name = `Oturum ${(sessions?.length ?? 0) + 1}`;
+    const name = `Test Bölümü ${(sessions?.length ?? 0) + 1}`;
+    resetSession(name);
     const inputs = toApiInputs(useAppStore.getState().inputs);
-    createSession.mutate({ name, inputs });
-    useAppStore.getState().setSessionName(name);
+    createSession.mutate({ name, inputs, projectId });
   }
 
   return (
     <>
-      <header className="sticky top-0 z-40 border-b border-[var(--border)] bg-[color-mix(in_srgb,var(--canvas)_82%,transparent)] px-3 py-2.5 backdrop-blur-xl sm:px-4">
+      <header className="sticky top-0 z-40 border-b border-[var(--border)] bg-[color-mix(in_srgb,var(--canvas)_82%,transparent)] px-3 py-1 backdrop-blur-xl sm:px-4">
         <div className="mx-auto flex max-w-[1500px] items-center gap-2.5">
           <IconButton
             label={
@@ -160,7 +161,7 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
             type="button"
             className={cn(
               "items-center gap-2 rounded-lg px-1 py-0.5 text-left transition-opacity hover:opacity-85",
-              desktopSidebarOpen ? "inline-flex lg:hidden" : "inline-flex",
+              desktopSidebarOpen ? "hidden sm:inline-flex lg:hidden" : "hidden sm:inline-flex",
             )}
             onClick={() => setTab("dashboard")}
             aria-label="HYDRO Ana Sayfa"
@@ -174,58 +175,50 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
           <div className="relative min-w-0" ref={pickerRef}>
             <button
               type="button"
-              className="flex min-w-0 max-w-[320px] items-center gap-2.5 rounded-xl border border-[var(--border-strong)] bg-[var(--surface-2)] px-3.5 py-2 text-left transition-colors hover:border-[var(--primary)] hover:bg-[var(--surface-3)] sm:max-w-[460px]"
+              className="flex h-9 min-w-0 max-w-[155px] items-center gap-2 rounded-xl border border-[var(--border-strong)] bg-[var(--surface-2)] px-2.5 py-1 text-left transition-colors hover:border-[var(--primary)] hover:bg-[var(--surface-3)] sm:max-w-[380px]"
               aria-haspopup="listbox"
               aria-expanded={pickerOpen}
               onClick={() => setPickerOpen((value) => !value)}
             >
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="truncate text-[15px] font-bold tracking-[-0.01em] text-[var(--text)]">
-                    {switching ? "Yükleniyor…" : sessionName}
-                  </span>
-                  <Badge tone={statusTone}>
-                    {sessionStatus === "completed"
-                      ? "Tamamlandı"
-                      : sessionStatus === "archived"
-                        ? "Arşiv"
-                        : sessionStatus === "active"
-                          ? "Aktif"
-                          : "Taslak"}
-                  </Badge>
-                </div>
-                <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="truncate text-[13.5px] font-bold tracking-[-0.01em] text-[var(--text)]">
+                  {switching ? "Yükleniyor…" : sessionName}
+                </span>
+                <Badge tone={statusTone} className="hidden sm:inline-flex">
+                  {sessionStatus === "completed"
+                    ? "Tamamlandı"
+                    : sessionStatus === "archived"
+                      ? "Arşiv"
+                      : sessionStatus === "active"
+                        ? "Aktif"
+                        : "Taslak"}
+                </Badge>
+                <span className="hidden items-center gap-1 whitespace-nowrap text-[10.5px] text-[var(--text-muted)] lg:inline-flex">
                   {projectCode ? (
                     <>
                       <span className="font-mono">{projectCode}</span>
                       <span aria-hidden>·</span>
                     </>
                   ) : null}
-                  <span>rev. {revision}</span>
+                  <span>rev.{revision}</span>
                   <span aria-hidden>·</span>
                   <span className={cn(dirty ? "tone-warning" : "tone-pass")}>
                     {dirty ? "Kaydedilmedi" : "Kaydedildi"}
                   </span>
-                  {backend === "demo" ? (
-                    <>
-                      <span aria-hidden>·</span>
-                      <span>çevrimdışı</span>
-                    </>
-                  ) : null}
-                </p>
+                </span>
               </div>
-              <ChevronDown size={16} className="shrink-0 text-[var(--text-soft)]" aria-hidden />
+              <ChevronDown size={15} className="shrink-0 text-[var(--text-soft)]" aria-hidden />
             </button>
 
             {pickerOpen ? (
               <div
                 className="absolute left-0 top-[calc(100%+8px)] z-50 w-[min(420px,calc(100vw-24px))] overflow-hidden rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] shadow-2xl"
                 role="listbox"
-                aria-label="Oturum seçici"
+                aria-label="Test Bölümü seçici"
               >
                 <div className="border-b border-[var(--border)] p-2.5">
                   <label className="field-label" htmlFor="session-rename">
-                    Oturum adı
+                    Test Bölümü adı
                   </label>
                   <div className="mt-1 flex gap-1.5">
                     <input
@@ -299,7 +292,7 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
                     }}
                   >
                     <Plus size={14} aria-hidden />
-                    Yeni oturum
+                    Yeni Bölüm
                   </button>
                 </div>
               </div>
@@ -308,27 +301,40 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
 
           <div className="ml-auto flex items-center gap-2">
             <Button
+              size="sm"
               variant="primary"
               className="hidden sm:inline-flex"
-              icon={saveSession.isPending ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+              icon={saveSession.isPending ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
               disabled={saveSession.isPending}
-              onClick={() => saveSession.mutate()}
+              onClick={() => {
+                if (tab === "forms") window.dispatchEvent(new CustomEvent("hydro:save"));
+                else saveSession.mutate();
+              }}
             >
               {saveSession.isPending ? "Kaydediliyor" : "Kaydet"}
             </Button>
-            <IconButton label="Kaydet" className="sm:hidden" disabled={saveSession.isPending} onClick={() => saveSession.mutate()}>
+            <IconButton
+              label="Kaydet"
+              className="sm:hidden"
+              disabled={saveSession.isPending}
+              onClick={() => {
+                if (tab === "forms") window.dispatchEvent(new CustomEvent("hydro:save"));
+                else saveSession.mutate();
+              }}
+            >
               {saveSession.isPending ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
             </IconButton>
 
             <Button
+              size="sm"
               className="hidden md:inline-flex"
-              icon={<Plus size={16} />}
+              icon={<Plus size={15} />}
               onClick={() => {
                 if (dirty) setConfirmNew(true);
                 else createNew();
               }}
             >
-              Yeni Oturum
+              Yeni Bölüm
             </Button>
 
             {updateStatus?.update_available && updateStatus.latest_version ? (
@@ -387,7 +393,9 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
 
             <IconButton
               label={rightPanelOpen ? "Canlı özet panelini gizle" : "Canlı özet panelini göster"}
-              className="hidden xl:grid"
+              className={
+                tab === "forms" || tab === "ocr" || tab === "projects" ? "hidden" : "hidden 2xl:grid"
+              }
               onClick={toggleRightPanel}
             >
               {rightPanelOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
@@ -398,14 +406,14 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
 
       <ConfirmDialog
         open={confirmNew}
-        title="Yeni oturum açılsın mı?"
+        title="Yeni Test Bölümü açılsın mı?"
         message={
           <span>
-            Kaydedilmemiş değişiklikler var. Yeni oturum açarsanız sunucuya kaydedilmemiş mevcut
-            değişiklikler kaybolur.
+            Kaydedilmemiş değişiklikler var. Yeni Test Bölümü açarsanız sunucuya kaydedilmemiş
+            mevcut değişiklikler kaybolur.
           </span>
         }
-        confirmLabel="Yeni oturum"
+        confirmLabel="Yeni Bölüm Aç"
         onConfirm={createNew}
         onClose={() => setConfirmNew(false)}
       />

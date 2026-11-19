@@ -30,6 +30,7 @@ import HistoryPanel from "./components/HistoryPanel";
 import PlanProfilePanel from "./components/PlanProfilePanel";
 import DossierPanel from "./components/DossierPanel";
 import { PageHeader } from "../../components/layout/PageHeader";
+import { ConfirmDialog } from "../../components/ui/Dialog";
 import { useOpenSession, useProjects, useSessions } from "../../hooks/queries";
 import { api } from "../../lib/api";
 import { createEmptyInputs } from "../../lib/mock";
@@ -128,7 +129,8 @@ export default function OcrPage() {
   const [jobId, setJobId] = useState<string | null>(null);
   const [copiedRequestId, setCopiedRequestId] = useState(false);
 
-  const [useCalculated, setUseCalculated] = useState(true);
+  const [useCalculated, setUseCalculated] = useState(false);
+  const [confirmResetOpen, setConfirmResetOpen] = useState(false);
   const [calculatedJson, setCalculatedJson] = useState("");
   const [calculatedError, setCalculatedError] = useState<string | null>(null);
   const [comparisonRequested, setComparisonRequested] = useState(false);
@@ -845,7 +847,7 @@ export default function OcrPage() {
                     : "OCR kullanılamıyor"}
             </span>
             <p className="numeric text-[10px] text-[var(--text-faint)]" title={sessionId}>
-              Oturum: {shortId(sessionId)}
+              Çalışma Alanı: {shortId(sessionId)}
             </p>
           </div>
         }
@@ -902,7 +904,7 @@ export default function OcrPage() {
         </p>
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="grid gap-5 2xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="min-w-0 space-y-5">
           <section className="panel p-5" aria-labelledby="ocr-upload-title">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -962,97 +964,102 @@ export default function OcrPage() {
               </p>
             ) : null}
 
-            <div className="panel-soft mt-4 p-4">
-              <label className="flex cursor-pointer items-start gap-3">
-                <input
-                  type="checkbox"
-                  className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--primary)]"
-                  checked={useCalculated}
-                  onChange={(event) => {
-                    setUseCalculated(event.target.checked);
-                    setCalculatedError(null);
-                  }}
-                />
-                <span>
-                  <span className="text-sm font-medium text-[var(--text)]">
-                    Hesaplanan değerlerle karşılaştır
-                  </span>
-                  <span className="mt-0.5 block text-[11px] leading-relaxed text-[var(--text-faint)]">
-                    Karşılaştırma verisini JSON olarak girebilirsiniz. Boş bırakılırsa yalnızca alan
-                    çıkarımı yapılır.
-                  </span>
-                </span>
-              </label>
-
-              {useCalculated ? (
-                <div className="mt-3">
-                  <label
-                    htmlFor="ocr-calculated"
-                    className="text-[10px] font-medium uppercase tracking-[0.16em] text-[var(--text-muted)]"
-                  >
-                    calculated JSON (opsiyonel)
-                  </label>
-                  <textarea
-                    id="ocr-calculated"
-                    value={calculatedJson}
+            <details className="panel-soft mt-4 p-4">
+              <summary className="cursor-pointer select-none text-xs font-semibold text-[var(--text-soft)]">
+                Gelişmiş: Hesaplanan JSON ile karşılaştır (isteğe bağlı)
+              </summary>
+              <div className="mt-3">
+                <label className="flex cursor-pointer items-start gap-3">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--primary)]"
+                    checked={useCalculated}
                     onChange={(event) => {
-                      setCalculatedJson(event.target.value);
+                      setUseCalculated(event.target.checked);
                       setCalculatedError(null);
                     }}
-                    rows={4}
-                    spellCheck={false}
-                    placeholder='{"test_pressure_bar": 80.0, "air_test": {"vpa_m3": 0.00768}}'
-                    aria-invalid={calculatedError ? true : undefined}
-                    aria-describedby="ocr-calculated-hint"
-                    className={clsx(
-                      "numeric mt-1.5 w-full resize-y rounded-lg border bg-[var(--surface-2)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text)] placeholder:text-[var(--text-faint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]",
-                      calculatedError ? "border-[var(--danger-border)]" : "border-[var(--border)]",
-                    )}
                   />
-                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-                    <p id="ocr-calculated-hint" className="text-[10px] text-[var(--text-faint)]">
-                      Şema: <span className="numeric">pipe_od_mm</span>,{" "}
-                      <span className="numeric">test_pressure_bar</span>,{" "}
-                      <span className="numeric">air_test.vpa_m3</span>,{" "}
-                      <span className="numeric">pressure_test.pa_bar</span>,{" "}
-                      <span className="numeric">result</span>.
-                    </p>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setCalculatedJson(JSON.stringify(SAMPLE_CALCULATED, null, 2));
-                          setCalculatedError(null);
-                        }}
-                        className="rounded-md border border-[var(--border)] px-2.5 py-1 text-[10px] font-medium text-[var(--text-soft)] transition hover:border-[var(--info-border)] hover:text-[var(--primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
-                      >
-                        Örnek doldur
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setCalculatedJson("");
-                          setCalculatedError(null);
-                        }}
-                        disabled={calculatedJson.length === 0}
-                        className="rounded-md border border-[var(--border)] px-2.5 py-1 text-[10px] font-medium text-[var(--text-soft)] transition hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        Temizle
-                      </button>
-                    </div>
-                  </div>
-                  {calculatedError ? (
-                    <p
-                      id="ocr-calculated-error"
-                      role="alert"
-                      className="mt-2 rounded-md border border-[var(--danger-border)] bg-[var(--danger-bg)] px-2.5 py-1.5 text-[11px] text-[var(--danger)]"
+                  <span>
+                    <span className="text-sm font-medium text-[var(--text)]">
+                      Hesaplanan değerlerle karşılaştır
+                    </span>
+                    <span className="mt-0.5 block text-[11px] leading-relaxed text-[var(--text-faint)]">
+                      Karşılaştırma verisini JSON olarak girebilirsiniz. Boş bırakılırsa yalnızca alan
+                      çıkarımı yapılır.
+                    </span>
+                  </span>
+                </label>
+
+                {useCalculated ? (
+                  <div className="mt-3">
+                    <label
+                      htmlFor="ocr-calculated"
+                      className="text-[10px] font-medium uppercase tracking-[0.16em] text-[var(--text-muted)]"
                     >
-                      {calculatedError}
-                    </p>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
+                      calculated JSON (opsiyonel)
+                    </label>
+                    <textarea
+                      id="ocr-calculated"
+                      value={calculatedJson}
+                      onChange={(event) => {
+                        setCalculatedJson(event.target.value);
+                        setCalculatedError(null);
+                      }}
+                      rows={4}
+                      spellCheck={false}
+                      placeholder='{"test_pressure_bar": 80.0, "air_test": {"vpa_m3": 0.00768}}'
+                      aria-invalid={calculatedError ? true : undefined}
+                      aria-describedby="ocr-calculated-hint"
+                      className={clsx(
+                        "numeric mt-1.5 w-full resize-y rounded-lg border bg-[var(--surface-2)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text)] placeholder:text-[var(--text-faint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]",
+                        calculatedError ? "border-[var(--danger-border)]" : "border-[var(--border)]",
+                      )}
+                    />
+                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                      <p id="ocr-calculated-hint" className="text-[10px] text-[var(--text-faint)]">
+                        Şema: <span className="numeric">pipe_od_mm</span>,{" "}
+                        <span className="numeric">test_pressure_bar</span>,{" "}
+                        <span className="numeric">air_test.vpa_m3</span>,{" "}
+                        <span className="numeric">pressure_test.pa_bar</span>,{" "}
+                        <span className="numeric">result</span>.
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCalculatedJson(JSON.stringify(SAMPLE_CALCULATED, null, 2));
+                            setCalculatedError(null);
+                          }}
+                          className="rounded-md border border-[var(--border)] px-2.5 py-1 text-[10px] font-medium text-[var(--text-soft)] transition hover:border-[var(--info-border)] hover:text-[var(--primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
+                        >
+                          Örnek doldur
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCalculatedJson("");
+                            setCalculatedError(null);
+                          }}
+                          disabled={calculatedJson.length === 0}
+                          className="rounded-md border border-[var(--border)] px-2.5 py-1 text-[10px] font-medium text-[var(--text-soft)] transition hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          Temizle
+                        </button>
+                      </div>
+                    </div>
+                    {calculatedError ? (
+                      <p
+                        id="ocr-calculated-error"
+                        role="alert"
+                        className="mt-2 rounded-md border border-[var(--danger-border)] bg-[var(--danger-bg)] px-2.5 py-1.5 text-[11px] text-[var(--danger)]"
+                      >
+                        {calculatedError}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            </details>
 
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t hairline pt-4">
               <div className="min-w-0">
@@ -1237,7 +1244,7 @@ export default function OcrPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={resetAll}
+                  onClick={() => setConfirmResetOpen(true)}
                   className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-[var(--border)] px-3.5 py-2 text-xs font-medium text-[var(--text-soft)] hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
                 >
                   <RotateCcw size={13} aria-hidden="true" />
@@ -1329,7 +1336,7 @@ export default function OcrPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={resetAll}
+                    onClick={() => setConfirmResetOpen(true)}
                     className="btn"
                   >
                     <Trash2 size={16} aria-hidden="true" />
@@ -1743,6 +1750,16 @@ export default function OcrPage() {
       </div>
         </>
       )}
+
+      <ConfirmDialog
+        open={confirmResetOpen}
+        title="Mevcut OCR analizi temizlensin mi?"
+        message="Seçili dosya ve ekrandaki OCR çıktısı temizlenir (sunucudaki geçmiş analizler korunur)."
+        confirmLabel="Yeni Analiz Başlat"
+        danger
+        onConfirm={resetAll}
+        onClose={() => setConfirmResetOpen(false)}
+      />
     </div>
   );
 }

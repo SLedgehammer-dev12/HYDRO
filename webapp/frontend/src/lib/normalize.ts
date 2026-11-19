@@ -285,9 +285,8 @@ export function normalizeInputs(raw: unknown): AppInputs {
 
 /** Yerel modeli API `inputs` gövdesine çevirir (modlar masaüstü etiketi taşımaz). */
 export function toApiInputs(inputs: AppInputs): Record<string, unknown> {
-  const { report: _report, ...rest } = inputs;
   return {
-    ...rest,
+    ...inputs,
     segments: inputs.segments.map((segment) => ({
       outside_diameter_mm: segment.outside_diameter_mm,
       wall_thickness_mm: segment.wall_thickness_mm,

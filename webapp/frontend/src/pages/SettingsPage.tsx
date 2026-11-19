@@ -27,6 +27,7 @@ import { getWorkspaceId } from "../lib/api";
 import { STEEL_MODEL_OPTIONS, STEEL_PRESETS } from "../lib/constants";
 import { dateTime, fmt, formatCoefficientState, num } from "../lib/format";
 import { cn } from "../lib/utils";
+import { DatabaseAdminPanel } from "../features/settings/DatabaseAdminPanel";
 
 export function SettingsPage() {
   const meta = useMeta().data;
@@ -83,7 +84,7 @@ export function SettingsPage() {
     <div className="space-y-5">
       <PageHeader
         kicker="Ayarlar"
-        title="Hesaplama, görünüm ve oturum"
+        title="Hesaplama, görünüm ve bölüm yönetimi"
         description="Backend bağlantısı, varsayılan katsayı kaynakları, tema ve yerel veri yönetimi."
         meta={
           <>
@@ -407,6 +408,8 @@ export function SettingsPage() {
           </div>
         </div>
       </SectionCard>
+
+      <DatabaseAdminPanel />
 
       <SectionCard title="Hakkında" description="Sürüm, şartname ve özellikler." icon={Info}>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

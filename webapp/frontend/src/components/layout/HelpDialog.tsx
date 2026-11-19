@@ -3,8 +3,8 @@ import { Modal } from "../ui/Dialog";
 import { Badge } from "../ui/Badge";
 
 const SHORTCUTS: Array<[string, string]> = [
-  ["Alt + 1…9", "Sekme değiştir"],
-  ["Ctrl/Cmd + S", "Oturumu kaydet"],
+  ["Alt + 1…9", "Ana sekmeler arası geç (mühendislik sırasıyla)"],
+  ["Ctrl/Cmd + S", "Aktif formu / Test Bölümünü kaydet"],
   ["Ctrl/Cmd + Enter", "Aktif testi / profili değerlendir"],
   ["Shift + ?", "Bu yardım penceresi"],
   ["Tab / Shift + Tab", "Alanlar arası gezin"],

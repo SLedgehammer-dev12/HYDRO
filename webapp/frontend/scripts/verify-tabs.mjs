@@ -27,14 +27,15 @@ const ROUTES = [
   ["projects", "Proje kayıtları ve kesit envanteri", "projects"],
   ["geometry", "Kesit, segmentler, kotlar ve saha profili", "geometry"],
   ["field", "Kesit, segmentler, kotlar ve saha profili", "geometry"],
-  ["air", "Hava içerik değerlendirmesi", "air"],
-  ["pressure", "Basınç değişim değerlendirmesi", "pressure"],
-  ["reports", "Rapor önizleme", "reports"],
-  ["ocr", "Test Raporu Kontrolü", "ocr"],
-  ["settings", "Hesaplama, görünüm ve oturum", "settings"],
   ["coefficients", "A/B hazırlama, üç kaynak ve backend karşılaştırması", "coefficients"],
   ["coefficient-detail", "A/B hazırlama, üç kaynak ve backend karşılaştırması", "coefficients"],
-  ["dashboard", "Merhaba", "dashboard"],
+  ["air", "Hava içerik değerlendirmesi", "air"],
+  ["pressure", "Basınç değişim değerlendirmesi", "pressure"],
+  ["forms/test_data", "Hidrostatik Test Verileri", "forms"],
+  ["ocr", "Test Raporu Kontrolü", "ocr"],
+  ["reports", "Rapor önizleme", "reports"],
+  ["settings", "Hesaplama, görünüm ve", "settings"],
+  ["dashboard", "", "dashboard"],
 ];
 
 function findChrome() {
@@ -200,12 +201,12 @@ async function main() {
         return {
           dataPage: page ? page.getAttribute("data-page") : null,
           h1: h1 ? h1.textContent.trim() : "",
-          greeting: main ? main.innerText.includes("Merhaba") : false,
+          greeting: main ? main.textContent.includes("Denetimli Hidrostatik Test İş Akışı") : false,
         };
       })()`);
 
       const okPage = state.dataPage === expectedPage;
-      const okTitle = state.h1.includes(expectedTitle);
+      const okTitle = expectedTitle ? state.h1.includes(expectedTitle) : state.h1.length > 0;
       const okGreeting = route === "dashboard" ? state.greeting : !state.greeting;
       if (!okPage || !okTitle || !okGreeting) {
         failures.push({ route, expectedPage, expectedTitle, ...state, okPage, okTitle, okGreeting });

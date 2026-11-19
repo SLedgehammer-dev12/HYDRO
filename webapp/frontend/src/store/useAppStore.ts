@@ -14,7 +14,12 @@ import type {
   ToastItem,
   ToastTone,
 } from "../lib/types";
-import { buildDemoResults, createDefaultInputs, createDemoHistory } from "../lib/mock";
+import {
+  buildDemoResults,
+  createDefaultInputs,
+  createDemoHistory,
+  createEmptyInputs,
+} from "../lib/mock";
 import { normalizeInputs } from "../lib/normalize";
 import { nowIso } from "../lib/format";
 
@@ -23,12 +28,12 @@ export const PERSIST_KEY = "hydro-app-v1";
 const makeId = (prefix: string): string =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
-function freshState() {
-  const inputs = createDefaultInputs();
+function freshState(empty = false) {
+  const inputs = empty ? createEmptyInputs() : createDefaultInputs();
   return {
     inputs,
     results: buildDemoResults(inputs),
-    history: createDemoHistory(inputs),
+    history: empty ? [] : createDemoHistory(inputs),
   };
 }
 
@@ -339,11 +344,11 @@ export const useAppStore = create<AppStore>()(
         set((state) => ({ toasts: state.toasts.filter((toast) => toast.id !== id) })),
 
       resetSession: (name) => {
-        const state = freshState();
+        const state = freshState(true);
         set({
           ...state,
           sessionId: null,
-          sessionName: name ?? "Yeni oturum",
+          sessionName: name ?? "Yeni Test Bölümü",
           sessionStatus: "draft",
           revision: 0,
           dirty: false,
@@ -361,7 +366,7 @@ export const useAppStore = create<AppStore>()(
         set({
           ...state,
           sessionId: null,
-          sessionName: "Yeni oturum",
+          sessionName: "Yeni Test Bölümü",
           sessionStatus: "draft",
           revision: 0,
           dirty: false,

@@ -14,8 +14,8 @@ import {
   useCalculatePig,
   useCalculateProfile,
   useMeta,
-  useOpenSession,
   useProjectScene,
+  useSafeSwitchSession,
   useSaveTestResult,
 } from "../hooks/queries";
 import { useAppStore } from "../store/useAppStore";
@@ -93,7 +93,7 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
   const calculateProfile = useCalculateProfile();
   const calculatePig = useCalculatePig();
   const saveResult = useSaveTestResult();
-  const openSession = useOpenSession();
+  const safeSwitchSession = useSafeSwitchSession();
   const projectSceneQuery = useProjectScene(projectId, Boolean(projectId));
   useEvaluateShortcut(evaluateProfile);
 
@@ -338,10 +338,10 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
                 className="min-h-[480px]"
                 onOpenSession={
                   effectiveProjectMode
-                    ? (sid) =>
-                        openSession.mutate(sid, {
-                          onSuccess: () => setSceneScope("section"),
-                        })
+                    ? (sid) => {
+                        safeSwitchSession.switchSession(sid);
+                        setSceneScope("section");
+                      }
                     : undefined
                 }
               />
@@ -384,73 +384,83 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
       <div className="grid gap-4 xl:grid-cols-3">
         <SectionCard
           title="Profil girdileri"
-          description="Kotlar ve basınç limitleri."
+          description={embedded ? "İzlenen basınç ve özet oranlar." : "Kotlar ve basınç limitleri."}
           icon={Mountain}
         >
-          <FieldGrid cols={2}>
-            <NumberField
-              label="En yüksek kot"
-              unit="m"
-              value={sp.highest_elevation_m}
-              onChange={(value) => patchInputs({ section_profile: { highest_elevation_m: value } })}
-              error={elevationError}
-            />
-            <NumberField
-              label="En düşük kot"
-              unit="m"
-              value={sp.lowest_elevation_m}
-              onChange={(value) => patchInputs({ section_profile: { lowest_elevation_m: value } })}
-            />
-            <NumberField
-              label="Başlangıç kotu"
-              unit="m"
-              value={sp.start_elevation_m}
-              onChange={(value) => patchInputs({ section_profile: { start_elevation_m: value } })}
-            />
-            <NumberField
-              label="Bitiş kotu"
-              unit="m"
-              value={sp.end_elevation_m}
-              onChange={(value) => patchInputs({ section_profile: { end_elevation_m: value } })}
-            />
-            <NumberField
-              label="Dizayn basıncı"
-              unit="bar"
-              value={sp.design_pressure_bar}
-              onChange={(value) => patchInputs({ section_profile: { design_pressure_bar: value } })}
-            />
-            <ReadonlyValue
-              label="SMYS"
-              unit="MPa"
-              value={sp.smys_mpa !== null ? num(sp.smys_mpa, 0) : "—"}
-              hint="Malzeme kalitesinden türetilir."
-            />
-          </FieldGrid>
+          {embedded ? (
+            <p className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-muted)]">
+              Kotlar, dizayn basıncı, SMYS, Location Class ve pompa konumu yukarıdaki{" "}
+              <strong className="font-medium text-[var(--text-soft)]">Test bölümü profili</strong>{" "}
+              kartından düzenlenir.
+            </p>
+          ) : (
+            <>
+              <FieldGrid cols={2}>
+                <NumberField
+                  label="En yüksek kot"
+                  unit="m"
+                  value={sp.highest_elevation_m}
+                  onChange={(value) => patchInputs({ section_profile: { highest_elevation_m: value } })}
+                  error={elevationError}
+                />
+                <NumberField
+                  label="En düşük kot"
+                  unit="m"
+                  value={sp.lowest_elevation_m}
+                  onChange={(value) => patchInputs({ section_profile: { lowest_elevation_m: value } })}
+                />
+                <NumberField
+                  label="Başlangıç kotu"
+                  unit="m"
+                  value={sp.start_elevation_m}
+                  onChange={(value) => patchInputs({ section_profile: { start_elevation_m: value } })}
+                />
+                <NumberField
+                  label="Bitiş kotu"
+                  unit="m"
+                  value={sp.end_elevation_m}
+                  onChange={(value) => patchInputs({ section_profile: { end_elevation_m: value } })}
+                />
+                <NumberField
+                  label="Dizayn basıncı"
+                  unit="bar"
+                  value={sp.design_pressure_bar}
+                  onChange={(value) => patchInputs({ section_profile: { design_pressure_bar: value } })}
+                />
+                <ReadonlyValue
+                  label="SMYS"
+                  unit="MPa"
+                  value={sp.smys_mpa !== null ? num(sp.smys_mpa, 0) : "—"}
+                  hint="Malzeme kalitesinden türetilir."
+                />
+              </FieldGrid>
 
-          <div className="mt-3">
-            <SelectField
-              label="Location Class"
-              value={inputs.location_class}
-              onChange={(value) => patchInputs({ location_class: value })}
-              options={(meta?.location_classes ?? []).map((rule) => ({
-                value: rule.label,
-                label: `${rule.label} · ×${rule.minimum_test_factor}`,
-              }))}
-            />
-          </div>
-          <div className="mt-3">
-            <SelectField
-              label="Pompa konumu"
-              value={inputs.pump_location}
-              onChange={(value) => patchInputs({ pump_location: value })}
-              options={(meta?.pump_locations ?? ["Baslangic noktasi", "Bitis noktasi"]).map((value) => ({
-                value,
-                label: PUMP_LABELS[value] ?? value,
-              }))}
-            />
-          </div>
+              <div className="mt-3">
+                <SelectField
+                  label="Location Class"
+                  value={inputs.location_class}
+                  onChange={(value) => patchInputs({ location_class: value })}
+                  options={(meta?.location_classes ?? []).map((rule) => ({
+                    value: rule.label,
+                    label: `${rule.label} · ×${rule.minimum_test_factor}`,
+                  }))}
+                />
+              </div>
+              <div className="mt-3">
+                <SelectField
+                  label="Pompa konumu"
+                  value={inputs.pump_location}
+                  onChange={(value) => patchInputs({ pump_location: value })}
+                  options={(meta?.pump_locations ?? ["Baslangic noktasi", "Bitis noktasi"]).map((value) => ({
+                    value,
+                    label: PUMP_LABELS[value] ?? value,
+                  }))}
+                />
+              </div>
+            </>
+          )}
 
-          <div className="mt-4 border-t border-[var(--border)] pt-3">
+          <div className={embedded ? "mt-3" : "mt-4 border-t border-[var(--border)] pt-3"}>
             <div className="flex items-center justify-between">
               <span className="field-label">İzlenen basınç</span>
               <span className="font-mono text-[12px] text-[var(--text-soft)]">{fmt.bar(monitored, 1)}</span>

@@ -391,28 +391,45 @@ export function UtilizationChart({
 }
 
 export function TrendChart({
-  pressure,
-  temperature,
+  rows,
   height = 180,
   className,
 }: {
-  pressure: number;
-  temperature: number;
+  rows?: Array<Record<string, unknown>>;
   height?: number;
   className?: string;
 }) {
-  const data = Array.from({ length: 13 }).map((_, index) => ({
-    hour: `${String((index * 2) % 24).padStart(2, "0")}:00`,
-    pressure: Number((pressure - 0.9 + Math.sin(index / 2) * 0.7 + index * 0.04).toFixed(3)),
-    temperature: Number((temperature - 0.6 + Math.cos(index / 2.6) * 0.35).toFixed(2)),
-  }));
+  const data = (rows ?? [])
+    .map((row, index) => {
+      const pRaw = row.pressure_bar ?? row.pressure ?? row.p_bar;
+      const tRaw = row.pipe_temp_c ?? row.ambient_temp_c ?? row.ground_temp_c ?? row.temperature_c;
+      const pressureVal = typeof pRaw === "number" ? pRaw : pRaw != null && pRaw !== "" ? Number(pRaw) : NaN;
+      const tempVal = typeof tRaw === "number" ? tRaw : tRaw != null && tRaw !== "" ? Number(tRaw) : NaN;
+      const label = String(row.time ?? row.hour ?? row.timestamp ?? `#${index + 1}`).trim();
+      return {
+        hour: label || `#${index + 1}`,
+        pressure: Number.isFinite(pressureVal) ? pressureVal : null,
+        temperature: Number.isFinite(tempVal) ? tempVal : null,
+      };
+    })
+    .filter((pt) => pt.pressure !== null || pt.temperature !== null);
+
+  if (data.length < 2) {
+    return (
+      <div className={className} style={{ height }}>
+        <div className="grid h-full place-items-center rounded-xl border border-dashed border-[var(--border)] px-4 text-center text-[11.5px] text-[var(--text-faint)]">
+          24 saatlik izleme verisi henüz girilmedi (BOT-FRM-021 / 018)
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={className} style={{ height }}>
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart data={data} margin={{ top: 8, right: 8, left: -22, bottom: 0 }}>
           <CartesianGrid stroke="var(--grid-line)" vertical={false} />
-          <XAxis dataKey="hour" tick={{ fontSize: 9, fill: "var(--text-faint)" }} axisLine={false} tickLine={false} interval={2} />
+          <XAxis dataKey="hour" tick={{ fontSize: 9, fill: "var(--text-faint)" }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
           <YAxis yAxisId="left" tick={{ fontSize: 9, fill: "var(--text-faint)" }} axisLine={false} tickLine={false} width={44} />
           <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 9, fill: "var(--text-faint)" }} axisLine={false} tickLine={false} width={34} />
           <Tooltip content={<ChartTooltip formatter={(value) => num(value, 2)} />} />
@@ -424,6 +441,7 @@ export function TrendChart({
             stroke="var(--chart-1)"
             strokeWidth={2}
             dot={false}
+            connectNulls
             isAnimationActive={false}
           />
           <Line
@@ -435,6 +453,7 @@ export function TrendChart({
             strokeWidth={1.6}
             strokeDasharray="4 3"
             dot={false}
+            connectNulls
             isAnimationActive={false}
           />
         </ComposedChart>
