@@ -78,3 +78,26 @@ jobs:
           path: coverage.xml
           if-no-files-found: warn
           retention-days: 7
+
+  web-backend-tests:
+    name: Web Backend Pytest (py3.12 / ubuntu-latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . -r requirements-dev.txt -r webapp/backend/requirements.txt
+
+      - name: Run web backend pytest suite
+        run: |
+          python -m pytest webapp/backend/tests -q

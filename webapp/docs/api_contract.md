@@ -1425,6 +1425,8 @@ Masaüstü "Girdileri Kaydet" JSON'unu (`schema_version: 1`) içe aktarır.
 | `session_id` | string | Hayır | Analizi oturuma bağlar |
 | `mapping_profile_id` | string | Hayır | Alan eşleme profili; yoksa default |
 | `language` | string | Hayır | `tur+eng` (varsayılan) |
+| `force` | boolean | Hayır | `true` ise aynı dosya için yeni analiz zorlanır |
+| `async_mode` | boolean | Hayır | `true` (veya `Prefer: respond-async` başlığı) ile `202` arka plan kuyruğu |
 
 `calculated` örneği (string olarak):
 
@@ -1440,14 +1442,14 @@ Masaüstü "Girdileri Kaydet" JSON'unu (`schema_version: 1`) içe aktarır.
 }
 ```
 
-**Yanıt 202**
+**Yanıt 202** (`async_mode=true` veya `Prefer: respond-async`; senkron varsayılan isteklerde `201`)
 
 ```json
 {
   "analysis_id": "c2d3…",
   "status": "queued",
   "poll_url": "/api/ocr/analyses/c2d3…",
-  "estimated_wait_s": 15
+  "estimated_wait_s": 12
 }
 ```
 

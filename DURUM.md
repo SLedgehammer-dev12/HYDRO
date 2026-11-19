@@ -2,9 +2,9 @@
 
 > Tek kaynak özet. Ayrıntı için "Ayrıntılı notlar" bölümündeki dosyalara bakın.
 >
-> **Son güncelleme:** 2026-11-18
-> **Dal:** `main` (`v1.9.1` — Kurumsal Windows WinRT OCR/PDF, Program İkon Sistemi & Faz 1–5 Web Arayüzü İyileştirmeleri)
-> **Son commit:** `hidrostatik-test-v1.9.1` sürüm hazırlığı (`v1.9.0` → `v1.9.1`)
+> **Son güncelleme:** 2026-11-19
+> **Dal:** `main` (`v1.9.1` — Güvenlik Sertleştirme, Tip Temizliği & Güvenilirlik Güncellemeleri)
+> **Son commit:** `hidrostatik-test-v1.9.1` hazırlık & üretim sertleştirme (`v1.9.0` → `v1.9.1`)
 
 ---
 
@@ -12,8 +12,8 @@
 
 | Alan | Durum | Kanıt |
 | --- | --- | --- |
-| Masaüstü uygulaması | Çalışıyor, kararlı | 676 unittest PASS (`skipped=1`) |
-| Web backend (FastAPI) | Çalışıyor | 137 pytest PASS |
+| Masaüstü uygulaması | Çalışıyor, kararlı | 686 unittest PASS (`skipped=1`) |
+| Web backend (FastAPI) | Çalışıyor | 167 pytest PASS, 81 OpenAPI path / 94 operation, 46 dosyada `mypy` temiz |
 | Web frontend (React 19) | Çalışıyor | `npm run typecheck` + `npm run build` PASS, `verify-tabs.mjs` 11/11 PASS, canlı tarayıcı smoke (0 konsol hatası) |
 | Program İkon & Marka Sistemi | Hazır | Boru kesiti + su dalgası + manometre ikonu (`tools/generate_icons.py`, `assets/icons/*`, `webapp/frontend/public/*`, `<HydroLogo />`, PyInstaller/Inno Setup/Tkinter) |
 | Web Güncelleme Yöneticisi | Çalışıyor | `/api/update/*`, SHA-256 + fail-closed Ed25519 `.sig` doğrulama, `UpdateManagerModal`, macOS `.dmg` / Win `.exe`/`.zip` kurulum |
@@ -105,9 +105,9 @@ yeni proje/test bölümü açarak) kaydedilmesi, kümülatif hesaplama (`profile
 noktası değerlendirmesi ve canlı oturum hidrasyonu tamamlandı.
 
 Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen işlerdir:
-1. OCR DB kuyruğu + worker + iptal.
-2. Alembic üretim migrasyonu ve Auth/OIDC.
-3. Frontend birim testleri (vitest).
+1. Alembic üretim migrasyonu ve Auth/OIDC.
+2. Frontend birim testleri (vitest).
+3. Kurum onayı bekleyen resmi A/B ve form revizyonları.
 
 ---
 
@@ -121,7 +121,7 @@ Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen iş
 - [x] 74 sayfalık ERCİŞ toplu OCR doğrulaması ve `.Başlık Yeri` / alfanümerik `BÖLÜM` iyileştirmesi (`docs/spec/ocr_calibration_report.md`).
 - [x] `.xlsx` / `.xls` test raporlarının doğrudan hücre tabanlı (`source="spreadsheet"`) okunması (`openpyxl` + `xlrd`, magic-byte/ZIP doğrulama).
 - [x] OCR Test Raporu Kontrolü kayıt & hesap hattı (`commit-dossier` liste sözleşmesi, mühendislik hesap paketi & boş `.xls` ayrımı, proje/KP kesit eşleme veya otomatik yeni proje + 11 zorunlu form slotu açma, `profile`/`air`/`pressure`/`pig` `TestResult` kaydı + canlı hidrasyon, tekil rapor onay/uygulama).
-- [ ] OCR DB kuyruğu + worker + iptal (şu an analiz senkron).
+- [x] OCR DB kuyruğu + worker + iptal (`ocr_queue.py` bounded executor, `async_mode`/`Prefer: respond-async` `202` + `estimated_wait_s`, `cancel_event`, `ocr_timeout_s`, parametrik `language`, başlangıç `worker_interrupted` toparlaması).
 - [ ] Alembic üretim migrasyonu (`create_all` + hafif kolon migrasyonu yerine).
 - [ ] Auth / OIDC + iki kişi onay kuralı (MVP'de anonim `X-Session-ID`).
 - [ ] Postgres runtime testi (kod uyumlu, `psycopg` kurulu değil).
@@ -168,15 +168,16 @@ Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen iş
 ## 6. Doğrulama (son çalıştırma: 2026-11-18)
 
 ```bash
-# Lint & domain tip denetimi
+# Lint & tip denetimi
 python3 -m ruff check .                                        # All checks passed
 python3 -m mypy hidrostatik_test/domain/                       # Success: no issues found (12 files)
+python3 -m mypy --ignore-missing-imports webapp/backend/app    # Success: no issues found (46 files)
 
 # Web backend
-python3 -m pytest webapp/backend/tests -q                      # 137 passed
+python3 -m pytest webapp/backend/tests -q                      # 167 passed
 
 # Masaüstü
-python3 -m unittest discover -s tests -p "test_*.py"           # 676 tests OK (skipped=1)
+python3 -m unittest discover -s tests -p "test_*.py"           # 686 tests OK (skipped=1)
 
 # Masaüstü paketli Web self-test
 python3 webapp/desktop_launcher.py --self-test                 # SELF_TEST_OK

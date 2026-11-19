@@ -33,26 +33,31 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements-dev.txt
+          python -m pip install -r requirements-dev.txt -r webapp/backend/requirements.txt
 
       - name: Run ruff (lint)
         run: |
-          ruff check hidrostatik_test/ tests/
+          ruff check .
 
       - name: Run ruff (format check)
         run: |
-          ruff format --check hidrostatik_test/ tests/
+          ruff format --check .
 
       # Domain katmani bloklayici: fizik/kabul kriteri degisiklikleri burada yakalanir.
       - name: Run mypy (domain, blocking)
         run: |
           mypy hidrostatik_test/domain/
 
-      # UI ve servis katmani henuz tam tipli degil; rapor uret ama is akisini durdurma.
+      # Web backend servis ve API katmani da bloklayici tip kapisi ile korunur.
+      - name: Run mypy (webapp backend, blocking)
+        run: |
+          mypy --ignore-missing-imports webapp/backend/app
+
+      # UI katmani henuz tam tipli degil; rapor uret ama is akisini durdurma.
       - name: Run mypy (full, informational)
         continue-on-error: true
         run: |
-          mypy --ignore-missing-imports --junit-xml=mypy-junit.xml hidrostatik_test/
+          mypy --ignore-missing-imports --junit-xml=mypy-junit.xml hidrostatik_test/ webapp/backend/app
 
       - name: Upload mypy report
         if: always()
@@ -62,3 +67,30 @@ jobs:
           path: mypy-junit.xml
           if-no-files-found: warn
           retention-days: 7
+
+  frontend-lint-build:
+    name: Frontend Typecheck & Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: webapp/frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: webapp/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Production build
+        run: npm run build

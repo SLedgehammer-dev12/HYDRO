@@ -30,8 +30,9 @@ python3 webapp/run_web.py --host 127.0.0.1 --port 8080
 - Gelistirme bagimliliklari: `python -m pip install -r requirements-dev.txt`
 - Testleri calistir: `python -m unittest discover -s tests -p "test_*.py"`
 - Kapsam raporu: `python -m coverage run --branch -m unittest discover -s tests -p "test_*.py"` ardindan `python -m coverage report`
-- Lint / format: `ruff check hidrostatik_test tests` ve `ruff format --check hidrostatik_test tests`
-- Tip kontrolu (domain, bloklayici): `mypy hidrostatik_test/domain/`
+- Lint / format: `ruff check .` ve `ruff format --check .`
+- Tip kontrolu (bloklayici): `mypy hidrostatik_test/domain/` ve `mypy --ignore-missing-imports webapp/backend/app`
+- Web guvenlik varsayilani: `webapp/run_web.py` varsayilan olarak yalnizca `127.0.0.1` loopback'e baglanir; kimlik dogrulamasiz `0.0.0.0` yayini engellenir (`HYDRO_ALLOW_REMOTE=1` acik onay gerektirir) ve DB/workspace yonetici uclari yerel loopback + `HYDRO_LOCAL_ADMIN_TOKEN` / kaynak `source_workspace_key` korumasi altindadir.
 - Su ozelligi gridini uret: `python tools/generate_water_property_table.py`
 - Windows release build al: `powershell -ExecutionPolicy Bypass -File .\build_exe.ps1`
 - macOS release build al: `./build_dmg.sh`
@@ -134,7 +135,7 @@ Mevcut kod:
 - Oturumlari SQLite ve JSON olarak kaydedip geri yukleyebilir; PDF/Excel rapor uretir
 - Windows `.zip` ve macOS `.dmg` paketleri icin SHA-256 dogrulamali self-update akisina sahiptir
 - `HYDRO` repo ayrisma gecisi icin legacy `Programlar` release kaynagina fallback destekler
-- 653 otomatik test ile dogrulanir
+- 686 masaüstü unittest ve 167 web backend pytest testi ile dogrulanir
 
 Mevcut kod henuz sunlari tam modellememektedir:
 
