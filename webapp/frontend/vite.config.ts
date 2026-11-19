@@ -43,8 +43,7 @@ export default defineConfig({
             },
             {
               name: "vendor-charts",
-              test: /node_modules[\\/](recharts|victory-vendor|@reduxjs[\\/]toolkit|immer|reselect|es-toolkit|decimal\.js-light|react-redux|eventemitter3)[\\/]/,
-              includeDependenciesRecursively: false,
+              test: /node_modules[\\/]recharts[\\/]/,
               priority: 25,
             },
           ],
