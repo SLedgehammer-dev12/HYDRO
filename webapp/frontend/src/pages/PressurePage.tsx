@@ -14,6 +14,7 @@ import {
   useSaveTestResult,
   useTablePoint,
 } from "../hooks/queries";
+import { OperationsPanel } from "../features/operations/OperationsPanel";
 import { useAppStore } from "../store/useAppStore";
 import { useEvaluateShortcut } from "../hooks/useEvaluateShortcut";
 import { STEEL_MODEL_OPTIONS } from "../lib/constants";
@@ -606,6 +607,7 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
           </SectionCard>
         </div>
       </div>
+      {embedded ? null : <OperationsPanel />}
     </div>
   );
 }

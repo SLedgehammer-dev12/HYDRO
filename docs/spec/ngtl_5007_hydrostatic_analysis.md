@@ -48,7 +48,7 @@ heniz sayisal ya da prosedel olarak modellenmis degil.
 - `10.4`: boru ve toprak probu yerlesimi, mesafeler ve raporlama yapida yok.
 - `11`: doldurma pigi, doldurma hizi, saatlik hacim ve sicaklik kaydi yok.
 - `12`: minimum 24 saatlik termal dengeleme ve son iki ortalama arasinda `0.5 degC` kosulu yok.
-- `14.1-14.3`: `domain/pressurization_monitor.py` ile modellendi (artis hizi <= 1 bar/dk, %95 SMYS sonrasi %0.2 basilan su siniri + durdurma, 2 saatlik bekleme/15 dk kayit). Arayuz akisi henuz bagli degil.
+- `14.1-14.3`: `domain/pressurization_monitor.py` ile modellendi (artis hizi <= 1 bar/dk, %95 SMYS sonrasi %0.2 basilan su siniri + durdurma, 2 saatlik bekleme/15 dk kayit). Web arayuzunde Basinc Degisim sayfasindaki Operasyonlar paneli kullanir; masaustu arayuzu bagli degil.
 - `14.3`: iki saatlik bekleme ve 15 dakikalik kayit akisi yok.
 - `16-17`: `domain/post_test_operations.py` ile kontrol listesi olarak modellendi (16: vana <= 2 inc ve on kosullar; 17: pig, onay, cevre, 17.6 raporu). Sartname bu bolumlerde baska sayisal kriter vermez.
 - `21`: form bazli rapor ciktisi ve kabul raporu seti uretilmiyor.
@@ -63,11 +63,11 @@ heniz sayisal ya da prosedel olarak modellenmis degil.
 | 11.3-11.4 | Saatlik doldurma hacmi ve sicakligi kaydi | Yok | Zaman serisi modeli gerekir |
 | 12 | 24 saat termal dengeleme ve `0.5 degC` kosulu | Yok | Yeni test adimi gerekir |
 | 13 | Hava icerik testi formulu ve `%6` kabul esigi | Var | En iyi kapsanan kisim |
-| 14.2 | Basinc-hacim iliskisi, `%0.2` esigi | Domain + API (`/api/calculations/pressurization-ramp`) | UI baglantisi bekliyor |
-| 14.3 | 2 saat bekleme, 15 dk kayit | Domain + API (`/api/calculations/pressure-hold`) | UI baglantisi bekliyor |
+| 14.2 | Basinc-hacim iliskisi, `%0.2` esigi | Domain + API (`/api/calculations/pressurization-ramp`) | Web UI paneli var; rapor/oturum baglantisi bekliyor |
+| 14.3 | 2 saat bekleme, 15 dk kayit | Domain + API (`/api/calculations/pressure-hold`) | Web UI paneli var; rapor/oturum baglantisi bekliyor |
 | 15.2 | Basinc degisim formulu ve `(Pa-dP)<=0.3` | Var | Isaret tanimi UI'de gosteriliyor |
-| 16 | Basinc dusurme | Domain + API (`/api/calculations/depressurization`) | UI baglantisi bekliyor |
-| 17 | Bosaltma, cevresel onlemler, raporlama | Domain + API (`/api/calculations/discharge`) | UI/rapor baglantisi bekliyor |
+| 16 | Basinc dusurme | Domain + API (`/api/calculations/depressurization`) | Web UI paneli var; rapor/oturum baglantisi bekliyor |
+| 17 | Bosaltma, cevresel onlemler, raporlama | Domain + API (`/api/calculations/discharge`) | Web UI paneli var; rapor baglantisi bekliyor |
 | 21 | Form bazli saha dokumantasyonu | Yok | Raporlama backlog'u |
 
 ## Kodla Eslesen Noktalar

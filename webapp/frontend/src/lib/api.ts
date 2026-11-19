@@ -374,6 +374,51 @@ export const api = {
     signal?: AbortSignal,
   ) => apiFetch<PressurizationResponse>("/calculations/pressurization", { method: "POST", body, signal }),
 
+  pressurizationRamp: (
+    body: {
+      readings: Array<{
+        elapsed_min: number;
+        pressure_bar: number;
+        cumulative_added_volume_m3: number;
+      }>;
+      test_pressure_100_smys_bar: number;
+      total_filled_volume_m3: number;
+    },
+    signal?: AbortSignal,
+  ) =>
+    apiFetch<import("./types").PressurizationRampResponse>("/calculations/pressurization-ramp", {
+      method: "POST",
+      body,
+      signal,
+    }),
+
+  pressureHold: (
+    body: {
+      readings: Array<{ elapsed_min: number; pressure_bar: number; temperature_c: number }>;
+      target_pressure_bar: number;
+    },
+    signal?: AbortSignal,
+  ) =>
+    apiFetch<import("./types").PressureHoldResponse>("/calculations/pressure-hold", {
+      method: "POST",
+      body,
+      signal,
+    }),
+
+  depressurization: (body: import("./types").DepressurizationRequest, signal?: AbortSignal) =>
+    apiFetch<import("./types").OperationCheckResponse>("/calculations/depressurization", {
+      method: "POST",
+      body,
+      signal,
+    }),
+
+  discharge: (body: import("./types").DischargeRequest, signal?: AbortSignal) =>
+    apiFetch<import("./types").OperationCheckResponse>("/calculations/discharge", {
+      method: "POST",
+      body,
+      signal,
+    }),
+
   waterDensity: (body: { temperature_c: number; pressure_bar: number }, signal?: AbortSignal) =>
     apiFetch<{ density_kg_per_m3: number; temperature_c: number; pressure_bar: number }>(
       "/calculations/water-density",

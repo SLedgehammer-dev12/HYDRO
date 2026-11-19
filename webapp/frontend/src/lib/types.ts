@@ -411,6 +411,68 @@ export interface PressurizationResponse {
   decision: Decision;
 }
 
+export interface PressurizationRampResponse {
+  max_ramp_rate_bar_per_min: number;
+  ramp_rate_violations: Array<{
+    start_elapsed_min: number;
+    end_elapsed_min: number;
+    rate_bar_per_min: number;
+  }>;
+  reached_95_smys: boolean;
+  reached_100_smys: boolean;
+  pumped_since_95_smys_m3: number;
+  excess_volume_limit_m3: number;
+  excess_volume_percent: number;
+  volume_limit_exceeded: boolean;
+  stop_required: boolean;
+  monitoring_gaps: number[];
+  passed: boolean | null;
+  decision: Decision;
+}
+
+export interface PressureHoldResponse {
+  duration_min: number;
+  duration_ok: boolean;
+  max_reading_gap_min: number;
+  interval_ok: boolean;
+  pressure_drop_bar: number;
+  pressure_tolerance_bar: number;
+  repressurize_required: boolean;
+  passed: boolean;
+  decision: Decision;
+}
+
+export interface OperationCheckResponse {
+  violations: string[];
+  missing: string[];
+  passed: boolean;
+  decision: Decision;
+}
+
+export interface DepressurizationRequest {
+  test_passed: boolean | null;
+  release_valve_diameter_in: number | null;
+  pipe_equipment_checked: boolean | null;
+  environmental_impact_checked: boolean | null;
+}
+
+export interface DischargeRequest {
+  destination: string | null;
+  used_discharge_pig: boolean | null;
+  hydraulic_load_measures_taken: boolean | null;
+  approvals_obtained: boolean | null;
+  treatment_requested: boolean;
+  treatment_done: boolean | null;
+  sample_analysis_requested: boolean;
+  sample_analysis_done: boolean | null;
+  erosion_prevented: boolean | null;
+  report_date: string;
+  report_time: string;
+  pig_name: string;
+  discharge_location: string;
+  duration_min: number | null;
+}
+
 /* ------------------------------------------------------------------ */
 /* Hesap istekleri                                                     */
 /* ------------------------------------------------------------------ */

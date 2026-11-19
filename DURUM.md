@@ -130,9 +130,9 @@ Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen iş
 
 ### 4.2 Domain / masaüstü (P1–P2, `tasks/todo.md`)
 
-- [x] 14.1–14.3 basınç–hacim izleme, `%0.2` ilave su durdurma mantığı ve 2 saatlik bekleme domain + API (`pressurization_monitor.py`); [ ] UI/rapor bağlantısı.
+- [x] 14.1–14.3 basınç–hacim izleme, `%0.2` ilave su durdurma mantığı ve 2 saatlik bekleme domain + API (`pressurization_monitor.py`); [x] Web UI paneli (Basınç Değişim sayfası, `OperationsPanel`); [ ] oturum kaydı/rapor bağlantısı.
 - [ ] 12 ve 15 için zaman serili termal dengeleme / 24 saatlik test kayıt veri modeli.
-- [x] 16–17 basınç düşürme ve boşaltma kontrol listesi domain + API (`post_test_operations.py`); [ ] UI/rapor (BOT-FRM-CDB-001-024) bağlantısı.
+- [x] 16–17 basınç düşürme ve boşaltma kontrol listesi domain + API (`post_test_operations.py`); [x] Web UI paneli (`OperationsPanel`); [ ] rapor/BOT-FRM-CDB-001-024 bağlantısı.
 - [ ] 21. bölümdeki saha formlarına uygun rapor çıktısı.
 - [ ] Segmentli geometri indirgemesi için kurum içi metod notu.
 - [ ] +2 °C dolum kısıtı için saha uyarı mantığı.
