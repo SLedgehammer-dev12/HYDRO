@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  AlertTriangle,
   ArrowDown,
   ArrowRight,
   ArrowUp,
@@ -14,11 +13,10 @@ import {
   Ruler,
   Trash2,
   Wand2,
-  XCircle,
 } from "lucide-react";
 import { PageHeader } from "../components/layout/PageHeader";
 import { SectionIdentityCard } from "../components/SectionIdentityCard";
-import { SectionCard, KpiCard, ResultTile } from "../components/ui/Card";
+import { SectionCard, ResultTile } from "../components/ui/Card";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { NumberField, SelectField, FieldGrid, ReadonlyValue } from "../components/ui/Field";
@@ -29,18 +27,9 @@ import { FieldPage } from "./FieldPage";
 import { useCatalog, useCalculateGeometry, useMeta } from "../hooks/queries";
 import { useAppStore } from "../store/useAppStore";
 import { PUMP_LABELS } from "../lib/constants";
-import { fmt, formatInput, num, parseNumber, dateTime, relativeTime } from "../lib/format";
+import { fmt, formatInput, num, parseNumber } from "../lib/format";
 import { computeGeometry, sectionsFromInputs } from "../lib/mock";
-import {
-  evaluateProjectKpContinuity,
-  evaluateSegmentConsistency,
-  formatKp,
-  formatKpLocation,
-  normalizeKpText,
-  parseKpMeters,
-  resolveSectionMeta,
-} from "../lib/kp";
-import type { GeometryIn } from "../lib/types";
+import { evaluateSegmentConsistency } from "../lib/kp";
 
 function SegmentNumberCell({
   value,

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiError, api, isRecoverableError } from "../lib/api";
+import { api, isRecoverableError } from "../lib/api";
 import {
   DEMO_GRADES,
   DEMO_META,
@@ -915,7 +915,6 @@ export function useSessionResults(id: string | null) {
 
 function demoResultRecords(): TestResultRecord[] {
   const state = useAppStore.getState();
-  const results = state.results;
   const history = state.history.length > 0 ? state.history : createDemoHistory(state.inputs);
   return history.map((entry, index) => ({
     id: `demo-result-${index}`,

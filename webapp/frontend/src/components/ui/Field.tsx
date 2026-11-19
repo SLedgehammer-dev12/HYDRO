@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { AlertCircle, ChevronDown } from "lucide-react";
 import { formatInput, parseNumber } from "../../lib/format";
 import { cn } from "../../lib/utils";

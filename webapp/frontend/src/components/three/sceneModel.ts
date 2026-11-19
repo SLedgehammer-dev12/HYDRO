@@ -369,7 +369,6 @@ function elevationFromProfile(profile: ScenePoint[], distance: number): number {
 const RAMP_LOW = new THREE.Color("#0a2334");
 const RAMP_MID = new THREE.Color("#14545c");
 const RAMP_HIGH = new THREE.Color("#8a7434");
-const RAMP_TEMP = new THREE.Color();
 
 function rampColor(fraction: number, target: THREE.Color): THREE.Color {
   const t = clamp(fraction, 0, 1);

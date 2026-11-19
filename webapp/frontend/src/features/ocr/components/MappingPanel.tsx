@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import clsx from "clsx";
 import { Braces, Info, SlidersHorizontal } from "lucide-react";
 import { formatDateTime, shortId } from "../format";
 import { DEFAULT_ALIASES, FIELD_CATALOG } from "../fields";

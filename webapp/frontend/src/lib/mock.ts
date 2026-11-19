@@ -25,7 +25,6 @@ import type {
   HistoryEntry,
   MetaResponse,
   OcrStatusResponse,
-  PigModeOption,
   PigSpeedRequest,
   PigSpeedResponse,
   PipeOption,
@@ -1695,7 +1694,7 @@ export function demoSessionDetail(inputs: AppInputs, name: string): Session {
 }
 
 export function demoSessions(
-  inputs: AppInputs,
+  _inputs: AppInputs,
   name: string,
   projectId: string | null = null,
 ): SessionListItem[] {

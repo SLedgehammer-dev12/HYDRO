@@ -12,7 +12,6 @@ import {
   Loader2,
   Plus,
   ShieldAlert,
-  XCircle,
 } from "lucide-react";
 import { SectionCard } from "../../../components/ui/Card";
 import { Badge, type Tone } from "../../../components/ui/Badge";
