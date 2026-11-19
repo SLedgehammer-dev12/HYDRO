@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  dateOnly,
+  dateTime,
   decisionLabel,
   fixed,
   fmt,
@@ -7,6 +9,7 @@ import {
   num,
   parseNumber,
   statusTone,
+  timeOnly,
 } from "./format";
 
 describe("parseNumber", () => {
@@ -46,5 +49,16 @@ describe("number formatting helpers", () => {
     expect(statusTone("BASARISIZ")).toBe("fail");
     expect(statusTone("KATSAYI GUNCELLENMELI")).toBe("warning");
     expect(statusTone("BEKLIYOR")).toBe("pending");
+  });
+
+  it("formats dates and repeats cached formatter calls identically", () => {
+    const iso = "2026-11-19T14:30:00Z";
+    expect(dateTime(iso)).toBe(dateTime(iso));
+    expect(dateOnly(iso)).toBe(dateOnly(iso));
+    expect(timeOnly(iso)).toBe(timeOnly(iso));
+    expect(dateTime(null)).toBe("—");
+    expect(dateOnly("not-a-date")).toBe("—");
+    expect(num(1234.5, 2)).toBe("1.234,5");
+    expect(formatInput(1234.5, 4)).toBe("1234,5");
   });
 });

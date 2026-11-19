@@ -1,4 +1,4 @@
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowRight, CheckCircle2, ClipboardCheck, Gauge, Layers, Mountain, MoveRight, Waves } from "lucide-react";
 import { PageHeader } from "../components/layout/PageHeader";
 import { SectionCard, KpiCard, ResultTile } from "../components/ui/Card";
@@ -8,7 +8,7 @@ import { NumberField, SelectField, FieldGrid, ReadonlyValue, CheckboxRow } from 
 import { DecisionCard } from "../components/ui/DecisionCard";
 import { ProgressBar } from "../components/ui/Gauge";
 import { EmptyState, InlineNotice } from "../components/ui/State";
-import { PressureWindowChart, ElevationProfileChart } from "../components/charts/Charts";
+import { PressureWindowChart, ElevationProfileChart } from "../components/charts/LazyCharts";
 const PipelineScene = lazy(() => import("../components/three/PipelineScene"));
 import {
   useCalculatePig,
@@ -87,7 +87,45 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
   const patchInputs = useAppStore((state) => state.patchInputs);
   const toggleCheck = useAppStore((state) => state.toggleCheck);
   const setTab = useAppStore((state) => state.setTab);
+  const pendingScrollTarget = useAppStore((state) => state.pendingScrollTarget);
+  const setPendingScrollTarget = useAppStore((state) => state.setPendingScrollTarget);
   const pushToast = useAppStore((state) => state.pushToast);
+
+  const sceneHostRef = useRef<HTMLDivElement | null>(null);
+  const [sceneVisible, setSceneVisible] = useState(
+    () => !embedded || typeof IntersectionObserver === "undefined",
+  );
+
+  useEffect(() => {
+    if (!embedded || sceneVisible) return;
+    if (typeof IntersectionObserver === "undefined") return;
+    const element = sceneHostRef.current;
+    if (!element) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setSceneVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "250px" },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [embedded, sceneVisible]);
+
+  useEffect(() => {
+    if (pendingScrollTarget !== "saha" && pendingScrollTarget !== "sahne-3d") return;
+    const targetId = pendingScrollTarget;
+    const raf = window.requestAnimationFrame(() => {
+      if (targetId === "sahne-3d") {
+        setSceneVisible(true);
+      }
+      document.getElementById(targetId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      setPendingScrollTarget(null);
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [pendingScrollTarget, setPendingScrollTarget]);
 
   const { data: meta } = useMeta();
   const calculateProfile = useCalculateProfile();
@@ -325,27 +363,38 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
               Proje genelindeki test bölümleri birleştiriliyor...
             </div>
           ) : null}
-          <div className="scene-shell">
-            <Suspense
-              fallback={
-                <div className="flex min-h-[480px] items-center justify-center text-xs text-[var(--text-muted)]">
-                  3D saha görünümü yükleniyor...
-                </div>
-              }
-            >
-              <PipelineScene
-                data={scene}
-                className="min-h-[480px]"
-                onOpenSession={
-                  effectiveProjectMode
-                    ? (sid) => {
-                        safeSwitchSession.switchSession(sid);
-                        setSceneScope("section");
-                      }
-                    : undefined
+          <div ref={sceneHostRef} className="scene-shell">
+            {!embedded || sceneVisible ? (
+              <Suspense
+                fallback={
+                  <div className="flex min-h-[620px] items-center justify-center text-xs text-[var(--text-muted)] sm:min-h-[600px]">
+                    3D saha görünümü yükleniyor...
+                  </div>
                 }
-              />
-            </Suspense>
+              >
+                <PipelineScene
+                  data={scene}
+                  className="min-h-[620px] sm:min-h-[600px]"
+                  onOpenSession={
+                    effectiveProjectMode
+                      ? (sid) => {
+                          safeSwitchSession.switchSession(sid);
+                          setSceneScope("section");
+                        }
+                      : undefined
+                  }
+                />
+              </Suspense>
+            ) : (
+              <div className="flex min-h-[620px] flex-col items-center justify-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface-2)]/50 p-6 text-center sm:min-h-[600px]">
+                <p className="text-xs text-[var(--text-muted)]">
+                  3D saha görünümü ekran alanına yaklaşınca veya istendiğinde yüklenir.
+                </p>
+                <Button size="sm" onClick={() => setSceneVisible(true)}>
+                  3D Sahneyi Yükle
+                </Button>
+              </div>
+            )}
           </div>
         </SectionCard>
       </div>

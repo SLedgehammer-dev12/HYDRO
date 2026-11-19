@@ -717,7 +717,7 @@ pre {
   font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
-  transition: all 0.15s ease;
+  transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
 }
 
 .seg-btn:hover {

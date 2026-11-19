@@ -3,6 +3,45 @@ import type { DecisionStatus } from "./types";
 const LOCALE = "tr-TR";
 const DASH = "—";
 
+const numberFormatCache = new Map<string, Intl.NumberFormat>();
+
+function getNumberFormatter(
+  minFractionDigits: number,
+  maxFractionDigits: number,
+  useGrouping = true,
+): Intl.NumberFormat {
+  const key = `${minFractionDigits}:${maxFractionDigits}:${useGrouping ? 1 : 0}`;
+  let formatter = numberFormatCache.get(key);
+  if (!formatter) {
+    formatter = new Intl.NumberFormat(LOCALE, {
+      minimumFractionDigits: minFractionDigits,
+      maximumFractionDigits: maxFractionDigits,
+      useGrouping,
+    });
+    numberFormatCache.set(key, formatter);
+  }
+  return formatter;
+}
+
+const DATE_TIME_FORMAT = new Intl.DateTimeFormat(LOCALE, {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+const TIME_ONLY_FORMAT = new Intl.DateTimeFormat(LOCALE, {
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+const DATE_ONLY_FORMAT = new Intl.DateTimeFormat(LOCALE, {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+});
+
 export function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
@@ -10,19 +49,13 @@ export function isFiniteNumber(value: unknown): value is number {
 /** tr-TR sayı biçimi. Geçersiz değerlerde "—" döner. */
 export function num(value: number | null | undefined, digits = 2): string {
   if (!isFiniteNumber(value)) return DASH;
-  return new Intl.NumberFormat(LOCALE, {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: digits,
-  }).format(value);
+  return getNumberFormatter(0, digits).format(value);
 }
 
 /** Sabit ondalıklı gösterim (ör. katsayılar 6 hane). */
 export function fixed(value: number | null | undefined, digits = 3): string {
   if (!isFiniteNumber(value)) return DASH;
-  return new Intl.NumberFormat(LOCALE, {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  }).format(value);
+  return getNumberFormatter(digits, digits).format(value);
 }
 
 /** Değer + birim; birim ayrı biçimlendirilir. */
@@ -64,10 +97,7 @@ export const fmt = {
 /** Girdi alanları için gruplamasız, ondalık virgüllü metin. */
 export function formatInput(value: number | null | undefined, digits = 6): string {
   if (!isFiniteNumber(value)) return "";
-  return new Intl.NumberFormat(LOCALE, {
-    useGrouping: false,
-    maximumFractionDigits: digits,
-  }).format(value);
+  return getNumberFormatter(0, digits, false).format(value);
 }
 
 /**
@@ -113,34 +143,21 @@ export function dateTime(iso: string | null | undefined): string {
   if (!iso) return DASH;
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return DASH;
-  return new Intl.DateTimeFormat(LOCALE, {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
+  return DATE_TIME_FORMAT.format(date);
 }
 
 export function timeOnly(iso: string | null | undefined): string {
   if (!iso) return DASH;
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return DASH;
-  return new Intl.DateTimeFormat(LOCALE, {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
+  return TIME_ONLY_FORMAT.format(date);
 }
 
 export function dateOnly(iso: string | null | undefined): string {
   if (!iso) return DASH;
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return DASH;
-  return new Intl.DateTimeFormat(LOCALE, {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(date);
+  return DATE_ONLY_FORMAT.format(date);
 }
 
 export function relativeTime(iso: string | null | undefined): string {

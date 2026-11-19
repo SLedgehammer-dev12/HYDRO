@@ -22,7 +22,7 @@ import { Button } from "../components/ui/Button";
 import { NumberField, SelectField, FieldGrid, ReadonlyValue } from "../components/ui/Field";
 import { ConfirmDialog } from "../components/ui/Dialog";
 import { InlineNotice, EmptyState } from "../components/ui/State";
-import { ElevationProfileChart, UtilizationChart } from "../components/charts/Charts";
+import { ElevationProfileChart, UtilizationChart } from "../components/charts/LazyCharts";
 import { FieldPage } from "./FieldPage";
 import { useCatalog, useCalculateGeometry, useMeta } from "../hooks/queries";
 import { useAppStore } from "../store/useAppStore";

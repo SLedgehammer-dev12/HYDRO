@@ -603,14 +603,14 @@ export function ProjectsPage() {
             <div className="scene-shell">
               <Suspense
                 fallback={
-                  <div className="flex min-h-[460px] items-center justify-center text-xs text-[var(--text-muted)]">
+                  <div className="flex min-h-[620px] items-center justify-center text-xs text-[var(--text-muted)] sm:min-h-[600px]">
                     3D saha görünümü yükleniyor...
                   </div>
                 }
               >
                 <PipelineScene
                   data={projectSceneQuery.data}
-                  className="min-h-[460px]"
+                  className="min-h-[620px] sm:min-h-[600px]"
                   onOpenSession={(sid) =>
                     openSession.mutate(sid, {
                       onSuccess: () => {

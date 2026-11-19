@@ -193,21 +193,28 @@ async function main() {
     for (const [route, expectedTitle, expectedPage = route] of ROUTES) {
       const hash = route === "dashboard" ? "#/" : `#/${route}`;
       await evaluate(`location.hash = ${JSON.stringify(hash)}`);
-      await SLEEP(450);
-      const state = await evaluate(`(() => {
-        const main = document.querySelector("main");
-        const page = main ? main.querySelector("[data-page]") : null;
-        const h1 = main ? main.querySelector("h1") : null;
-        return {
-          dataPage: page ? page.getAttribute("data-page") : null,
-          h1: h1 ? h1.textContent.trim() : "",
-          greeting: main ? main.textContent.includes("Denetimli Hidrostatik Test İş Akışı") : false,
-        };
-      })()`);
-
-      const okPage = state.dataPage === expectedPage;
-      const okTitle = expectedTitle ? state.h1.includes(expectedTitle) : state.h1.length > 0;
-      const okGreeting = route === "dashboard" ? state.greeting : !state.greeting;
+      let state = { dataPage: null, h1: "", greeting: false };
+      let okPage = false;
+      let okTitle = false;
+      let okGreeting = false;
+      const deadline = Date.now() + 3_500;
+      while (Date.now() <= deadline) {
+        state = await evaluate(`(() => {
+          const main = document.querySelector("main");
+          const page = main ? main.querySelector("[data-page]") : null;
+          const h1 = main ? main.querySelector("h1") : null;
+          return {
+            dataPage: page ? page.getAttribute("data-page") : null,
+            h1: h1 ? h1.textContent.trim() : "",
+            greeting: main ? main.textContent.includes("Denetimli Hidrostatik Test İş Akışı") : false,
+          };
+        })()`);
+        okPage = state.dataPage === expectedPage;
+        okTitle = expectedTitle ? state.h1.includes(expectedTitle) : state.h1.length > 0;
+        okGreeting = route === "dashboard" ? state.greeting : !state.greeting;
+        if (okPage && okTitle && okGreeting) break;
+        await SLEEP(50);
+      }
       if (!okPage || !okTitle || !okGreeting) {
         failures.push({ route, expectedPage, expectedTitle, ...state, okPage, okTitle, okGreeting });
       }

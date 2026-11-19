@@ -4,6 +4,24 @@ import type { FieldValue } from "./types";
 const LOCALE = "tr-TR";
 const MINUS = "−";
 
+const ocrNumberCache = new Map<number, Intl.NumberFormat>();
+
+function getOcrNumberFormatter(maxFractionDigits: number): Intl.NumberFormat {
+  const digits = Math.max(0, maxFractionDigits);
+  let formatter = ocrNumberCache.get(digits);
+  if (!formatter) {
+    formatter = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: digits });
+    ocrNumberCache.set(digits, formatter);
+  }
+  return formatter;
+}
+
+const OCR_SHORT_DATE_FORMAT = new Intl.DateTimeFormat(LOCALE, { dateStyle: "short" });
+const OCR_SHORT_DATETIME_FORMAT = new Intl.DateTimeFormat(LOCALE, {
+  dateStyle: "short",
+  timeStyle: "short",
+});
+
 export type ConfidenceTier = "critical" | "low" | "ok" | "high";
 
 export function confidenceTier(confidence: number | null | undefined): ConfidenceTier {
@@ -21,9 +39,7 @@ export function formatConfidence(confidence: number | null | undefined): string 
 
 export function formatNumber(value: number, maxFractionDigits = 3): string {
   if (!Number.isFinite(value)) return "—";
-  return new Intl.NumberFormat(LOCALE, {
-    maximumFractionDigits: Math.max(0, maxFractionDigits),
-  }).format(value);
+  return getOcrNumberFormatter(maxFractionDigits).format(value);
 }
 
 const FIELD_DIGITS: Record<string, number> = {
@@ -72,7 +88,7 @@ export function formatValue(
   if (key === "date" && typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
     const parsed = new Date(`${value}T00:00:00`);
     if (!Number.isNaN(parsed.getTime())) {
-      return new Intl.DateTimeFormat(LOCALE, { dateStyle: "short" }).format(parsed);
+      return OCR_SHORT_DATE_FORMAT.format(parsed);
     }
   }
   if (typeof value === "number") {
@@ -112,10 +128,7 @@ export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return "—";
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
-  return new Intl.DateTimeFormat(LOCALE, {
-    dateStyle: "short",
-    timeStyle: "short",
-  }).format(date);
+  return OCR_SHORT_DATETIME_FORMAT.format(date);
 }
 
 export function formatElapsed(seconds: number): string {

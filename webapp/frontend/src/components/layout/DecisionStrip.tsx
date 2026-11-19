@@ -112,10 +112,8 @@ export function DecisionStrip() {
               activeTab === "geometry" && tab !== "forms" && "ring-1 ring-[color-mix(in_srgb,var(--primary)_35%,transparent)]",
             )}
             onClick={() => {
+              useAppStore.getState().setPendingScrollTarget("saha");
               setTab("geometry");
-              window.setTimeout(() => {
-                document.getElementById("saha")?.scrollIntoView({ behavior: "smooth", block: "start" });
-              }, 30);
             }}
             title="Basınç penceresi kararı"
           >

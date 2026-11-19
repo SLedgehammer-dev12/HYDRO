@@ -43,6 +43,7 @@ export interface AppStore {
   tab: TabKey;
   activeFormCode: BotasFormCode;
   updateModalOpen: boolean;
+  pendingScrollTarget: string | null;
   sessionId: string | null;
   sessionName: string;
   sessionStatus: SessionStatus;
@@ -76,6 +77,7 @@ export interface AppStore {
   setActiveFormCode: (code: BotasFormCode) => void;
   openForm: (code: BotasFormCode) => void;
   setUpdateModalOpen: (open: boolean) => void;
+  setPendingScrollTarget: (target: string | null) => void;
   setSessionMeta: (meta: {
     id?: string | null;
     name?: string;
@@ -126,6 +128,7 @@ export const useAppStore = create<AppStore>()(
       tab: "dashboard",
       activeFormCode: "test_data",
       updateModalOpen: false,
+      pendingScrollTarget: null,
       sessionId: null,
       sessionName: "Bölüm 12–13 · Doğu Hattı",
       sessionStatus: "active",
@@ -158,6 +161,7 @@ export const useAppStore = create<AppStore>()(
       setActiveFormCode: (activeFormCode) => set({ activeFormCode }),
       openForm: (activeFormCode) => set({ tab: "forms", activeFormCode }),
       setUpdateModalOpen: (updateModalOpen) => set({ updateModalOpen }),
+      setPendingScrollTarget: (pendingScrollTarget) => set({ pendingScrollTarget }),
 
       setSessionMeta: (meta) =>
         set((state) => ({

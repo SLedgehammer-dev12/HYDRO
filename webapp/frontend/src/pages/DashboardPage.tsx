@@ -15,14 +15,13 @@ import {
   Wind,
   XCircle,
 } from "lucide-react";
-import { motion } from "framer-motion";
 import { PageHeader } from "../components/layout/PageHeader";
 import { SectionCard, KpiCard, ResultTile } from "../components/ui/Card";
 import { Badge, StatusBadge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { DecisionCard } from "../components/ui/DecisionCard";
 import { OfflineNotice, EmptyState, InlineNotice } from "../components/ui/State";
-import { ElevationProfileChart, TrendChart } from "../components/charts/Charts";
+import { ElevationProfileChart, TrendChart } from "../components/charts/LazyCharts";
 import { RatioGauge, ProgressBar } from "../components/ui/Gauge";
 import { geometryForInputs } from "../lib/mock";
 import { BOTAS_FORM_BY_CODE, CHECK_DEFINITIONS } from "../lib/constants";
@@ -44,6 +43,7 @@ export function DashboardPage() {
   const projectCode = useAppStore((state) => state.projectCode);
   const sessionId = useAppStore((state) => state.sessionId);
   const setTab = useAppStore((state) => state.setTab);
+  const setPendingScrollTarget = useAppStore((state) => state.setPendingScrollTarget);
   const openForm = useAppStore((state) => state.openForm);
   const { data: meta } = useMeta();
   const { data: formsPayload } = useSessionForms(sessionId);
@@ -76,10 +76,8 @@ export function DashboardPage() {
   );
 
   function open3DScene() {
+    setPendingScrollTarget("sahne-3d");
     setTab("geometry");
-    window.setTimeout(() => {
-      document.getElementById("sahne-3d")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 80);
   }
 
   const airAReady = Boolean(inputs.air.a_micro_per_bar);
@@ -434,7 +432,15 @@ export function DashboardPage() {
             </Button>
           }
         >
-          <TrendChart rows={trendRows} height={180} />
+          {trendRows.length < 2 ? (
+            <div style={{ height: 180 }}>
+              <div className="grid h-full place-items-center rounded-xl border border-dashed border-[var(--border)] px-4 text-center text-[11.5px] text-[var(--text-faint)]">
+                24 saatlik izleme verisi henüz girilmedi (BOT-FRM-021 / 018)
+              </div>
+            </div>
+          ) : (
+            <TrendChart rows={trendRows} height={180} />
+          )}
           <div className="mt-1 flex gap-4 text-[10px] text-[var(--text-faint)]">
             <span className="flex items-center gap-1"><span className="legend-dot bg-[var(--chart-1)]" /> Basınç (bar)</span>
             <span className="flex items-center gap-1"><span className="legend-dot bg-[var(--chart-3)]" /> Sıcaklık (°C)</span>
@@ -523,19 +529,14 @@ export function DashboardPage() {
         </InlineNotice>
       ) : null}
 
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.05, duration: 0.25 }}
-        className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3.5 py-2.5 text-[10.5px] text-[var(--text-faint)]"
-      >
+      <div className="page-transition flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3.5 py-2.5 text-[10.5px] text-[var(--text-faint)]">
         <span className="flex items-center gap-1.5">
           <StatusBadge status={air?.decision.status ?? "BEKLIYOR"} dotOnly />
           <span aria-hidden>·</span>
           <StatusBadge status={pressure?.decision.status ?? "BEKLIYOR"} dotOnly />
         </span>
         <span className="font-mono">{meta?.spec.code ?? "4-NGTL 0-GN-P-002-5007 R4"}</span>
-      </motion.div>
+      </div>
     </div>
   );
 }

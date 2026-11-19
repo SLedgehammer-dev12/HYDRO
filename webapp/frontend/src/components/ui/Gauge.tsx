@@ -193,13 +193,13 @@ export function ProgressBar({
     >
       <div
         className={cn(
-          "h-full rounded-full transition-[width] duration-500",
+          "h-full w-full origin-left rounded-full transition-transform duration-500",
           tone === "pass" && "bg-[var(--success)]",
           tone === "info" && "bg-[var(--primary)]",
           tone === "warning" && "bg-[var(--warning)]",
           tone === "fail" && "bg-[var(--danger)]",
         )}
-        style={{ width: `${ratio * 100}%` }}
+        style={{ transform: `scaleX(${ratio})` }}
       />
     </div>
   );

@@ -1,23 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Sidebar } from "./components/layout/Sidebar";
 import { TopBar } from "./components/layout/TopBar";
 import { DecisionStrip } from "./components/layout/DecisionStrip";
 import { RightPanel } from "./components/layout/RightPanel";
-import { HelpDialog } from "./components/layout/HelpDialog";
-import { UpdateManagerModal } from "./components/layout/UpdateManagerModal";
 import { ToastHost } from "./components/ui/ToastHost";
 import { PageErrorBoundary } from "./components/PageErrorBoundary";
 import { DashboardPage } from "./pages/DashboardPage";
-import { ProjectsPage } from "./pages/ProjectsPage";
-import { GeometryPage } from "./pages/GeometryPage";
-import { CoefficientsPage } from "./pages/CoefficientsPage";
-import { AirPage } from "./pages/AirPage";
-import { PressurePage } from "./pages/PressurePage";
-import { SectionFormPage } from "./pages/SectionFormPage";
-import { ReportsPage } from "./pages/ReportsPage";
-import { SettingsPage } from "./pages/SettingsPage";
-import OcrPage from "./features/ocr/OcrPage";
 import { hydrateSessionResults, useBackendProbe, useProjects, useSaveSession, useSessions } from "./hooks/queries";
 import { useAppStore } from "./store/useAppStore";
 import {
@@ -31,6 +20,63 @@ import {
 import { api, apiErrorMessage } from "./lib/api";
 import { createEmptyInputs } from "./lib/mock";
 import { toApiInputs } from "./lib/normalize";
+
+const ProjectsPage = lazy(() =>
+  import("./pages/ProjectsPage").then((module) => ({ default: module.ProjectsPage })),
+);
+const GeometryPage = lazy(() =>
+  import("./pages/GeometryPage").then((module) => ({ default: module.GeometryPage })),
+);
+const CoefficientsPage = lazy(() =>
+  import("./pages/CoefficientsPage").then((module) => ({ default: module.CoefficientsPage })),
+);
+const AirPage = lazy(() =>
+  import("./pages/AirPage").then((module) => ({ default: module.AirPage })),
+);
+const PressurePage = lazy(() =>
+  import("./pages/PressurePage").then((module) => ({ default: module.PressurePage })),
+);
+const SectionFormPage = lazy(() =>
+  import("./pages/SectionFormPage").then((module) => ({ default: module.SectionFormPage })),
+);
+const ReportsPage = lazy(() =>
+  import("./pages/ReportsPage").then((module) => ({ default: module.ReportsPage })),
+);
+const SettingsPage = lazy(() =>
+  import("./pages/SettingsPage").then((module) => ({ default: module.SettingsPage })),
+);
+const OcrPage = lazy(() => import("./features/ocr/OcrPage"));
+
+const HelpDialog = lazy(() =>
+  import("./components/layout/HelpDialog").then((module) => ({ default: module.HelpDialog })),
+);
+const UpdateManagerModal = lazy(() =>
+  import("./components/layout/UpdateManagerModal").then((module) => ({
+    default: module.UpdateManagerModal,
+  })),
+);
+
+const SKELETON_CARDS = ["kpi-1", "kpi-2", "kpi-3", "kpi-4"] as const;
+
+function PageSkeleton() {
+  return (
+    <div className="min-h-[720px] space-y-4" aria-busy="true" aria-label="Sayfa yükleniyor">
+      <div className="h-[72px] rounded-xl border border-[var(--border)] bg-[var(--surface-2)] animate-pulse" />
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {SKELETON_CARDS.map((cardKey) => (
+          <div
+            key={cardKey}
+            className="h-[92px] rounded-xl border border-[var(--border)] bg-[var(--surface-2)] animate-pulse"
+          />
+        ))}
+      </div>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <div className="h-[320px] rounded-xl border border-[var(--border)] bg-[var(--surface-2)] animate-pulse" />
+        <div className="h-[320px] rounded-xl border border-[var(--border)] bg-[var(--surface-2)] animate-pulse" />
+      </div>
+    </div>
+  );
+}
 
 function isTyping(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -57,6 +103,7 @@ export default function App() {
   const setActiveFormCode = useAppStore((state) => state.setActiveFormCode);
   const theme = useAppStore((state) => state.theme);
   const rightPanelOpen = useAppStore((state) => state.rightPanelOpen);
+  const updateModalOpen = useAppStore((state) => state.updateModalOpen);
   const backend = useAppStore((state) => state.backend);
   const sessionId = useAppStore((state) => state.sessionId);
   const applySessionInputs = useAppStore((state) => state.applySessionInputs);
@@ -279,7 +326,7 @@ export default function App() {
                   Basit key'li div + CSS animasyonu her zaman doğru içeriği render eder.
                 */}
                 <div key={tab} data-page={tab} className="page-transition">
-                  {page}
+                  <Suspense fallback={<PageSkeleton />}>{page}</Suspense>
                 </div>
               </PageErrorBoundary>
 
@@ -299,8 +346,16 @@ export default function App() {
         </div>
       </div>
 
-      <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
-      <UpdateManagerModal />
+      {helpOpen ? (
+        <Suspense fallback={null}>
+          <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
+        </Suspense>
+      ) : null}
+      {updateModalOpen ? (
+        <Suspense fallback={null}>
+          <UpdateManagerModal />
+        </Suspense>
+      ) : null}
       <ToastHost />
     </div>
   );

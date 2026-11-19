@@ -10,15 +10,28 @@ interface Props {
 interface State {
   hasError: boolean;
   message: string;
+  isChunkError: boolean;
+}
+
+function detectChunkError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const text = `${error.name} ${error.message}`.toLowerCase();
+  return (
+    text.includes("chunkloaderror") ||
+    text.includes("failed to fetch dynamically imported module") ||
+    text.includes("importing a module script failed") ||
+    text.includes("error loading dynamically imported module")
+  );
 }
 
 export class PageErrorBoundary extends Component<Props, State> {
-  state: State = { hasError: false, message: "" };
+  state: State = { hasError: false, message: "", isChunkError: false };
 
   static getDerivedStateFromError(error: unknown): State {
     return {
       hasError: true,
       message: error instanceof Error ? error.message : "Bilinmeyen bir hata oluştu.",
+      isChunkError: detectChunkError(error),
     };
   }
 
@@ -30,7 +43,7 @@ export class PageErrorBoundary extends Component<Props, State> {
 
   componentDidUpdate(previous: Props): void {
     if (this.state.hasError && previous.resetKey !== this.props.resetKey) {
-      this.setState({ hasError: false, message: "" });
+      this.setState({ hasError: false, message: "", isChunkError: false });
     }
   }
 
@@ -45,15 +58,28 @@ export class PageErrorBoundary extends Component<Props, State> {
               {this.props.title ?? "Bu bölüm yüklenemedi"}
             </p>
             <p className="mt-1 max-w-[60ch] text-[11.5px] leading-relaxed text-[var(--text-muted)]">
-              {this.state.message} Form verileri korunuyor. Diğer sekmeler çalışmaya devam eder.
+              {this.state.isChunkError
+                ? "Uygulama modülü güncellenmiş veya ağ kesilmiş olabilir. Sayfayı yenileyin."
+                : `${this.state.message} Form verileri korunuyor. Diğer sekmeler çalışmaya devam eder.`}
             </p>
-            <button
-              type="button"
-              className="btn btn-sm mt-3"
-              onClick={() => this.setState({ hasError: false, message: "" })}
-            >
-              <RefreshCw size={12} aria-hidden /> Tekrar dene
-            </button>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {this.state.isChunkError ? (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={() => window.location.reload()}
+                >
+                  <RefreshCw size={12} aria-hidden /> Sayfayı yenile
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => this.setState({ hasError: false, message: "", isChunkError: false })}
+              >
+                <RefreshCw size={12} aria-hidden /> Tekrar dene
+              </button>
+            </div>
           </div>
         </div>
       </div>

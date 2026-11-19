@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 
 from .core.config import Settings, ensure_repo_on_path
 
@@ -125,8 +126,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.headers[REQUEST_ID_HEADER] = request_id
         response.headers[SESSION_HEADER] = raw_workspace
         if "text/html" in response.headers.get("content-type", ""):
-            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Cache-Control"] = "no-cache"
+        elif (
+            request.method in {"GET", "HEAD"}
+            and response.status_code == 200
+            and request.url.path.startswith("/assets/")
+        ):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         return response
+
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
 
     if resolved.cors_origins:
         app.add_middleware(
