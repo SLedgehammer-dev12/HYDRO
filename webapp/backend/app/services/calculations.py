@@ -429,6 +429,7 @@ def evaluate_test(test_type: str, payload: dict[str, Any]) -> tuple[dict[str, An
             pressure_bar=request_b.pressure_bar,
             steel_alpha_micro_per_c=request_b.steel_alpha_micro_per_c,
             steel_model=request_b.steel_model,
+            backend=request_b.backend,
         )
         decision = {
             "status": decisions.STATUS_PASS,

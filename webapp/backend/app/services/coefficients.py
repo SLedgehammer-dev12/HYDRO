@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from ..core.errors import error_from_domain
 from ..domain_adapter import b_source_payload, backend_info_payload
+
+logger = logging.getLogger("hydro.web.coefficients")
 
 
 def _reraise(exc: BaseException, **kwargs: Any) -> None:
@@ -176,7 +179,9 @@ def backend_comparison(
     pressure_bar: float,
     include_dev_backends: bool,
 ) -> dict[str, Any]:
+    from hidrostatik_test.domain import ValidationError
     from hidrostatik_test.domain.water_properties import (
+        WaterPropertyError,
         get_available_water_property_backends,
         get_water_property_backend,
     )
@@ -201,8 +206,11 @@ def backend_comparison(
             entry["density_kg_per_m3"] = backend.calculate_water_density(
                 temperature_c, pressure_bar
             )
-        except Exception as exc:  # partial success is contract behaviour
+        except (WaterPropertyError, ValidationError) as exc:
             entry["error"] = str(exc)
+        except Exception:  # partial success is contract behaviour; keep details sanitized
+            logger.exception("Water property backend %s failed during comparison", info.key)
+            entry["error"] = "Backend hesaplama sirasinda beklenmeyen bir hata olustu."
         items.append(entry)
 
     return {

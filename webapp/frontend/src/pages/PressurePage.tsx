@@ -46,10 +46,12 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
   const coefficientB = useCoefficientB();
   const tablePoint = useTablePoint();
   const saveResult = useSaveTestResult();
+  const [aPrepError, setAPrepError] = useState<string | null>(null);
   const [bPrepError, setBPrepError] = useState<string | null>(null);
   useEvaluateShortcut(evaluate);
 
   function prepareAB() {
+    setAPrepError(null);
     setBPrepError(null);
     const tempC = inputs.pressure.temperature_c ?? inputs.air.temperature_c ?? 20;
     const pressBar =
@@ -96,10 +98,10 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
     if (inputs.pressure.a_micro_per_bar === null) {
       if (inputs.air.a_micro_per_bar !== null) {
         patchInputs({ pressure: { a_micro_per_bar: inputs.air.a_micro_per_bar } });
-      } else if (inputs.modes.air_a_mode === "table") {
+      } else if (inputs.modes.pressure_a_mode === "table") {
         tablePoint.mutate(
           {
-            table: inputs.modes.air_a_reference.includes("GAIL") ? "gail" : "institutional",
+            table: inputs.modes.pressure_a_reference.includes("GAIL") ? "gail" : "institutional",
             temperature_c: tempC,
             pressure_bar: pressBar,
           },
@@ -108,9 +110,13 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
               patchInputs({ pressure: { a_micro_per_bar: data.a_micro_per_bar } });
               pushToast("success", "A tablodan alındı", fmt.a(data.a_micro_per_bar));
             },
+            onError: (error) => {
+              setAPrepError(error.message);
+              pushToast("error", "A hazırlanamadı", error.message);
+            },
           },
         );
-      } else if (inputs.modes.air_a_mode !== "manual") {
+      } else if (inputs.modes.pressure_a_mode !== "manual") {
         coefficientA.mutate(
           {
             temperature_c: tempC,
@@ -121,6 +127,10 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
             onSuccess: ({ data }) => {
               patchInputs({ pressure: { a_micro_per_bar: data.a_micro_per_bar } });
               pushToast("success", "A hesaplandı", fmt.a(data.a_micro_per_bar));
+            },
+            onError: (error) => {
+              setAPrepError(error.message);
+              pushToast("error", "A hazırlanamadı", error.message);
             },
           },
         );
@@ -389,6 +399,14 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
               </div>
             </div>
 
+            {aPrepError ? (
+              <div className="mt-2">
+                <InlineNotice tone="danger" title="A hazırlanamadı" icon={AlertTriangle}>
+                  {aPrepError}
+                </InlineNotice>
+              </div>
+            ) : null}
+
             {bPrepError ? (
               <div className="mt-2">
                 <InlineNotice tone="danger" title="B hazırlanamadı" icon={AlertTriangle}>
@@ -418,20 +436,36 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
                     ΔT = Tilk − Tson. Tilk/Tson girilirse ΔT otomatik hesaplanır ve kilitlenir.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  className="badge badge-neutral"
-                  aria-pressed={inputs.pressure.derive_delta_t}
-                  onClick={() =>
-                    setTemperatures(
-                      inputs.pressure.t_initial_c,
-                      inputs.pressure.t_final_c,
-                      !inputs.pressure.derive_delta_t,
-                    )
-                  }
-                >
-                  {inputs.pressure.derive_delta_t ? "Tilk/Tson ile türet" : "ΔT doğrudan gir"}
-                </button>
+                <div className="seg-control" role="group" aria-label="Sıcaklık değişimi modu">
+                  <button
+                    type="button"
+                    className="seg-btn"
+                    aria-pressed={!inputs.pressure.derive_delta_t}
+                    onClick={() =>
+                      setTemperatures(
+                        inputs.pressure.t_initial_c,
+                        inputs.pressure.t_final_c,
+                        false,
+                      )
+                    }
+                  >
+                    ΔT doğrudan gir
+                  </button>
+                  <button
+                    type="button"
+                    className="seg-btn"
+                    aria-pressed={inputs.pressure.derive_delta_t}
+                    onClick={() =>
+                      setTemperatures(
+                        inputs.pressure.t_initial_c,
+                        inputs.pressure.t_final_c,
+                        true,
+                      )
+                    }
+                  >
+                    Tilk − Tson ile türet
+                  </button>
+                </div>
               </div>
 
               <FieldGrid cols={2} className="mt-2">
@@ -613,7 +647,11 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
                 Duyarlılık için geometri, A, ΔT ve Pa gerekli.
               </p>
             ) : (
-              <div className="table-wrap scroll-thin">
+              <div
+                role="region"
+                aria-label="B kaynağına göre duyarlılık tablosu"
+                className="table-wrap scroll-thin"
+              >
                 <table className="data compact">
                   <caption>Yerel önizleme; resmi karar domain/API hesabından gelir.</caption>
                   <thead>
@@ -628,7 +666,9 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
                   <tbody>
                     {sensitivity.map((row) => (
                       <tr key={row.source}>
-                        <td className="whitespace-nowrap" title={row.fullLabel}>{row.label}</td>
+                        <th scope="row" className="whitespace-nowrap font-normal" title={row.fullLabel}>
+                          {row.label}
+                        </th>
                         <td className="num">{num(row.b, 1)}</td>
                         <td className="num">{num(row.result.theoretical_pressure_change_bar, 3)}</td>
                         <td className="num">{num(row.result.margin_bar, 3)}</td>

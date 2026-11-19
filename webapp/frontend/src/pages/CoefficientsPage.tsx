@@ -51,10 +51,16 @@ const B_SOURCES: Array<{ value: BSource; label: string; note: string }> = [
   { value: "auto", label: "Otomatik", note: "β − çelik genleşmesi" },
 ];
 
+function formatSignedDelta(value: number | null): string {
+  if (value === null || Math.abs(value) < 5e-7) return "—";
+  return `${value > 0 ? "+" : ""}${num(value, 6)}`;
+}
+
 export function CoefficientsPage() {
   const inputs = useAppStore((state) => state.inputs);
   const results = useAppStore((state) => state.results);
   const patchInputs = useAppStore((state) => state.patchInputs);
+  const setResults = useAppStore((state) => state.setResults);
   const setTab = useAppStore((state) => state.setTab);
   const pushToast = useAppStore((state) => state.pushToast);
 
@@ -70,7 +76,9 @@ export function CoefficientsPage() {
   const [aTarget, setATarget] = useState<"air" | "pressure">("pressure");
   const [aError, setAError] = useState<string | null>(null);
   const [bError, setBError] = useState<string | null>(null);
+  const [bStale, setBStale] = useState(false);
   const [compareError, setCompareError] = useState<string | null>(null);
+  const [backendCompareError, setBackendCompareError] = useState<string | null>(null);
 
   const activeWaterBackend = inputs.water_backend || meta?.water_backends[0]?.key || "table_v1";
   const context = aTarget === "air" ? inputs.air : inputs.pressure;
@@ -92,15 +100,45 @@ export function CoefficientsPage() {
   const institutional = referenceTables?.items.find((table) => table.key === "institutional");
   const gail = referenceTables?.items.find((table) => table.key === "gail");
 
+  function markAStale(target?: "air" | "pressure") {
+    const coeffs = results.coefficients;
+    if (!coeffs) return;
+    const nextCoeffs = { ...coeffs };
+    let changed = false;
+    const targets: Array<"air" | "pressure"> = target ? [target] : ["air", "pressure"];
+    for (const item of targets) {
+      const key = item === "air" ? "airA" : "pressureA";
+      const existing = nextCoeffs[key];
+      if (existing && existing.state !== "stale") {
+        nextCoeffs[key] = { ...existing, state: "stale" };
+        changed = true;
+      }
+    }
+    if (changed) {
+      setResults({ coefficients: nextCoeffs });
+    }
+  }
+
+  function updateWaterBackend(backendKey: string) {
+    patchInputs({ water_backend: backendKey });
+    markAStale();
+    if (inputs.modes.pressure_b_source === "auto") {
+      setBStale(true);
+    }
+  }
+
   function setContextValues(temperature: number | null, pressure: number | null) {
+    markAStale(aTarget);
     if (aTarget === "air") {
       patchInputs({ air: { temperature_c: temperature, pressure_bar: pressure } });
     } else {
+      setBStale(true);
       patchInputs({ pressure: { temperature_c: temperature, pressure_bar: pressure } });
     }
   }
 
   function setAModeValue(mode: AMode) {
+    markAStale(aTarget);
     if (aTarget === "air") {
       patchInputs({ modes: { air_a_mode: mode } });
     } else {
@@ -196,6 +234,7 @@ export function CoefficientsPage() {
       },
       {
         onSuccess: ({ data }) => {
+          setBStale(false);
           patchInputs({ pressure: { b_micro_per_c: data.b_micro_per_c } });
           if (data.water_beta_micro_per_c !== null) {
             patchInputs({ helper: { water_beta_micro_per_c: data.water_beta_micro_per_c } });
@@ -235,14 +274,25 @@ export function CoefficientsPage() {
   }
 
   function runBackendCompare() {
+    setBackendCompareError(null);
     if (inputs.pressure.temperature_c === null || inputs.pressure.pressure_bar === null) {
-      pushToast("error", "Backend karşılaştırması yapılamadı", "Sıcaklık ve basınç girilmelidir.");
+      const msg = "Sıcaklık ve basınç girilmelidir.";
+      setBackendCompareError(msg);
+      pushToast("error", "Backend karşılaştırması yapılamadı", msg);
       return;
     }
-    backendCompare.mutate({
-      temperature_c: inputs.pressure.temperature_c,
-      pressure_bar: inputs.pressure.pressure_bar,
-    });
+    backendCompare.mutate(
+      {
+        temperature_c: inputs.pressure.temperature_c,
+        pressure_bar: inputs.pressure.pressure_bar,
+      },
+      {
+        onError: (error) => {
+          setBackendCompareError(error.message);
+          pushToast("error", "Backend karşılaştırması başarısız", error.message);
+        },
+      },
+    );
   }
 
   function exportBackendComparison(format: "txt" | "csv") {
@@ -268,6 +318,17 @@ export function CoefficientsPage() {
 
   const activeA = aMode === "manual" ? context.a_micro_per_bar : aResult?.a_micro_per_bar ?? context.a_micro_per_bar;
 
+  const bBadgeState =
+    bStale && (bResult || inputs.pressure.b_micro_per_c !== null)
+      ? "stale"
+      : bResult?.source === "auto"
+        ? "computed"
+        : bResult
+          ? "reference"
+          : inputs.pressure.b_micro_per_c !== null
+            ? "manual"
+            : "empty";
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -280,7 +341,7 @@ export function CoefficientsPage() {
               A <CoefficientBadge state={aResult?.state ?? (activeA !== null ? "manual" : "empty")} />
             </span>
             <span className="flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
-              B <CoefficientBadge state={bResult ? "reference" : inputs.pressure.b_micro_per_c !== null ? "manual" : "empty"} />
+              B <CoefficientBadge state={bBadgeState} />
             </span>
             <span className="chip">{inputs.modes.steel_model}</span>
             <Badge tone={bCompare ? "pass" : "pending"}>
@@ -313,7 +374,7 @@ export function CoefficientsPage() {
           title="A — su sıkıştırılabilirliği"
           description="10⁻⁶/bar mertebesinde; test sıcaklığı ve basıncına bağlıdır."
           icon={FlaskConical}
-          action={<CoefficientBadge state={aResult?.state ?? (activeA ? "manual" : "empty")} />}
+          action={<CoefficientBadge state={aResult?.state ?? (activeA !== null ? "manual" : "empty")} />}
         >
           <div className="mb-3 seg-control" role="group" aria-label="A hedef testi">
             <button type="button" className="seg-btn" aria-pressed={aTarget === "air"} onClick={() => setATarget("air")}>
@@ -389,7 +450,7 @@ export function CoefficientsPage() {
               <SelectField
                 label="Su özelliği backend'i"
                 value={activeWaterBackend}
-                onChange={(value) => patchInputs({ water_backend: value })}
+                onChange={updateWaterBackend}
                 options={(meta?.water_backends ?? []).map((backend) => ({
                   value: backend.key,
                   label: `${backend.label}${backend.distribution_ready ? "" : " (dağıtım dışı)"}`,
@@ -459,7 +520,7 @@ export function CoefficientsPage() {
           title="B — basınç değişim katsayısı"
           description="Varsayılan kurum içi tablodur. Otomatik modda β − 3α (hacimsel) kullanılır."
           icon={Sparkles}
-          action={<CoefficientBadge state={bResult?.source === "auto" ? "computed" : bResult ? "reference" : inputs.pressure.b_micro_per_c !== null ? "manual" : "empty"} />}
+          action={<CoefficientBadge state={bBadgeState} />}
         >
           <div className="mb-3 seg-control" role="group" aria-label="B kaynağı">
             {B_SOURCES.map((source) => (
@@ -470,6 +531,7 @@ export function CoefficientsPage() {
                 aria-pressed={inputs.modes.pressure_b_source === source.value}
                 title={source.note}
                 onClick={() => {
+                  setBStale(true);
                   patchInputs({
                     modes: {
                       pressure_b_source: source.value,
@@ -499,13 +561,21 @@ export function CoefficientsPage() {
               label="Su sıcaklığı (B)"
               unit="°C"
               value={inputs.pressure.temperature_c}
-              onChange={(value) => patchInputs({ pressure: { temperature_c: value } })}
+              onChange={(value) => {
+                setBStale(true);
+                markAStale("pressure");
+                patchInputs({ pressure: { temperature_c: value } });
+              }}
             />
             <NumberField
               label="Su basıncı (B)"
               unit="bar"
               value={inputs.pressure.pressure_bar}
-              onChange={(value) => patchInputs({ pressure: { pressure_bar: value } })}
+              onChange={(value) => {
+                setBStale(true);
+                markAStale("pressure");
+                patchInputs({ pressure: { pressure_bar: value } });
+              }}
             />
           </FieldGrid>
 
@@ -513,11 +583,12 @@ export function CoefficientsPage() {
             <SelectField
               label="Çelik modeli"
               value={inputs.modes.steel_model}
-              onChange={(value) =>
+              onChange={(value) => {
+                setBStale(true);
                 patchInputs({
                   modes: { steel_model: value as typeof inputs.modes.steel_model },
-                })
-              }
+                });
+              }}
               options={STEEL_MODEL_OPTIONS.map((model) => ({
                 value: model.value,
                 label: model.label,
@@ -533,9 +604,10 @@ export function CoefficientsPage() {
               label="Çelik α"
               unit="10⁻⁶/°C"
               value={inputs.helper.steel_alpha_micro_per_c}
-              onChange={(value) =>
-                patchInputs({ helper: { steel_alpha_micro_per_c: value ?? 12 } })
-              }
+              onChange={(value) => {
+                setBStale(true);
+                patchInputs({ helper: { steel_alpha_micro_per_c: value ?? 12 } });
+              }}
               min={0.1}
               disabled={inputs.modes.pressure_b_source !== "auto"}
               help="Karbon çelik varsayılanı 12,0."
@@ -548,6 +620,7 @@ export function CoefficientsPage() {
               value={inputs.modes.steel_preset}
               onChange={(value) => {
                 const preset = STEEL_PRESETS.find((item) => item.label === value);
+                setBStale(true);
                 patchInputs({
                   modes: { steel_preset: value },
                   helper: {
@@ -562,7 +635,7 @@ export function CoefficientsPage() {
               <SelectField
                 label="Su özelliği backend'i (auto β)"
                 value={activeWaterBackend}
-                onChange={(value) => patchInputs({ water_backend: value })}
+                onChange={updateWaterBackend}
                 options={(meta?.water_backends ?? []).map((backend) => ({
                   value: backend.key,
                   label: `${backend.label}${backend.distribution_ready ? "" : " (dağıtım dışı)"}`,
@@ -685,7 +758,11 @@ export function CoefficientsPage() {
         {compareError ? <InlineNotice tone="danger" title="Karşılaştırma başarısız">{compareError}</InlineNotice> : null}
         {bCompare ? (
           <>
-            <div className="table-wrap scroll-thin mt-1">
+            <div
+              role="region"
+              aria-label="Üç kaynak karşılaştırma tablosu"
+              className="table-wrap scroll-thin mt-1"
+            >
               <table className="data">
                 <caption>
                   T = {fmt.c(bCompare.temperature_c)} · P = {fmt.bar(bCompare.pressure_bar)}
@@ -711,15 +788,15 @@ export function CoefficientsPage() {
                         : row.b_micro_per_c - bCompare.institutional.b_micro_per_c;
                     return (
                       <tr key={key} className={cn(key === inputs.modes.pressure_b_source && "bg-[var(--primary-soft)]")}>
-                        <td>
-                          <div className="flex items-center gap-2">
+                        <th scope="row">
+                          <div className="flex items-center gap-2 font-normal">
                             <span className="font-medium text-[var(--text)]">{row.label}</span>
                             {key === inputs.modes.pressure_b_source ? <Badge tone="info">seçili</Badge> : null}
                           </div>
-                        </td>
+                        </th>
                         <td className="num">{num(row.b_micro_per_c, 6)}</td>
-                        <td className={cn("num", delta === 0 ? "text-[var(--text-faint)]" : "tone-warning")}>
-                          {delta === 0 ? "—" : `${delta > 0 ? "+" : ""}${num(delta, 6)}`}
+                        <td className={cn("num", formatSignedDelta(delta) === "—" ? "text-[var(--text-faint)]" : "tone-warning")}>
+                          {formatSignedDelta(delta)}
                         </td>
                         <td>
                           {row.repaired_table ? <Badge tone="warning">onarıldı</Badge> : <Badge tone="pass">ham</Badge>}
@@ -785,6 +862,13 @@ export function CoefficientsPage() {
             </div>
           }
         >
+          {backendCompareError ? (
+            <div className="mb-3">
+              <InlineNotice tone="danger" title="Backend karşılaştırması başarısız" icon={AlertTriangle}>
+                {backendCompareError}
+              </InlineNotice>
+            </div>
+          ) : null}
           {results.backendCompare ? (
             (() => {
               const items = results.backendCompare.items;
@@ -842,15 +926,11 @@ export function CoefficientsPage() {
                               <>
                                 <td className="num">{num(item.a_micro_per_bar, 6)}</td>
                                 <td className="num text-[var(--text-faint)]">
-                                  {deltaA === null || deltaA === 0
-                                    ? "—"
-                                    : `${deltaA > 0 ? "+" : ""}${num(deltaA, 6)}`}
+                                  {formatSignedDelta(deltaA)}
                                 </td>
                                 <td className="num">{num(item.beta_micro_per_c, 6)}</td>
                                 <td className="num text-[var(--text-faint)]">
-                                  {deltaBeta === null || deltaBeta === 0
-                                    ? "—"
-                                    : `${deltaBeta > 0 ? "+" : ""}${num(deltaBeta, 6)}`}
+                                  {formatSignedDelta(deltaBeta)}
                                 </td>
                                 <td className="num">{num(item.density_kg_per_m3, 2)}</td>
                                 <td>
@@ -860,7 +940,7 @@ export function CoefficientsPage() {
                                     <Button
                                       size="sm"
                                       variant="ghost"
-                                      onClick={() => patchInputs({ water_backend: item.backend.key })}
+                                      onClick={() => updateWaterBackend(item.backend.key)}
                                     >
                                       Seç
                                     </Button>

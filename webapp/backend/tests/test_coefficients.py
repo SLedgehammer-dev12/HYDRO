@@ -180,3 +180,37 @@ def test_backend_comparison_partial_success(client):
     assert table["error"] is None
     assert math.isclose(table["a_micro_per_bar"], 44.971994, rel_tol=1e-6)
     assert table["density_kg_per_m3"] is not None
+
+
+def test_backend_comparison_sanitizes_unexpected_errors(client, monkeypatch):
+    from hidrostatik_test.domain import water_properties as wp
+
+    class BrokenBackend:
+        def calculate_water_compressibility_a(self, _t: float, _p: float) -> float:
+            raise RuntimeError("secret /internal/path failure")
+
+        def calculate_water_thermal_expansion_beta(self, _t: float, _p: float) -> float:
+            return 0.0
+
+        def calculate_water_density(self, _t: float, _p: float) -> float:
+            return 1000.0
+
+    orig_get = wp.get_water_property_backend
+
+    def fake_get(backend=None):
+        if backend == "table_v1":
+            return BrokenBackend()
+        return orig_get(backend)
+
+    monkeypatch.setattr(wp, "get_water_property_backend", fake_get)
+    res = client.post(
+        "/api/coefficients/backend-comparison",
+        json={"temperature_c": 20.0, "pressure_bar": 80.0},
+    )
+    assert res.status_code == 200
+    table = next(item for item in res.json()["items"] if item["backend"]["key"] == "table_v1")
+    assert table["a_micro_per_bar"] is None
+    assert table["error"] is not None
+    assert "secret" not in table["error"]
+    assert "/internal/path" not in table["error"]
+    assert "beklenmeyen" in table["error"]

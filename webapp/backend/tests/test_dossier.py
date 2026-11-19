@@ -1714,3 +1714,62 @@ def test_ocr_report_meta_fallback_and_safety_report_export(client, headers):
     restored, _ = apply_snapshot({}, snap)
     assert restored["water_backend"] == "table_v1_bicubic"
     assert restored["report"]["operator"] == "Ece Yilmaz"
+
+
+def test_zero_celsius_ambient_preserved_and_lazy_backend_comparison(client, headers):
+    from app import db as app_db
+    from app.models import HydroSession
+    from app.services.dossier import _first_finite, evaluate_operational_checks
+    from app.services.reports import build_context
+
+    from hidrostatik_test.domain import AirContentInputs, PipeSection, evaluate_air_content_test
+
+    assert _first_finite(0.0, 12.0) == 0.0
+    assert _first_finite(None, 0.0) == 0.0
+
+    zero_checks, zero_details = evaluate_operational_checks(
+        {"ambient_temperature_c": 0.0},
+        {},
+        {"air": {"status": "pending"}, "pressure": {"status": "pending"}},
+    )
+    assert zero_checks["ambient_temp"] is False
+    assert zero_details["ambient_temp"]["status"] == "failed"
+    assert "0.0 °C" in zero_details["ambient_temp"]["message"]
+
+    # Boundary 2.0 C passes without triggering Spec 10.1 warning, and build_context
+    # skips backend_comparison unless include_backend_comparison=True.
+    r_sess = client.post(
+        "/api/sessions",
+        json={
+            "name": " Boundary 2C ",
+            "inputs": {
+                "air": {"temperature_c": 10.0, "pressure_bar": 50.0, "ambient_temperature_c": 2.0},
+                "pressure": {"temperature_c": 10.0, "pressure_bar": 50.0},
+            },
+        },
+        headers=headers,
+    )
+    assert r_sess.status_code == 201
+    sess_id = r_sess.json()["id"]
+    r_txt = client.get(f"/api/sessions/{sess_id}/export?format=txt", headers=headers)
+    assert r_txt.status_code == 200
+    assert "UYARI (Sartname 10.1)" not in r_txt.text
+
+    with app_db.session_scope() as db:
+        row = db.get(HydroSession, sess_id)
+        assert row is not None
+        ctx_no_cmp = build_context(row, [], include_backend_comparison=False)
+        assert ctx_no_cmp["backend_comparison"] is None
+        ctx_with_cmp = build_context(row, [], include_backend_comparison=True)
+        assert ctx_with_cmp["backend_comparison"] is not None
+
+    res_air = evaluate_air_content_test(
+        AirContentInputs(
+            pipe=PipeSection(outside_diameter_mm=406.4, wall_thickness_mm=8.74, length_m=1000.0),
+            a_micro_per_bar=45.0,
+            pressure_rise_bar=1.0,
+            k_factor=1.02,
+            actual_added_water_m3=0.5,
+        )
+    )
+    assert res_air.acceptance_limit_m3 > 0

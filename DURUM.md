@@ -12,9 +12,9 @@
 
 | Alan | Durum | Kanıt |
 | --- | --- | --- |
-| Masaüstü uygulaması | Çalışıyor, kararlı | 714 unittest PASS (`skipped=1`) |
-| Web backend (FastAPI) | Çalışıyor | 217 pytest PASS (Alembic `0003`), 81 OpenAPI path / 94 operation, 48 dosyada `mypy` temiz |
-| Web frontend (React 19) | Çalışıyor | `npm run lint` (0 hata, `jsx-a11y`), `npm test` (31 Vitest), `npm run typecheck` + `npm run build` + `check:bundle` PASS (`144,0 kB` gzip ilk yükleme JS), `verify-tabs.mjs` 12/12 PASS |
+| Masaüstü uygulaması | Çalışıyor, kararlı | 715 unittest PASS (`skipped=1`) |
+| Web backend (FastAPI) | Çalışıyor | 221 pytest PASS (Alembic `0003`), 81 OpenAPI path / 94 operation, 48 dosyada `mypy` temiz |
+| Web frontend (React 19) | Çalışıyor | `npm run lint` (0 hata, `jsx-a11y`), `npm test` (34 Vitest), `npm run typecheck` + `npm run build` + `check:bundle` PASS (`144,4 kB` gzip ilk yükleme JS), `verify-tabs.mjs` 12/12 PASS |
 | Program İkon & Marka Sistemi | Hazır | Boru kesiti + su dalgası + manometre ikonu (`tools/generate_icons.py`, `assets/icons/*`, `webapp/frontend/public/*`, `<HydroLogo />`, PyInstaller/Inno Setup/Tkinter) |
 | Web Güncelleme Yöneticisi | Çalışıyor | `/api/update/*`, SHA-256 + fail-closed Ed25519 `.sig` doğrulama, `UpdateManagerModal`, macOS `.dmg` / Win `.exe`/`.zip` kurulum |
 | BOTAŞ Test Bölümü Formları | Çalışıyor | Seçenek 1 sol menü (`015`..`023`, `KUR-001`, `KUR-002` + 5 ek), `SectionFormPage`, `rows`/`pig_runs`/`findings`, tekil OCR, `020`/`022` gömülü hesaplama ve `023` (`BOT-FRM-CDB-001-024`) Şartname 16–17 çift yönlü entegrasyonu |
@@ -175,10 +175,10 @@ python3 -m mypy hidrostatik_test/domain/                       # Success: no iss
 python3 -m mypy --ignore-missing-imports webapp/backend/app    # Success: no issues found (48 files)
 
 # Web backend (Alembic + API + domain parity)
-python3 -m pytest webapp/backend/tests -q                      # 217 passed
+python3 -m pytest webapp/backend/tests -q                      # 221 passed
 
 # Masaüstü
-python3 -m unittest discover -s tests -p "test_*.py"           # 714 tests OK (skipped=1)
+python3 -m unittest discover -s tests -p "test_*.py"           # 715 tests OK (skipped=1)
 
 # Masaüstü paketli Web self-test
 python3 webapp/desktop_launcher.py --self-test                 # SELF_TEST_OK
@@ -206,7 +206,7 @@ docker compose -f webapp/docker-compose.yml up --build
 - `@react-three/drei` `Html` React 19 üretim derlemesinde `removeChild` hatası veriyor;
   yerine `SceneHtml` + `SceneLabels` DOM katmanı kullanılıyor. Geri dönülmemeli.
 - Demo proje ID'leri (`demo-*`) backend'e gönderilmez; `App.tsx` ve mutation hook'ları filtreler.
-- İlk yükleme frontend JS paketi rota/Recharts/three.js kod bölme ve lazy-loading ile 144,0 kB gzip altındadır (`npm run check:bundle` ≤ 200 kB bütçe kapısı).
+- İlk yükleme frontend JS paketi rota/Recharts/three.js kod bölme ve lazy-loading ile 144,4 kB gzip altındadır (`npm run check:bundle` ≤ 200 kB bütçe kapısı).
 - `implementation_status.md` içindeki test sayıları bu dosyayla hizalandı.
 - Plan-Profil tarama motoru PDF metin katmanı veya Tesseract/macOS Vision varsa çalışır;
   hiçbiri yoksa yanıt `ocr.available=false` döner.

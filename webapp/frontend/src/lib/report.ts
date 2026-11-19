@@ -81,7 +81,7 @@ export function buildReportText(
   lines.push(`Malzeme kalitesi: ${inputs.material_grade || "—"}`);
   lines.push(`SMYS            : ${fmt.mpa(inputs.section_profile.smys_mpa)}`);
   lines.push(`Location Class  : ${inputs.location_class || "—"}`);
-  lines.push(`Pompa konumu    : ${PUMP_LABELS[inputs.pump_location] ?? inputs.pump_location ?? "—"}`);
+  lines.push(`Pompa konumu    : ${PUMP_LABELS[inputs.pump_location] ?? (inputs.pump_location || "—")}`);
   lines.push(
     `Kotlar (m)      : başlangıç ${num(inputs.section_profile.start_elevation_m, 2)} · en yüksek ${num(
       inputs.section_profile.highest_elevation_m,
@@ -289,6 +289,7 @@ export function buildSnapshot(
       pressure_rise_bar: str(inputs.air.pressure_rise_bar),
       k_factor: str(inputs.air.k_factor),
       actual_added_water_m3: str(inputs.air.actual_added_water_m3),
+      ambient_temperature_c: str(inputs.air.ambient_temperature_c ?? inputs.field.ambient_temperature_c),
     },
     pressure: {
       temperature_c: str(inputs.pressure.temperature_c),
@@ -311,7 +312,44 @@ export function buildSnapshot(
       steel_alpha_micro_per_c: str(inputs.helper.steel_alpha_micro_per_c),
       water_beta_micro_per_c: str(inputs.helper.water_beta_micro_per_c),
     },
-    modes: inputs.modes,
+    modes: {
+      air_a_mode:
+        inputs.modes.air_a_mode === "auto"
+          ? "Otomatik"
+          : inputs.modes.air_a_mode === "table"
+            ? "Tablo"
+            : "Manuel",
+      pressure_a_mode:
+        inputs.modes.pressure_a_mode === "auto"
+          ? "Otomatik"
+          : inputs.modes.pressure_a_mode === "table"
+            ? "Tablo"
+            : "Manuel",
+      pressure_b_mode:
+        inputs.modes.pressure_b_mode === "auto"
+          ? "Otomatik"
+          : inputs.modes.pressure_b_mode === "table"
+            ? "Tablo"
+            : "Manuel",
+      pressure_b_source:
+        inputs.modes.pressure_b_source === "gail"
+          ? "GAIL referans tablosu"
+          : inputs.modes.pressure_b_source === "auto"
+            ? "Otomatik (beta - 3*alpha)"
+            : "Kurum ici tablo (varsayilan)",
+      steel_model:
+        inputs.modes.steel_model === "linear"
+          ? "Lineer alpha"
+          : inputs.modes.steel_model === "volumetric_temperature"
+            ? "Sicakliga bagli 3*alpha(T)"
+            : "Hacimsel 3*alpha (varsayilan)",
+      air_a_reference: inputs.modes.air_a_reference,
+      pressure_a_reference: inputs.modes.pressure_a_reference,
+      pressure_b_reference: inputs.modes.pressure_b_reference,
+      k_preset: inputs.modes.k_preset,
+      steel_preset: inputs.modes.steel_preset,
+      pig_mode: inputs.modes.pig_mode,
+    },
     checks: inputs.checks,
     geometry_segments: inputs.segments.map((segment) => ({
       outside_diameter_mm: str(segment.outside_diameter_mm),
@@ -378,8 +416,14 @@ export function buildBackendComparisonReportText(
 
 function csvCell(value: string | number | boolean | null | undefined): string {
   if (value === null || value === undefined) return "";
-  const raw = String(value);
-  return /[",\n\r]/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw;
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? String(value) : "";
+  }
+  if (typeof value === "boolean") {
+    return String(value);
+  }
+  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
 
 export function buildBackendComparisonCsv(

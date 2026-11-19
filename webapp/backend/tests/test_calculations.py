@@ -520,3 +520,27 @@ def test_coefficients_b_and_compare_accept_backend_and_cold_range(client):
     )
     assert cmp_res.status_code == 200, cmp_res.text
     assert "table_v1" in cmp_res.json()["auto"]["note"]
+
+
+def test_evaluate_test_coefficient_b_propagates_backend(client):
+    sess = client.post(
+        "/api/sessions",
+        json={"name": "Eval B Backend", "inputs": {"water_backend": "table_v1"}},
+    ).json()
+    saved = client.post(
+        f"/api/sessions/{sess['id']}/results",
+        json={
+            "test_type": "coefficient_b",
+            "payload": {
+                "source": "auto",
+                "temperature_c": 10.0,
+                "pressure_bar": 50.0,
+                "steel_alpha_micro_per_c": 12.0,
+                "steel_model": "volumetric",
+                "backend": "table_v1",
+            },
+        },
+        headers={"If-Match": f'"{sess["revision"]}"'},
+    )
+    assert saved.status_code == 201, saved.text
+    assert "table_v1" in saved.json()["result"]["note"]

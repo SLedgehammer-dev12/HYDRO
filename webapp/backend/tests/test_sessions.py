@@ -572,3 +572,41 @@ def test_scene_custom_equipment_and_approximate_warning(client):
     assert single_pt.status_code == 200, single_pt.text
     single_scene = client.get(f"/api/sessions/{default_session['id']}/scene").json()
     assert single_scene["approximate_profile"] is True
+
+
+def test_ambient_temperature_symmetric_patch_clear_and_backend_case_insensitive(client):
+    from app.services.snapshot import resolve_backend_key
+
+    assert resolve_backend_key("Table Interpolation v1 (bicubic)") in (
+        "table_v1_bicubic",
+        None,
+    )
+    assert resolve_backend_key("  table interpolation v1 ") == "table_v1"
+
+    sess = create_session(client, name="Ambient Mirror")
+    p1 = client.put(
+        f"/api/sessions/{sess['id']}",
+        json={"inputs": {"air": {"ambient_temperature_c": 1.5}}},
+        headers={"If-Match": f'"{sess["revision"]}"'},
+    )
+    assert p1.status_code == 200, p1.text
+    assert p1.json()["inputs"]["air"]["ambient_temperature_c"] == 1.5
+    assert p1.json()["inputs"]["field"]["ambient_temperature_c"] == 1.5
+
+    p2 = client.put(
+        f"/api/sessions/{sess['id']}",
+        json={"inputs": {"field": {"ambient_temperature_c": 6.0}}},
+        headers={"If-Match": f'"{p1.json()["revision"]}"'},
+    )
+    assert p2.status_code == 200, p2.text
+    assert p2.json()["inputs"]["air"]["ambient_temperature_c"] == 6.0
+    assert p2.json()["inputs"]["field"]["ambient_temperature_c"] == 6.0
+
+    p3 = client.put(
+        f"/api/sessions/{sess['id']}",
+        json={"inputs": {"air": {"ambient_temperature_c": None}}},
+        headers={"If-Match": f'"{p2.json()["revision"]}"'},
+    )
+    assert p3.status_code == 200, p3.text
+    assert p3.json()["inputs"]["air"]["ambient_temperature_c"] is None
+    assert p3.json()["inputs"]["field"]["ambient_temperature_c"] is None

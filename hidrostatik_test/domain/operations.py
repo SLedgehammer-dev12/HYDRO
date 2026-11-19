@@ -24,7 +24,11 @@ class FillTemperatureResult:
 def evaluate_fill_temperature(ambient_temp_c: float) -> FillTemperatureResult:
     """Evaluate ambient or water fill temperature against Specification 10.1 (+2 C minimum)."""
 
-    if not isfinite(ambient_temp_c) or ambient_temp_c <= -273.15:
+    if (
+        isinstance(ambient_temp_c, bool)
+        or not isfinite(ambient_temp_c)
+        or ambient_temp_c <= -273.15
+    ):
         raise ValidationError("Ortam/dolum sicakligi sonlu ve fiziksel bir deger olmalidir.")
 
     passed = ambient_temp_c >= AMBIENT_TEMP_LIMIT_C - FLOAT_TOLERANCE

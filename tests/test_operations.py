@@ -55,6 +55,11 @@ class FillTemperatureOperationTests(unittest.TestCase):
             with self.assertRaises(ValidationError):
                 evaluate_fill_temperature(bad)
 
+    def test_fill_temperature_rejects_booleans(self) -> None:
+        for bad in (True, False):
+            with self.assertRaises(ValidationError):
+                evaluate_fill_temperature(bad)
+
 
 if __name__ == "__main__":
     unittest.main()

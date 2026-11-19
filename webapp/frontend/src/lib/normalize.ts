@@ -45,21 +45,69 @@ const asBool = (value: unknown, fallback: boolean): boolean =>
 const A_MODES: AMode[] = ["auto", "table", "manual"];
 const B_SOURCES: BSource[] = ["institutional", "gail", "auto"];
 const STEEL_MODELS: SteelModel[] = ["volumetric", "linear", "volumetric_temperature"];
-const KNOWN_WATER_BACKENDS = new Set(["table_v1", "table_v1_bicubic", "coolprop", "iapws"]);
+const KNOWN_WATER_BACKENDS = new Set(["table_v1", "table_v1_bicubic", "coolprop", "iapws95_dev"]);
+
+const DESKTOP_MODE_MAP: Record<string, AMode> = {
+  auto: "auto",
+  otomatik: "auto",
+  table: "table",
+  tablo: "table",
+  manual: "manual",
+  manuel: "manual",
+};
+
+function resolveWaterBackendOption(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  const trimmed = raw.trim();
+  const folded = trimmed.toLowerCase();
+  if (!folded) return "";
+  if (folded === "iapws") return "iapws95_dev";
+  if (KNOWN_WATER_BACKENDS.has(trimmed)) return trimmed;
+  if (KNOWN_WATER_BACKENDS.has(folded)) return folded;
+  if (folded.startsWith("table interpolation v1 (bicubic)")) return "table_v1_bicubic";
+  if (folded.startsWith("table interpolation v1")) return "table_v1";
+  if (folded.startsWith("coolprop")) return "coolprop";
+  if (folded.startsWith("iapws")) return "iapws95_dev";
+  return "";
+}
 
 function asAMode(value: unknown, fallback: AMode): AMode {
+  if (typeof value === "string") {
+    const mapped = DESKTOP_MODE_MAP[value.trim().toLowerCase()];
+    if (mapped) return mapped;
+  }
   return A_MODES.includes(value as AMode) ? (value as AMode) : fallback;
 }
 
 function asBSource(value: unknown, fallback: BSource): BSource {
+  if (typeof value === "string") {
+    const folded = value.trim().toLowerCase();
+    if (B_SOURCES.includes(folded as BSource)) return folded as BSource;
+    if (folded.includes("gail")) return "gail";
+    if (folded.includes("otomatik")) return "auto";
+    if (folded.includes("kurum")) return "institutional";
+  }
   return B_SOURCES.includes(value as BSource) ? (value as BSource) : fallback;
 }
 
 function asSteelModel(value: unknown, fallback: SteelModel): SteelModel {
+  if (typeof value === "string") {
+    const folded = value.trim().toLowerCase();
+    if (STEEL_MODELS.includes(folded as SteelModel)) return folded as SteelModel;
+    if (folded.includes("lineer") || folded === "linear") return "linear";
+    if (folded.includes("sicakli") || folded.includes("sıcaklı") || folded.includes("3*alpha(t)")) {
+      return "volumetric_temperature";
+    }
+    if (folded.includes("hacimsel") || folded.includes("volumetric")) return "volumetric";
+  }
   return STEEL_MODELS.includes(value as SteelModel) ? (value as SteelModel) : fallback;
 }
 
 function asBMode(value: unknown, fallback: "auto" | "table" | "manual") {
+  if (typeof value === "string") {
+    const mapped = DESKTOP_MODE_MAP[value.trim().toLowerCase()];
+    if (mapped) return mapped;
+  }
   return value === "auto" || value === "table" || value === "manual" ? value : fallback;
 }
 
@@ -179,11 +227,14 @@ export function normalizeInputs(raw: unknown): AppInputs {
 
   const airRef = asString(modes.air_a_reference, base.modes.air_a_reference).trim();
   const pressRef = asString(modes.pressure_a_reference, base.modes.pressure_a_reference).trim();
-  const explicitWaterBackend = asString(raw.water_backend).trim();
+  const rawExplicitBackend = asString(raw.water_backend).trim();
+  const explicitWaterBackend =
+    rawExplicitBackend === "iapws" ? "iapws95_dev" : rawExplicitBackend;
   const migratedWaterBackend =
     explicitWaterBackend ||
-    (KNOWN_WATER_BACKENDS.has(airRef) ? airRef : "") ||
-    (KNOWN_WATER_BACKENDS.has(pressRef) ? pressRef : "") ||
+    resolveWaterBackendOption(raw.water_backend_option) ||
+    resolveWaterBackendOption(airRef) ||
+    resolveWaterBackendOption(pressRef) ||
     base.water_backend;
 
   const airAmbient = asNumber(air.ambient_temperature_c, null);
@@ -220,7 +271,7 @@ export function normalizeInputs(raw: unknown): AppInputs {
       size_option: asString(catalog.size_option, base.geometry_catalog.size_option),
       schedule_option: asString(catalog.schedule_option, base.geometry_catalog.schedule_option),
     },
-    segments: asSegments(raw.segments, base.segments),
+    segments: asSegments(raw.segments ?? raw.geometry_segments, base.segments),
     profile_points: asProfilePoints(raw.profile_points),
     landmarks: asLandmarks(raw.landmarks),
     equipment: asEquipment(raw.equipment),
@@ -275,9 +326,10 @@ export function normalizeInputs(raw: unknown): AppInputs {
     },
     modes: {
       air_a_mode: asAMode(modes.air_a_mode, base.modes.air_a_mode),
-      air_a_reference: KNOWN_WATER_BACKENDS.has(airRef) ? base.modes.air_a_reference : airRef,
+      air_a_reference: KNOWN_WATER_BACKENDS.has(airRef) || airRef === "iapws" ? base.modes.air_a_reference : airRef,
       pressure_a_mode: asAMode(modes.pressure_a_mode, base.modes.pressure_a_mode),
-      pressure_a_reference: KNOWN_WATER_BACKENDS.has(pressRef) ? base.modes.pressure_a_reference : pressRef,
+      pressure_a_reference:
+        KNOWN_WATER_BACKENDS.has(pressRef) || pressRef === "iapws" ? base.modes.pressure_a_reference : pressRef,
       pressure_b_mode: asBMode(modes.pressure_b_mode, base.modes.pressure_b_mode),
       pressure_b_source: asBSource(modes.pressure_b_source, base.modes.pressure_b_source),
       pressure_b_reference: asString(modes.pressure_b_reference, base.modes.pressure_b_reference),

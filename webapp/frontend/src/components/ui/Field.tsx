@@ -70,7 +70,8 @@ export interface NumberFieldProps {
 }
 
 function isIntermediate(text: string): boolean {
-  return /^[+-]?[.,]?$/.test(text.trim());
+  const trimmed = text.trim();
+  return trimmed.length > 0 && /^[+-]?[.,]?$/.test(trimmed);
 }
 
 export function NumberField({

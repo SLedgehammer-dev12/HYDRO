@@ -1284,6 +1284,14 @@ def _finite_float(val: Any) -> float | None:
     return num if math.isfinite(num) else None
 
 
+def _first_finite(*values: Any) -> float | None:
+    for val in values:
+        num = _finite_float(val)
+        if num is not None:
+            return num
+    return None
+
+
 def _extract_landscape_monitoring_columns(text: str, row_count: int) -> dict[str, Any]:
     """Recover column-split Basınç, Toprak/Boru temps & Avg. Boru 4h blocks on rotated 018/021 scans."""
     lines = [" ".join(ln.split()).strip() for ln in text.splitlines() if ln.strip()]
@@ -2112,8 +2120,9 @@ def evaluate_section_calculations(
     vpa = air_data.get("vpa_m3")
     vp_rep = air_data.get("vp_m3")
     a_air = air_data.get("a_micro_per_bar")
-    k_val = air_data.get("k_factor") or 1.02
-    if pipe is not None and a_air and vpa is not None:
+    k_val_raw = air_data.get("k_factor")
+    k_val = 1.02 if k_val_raw is None else k_val_raw
+    if pipe is not None and a_air is not None and vpa is not None:
         try:
             res = evaluate_air_content_test(
                 AirContentInputs(
@@ -4078,22 +4087,22 @@ def _cumulative_recompute_section(
         air_calc.get("vpa_m3") if air_calc.get("vpa_m3") is not None else air_raw.get("vpa_m3")
     )
     _set_if_needed(air_inp, "actual_added_water_m3", vpa_val, overwrite_values)
-    air_p_val = (
-        _finite_float(merged_header.get("test_pressure_bar"))
-        or _finite_float(merged_header.get("monitored_pressure_bar"))
-        or _finite_float(sp.get("design_pressure_bar"))
+    air_p_val = _first_finite(
+        merged_header.get("test_pressure_bar"),
+        merged_header.get("monitored_pressure_bar"),
+        sp.get("design_pressure_bar"),
     )
     _set_if_needed(air_inp, "pressure_bar", air_p_val, overwrite_values)
-    air_t_val = (
-        _finite_float(fill_ext.get("max_temp_c"))
-        or _finite_float(press_ext.get("temp_c"))
-        or _finite_float(pt_mon.get("pipe_start_c"))
+    air_t_val = _first_finite(
+        fill_ext.get("max_temp_c"),
+        press_ext.get("temp_c"),
+        pt_mon.get("pipe_start_c"),
     )
     _set_if_needed(air_inp, "temperature_c", air_t_val, overwrite_values)
-    air_amb = (
-        _finite_float(leak_mon.get("min_temp_c"))
-        or _finite_float(fill_ext.get("min_temp_c"))
-        or _finite_float(pt_mon.get("min_temp_c"))
+    air_amb = _first_finite(
+        leak_mon.get("min_temp_c"),
+        fill_ext.get("min_temp_c"),
+        pt_mon.get("min_temp_c"),
     )
     _set_if_needed(air_inp, "ambient_temperature_c", air_amb, overwrite_values)
     inputs["air"] = air_inp
@@ -4106,7 +4115,9 @@ def _cumulative_recompute_section(
     _set_if_needed(
         pr_inp,
         "a_micro_per_bar",
-        pres_calc.get("a_micro_per_bar") or pr_raw.get("a_micro_per_bar"),
+        pres_calc.get("a_micro_per_bar")
+        if pres_calc.get("a_micro_per_bar") is not None
+        else pr_raw.get("a_micro_per_bar"),
         overwrite_values,
     )
     _set_if_needed(
@@ -4127,10 +4138,10 @@ def _cumulative_recompute_section(
     )
     pa_v = pres_calc.get("pa_bar") if pres_calc.get("pa_bar") is not None else pr_raw.get("pa_bar")
     _set_if_needed(pr_inp, "actual_pressure_change_bar", pa_v, overwrite_values)
-    pr_p_val = (
-        _finite_float(pt_mon.get("p_start_bar"))
-        or _finite_float(merged_header.get("test_pressure_bar"))
-        or _finite_float(merged_header.get("monitored_pressure_bar"))
+    pr_p_val = _first_finite(
+        pt_mon.get("p_start_bar"),
+        merged_header.get("test_pressure_bar"),
+        merged_header.get("monitored_pressure_bar"),
     )
     _set_if_needed(pr_inp, "pressure_bar", pr_p_val, overwrite_values)
     _set_if_needed(
@@ -4140,8 +4151,9 @@ def _cumulative_recompute_section(
     inputs["pressure"] = pr_inp
 
     pig_calc = calcs.get("pig") or {}
-    mon_p_field = _finite_float(merged_header.get("monitored_pressure_bar")) or _finite_float(
-        pt_mon.get("p_start_bar")
+    mon_p_field = _first_finite(
+        merged_header.get("monitored_pressure_bar"),
+        pt_mon.get("p_start_bar"),
     )
     _set_if_needed(fld, "monitored_pressure_bar", mon_p_field, overwrite_values)
     _set_if_needed(fld, "ambient_temperature_c", air_amb, overwrite_values)

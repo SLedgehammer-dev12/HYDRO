@@ -14,7 +14,6 @@ from hidrostatik_test.app_metadata import (
     SPEC_DOCUMENT_TITLE,
 )
 from hidrostatik_test.domain import (
-    AMBIENT_TEMP_LIMIT_C,
     ValidationError,
     evaluate_fill_temperature,
 )
@@ -99,7 +98,12 @@ def _resolve_ambient_temp(inputs: dict[str, Any]) -> float | None:
     return ambient
 
 
-def build_context(session: HydroSession, results: Iterable[TestResult]) -> dict[str, Any]:
+def build_context(
+    session: HydroSession,
+    results: Iterable[TestResult],
+    *,
+    include_backend_comparison: bool = False,
+) -> dict[str, Any]:
     inputs = session.inputs or {}
     latest = _latest_by_type(results)
     geometry = inputs.get("geometry") or {}
@@ -160,7 +164,8 @@ def build_context(session: HydroSession, results: Iterable[TestResult]) -> dict[
     if ref_p is None:
         ref_p = as_float(air.get("pressure_bar"))
     backend_cmp: dict[str, Any] | None = None
-    if ref_t is not None and ref_p is not None and ref_p > 0:
+    backend_cmp_error: str | None = None
+    if include_backend_comparison and ref_t is not None and ref_p is not None and ref_p > 0:
         try:
             backend_cmp = coefficient_service.backend_comparison(
                 temperature_c=ref_t,
@@ -168,7 +173,8 @@ def build_context(session: HydroSession, results: Iterable[TestResult]) -> dict[
                 include_dev_backends=False,
             )
         except Exception:
-            backend_cmp = None
+            logger.exception("Backend comparison failed during report export")
+            backend_cmp_error = "Su ozelligi backend karsilastirmasi uretilemedi."
     geometry_data = {
         "Dis cap (mm)": fmt_number(od, 2) or "-",
         "Et kalinligi (mm)": fmt_number(wt, 2) or "-",
@@ -221,6 +227,7 @@ def build_context(session: HydroSession, results: Iterable[TestResult]) -> dict[
         "ambient_temperature_c": ambient_temp,
         "fill_temperature_eval": fill_eval,
         "backend_comparison": backend_cmp,
+        "backend_comparison_error": backend_cmp_error,
     }
 
 
@@ -286,7 +293,7 @@ def build_report_text(context: dict[str, Any], session: HydroSession) -> str:
         f"Fiili ilave su Vpa (m³): {fmt_number(as_float(air.get('actual_added_water_m3')))}",
         f"Ortam hava sicakligi (10.1, °C): {fmt_number(ambient_temp, 1) if ambient_temp is not None else '-'}",
     ]
-    if ambient_temp is not None and ambient_temp < AMBIENT_TEMP_LIMIT_C and fill_eval is not None:
+    if ambient_temp is not None and fill_eval is not None and not fill_eval.passed:
         air_lines.append(f"UYARI (Sartname 10.1): {fill_eval.message}")
 
     t_initial = as_float(pressure.get("t_initial_c"))
@@ -413,6 +420,13 @@ def build_report_text(context: dict[str, Any], session: HydroSession) -> str:
                 f"beta={fmt_number(beta_val, 6)} (dbeta={dbeta_str}) | "
                 f"rho={fmt_number(rho_val, 2)} kg/m3"
             )
+    elif context.get("backend_comparison_error"):
+        lines.extend(
+            [
+                "",
+                f"Su Ozelligi Backend Karsilastirmasi: {context['backend_comparison_error']}",
+            ]
+        )
 
     lines.extend(
         [
@@ -470,7 +484,7 @@ def export_session(
     *,
     fmt: str,
 ) -> tuple[Path, dict[str, Any]]:
-    context = build_context(session, results)
+    context = build_context(session, results, include_backend_comparison=(fmt == "txt"))
     text = build_report_text(context, session) if fmt == "txt" else None
     target = _target_path(settings, session.id, fmt)
     try:

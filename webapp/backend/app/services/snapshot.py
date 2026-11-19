@@ -42,6 +42,7 @@ NUMERIC_SECTIONS: dict[str, tuple[str, ...]] = {
         "pressure_rise_bar",
         "k_factor",
         "actual_added_water_m3",
+        "ambient_temperature_c",
     ),
     "pressure": (
         "temperature_c",
@@ -81,14 +82,18 @@ def resolve_backend_key(label: str | None) -> str | None:
     if not label:
         return None
     text = label.strip()
+    folded = text.casefold()
     labels = _backend_labels()
-    if text in labels:
-        return text
-    for key, value in labels.items():
-        if text == value:
+    for key in labels:
+        if folded == key.casefold():
             return key
+    for key, value in labels.items():
+        if folded == value.casefold():
+            return key
+    if folded == "iapws":
+        return "iapws95_dev" if "iapws95_dev" in labels else None
     for key, value in sorted(labels.items(), key=lambda item: len(item[1]), reverse=True):
-        if text.startswith(value):
+        if folded.startswith(value.casefold()):
             return key
     return None
 

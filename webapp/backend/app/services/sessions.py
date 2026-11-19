@@ -171,16 +171,26 @@ def normalize_inputs(raw: dict[str, Any] | None) -> dict[str, Any]:
         merged["report"][key] = text
     if not isinstance(merged.get("report_entries"), list):
         merged["report_entries"] = []
-    # Mirror ambient temperature symmetrically between ``air`` and canonical ``field``.
+    # Keep air.ambient_temperature_c and field.ambient_temperature_c canonical & identical.
     air_block = merged.get("air")
     field_block = merged.get("field")
     if isinstance(air_block, dict) and isinstance(field_block, dict):
         air_ambient = as_float(air_block.get("ambient_temperature_c"))
         field_ambient = as_float(field_block.get("ambient_temperature_c"))
-        if field_ambient is None and air_ambient is not None:
-            field_block["ambient_temperature_c"] = air_ambient
-        elif air_ambient is None and field_ambient is not None:
-            air_block["ambient_temperature_c"] = field_ambient
+        raw_air_amb = (raw.get("air") if isinstance(raw, dict) else None) or {}
+        raw_fld_amb = (raw.get("field") if isinstance(raw, dict) else None) or {}
+        has_raw_air = isinstance(raw_air_amb, dict) and "ambient_temperature_c" in raw_air_amb
+        has_raw_fld = isinstance(raw_fld_amb, dict) and "ambient_temperature_c" in raw_fld_amb
+        if has_raw_fld and not has_raw_air:
+            canonical_ambient = field_ambient
+        elif has_raw_air and not has_raw_fld:
+            canonical_ambient = air_ambient
+        elif air_ambient is not None:
+            canonical_ambient = air_ambient
+        else:
+            canonical_ambient = field_ambient
+        air_block["ambient_temperature_c"] = canonical_ambient
+        field_block["ambient_temperature_c"] = canonical_ambient
     return merged
 
 
@@ -453,12 +463,26 @@ def update_session(
     if "notes" in changes and changes["notes"] is not None:
         session.notes = str(changes["notes"])
     if "inputs" in changes and changes["inputs"] is not None:
-        patch = changes["inputs"]
-        if not isinstance(patch, dict):
+        raw_patch = changes["inputs"]
+        if not isinstance(raw_patch, dict):
             raise AppError("validation_error", "inputs bir nesne olmalidir.", status_code=422)
         if replace_inputs:
-            session.inputs = normalize_inputs(patch)
+            session.inputs = normalize_inputs(raw_patch)
         else:
+            patch = dict(raw_patch)
+            patch_air = patch.get("air")
+            patch_field = patch.get("field")
+            if isinstance(patch_air, dict) and "ambient_temperature_c" in patch_air:
+                if not (isinstance(patch_field, dict) and "ambient_temperature_c" in patch_field):
+                    patch["field"] = {
+                        **(dict(patch_field) if isinstance(patch_field, dict) else {}),
+                        "ambient_temperature_c": patch_air["ambient_temperature_c"],
+                    }
+            elif isinstance(patch_field, dict) and "ambient_temperature_c" in patch_field:
+                patch["air"] = {
+                    **(dict(patch_air) if isinstance(patch_air, dict) else {}),
+                    "ambient_temperature_c": patch_field["ambient_temperature_c"],
+                }
             session.inputs = normalize_inputs(deep_merge(session.inputs or {}, patch))
     if "wizard_state" in changes:
         session.wizard_state = changes["wizard_state"]

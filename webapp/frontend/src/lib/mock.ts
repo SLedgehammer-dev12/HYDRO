@@ -95,7 +95,7 @@ export const DEMO_META: MetaResponse = {
     },
     {
       key: "table_v1_bicubic",
-      label: "Table Interpolation v1 (bicubic)",
+      label: "Table Interpolation v1 (Bicubic)",
       distribution_ready: true,
       note: "0-40 °C, 1-150 bar · bicubic",
     },
@@ -498,7 +498,7 @@ export function createEmptyInputs(): AppInputs {
       actual_pressure_change_bar: null,
       t_initial_c: null,
       t_final_c: null,
-      derive_delta_t: true,
+      derive_delta_t: false,
     },
     field: {
       ambient_temperature_c: null,
@@ -648,7 +648,7 @@ export function computeA(inputs: CoefficientARequest): CoefficientAResponse {
         inputs.backend === "coolprop"
           ? "CoolProp EOS"
           : inputs.backend === "table_v1_bicubic"
-            ? "Table Interpolation v1 (bicubic)"
+            ? "Table Interpolation v1 (Bicubic)"
             : "Table Interpolation v1",
       distribution_ready: true,
     },
@@ -772,6 +772,14 @@ export function computePressure(request: PressureVariationRequest): PressureVari
   const upper = theoretical + 0.3;
   const margin = request.actual_pressure_change_bar - theoretical;
   const passed = margin <= 0.3 + 1e-9;
+  const negativeB = request.b_micro_per_c < 0;
+  let summaryText = `Pt = ${round(theoretical, 6)} bar, üst sınır = ${round(upper, 6)} bar, Pa = ${round(
+    request.actual_pressure_change_bar,
+    6,
+  )} bar, fark = ${round(margin, 6)} bar. Kural: (Pa - Pt) <= 0.3 bar.`;
+  if (negativeB) {
+    summaryText += " B negatif: dP işareti ters döner ve geçerlidir.";
+  }
 
   return {
     theoretical_pressure_change_bar: round(theoretical, 6),
@@ -779,15 +787,12 @@ export function computePressure(request: PressureVariationRequest): PressureVari
     actual_pressure_change_bar: round(request.actual_pressure_change_bar, 6),
     margin_bar: round(margin, 6),
     passed,
-    negative_b: request.b_micro_per_c < 0,
+    negative_b: negativeB,
     geometry: summary,
     decision: {
       status: passed ? "BASARILI" : "BASARISIZ",
       title: "Basınç Değişim Testi",
-      summary: `Pt = ${round(theoretical, 6)} bar, üst sınır = ${round(upper, 6)} bar, Pa = ${round(
-        request.actual_pressure_change_bar,
-        6,
-      )} bar, fark = ${round(margin, 6)} bar. Kural: (Pa - Pt) <= 0.3 bar.`,
+      summary: summaryText,
       rule: "(Pa - Pt) <= 0.3 bar",
       margin: round(margin, 6),
     },
@@ -1026,7 +1031,7 @@ export function computeBackendComparison(
         error: null,
       },
       {
-        backend: { key: "table_v1_bicubic", label: "Table Interpolation v1 (bicubic)", distribution_ready: true },
+        backend: { key: "table_v1_bicubic", label: "Table Interpolation v1 (Bicubic)", distribution_ready: true },
         a_micro_per_bar: round(base.a_micro_per_bar + 0.000004, 6),
         beta_micro_per_c: round(beta + 0.00012, 6),
         density_kg_per_m3: computeDensity(temperatureC, pressureBar),

@@ -25,13 +25,18 @@ export function RightPanel() {
   const airCoeff = results.coefficients?.airA;
   const pressureB = results.coefficients?.pressureB;
 
+  const isMissingNumber = (value: number | null | undefined): boolean =>
+    value === null || value === undefined || !Number.isFinite(value);
+
   const missing: string[] = [];
   if (!geometry) missing.push("Geometri: dış çap, et kalınlığı ve uzunluk gerekli.");
-  if (!inputs.air.actual_added_water_m3) missing.push("Hava: fiili ilave su (Vpa) girilmedi.");
-  if (!inputs.pressure.delta_t_c) missing.push("Basınç: ΔT girilmedi.");
-  if (!inputs.pressure.actual_pressure_change_bar)
+  if (isMissingNumber(inputs.air.actual_added_water_m3))
+    missing.push("Hava: fiili ilave su (Vpa) girilmedi.");
+  if (isMissingNumber(inputs.pressure.delta_t_c))
+    missing.push("Basınç: ΔT girilmedi.");
+  if (isMissingNumber(inputs.pressure.actual_pressure_change_bar))
     missing.push("Basınç: Pa girilmedi.");
-  if (!inputs.section_profile.smys_mpa)
+  if (isMissingNumber(inputs.section_profile.smys_mpa))
     missing.push("Profil: malzeme kalitesi / SMYS seçilmedi.");
 
   const formProgressTone = formsSummary?.failed_forms?.length

@@ -3,6 +3,7 @@ import {
   DEMO_META,
   computeB,
   computePressure,
+  createDefaultInputs,
   createEmptyInputs,
 } from "./mock";
 import { normalizeInputs } from "./normalize";
@@ -78,6 +79,7 @@ describe("Slice 5 engineering safety & coefficient regressions", () => {
     });
     expect(negativeBNegDt.theoretical_pressure_change_bar).toBeGreaterThan(0);
     expect(negativeBNegDt.negative_b).toBe(true);
+    expect(negativeBNegDt.decision.summary).toContain("B negatif");
 
     const zeroB = computePressure({
       geometry: geom,
@@ -88,6 +90,59 @@ describe("Slice 5 engineering safety & coefficient regressions", () => {
     });
     expect(zeroB.negative_b).toBe(false);
     expect(zeroB.theoretical_pressure_change_bar).toBe(0);
+    expect(createEmptyInputs().pressure.derive_delta_t).toBe(false);
+  });
+
+  it("neutralizes spreadsheet formula prefixes in CSV cells while keeping numbers numeric and roundtrips snapshots", () => {
+    const formulaComparison = {
+      temperature_c: 10,
+      pressure_bar: 50,
+      items: [
+        {
+          backend: { key: "table_v1", label: "=cmd|' /C calc'!A0", distribution_ready: true },
+          a_micro_per_bar: 45.0,
+          beta_micro_per_c: -19.37,
+          density_kg_per_m3: 1000.2,
+          error: null,
+        },
+        {
+          backend: { key: "other", label: "+SUM(A1:A2)", distribution_ready: true },
+          a_micro_per_bar: null,
+          beta_micro_per_c: null,
+          density_kg_per_m3: null,
+          error: "@malicious",
+        },
+      ],
+    };
+    const csv = buildBackendComparisonCsv(formulaComparison, "table_v1");
+    expect(csv).toContain("'=cmd|");
+    expect(csv).toContain("'+SUM(A1:A2)");
+    expect(csv).toContain("'@malicious");
+    // Negative numbers remain plain numeric cells without quote prefix
+    expect(csv).toContain(",-19.37,");
+
+    const defaults = createDefaultInputs();
+    defaults.water_backend = "table_v1_bicubic";
+    defaults.air.ambient_temperature_c = 1.5;
+    defaults.field.ambient_temperature_c = 1.5;
+    const snap = buildSnapshot(defaults, { source: "live" }, DEMO_META);
+    expect(snap.water_backend_option).toBe("Table Interpolation v1 (Bicubic)");
+    expect((snap.modes as Record<string, unknown>).air_a_mode).toBe("Otomatik");
+    expect((snap.modes as Record<string, unknown>).pressure_b_source).toBe(
+      "Kurum ici tablo (varsayilan)",
+    );
+
+    const restored = normalizeInputs(snap);
+    expect(restored.water_backend).toBe("table_v1_bicubic");
+    expect(restored.modes.air_a_mode).toBe("auto");
+    expect(restored.modes.pressure_b_source).toBe("institutional");
+    expect(restored.segments.length).toBeGreaterThan(0);
+    expect(restored.air.ambient_temperature_c).toBe(1.5);
+    expect(restored.field.ambient_temperature_c).toBe(1.5);
+    expect(restored.report).toEqual(defaults.report);
+
+    const legacyIapws = normalizeInputs({ water_backend: "iapws" });
+    expect(legacyIapws.water_backend).toBe("iapws95_dev");
   });
 
   it("includes +2 C warning, Tilk/Tson, active backend and backend comparison in report & exports", () => {
