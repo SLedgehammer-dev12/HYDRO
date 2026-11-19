@@ -85,6 +85,8 @@ describe("SiteSurveyPanel accessibility, seeding, paste and validation", () => {
 
     await user.clear(elevInput);
     await user.type(elevInput, "250");
+    // Mid-typing must not commit partial value before blur
+    expect(useAppStore.getState().inputs.profile_points[0].elevation_m).toBe(100);
     await user.tab();
     expect(elevInput).toHaveAttribute("aria-invalid", "false");
     expect(elevInput).not.toHaveAttribute("aria-describedby");

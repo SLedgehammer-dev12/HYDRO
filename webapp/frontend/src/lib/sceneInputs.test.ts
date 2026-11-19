@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { parseSurveyPointsText } from "../components/geometry/SiteSurveyPanel";
+import {
+  countDistinctProfileStations,
+  parseSurveyPointsText,
+} from "../components/geometry/SiteSurveyPanel";
 import { buildDemoResults, buildSceneData, createDefaultInputs, createEmptyInputs } from "./mock";
 import { normalizeInputs, toApiInputs } from "./normalize";
 
@@ -69,8 +72,10 @@ describe("3D real profile_points and equipment inputs", () => {
     const raw = [
       "İstasyon;Kot",
       "KP 1+500\t485,2",
+      "KP 0+500\t410",
       "0,420.5",
       "2000; 510,75",
+      ", 450",
       "bad-line",
       "-10, 400",
       "3000, 12000",
@@ -82,7 +87,16 @@ describe("3D real profile_points and equipment inputs", () => {
       { station_m: 500, elevation_m: 485.2 },
       { station_m: 2000, elevation_m: 510.75 },
     ]);
-    expect(parsed.invalidLines).toBe(3);
+    expect(parsed.invalidLines).toBe(5);
+    expect(
+      countDistinctProfileStations(
+        [
+          { station_m: 1200, elevation_m: 100 },
+          { station_m: 1800, elevation_m: 120 },
+        ],
+        1000,
+      ),
+    ).toBe(1);
   });
 
   it("emits approximate warnings without being swallowed when feasible is false", () => {

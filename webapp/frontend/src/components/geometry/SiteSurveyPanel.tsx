@@ -31,11 +31,15 @@ const EQUIPMENT_STATUS_OPTIONS: ReadonlyArray<{ value: SceneStatus; label: strin
   { value: "fail", label: "Hata" },
 ];
 
-/** Count profile points with at least 0.5 m spacing along the line. */
-export function countDistinctProfileStations(points: ReadonlyArray<ProfilePointItem>): number {
+/** Count distinct profile points (clamped to `[0, totalLength]` when given, >0.5 m spacing). */
+export function countDistinctProfileStations(
+  points: ReadonlyArray<ProfilePointItem>,
+  totalLength?: number,
+): number {
+  const hasLimit = typeof totalLength === "number" && Number.isFinite(totalLength) && totalLength > 0;
   const valid = points
     .filter((pt) => Number.isFinite(pt.station_m) && Number.isFinite(pt.elevation_m))
-    .map((pt) => pt.station_m)
+    .map((pt) => (hasLimit ? Math.max(0, Math.min(totalLength, pt.station_m)) : pt.station_m))
     .sort((a, b) => a - b);
   let distinct = 0;
   let last: number | null = null;
@@ -50,7 +54,7 @@ export function countDistinctProfileStations(points: ReadonlyArray<ProfilePointI
 
 function parseLocalizedNumber(token: string): number | null {
   const cleaned = token.trim().replace(/\s+/g, "");
-  if (!cleaned) return null;
+  if (!cleaned || !/\d/.test(cleaned)) return null;
   if (/^-?\d{1,3}(\.\d{3})+,\d+$/.test(cleaned)) {
     const parsed = Number(cleaned.replace(/\./g, "").replace(",", "."));
     return Number.isFinite(parsed) ? parsed : null;
@@ -106,7 +110,7 @@ export function parseSurveyPointsText(
     if (firstToken.includes("+")) {
       const absKp = parseKpMeters(firstToken);
       if (absKp !== null) {
-        station = startKpM !== null ? Math.max(0, absKp - startKpM) : absKp;
+        station = startKpM !== null ? absKp - startKpM : absKp;
       }
     } else {
       station = parseLocalizedNumber(firstToken);
@@ -219,10 +223,6 @@ function ValidatedNumberInput({
         value={text}
         onChange={(event) => {
           setText(event.target.value);
-          if (interacted) {
-            const live = validateText(event.target.value);
-            if (live.valid) onCommit(live.parsed);
-          }
         }}
         onBlur={commit}
         onKeyDown={(event) => {
@@ -234,7 +234,7 @@ function ValidatedNumberInput({
       />
       {showError ? (
         <div id={errId} className="survey-field-error">
-          <span role="img" aria-label="Hata">!</span> {errorText}
+          <span aria-hidden="true">!</span> Hata: {errorText}
         </div>
       ) : null}
     </div>
@@ -263,6 +263,14 @@ function ValidatedLabelInput({
 
   const invalid = interacted && text.trim().length === 0;
 
+  const commit = () => {
+    setInteracted(true);
+    const trimmed = text.trim();
+    if (trimmed.length > 0) {
+      onCommit(trimmed);
+    }
+  };
+
   return (
     <div>
       <input
@@ -274,20 +282,18 @@ function ValidatedLabelInput({
         value={text}
         onChange={(event) => {
           setText(event.target.value);
-          if (event.target.value.trim().length > 0) {
-            onCommit(event.target.value);
-          }
         }}
-        onBlur={() => {
-          setInteracted(true);
-          if (text.trim().length > 0) {
-            onCommit(text.trim());
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            commit();
+            (event.target as HTMLInputElement).blur();
           }
         }}
       />
       {invalid ? (
         <div id={errId} className="survey-field-error">
-          <span role="img" aria-label="Hata">!</span> {errorText}
+          <span aria-hidden="true">!</span> Hata: {errorText}
         </div>
       ) : null}
     </div>
@@ -303,17 +309,20 @@ export function SiteSurveyPanel({ totalLength }: { totalLength: number }) {
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState("");
   const [pasteFeedback, setPasteFeedback] = useState<string | null>(null);
+  const [tableEpoch, setTableEpoch] = useState(0);
 
   const profileCaptionId = useId();
   const equipmentCaptionId = useId();
 
-  const maxStation = totalLength > 0 ? Math.max(totalLength, 1_000_000) : 1_000_000;
-  const stationLimit = totalLength > 0 ? totalLength : 1_000_000;
+  const maxStation = totalLength > 0 ? totalLength : 1_000_000;
   const startKpM = useMemo(() => parseKpMeters(inputs.section_meta.start_kp), [inputs.section_meta.start_kp]);
 
   const points = useMemo(() => inputs.profile_points ?? [], [inputs.profile_points]);
   const equipment = useMemo(() => inputs.equipment ?? [], [inputs.equipment]);
-  const distinctCount = useMemo(() => countDistinctProfileStations(points), [points]);
+  const distinctCount = useMemo(
+    () => countDistinctProfileStations(points, totalLength),
+    [points, totalLength],
+  );
   const hasRealProfile = distinctCount >= 2;
   const hasCustomEquipment = equipment.some(
     (item) => Number.isFinite(item.station_m) && item.label.trim().length > 0,
@@ -337,6 +346,7 @@ export function SiteSurveyPanel({ totalLength }: { totalLength: number }) {
       { station_m: Math.round(len * 0.68 * 100) / 100, elevation_m: Math.round(lowest * 100) / 100 },
       { station_m: Math.round(len * 100) / 100, elevation_m: Math.round(endEl * 100) / 100 },
     ]);
+    setTableEpoch((n) => n + 1);
     setPasteFeedback(null);
   };
 
@@ -344,7 +354,7 @@ export function SiteSurveyPanel({ totalLength }: { totalLength: number }) {
     const last = points[points.length - 1];
     const step = totalLength > 0 ? Math.max(100, Math.round(totalLength / 10)) : 500;
     const nextStation = last
-      ? Math.min(stationLimit, Math.round((last.station_m + step) * 100) / 100)
+      ? Math.min(maxStation, Math.round((last.station_m + step) * 100) / 100)
       : 0;
     const nextElev = last
       ? last.elevation_m
@@ -373,6 +383,7 @@ export function SiteSurveyPanel({ totalLength }: { totalLength: number }) {
       return;
     }
     setProfilePoints(parsed.points);
+    setTableEpoch((n) => n + 1);
     setPasteOpen(false);
     setPasteText("");
     setPasteFeedback(
@@ -450,7 +461,10 @@ export function SiteSurveyPanel({ totalLength }: { totalLength: number }) {
                 size="sm"
                 variant="ghost"
                 icon={<ArrowUpDown size={13} />}
-                onClick={() => setProfilePoints([...points].sort((a, b) => a.station_m - b.station_m))}
+                onClick={() => {
+                  setProfilePoints([...points].sort((a, b) => a.station_m - b.station_m));
+                  setTableEpoch((n) => n + 1);
+                }}
               >
                 Sırala
               </Button>
@@ -463,6 +477,7 @@ export function SiteSurveyPanel({ totalLength }: { totalLength: number }) {
               icon={<Trash2 size={13} />}
               onClick={() => {
                 setProfilePoints([]);
+                setTableEpoch((n) => n + 1);
                 setPasteFeedback(null);
               }}
             >
@@ -530,7 +545,7 @@ export function SiteSurveyPanel({ totalLength }: { totalLength: number }) {
               </thead>
               <tbody>
                 {points.map((pt, index) => (
-                  <tr key={`pp-${index}`}>
+                  <tr key={`pp-${tableEpoch}-${index}`}>
                     <th scope="row" className="sticky-col font-mono text-[11px] text-[var(--text-faint)]">
                       {index + 1}
                     </th>
@@ -539,7 +554,7 @@ export function SiteSurveyPanel({ totalLength }: { totalLength: number }) {
                         label={`Kot noktası ${index + 1} istasyon`}
                         value={pt.station_m}
                         min={0}
-                        max={totalLength > 0 ? totalLength : maxStation}
+                        max={maxStation}
                         errorText={
                           totalLength > 0
                             ? `0 ile ${num(totalLength, 0)} m arasında olmalıdır.`
@@ -574,7 +589,10 @@ export function SiteSurveyPanel({ totalLength }: { totalLength: number }) {
                     <td className="text-right">
                       <IconButton
                         label={`Kot noktası ${index + 1} sil`}
-                        onClick={() => setProfilePoints(points.filter((_, i) => i !== index))}
+                        onClick={() => {
+                          setProfilePoints(points.filter((_, i) => i !== index));
+                          setTableEpoch((n) => n + 1);
+                        }}
                       >
                         <Trash2 size={13} />
                       </IconButton>
@@ -697,7 +715,7 @@ export function SiteSurveyPanel({ totalLength }: { totalLength: number }) {
                           label={`Ekipman ${index + 1} istasyon`}
                           value={item.station_m}
                           min={0}
-                          max={totalLength > 0 ? totalLength : maxStation}
+                          max={maxStation}
                           errorText={
                             totalLength > 0
                               ? `0 ile ${num(totalLength, 0)} m arasında olmalıdır.`

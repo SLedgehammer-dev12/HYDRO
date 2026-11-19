@@ -540,8 +540,9 @@ def test_scene_custom_equipment_and_approximate_warning(client):
         equipment=[
             {"id": "eq-v1", "kind": "mainline", "label": "Giris Vanasi", "station_m": 0.0},
             {"id": "eq-p1", "type": "pump", "label": "Ana Pompa", "station_m": 100.0},
-            {"id": "eq-h1", "type": "test-head", "label": "Test Basligi", "station_m": 150.0},
+            {"id": "eq-h1", "type": "test-head", "label": "Test Basligi", "distance_m": 150.0},
             {"id": "eq-g1", "type": "gauge", "label": "Orta Olcer", "station_m": 500.0},
+            {"id": "eq-blank", "type": "valve", "label": "   ", "station_m": 200.0},
         ],
     )
     updated = client.put(
@@ -550,12 +551,24 @@ def test_scene_custom_equipment_and_approximate_warning(client):
         headers={"If-Match": f'"{default_session["revision"]}"'},
     )
     assert updated.status_code == 200, updated.text
-    assert len(updated.json()["inputs"]["equipment"]) == 4
+    assert len(updated.json()["inputs"]["equipment"]) == 5
 
     scene = client.get(f"/api/sessions/{default_session['id']}/scene").json()
     assert scene["approximate_profile"] is False
     assert scene["is_custom_equipment"] is True
     assert not any("ekipman" in w.lower() for w in scene["warnings"])
     custom = {item["id"]: item for item in scene["custom_equipment"]}
+    assert "eq-blank" not in custom
     assert custom["eq-v1"]["type"] == "valve"
+    assert custom["eq-h1"]["distance_m"] == 150.0
     assert custom["eq-g1"]["elevation_m"] == 150.0
+
+    # A single distinct profile_point must still fall back to approximate_profile=True
+    single_pt = client.put(
+        f"/api/sessions/{default_session['id']}",
+        json={"inputs": {"profile_points": [{"station_m": 100.0, "elevation_m": 150.0}]}},
+        headers={"If-Match": f'"{updated.json()["revision"]}"'},
+    )
+    assert single_pt.status_code == 200, single_pt.text
+    single_scene = client.get(f"/api/sessions/{default_session['id']}/scene").json()
+    assert single_scene["approximate_profile"] is True

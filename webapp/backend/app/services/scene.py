@@ -49,14 +49,19 @@ _EQUIPMENT_TYPE_ALIASES: dict[str, str] = {
 _VALID_SCENE_STATUSES = {"pending", "pass", "fail", "warning"}
 
 
-def _normalize_equipment_type(raw_type: Any) -> str:
+def normalize_equipment_type(raw_type: Any) -> str:
     key = str(raw_type or "valve").strip().lower()
     return _EQUIPMENT_TYPE_ALIASES.get(key, "valve")
 
 
-def _normalize_equipment_status(raw_status: Any) -> str:
+def normalize_equipment_status(raw_status: Any) -> str:
     val = str(raw_status or "pass").strip().lower()
     return val if val in _VALID_SCENE_STATUSES else "pass"
+
+
+# Backwards-compatible internal aliases
+_normalize_equipment_type = normalize_equipment_type
+_normalize_equipment_status = normalize_equipment_status
 
 
 def _density() -> float:
@@ -110,11 +115,18 @@ def _profile_from_inputs(
             elevation = as_float(item.get("elevation_m"))
             if station is None or elevation is None:
                 continue
-            points.append((station, elevation))
-        if points:
+            clamped_x = round(max(0.0, min(total_length, station)), 2)
+            points.append((clamped_x, elevation))
+        deduped: list[tuple[float, float]] = []
+        for px, py in sorted(points, key=lambda pt: pt[0]):
+            if not deduped or abs(px - deduped[-1][0]) > 0.5:
+                deduped.append((px, py))
+            else:
+                deduped[-1] = (px, py)
+        if len(deduped) >= 2:
             return (
-                [{"station_m": s, "elevation_m": e} for s, e in sorted(points)],
-                _elevation_interpolator(points),
+                [{"station_m": s, "elevation_m": e} for s, e in deduped],
+                _elevation_interpolator(deduped),
                 warnings,
                 False,
             )
@@ -405,8 +417,10 @@ def build_scene(inputs: dict[str, Any]) -> dict[str, Any]:
             if elevation is None:
                 elevation = elevation_at(station_value)
             eq_id = str(item.get("id") or f"v-{index}")
-            label_val = str(item.get("label") or raw_kind).strip() or norm_type
-            eq_status = _normalize_equipment_status(item.get("status"))
+            label_val = str(item.get("label") or "").strip()
+            if not label_val:
+                continue
+            eq_status = normalize_equipment_status(item.get("status"))
             has_custom_equipment = True
             custom_equipment.append(
                 {
@@ -755,14 +769,15 @@ def build_project_scene(
 
     total_length_m = round(cursor_m, 2)
     density = _density()
-    any_survey_profile = False
     survey_section_count = 0
-    any_custom_equipment = False
+    equipment_section_count = 0
     global_profile_points: list[tuple[float, float]] = []
     boundary_xs: set[float] = set()
     segments: list[dict[str, Any]] = []
     equipment: list[dict[str, Any]] = []
+    boundary_valves: list[dict[str, Any]] = []
     custom_equipment: list[dict[str, Any]] = []
+    seen_equipment_ids: set[str] = set()
     landmarks: list[dict[str, Any]] = []
     seen_landmarks: list[tuple[float, str, str]] = []
     sections_summary: list[dict[str, Any]] = []
@@ -800,7 +815,6 @@ def build_project_scene(
                     local_pts[-1] = (px, py)
         has_local_survey = len(local_pts) >= 2
         if has_local_survey:
-            any_survey_profile = True
             survey_section_count += 1
             if local_pts[0][0] > 0.0:
                 local_pts.insert(0, (0.0, local_pts[0][1]))
@@ -961,7 +975,7 @@ def build_project_scene(
         if idx > 0:
             prev_no = records[idx - 1]["sec_no"]
             kp_note = f" (KP {rec['start_kp']})" if rec["has_valid_kp"] and rec["start_kp"] else ""
-            equipment.append(
+            boundary_valves.append(
                 {
                     "id": f"eq-boundary-{idx}",
                     "type": "valve",
@@ -1010,31 +1024,45 @@ def build_project_scene(
 
         raw_eq_val = inputs.get("equipment")
         raw_eq_items: list[Any] = raw_eq_val if isinstance(raw_eq_val, list) else []
+        sec_has_equipment = False
         for eq_idx, eq_item in enumerate(raw_eq_items, start=1):
             if not isinstance(eq_item, dict):
                 continue
             eq_st = as_float(eq_item.get("station_m"))
             if eq_st is None:
                 eq_st = as_float(eq_item.get("distance_m"))
-            eq_type = _normalize_equipment_type(eq_item.get("type") or eq_item.get("kind"))
-            eq_lbl = str(eq_item.get("label") or eq_type).strip()
+            eq_type = normalize_equipment_type(eq_item.get("type") or eq_item.get("kind"))
+            eq_lbl = str(eq_item.get("label") or "").strip()
             if eq_st is None or not eq_lbl:
                 continue
             clamped_st = max(0.0, min(sec_len, eq_st))
             eq_el = as_float(eq_item.get("elevation_m"))
             if eq_el is None:
                 eq_el = round(local_interp(clamped_st), 1)
-            any_custom_equipment = True
+            raw_id = str(eq_item.get("id") or f"eq-{rec['sec_no']}-{eq_idx}").strip()
+            if not raw_id:
+                raw_id = f"eq-{rec['sec_no']}-{eq_idx}"
+            eq_id = raw_id
+            if eq_id in seen_equipment_ids:
+                eq_id = f"{sess.id[:8]}-{raw_id}"
+            suffix = 2
+            while eq_id in seen_equipment_ids:
+                eq_id = f"{sess.id[:8]}-{raw_id}-{suffix}"
+                suffix += 1
+            seen_equipment_ids.add(eq_id)
+            sec_has_equipment = True
             custom_equipment.append(
                 {
-                    "id": str(eq_item.get("id") or f"eq-{rec['sec_no']}-{eq_idx}"),
+                    "id": eq_id,
                     "type": eq_type,
                     "label": eq_lbl,
                     "distance_m": round(offset_m + clamped_st, 1),
                     "elevation_m": round(eq_el, 1),
-                    "status": _normalize_equipment_status(eq_item.get("status")),
+                    "status": normalize_equipment_status(eq_item.get("status")),
                 }
             )
+        if sec_has_equipment:
+            equipment_section_count += 1
 
         sections_summary.append(
             {
@@ -1053,9 +1081,22 @@ def build_project_scene(
     thinned_profile = _thin_points(global_profile_points, 300, required_xs=boundary_xs)
     global_interp = _elevation_interpolator(thinned_profile)
 
-    if any_custom_equipment:
+    all_survey_profile = bool(records) and survey_section_count == len(records)
+    all_custom_equipment = bool(records) and equipment_section_count == len(records)
+
+    if all_custom_equipment:
         equipment = sorted(custom_equipment, key=lambda item: float(item["distance_m"]))
+    elif equipment_section_count > 0:
+        merged_eq = list(custom_equipment)
+        for bv in boundary_valves:
+            bv_id = str(bv["id"])
+            if bv_id in seen_equipment_ids:
+                bv_id = f"boundary-{bv_id}"
+            seen_equipment_ids.add(bv_id)
+            merged_eq.append({**bv, "id": bv_id})
+        equipment = sorted(merged_eq, key=lambda item: float(item["distance_m"]))
     else:
+        equipment = list(boundary_valves)
         # Başlangıç / bitiş ve ekstremum kot göstergeleri
         start_el_g = round(global_interp(0.0), 1) if thinned_profile else 0.0
         end_el_g = round(global_interp(total_length_m), 1) if thinned_profile else 0.0
@@ -1131,11 +1172,15 @@ def build_project_scene(
             )
         elif survey_section_count < len(records):
             warnings.append(
-                "Bazı test bölümlerinde gerçek kot profili yok; eksik kesitler 4 noktadan yaklaşık türetildi."
+                "Bazı test bölümlerinde gerçek kot profili (profile_points) yok; eksik kesitler 4 noktadan yaklaşık türetildi."
             )
-        if not any_custom_equipment:
+        if equipment_section_count == 0:
             warnings.append(
                 "Gerçek saha ekipmanı (equipment) girilmedi; ekipman konumları varsayılan yerleşimle gösteriliyor."
+            )
+        elif equipment_section_count < len(records):
+            warnings.append(
+                "Bazı test bölümlerinde özel saha ekipmanı (equipment) yok; yalnızca tanımlı bölümlerin ekipmanları ve sınır vanaları gösteriliyor."
             )
 
     pressures = [
@@ -1152,8 +1197,8 @@ def build_project_scene(
         "profile_points": [[pt[0], pt[1]] for pt in thinned_profile],
         "landmarks": landmarks,
         "start_kp_m": origin_kp_m,
-        "is_survey_profile": any_survey_profile,
-        "is_custom_equipment": any_custom_equipment,
+        "is_survey_profile": all_survey_profile,
+        "is_custom_equipment": all_custom_equipment,
         "warnings": list(dict.fromkeys(warnings)),
         "sections": sections_summary,
     }

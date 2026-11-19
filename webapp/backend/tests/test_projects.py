@@ -1112,3 +1112,116 @@ def test_project_scene_equipment_warnings_and_template_clone(client, headers):
     b01_clone = client.get(f"/api/sessions/{b01_meta['id']}", headers=headers).json()
     assert len(b01_clone["inputs"]["equipment"]) == 2
     assert b01_clone["inputs"]["equipment"][1]["id"] == "s1-gauge"
+
+
+def test_project_scene_mixed_sections_duplicate_eq_ids_and_recommit_preserve(client, headers):
+    project = _create_project(client, headers, name="Karışık Kesit Projesi", code="3D-MIX")
+    # Bölüm 1: gerçek kot profili ve varsayılan benzeri statik ID'li ekipman
+    s1 = _create_session(
+        client,
+        headers,
+        name="B-01",
+        project_id=project["id"],
+        inputs={
+            "section_meta": {"section_no": "B-01", "start_kp": "0+000", "end_kp": "1+000"},
+            "geometry": {
+                "outside_diameter_mm": 406.4,
+                "wall_thickness_mm": 8.74,
+                "length_m": 1000.0,
+            },
+            "profile_points": [
+                {"station_m": 0.0, "elevation_m": 100.0},
+                {"station_m": 1000.0, "elevation_m": 200.0},
+            ],
+            "equipment": [
+                {"id": "eq-valve-start", "type": "valve", "label": "S1 Vana", "station_m": 0.0},
+            ],
+        },
+    )
+    # Bölüm 2: kot profili ve ekipmanı yok -> karışık sahne yaklaşıklık bayraklarını korumalı
+    _create_session(
+        client,
+        headers,
+        name="B-02",
+        project_id=project["id"],
+        inputs={
+            "section_meta": {"section_no": "B-02", "start_kp": "1+000", "end_kp": "2+000"},
+            "geometry": {
+                "outside_diameter_mm": 406.4,
+                "wall_thickness_mm": 8.74,
+                "length_m": 1000.0,
+            },
+            "section_profile": {
+                "start_elevation_m": 200.0,
+                "end_elevation_m": 240.0,
+                "highest_elevation_m": 240.0,
+                "lowest_elevation_m": 200.0,
+            },
+        },
+    )
+
+    mixed_scene = client.get(f"/api/projects/{project['id']}/scene", headers=headers).json()
+    assert mixed_scene["is_survey_profile"] is False
+    assert mixed_scene["is_custom_equipment"] is False
+    joined_warnings = " ".join(mixed_scene["warnings"])
+    assert "profile_points" in joined_warnings
+    assert "equipment" in joined_warnings
+    # Kısmi ekipmanda sınır vanası korunmalı
+    assert any(item["id"] == "eq-boundary-1" for item in mixed_scene["equipment"])
+
+    # Bölüm 2'ye aynı 'eq-valve-start' ID'si ile ekipman ve profile_points eklendiğinde ID çakışmamalı
+    sessions = client.get(f"/api/sessions?project_id={project['id']}", headers=headers).json()[
+        "items"
+    ]
+    b02_meta = next(s for s in sessions if s["name"] == "B-02")
+    b02_detail = client.get(f"/api/sessions/{b02_meta['id']}", headers=headers).json()
+    upd2 = client.put(
+        f"/api/sessions/{b02_meta['id']}",
+        json={
+            "inputs": {
+                "profile_points": [
+                    {"station_m": 0.0, "elevation_m": 200.0},
+                    {"station_m": 1000.0, "elevation_m": 240.0},
+                ],
+                "equipment": [
+                    {"id": "eq-valve-start", "type": "valve", "label": "S2 Vana", "station_m": 0.0},
+                ],
+            }
+        },
+        headers={**headers, "If-Match": f'"{b02_detail["revision"]}"'},
+    )
+    assert upd2.status_code == 200, upd2.text
+
+    full_scene = client.get(f"/api/projects/{project['id']}/scene", headers=headers).json()
+    assert full_scene["is_survey_profile"] is True
+    assert full_scene["is_custom_equipment"] is True
+    eq_ids = [item["id"] for item in full_scene["equipment"]]
+    assert len(eq_ids) == 2
+    assert len(set(eq_ids)) == 2
+
+    # B-01 yeniden plan-profile commit edildiğinde (equipment boşsa) mevcut ekipmanı korunmalı
+    recommit = client.post(
+        "/api/projects/plan-profile/commit",
+        json={
+            "project_id": project["id"],
+            "sections": [
+                {
+                    "section_no": "B-01",
+                    "start_kp": "0+000",
+                    "end_kp": "1+000",
+                    "length_m": 1000.0,
+                    "outside_diameter_mm": 406.4,
+                    "wall_thickness_mm": 8.74,
+                    "profile_points": [
+                        {"station_m": 0.0, "elevation_m": 102.0},
+                        {"station_m": 1000.0, "elevation_m": 202.0},
+                    ],
+                }
+            ],
+        },
+        headers=headers,
+    )
+    assert recommit.status_code == 201, recommit.text
+    s1_after = client.get(f"/api/sessions/{s1['id']}", headers=headers).json()
+    assert len(s1_after["inputs"]["equipment"]) == 1
+    assert s1_after["inputs"]["equipment"][0]["label"] == "S1 Vana"

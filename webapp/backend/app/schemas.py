@@ -526,6 +526,7 @@ __all__ = [
     "ReportExportRequest",
     "ResultCreate",
     "SampleProjectGenerateRequest",
+    "SectionEquipmentIn",
     "SectionFormUpdateRequest",
     "SectionLandmarkIn",
     "SectionProfilePointIn",

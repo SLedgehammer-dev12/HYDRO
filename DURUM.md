@@ -13,7 +13,7 @@
 | Alan | Durum | Kanıt |
 | --- | --- | --- |
 | Masaüstü uygulaması | Çalışıyor, kararlı | 709 unittest PASS (`skipped=1`) |
-| Web backend (FastAPI) | Çalışıyor | 212 pytest PASS (Alembic `0003`), 81 OpenAPI path / 94 operation, 48 dosyada `mypy` temiz |
+| Web backend (FastAPI) | Çalışıyor | 213 pytest PASS (Alembic `0003`), 81 OpenAPI path / 94 operation, 48 dosyada `mypy` temiz |
 | Web frontend (React 19) | Çalışıyor | `npm run lint` (0 hata, `jsx-a11y`), `npm test` (28 Vitest), `npm run typecheck` + `npm run build` + `check:bundle` PASS (`143,8 kB` gzip ilk yükleme JS), `verify-tabs.mjs` 12/12 PASS |
 | Program İkon & Marka Sistemi | Hazır | Boru kesiti + su dalgası + manometre ikonu (`tools/generate_icons.py`, `assets/icons/*`, `webapp/frontend/public/*`, `<HydroLogo />`, PyInstaller/Inno Setup/Tkinter) |
 | Web Güncelleme Yöneticisi | Çalışıyor | `/api/update/*`, SHA-256 + fail-closed Ed25519 `.sig` doğrulama, `UpdateManagerModal`, macOS `.dmg` / Win `.exe`/`.zip` kurulum |
@@ -175,7 +175,7 @@ python3 -m mypy hidrostatik_test/domain/                       # Success: no iss
 python3 -m mypy --ignore-missing-imports webapp/backend/app    # Success: no issues found (48 files)
 
 # Web backend (Alembic + API + domain parity)
-python3 -m pytest webapp/backend/tests -q                      # 212 passed
+python3 -m pytest webapp/backend/tests -q                      # 213 passed
 
 # Masaüstü
 python3 -m unittest discover -s tests -p "test_*.py"           # 709 tests OK (skipped=1)

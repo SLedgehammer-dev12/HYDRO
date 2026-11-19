@@ -33,6 +33,7 @@ from ..core.timeutil import utcnow
 from ..models import HydroSession
 from . import dossier as dossier_service
 from . import projects as project_service
+from . import scene as scene_service
 from . import sessions as session_service
 
 logger = logging.getLogger("hydro.web.plan_profile")
@@ -2196,7 +2197,7 @@ def create_sections_from_drafts(
             )
 
         raw_eq: list[dict[str, Any]] = []
-        for idx, eq in enumerate(draft.get("equipment") or [], start=1):
+        for eq_idx, eq in enumerate(draft.get("equipment") or [], start=1):
             if not isinstance(eq, dict):
                 continue
             st_val = _parse_float(str(eq.get("station_m")))
@@ -2210,12 +2211,14 @@ def create_sections_from_drafts(
             )
             raw_eq.append(
                 {
-                    "id": str(eq.get("id") or f"eq-{idx}"),
-                    "type": str(eq.get("type") or "valve"),
+                    "id": str(eq.get("id") or f"eq-{sec_no}-{eq_idx}"),
+                    "type": scene_service.normalize_equipment_type(
+                        eq.get("type") or eq.get("kind")
+                    ),
                     "label": label_val,
                     "station_m": round(max(0.0, min(length_m, st_val)), 1),
                     "elevation_m": round(el_val, 1) if el_val is not None else None,
-                    "status": str(eq.get("status") or "pass"),
+                    "status": scene_service.normalize_equipment_status(eq.get("status")),
                 }
             )
 

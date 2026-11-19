@@ -587,7 +587,10 @@ export function ProjectsPage() {
             const continuityWarnings =
               projectSceneQuery.data && !projectSceneQuery.data.continuity_ok
                 ? (projectSceneQuery.data.warnings ?? []).filter(
-                    (w) => !w.includes("profile_points") && !w.includes("equipment"),
+                    (w) =>
+                      !w.includes("profile_points") &&
+                      !w.includes("equipment") &&
+                      !w.includes("4 noktadan yaklaşık"),
                   )
                 : [];
             return continuityWarnings.length > 0 ? (

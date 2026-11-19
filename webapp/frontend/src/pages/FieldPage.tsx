@@ -357,7 +357,10 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
             const continuityWarnings =
               effectiveProjectMode && projectScene && !projectScene.continuity_ok
                 ? (projectScene.warnings ?? []).filter(
-                    (w) => !w.includes("profile_points") && !w.includes("equipment"),
+                    (w) =>
+                      !w.includes("profile_points") &&
+                      !w.includes("equipment") &&
+                      !w.includes("4 noktadan yaklaşık"),
                   )
                 : [];
             return continuityWarnings.length > 0 ? (

@@ -1072,6 +1072,12 @@ dialog.drawer-dialog::backdrop {
   outline: none;
 }
 
+.table-input:focus-visible {
+  border-color: var(--primary);
+  outline: 2px solid var(--primary-soft);
+  outline-offset: 0;
+}
+
 .table-input:is(:user-invalid, [aria-invalid="true"]) {
   border-color: var(--danger);
   background: var(--danger-bg);
