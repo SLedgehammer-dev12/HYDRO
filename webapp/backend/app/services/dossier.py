@@ -21,7 +21,6 @@ from sqlalchemy.orm.attributes import flag_modified
 from hidrostatik_test.data.pipe_catalog import API_5L_PSL2_GRADES
 from hidrostatik_test.domain import (
     AIR_CONTENT_ACCEPTANCE_FACTOR,
-    AMBIENT_TEMP_LIMIT_C,
     END_PUMP_LOCATION,
     PRESSURE_VARIATION_ACCEPTANCE_BAR,
     START_PUMP_LOCATION,
@@ -32,6 +31,7 @@ from hidrostatik_test.domain import (
     SectionPressureProfileInputs,
     ValidationError,
     evaluate_air_content_test,
+    evaluate_fill_temperature,
     evaluate_pig_speed,
     evaluate_pressure_variation_test,
     evaluate_section_pressure_profile,
@@ -2413,24 +2413,35 @@ def evaluate_operational_checks(
 
     # 1) ambient_temp (10.1): Dolum / ortam hava sıcaklığı >= +2 °C
     lbl, ref = meta_by_key["ambient_temp"]
-    fill_min_t = (fill_data.get("filling") or {}).get("min_temp_c")
-    leak_min_t = (leak_data.get("monitoring") or {}).get("min_temp_c")
-    observed_temps = [t for t in (fill_min_t, leak_min_t) if t is not None]
+    fill_min_t = _finite_float((fill_data.get("filling") or {}).get("min_temp_c"))
+    leak_min_t = _finite_float((leak_data.get("monitoring") or {}).get("min_temp_c"))
+    manual_ambient_t = _finite_float(merged_header.get("ambient_temperature_c"))
+    form_temps = [t for t in (fill_min_t, leak_min_t) if t is not None]
+    observed_temps = [t for t in (fill_min_t, leak_min_t, manual_ambient_t) if t is not None]
     if observed_temps:
         min_t = min(observed_temps)
-        ok = min_t >= AMBIENT_TEMP_LIMIT_C
+        try:
+            fill_eval = evaluate_fill_temperature(min_t)
+            ok = fill_eval.passed
+            eval_msg = fill_eval.message
+        except ValidationError as exc:
+            ok = False
+            eval_msg = str(exc)
+        ambient_sources: list[str] = []
+        if fill_min_t is not None and fill_form:
+            ambient_sources.append(fill_form["form_code"])
+        if leak_min_t is not None and leak_form:
+            ambient_sources.append(leak_form["form_code"])
+        if manual_ambient_t is not None and (not form_temps or manual_ambient_t <= min(form_temps)):
+            ambient_sources.append("manual_input")
         _set(
             "ambient_temp",
             lbl,
             ref,
             checked=ok,
             status="passed" if ok else "failed",
-            message=(
-                f"Ölçülen minimum su/ortam sıcaklığı {min_t:.1f} °C (sınır ≥ +{AMBIENT_TEMP_LIMIT_C:.0f} °C)."
-                if ok
-                else f"Uyarı: ölçülen minimum sıcaklık {min_t:.1f} °C (+{AMBIENT_TEMP_LIMIT_C:.0f} °C şartname limitinin altında)."
-            ),
-            sources=[f["form_code"] for f in (fill_form, leak_form) if f],
+            message=eval_msg,
+            sources=ambient_sources,
         )
     else:
         _set(
@@ -2439,7 +2450,7 @@ def evaluate_operational_checks(
             ref,
             checked=False,
             status="pending",
-            message="Su Dolum (017) veya Kaçak Dengeleme (018) formunda sıcaklık verisi bulunmadı.",
+            message="Su Dolum (017), Kaçak Dengeleme (018) veya saha ortam sıcaklığı verisi bulunmadı.",
             sources=[],
         )
 
@@ -3941,6 +3952,13 @@ def _cumulative_recompute_section(
         and fld.get("monitored_pressure_bar") is not None
     ):
         merged_header["monitored_pressure_bar"] = fld["monitored_pressure_bar"]
+    air_block = dict(inputs.get("air") or {})
+    if merged_header.get("ambient_temperature_c") is None:
+        ambient_val = _finite_float(fld.get("ambient_temperature_c"))
+        if ambient_val is None:
+            ambient_val = _finite_float(air_block.get("ambient_temperature_c"))
+        if ambient_val is not None:
+            merged_header["ambient_temperature_c"] = ambient_val
 
     calcs = evaluate_section_calculations(
         merged_header,

@@ -65,6 +65,7 @@ class CoefficientBRequest(StrictModel):
     pressure_bar: float
     steel_alpha_micro_per_c: float = 12.0
     steel_model: STEEL_MODEL = "volumetric"
+    backend: str | None = None
 
 
 class CoefficientCompareRequest(StrictModel):
@@ -72,6 +73,7 @@ class CoefficientCompareRequest(StrictModel):
     pressure_bar: float
     steel_alpha_micro_per_c: float = 12.0
     steel_model: STEEL_MODEL = "volumetric"
+    backend: str | None = None
 
 
 class CoefficientTableRequest(StrictModel):

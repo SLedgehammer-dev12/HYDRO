@@ -130,6 +130,7 @@ def resolve_b_value(
     pressure_bar: float,
     steel_alpha_micro_per_c: float = 12.0,
     steel_model: str = DEFAULT_STEEL_MODEL,
+    backend: str | None = None,
 ) -> BSourceResult:
     """Resolve B (10^-6 / degC) from the requested source.
 
@@ -181,7 +182,7 @@ def resolve_b_value(
         )
 
     beta_micro_per_c = calculate_water_thermal_expansion_beta(
-        temp_c=temp_c, pressure_bar=pressure_bar
+        temp_c=temp_c, pressure_bar=pressure_bar, backend=backend
     )
     b_value = calculate_b_coefficient(
         beta_micro_per_c,
@@ -195,12 +196,13 @@ def resolve_b_value(
         model_note = "B = beta - 3*alpha (hacimsel model)"
     else:
         model_note = "B = beta - 3*alpha(T) (sicakliga bagli hacimsel model)"
+    backend_prefix = f"Otomatik hesap ({backend})" if backend else "Otomatik hesap"
     return BSourceResult(
         b_micro_per_c=b_value,
         source=resolved_source,
         label=AUTO_B_LABEL,
         note=(
-            f"Otomatik hesap: beta = {beta_micro_per_c:.6f}, "
+            f"{backend_prefix}: beta = {beta_micro_per_c:.6f}, "
             f"celik alpha = {steel_alpha:.6f}; {model_note}."
         ),
         repaired_table=False,
@@ -215,6 +217,7 @@ def compare_b_sources(
     pressure_bar: float,
     steel_alpha_micro_per_c: float = 12.0,
     steel_model: str = DEFAULT_STEEL_MODEL,
+    backend: str | None = None,
 ) -> BSourceComparison:
     """Return institutional, GAIL and automatic B values at one node.
 
@@ -248,6 +251,7 @@ def compare_b_sources(
             pressure_bar=pressure_bar,
             steel_alpha_micro_per_c=steel_alpha_micro_per_c,
             steel_model=model,
+            backend=backend,
         ),
     )
 

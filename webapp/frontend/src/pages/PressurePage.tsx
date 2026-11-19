@@ -1,4 +1,5 @@
-import { ArrowLeftRight, ArrowRight, CheckCircle2, Gauge, History, Info, Lock, Sigma } from "lucide-react";
+import { useState } from "react";
+import { AlertTriangle, ArrowLeftRight, ArrowRight, CheckCircle2, Gauge, History, Info, Lock, Sigma } from "lucide-react";
 import { PageHeader } from "../components/layout/PageHeader";
 import { SectionCard, ResultTile } from "../components/ui/Card";
 import { Badge, CoefficientBadge } from "../components/ui/Badge";
@@ -45,9 +46,11 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
   const coefficientB = useCoefficientB();
   const tablePoint = useTablePoint();
   const saveResult = useSaveTestResult();
+  const [bPrepError, setBPrepError] = useState<string | null>(null);
   useEvaluateShortcut(evaluate);
 
   function prepareAB() {
+    setBPrepError(null);
     const tempC = inputs.pressure.temperature_c ?? inputs.air.temperature_c ?? 20;
     const pressBar =
       inputs.pressure.pressure_bar ??
@@ -73,13 +76,20 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
         pressure_bar: pressBar,
         steel_alpha_micro_per_c: inputs.helper.steel_alpha_micro_per_c,
         steel_model: inputs.modes.steel_model,
+        backend: inputs.water_backend || "table_v1",
       },
       {
         onSuccess: ({ data }) => {
           patchInputs({ pressure: { b_micro_per_c: data.b_micro_per_c } });
+          if (data.water_beta_micro_per_c !== null) {
+            patchInputs({ helper: { water_beta_micro_per_c: data.water_beta_micro_per_c } });
+          }
           pushToast("success", "B katsayısı hazırlandı", fmt.b(data.b_micro_per_c));
         },
-        onError: (error) => pushToast("error", "B hazırlanamadı", error.message),
+        onError: (error) => {
+          setBPrepError(error.message);
+          pushToast("error", "B hazırlanamadı", error.message);
+        },
       },
     );
 
@@ -105,7 +115,7 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
           {
             temperature_c: tempC,
             pressure_bar: pressBar,
-            backend: inputs.modes.air_a_reference || "table_v1",
+            backend: inputs.water_backend || "table_v1",
           },
           {
             onSuccess: ({ data }) => {
@@ -160,7 +170,11 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
       : "Tilk ve Tson girilirse ΔT otomatik türetilir.";
 
   function setTemperatures(initial: number | null, final: number | null, derive: boolean) {
-    const derived = derive && initial !== null && final !== null ? round(initial - final, 3) : inputs.pressure.delta_t_c;
+    const derived = derive
+      ? initial !== null && final !== null
+        ? round(initial - final, 3)
+        : null
+      : inputs.pressure.delta_t_c;
     patchInputs({
       pressure: {
         t_initial_c: initial,
@@ -209,6 +223,7 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
           pressure_bar: inputs.pressure.pressure_bar ?? 80,
           steel_alpha_micro_per_c: inputs.helper.steel_alpha_micro_per_c,
           steel_model: inputs.modes.steel_model,
+          backend: inputs.water_backend || "table_v1",
         });
         const result = computePressure({
           geometry: { sections },
@@ -374,6 +389,27 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
               </div>
             </div>
 
+            {bPrepError ? (
+              <div className="mt-2">
+                <InlineNotice tone="danger" title="B hazırlanamadı" icon={AlertTriangle}>
+                  {bPrepError}
+                </InlineNotice>
+              </div>
+            ) : null}
+
+            {(bValue !== null && bValue < 0) ||
+            (inputs.pressure.temperature_c !== null &&
+              inputs.pressure.temperature_c >= 0 &&
+              inputs.pressure.temperature_c <= 4) ? (
+              <div className="mt-2">
+                <InlineNotice tone="info" title="0–4 °C bölgesi / negatif B" icon={Info}>
+                  0–4 °C aralığında suyun yoğunluk anomalisi nedeniyle <span className="font-mono">β</span>{" "}
+                  ve <span className="font-mono">B</span> sıfır veya negatif olabilir;{" "}
+                  <span className="font-mono">Pt</span> işaretinin ters dönmesi fiziksel olarak geçerlidir.
+                </InlineNotice>
+              </div>
+            ) : null}
+
             <div className="mt-4 border-t border-[var(--border)] pt-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
@@ -421,17 +457,24 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
 
               <div className="mt-3 grid grid-cols-2 gap-2">
                 {inputs.pressure.derive_delta_t ? (
-                  <ReadonlyValue
-                    label="ΔT (türetilmiş)"
-                    unit="°C"
-                    value={
-                      <span className="flex items-center justify-end gap-1.5">
-                        <Lock size={11} className="text-[var(--text-faint)]" aria-hidden />
-                        {num(deltaT, 3)}
-                      </span>
-                    }
-                    hint={deltaHint}
-                  />
+                  <div>
+                    <ReadonlyValue
+                      label="ΔT (türetilmiş)"
+                      unit="°C"
+                      value={
+                        <span className="flex items-center justify-end gap-1.5">
+                          <Lock size={11} className="text-[var(--text-faint)]" aria-hidden />
+                          {num(deltaT, 3)}
+                        </span>
+                      }
+                      hint={deltaHint}
+                    />
+                    {deltaError ? (
+                      <p className="mt-1 text-[10.5px] font-medium text-[var(--danger)]" role="alert">
+                        {deltaError}
+                      </p>
+                    ) : null}
+                  </div>
                 ) : (
                   <NumberField
                     label="ΔT = Tilk − Tson"

@@ -83,9 +83,11 @@ def air_decision(result: Any) -> dict[str, Any]:
     return _decision(status, "Hava Icerik Testi", summary, AIR_RULE, margin)
 
 
-def pressure_decision(result: Any) -> dict[str, Any]:
+def pressure_decision(result: Any, *, negative_b: bool | None = None) -> dict[str, Any]:
     status = STATUS_PASS if result.passed else STATUS_FAIL
-    negative_b = result.theoretical_pressure_change_bar < 0
+    is_negative_b = (
+        negative_b if negative_b is not None else result.theoretical_pressure_change_bar < 0
+    )
     summary = (
         f"Pt = {result.theoretical_pressure_change_bar:.6f} bar, "
         f"ust sinir = {result.allowable_upper_pressure_change_bar:.6f} bar, "
@@ -93,7 +95,7 @@ def pressure_decision(result: Any) -> dict[str, Any]:
         f"fark = {result.margin_bar:.6f} bar. Kural: {PRESSURE_RULE}; "
         f"marj = {result.margin_bar:.6f} bar."
     )
-    if negative_b:
+    if is_negative_b:
         summary = f"{summary} B negatif: dP isareti ters doner ve gecerlidir."
     return _decision(status, "Basinc Degisim Testi", summary, PRESSURE_RULE, result.margin_bar)
 

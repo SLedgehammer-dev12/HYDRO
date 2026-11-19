@@ -501,6 +501,7 @@ export interface CoefficientBRequest {
   pressure_bar: number;
   steel_alpha_micro_per_c: number;
   steel_model: SteelModel;
+  backend?: string | null;
 }
 
 export interface CoefficientCompareRequest {
@@ -508,6 +509,7 @@ export interface CoefficientCompareRequest {
   pressure_bar: number;
   steel_alpha_micro_per_c: number;
   steel_model: SteelModel;
+  backend?: string | null;
 }
 
 export interface AirContentRequest {
@@ -1119,6 +1121,7 @@ export interface ReportMeta {
 }
 
 export interface AppInputs {
+  water_backend: string;
   section_meta: SectionMeta;
   geometry: GeometryInputs;
   geometry_catalog: GeometryCatalogInputs;

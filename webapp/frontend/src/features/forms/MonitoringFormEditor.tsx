@@ -1,8 +1,9 @@
 import { useId } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, Plus, Trash2 } from "lucide-react";
 import { num } from "../../lib/format";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
+import { InlineNotice } from "../../components/ui/State";
 import {
   CellInput,
   PasteRowsTray,
@@ -67,6 +68,7 @@ export function MonitoringFormEditor({
   /* ---------------------------------------------------------------- */
   if (formCode === "filling") {
     const filling = toRecord(draft.filling);
+    const fillingCold = typeof filling.min_temp_c === "number" && filling.min_temp_c < 2;
     return (
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -77,7 +79,7 @@ export function MonitoringFormEditor({
                 ? `${num(filling.total_filled_m3, 2)} m³`
                 : "—"}
             </Badge>
-            <Badge tone="neutral">
+            <Badge tone={fillingCold ? "fail" : "neutral"}>
               Su Sıcaklığı:{" "}
               {typeof filling.min_temp_c === "number"
                 ? `${num(filling.min_temp_c, 1)}–${num(filling.max_temp_c as number, 1)} °C`
@@ -104,6 +106,13 @@ export function MonitoringFormEditor({
             Saat Satırı Ekle
           </Button>
         </div>
+
+        {fillingCold ? (
+          <InlineNotice tone="danger" title="Şartname 10.1 — +2 °C dolum kısıtı" icon={AlertTriangle}>
+            Form 017 su dolum kayıtlarında minimum sıcaklık ({num(filling.min_temp_c as number, 1)} °C)
+            +2 °C sınırının altında görünüyor. Dolum öncesi ortam ve su sıcaklığını doğrulayın.
+          </InlineNotice>
+        ) : null}
 
         <PasteRowsTray
           hint="Saat | Sayaç (m³) | Hacim Farkı (m³) | Toplam Hacim (m³) | Su Sıcaklığı (°C) | Su Basıncı (Bar)"

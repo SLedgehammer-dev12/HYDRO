@@ -85,7 +85,10 @@ def resolve_backend_key(label: str | None) -> str | None:
     if text in labels:
         return text
     for key, value in labels.items():
-        if text == value or text.startswith(value):
+        if text == value:
+            return key
+    for key, value in sorted(labels.items(), key=lambda item: len(item[1]), reverse=True):
+        if text.startswith(value):
             return key
     return None
 
@@ -124,6 +127,14 @@ def build_snapshot(inputs: dict[str, Any]) -> dict[str, Any]:
     helper = inputs.get("helper") or {}
     modes = inputs.get("modes") or {}
     checks = inputs.get("checks") or {}
+    raw_report = inputs.get("report")
+    raw_report_meta = inputs.get("report_meta")
+    report_raw: dict[str, Any] = raw_report if isinstance(raw_report, dict) else {}
+    report_meta_raw: dict[str, Any] = raw_report_meta if isinstance(raw_report_meta, dict) else {}
+    report_payload = {
+        key: str(report_raw.get(key) or report_meta_raw.get(key) or "")
+        for key in ("report_no", "operator", "date", "section_id")
+    }
 
     return {
         "schema_version": 1,
@@ -187,6 +198,7 @@ def build_snapshot(inputs: dict[str, Any]) -> dict[str, Any]:
         },
         "checks": {str(key): bool(value) for key, value in checks.items()},
         "geometry_segments": _segments_payload(inputs.get("segments")),
+        "report": report_payload,
         "report_entries": [
             str(item) for item in (inputs.get("report_entries") or []) if item is not None
         ],
@@ -402,6 +414,26 @@ def apply_snapshot(
     raw_entries = snapshot.get("report_entries")
     if isinstance(raw_entries, list):
         patch["report_entries"] = [str(item) for item in raw_entries if item is not None]
+
+    maybe_report = snapshot.get("report")
+    maybe_report_meta = snapshot.get("report_meta")
+    raw_report: dict[str, Any] = maybe_report if isinstance(maybe_report, dict) else {}
+    raw_report_meta: dict[str, Any] = (
+        maybe_report_meta if isinstance(maybe_report_meta, dict) else {}
+    )
+    if raw_report or raw_report_meta:
+        report_patch: dict[str, str] = {}
+        for key in ("report_no", "operator", "date", "section_id"):
+            val = raw_report.get(key)
+            if val is None or not str(val).strip():
+                val = raw_report_meta.get(key)
+            text = state.text(val, f"report.{key}")
+            if text is not None:
+                report_patch[key] = text
+                if text:
+                    state.converted += 1
+        if report_patch:
+            patch["report"] = report_patch
 
     backend_option = snapshot.get("water_backend_option")
     if backend_option is not None and str(backend_option).strip():

@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import {
+  AlertTriangle,
   ArrowRight,
   Database,
+  Download,
   FlaskConical,
   Info,
   RefreshCw,
@@ -28,7 +30,13 @@ import {
 import { useAppStore } from "../store/useAppStore";
 import { STEEL_MODEL_OPTIONS, STEEL_PRESETS } from "../lib/constants";
 import { fmt, num } from "../lib/format";
-import type { AMode, BSource } from "../lib/types";
+import {
+  buildBackendComparisonCsv,
+  buildBackendComparisonReportText,
+  downloadBlob,
+  reportFileName,
+} from "../lib/report";
+import type { AMode, BackendComparisonItem, BSource } from "../lib/types";
 import { cn } from "../lib/utils";
 
 const A_MODES: Array<{ value: AMode; label: string; note: string }> = [
@@ -58,15 +66,28 @@ export function CoefficientsPage() {
   const backendCompare = useBackendComparison();
   const tablePoint = useTablePoint();
 
+  const backendTableCaptionId = useId();
   const [aTarget, setATarget] = useState<"air" | "pressure">("pressure");
+  const [aError, setAError] = useState<string | null>(null);
+  const [bError, setBError] = useState<string | null>(null);
   const [compareError, setCompareError] = useState<string | null>(null);
 
+  const activeWaterBackend = inputs.water_backend || meta?.water_backends[0]?.key || "table_v1";
   const context = aTarget === "air" ? inputs.air : inputs.pressure;
   const aMode = aTarget === "air" ? inputs.modes.air_a_mode : inputs.modes.pressure_a_mode;
   const aResult =
     aTarget === "air" ? results.coefficients?.airA : results.coefficients?.pressureA;
   const bResult = results.coefficients?.pressureB;
   const bCompare = results.bCompare;
+
+  const effectiveB = inputs.pressure.b_micro_per_c ?? bResult?.b_micro_per_c ?? null;
+  const effectiveBeta = bResult?.water_beta_micro_per_c ?? inputs.helper.water_beta_micro_per_c ?? null;
+  const bTemp = inputs.pressure.temperature_c;
+  const inDensityAnomalyBand = bTemp !== null && bTemp >= 0 && bTemp <= 4;
+  const showNegativeBetaOrBNotice =
+    inDensityAnomalyBand ||
+    (effectiveBeta !== null && effectiveBeta < 0) ||
+    (effectiveB !== null && effectiveB < 0);
 
   const institutional = referenceTables?.items.find((table) => table.key === "institutional");
   const gail = referenceTables?.items.find((table) => table.key === "gail");
@@ -96,8 +117,11 @@ export function CoefficientsPage() {
   }
 
   function computeA() {
+    setAError(null);
     if (context.temperature_c === null || context.pressure_bar === null) {
-      pushToast("error", "A hesaplanamadı", "Sıcaklık ve basınç girilmelidir.");
+      const msg = "Sıcaklık ve basınç girilmelidir.";
+      setAError(msg);
+      pushToast("error", "A hesaplanamadı", msg);
       return;
     }
     if (aMode === "manual") {
@@ -122,7 +146,10 @@ export function CoefficientsPage() {
               `${fmt.a(data.a_micro_per_bar)}${data.repaired ? " · onarılmış hücre" : ""}`,
             );
           },
-          onError: (error) => pushToast("error", "A okunamadı", error.message),
+          onError: (error) => {
+            setAError(error.message);
+            pushToast("error", "A okunamadı", error.message);
+          },
         },
       );
       return;
@@ -131,10 +158,7 @@ export function CoefficientsPage() {
       {
         temperature_c: context.temperature_c,
         pressure_bar: context.pressure_bar,
-        backend:
-          (aTarget === "air" ? inputs.modes.air_a_reference : inputs.modes.pressure_a_reference) ||
-          meta?.water_backends[0]?.key ||
-          "table_v1",
+        backend: activeWaterBackend,
       },
       {
         onSuccess: ({ data }) => {
@@ -145,14 +169,20 @@ export function CoefficientsPage() {
             `${fmt.a(data.a_micro_per_bar)} · ${data.backend.label}`,
           );
         },
-        onError: (error) => pushToast("error", "A hesaplanamadı", error.message),
+        onError: (error) => {
+          setAError(error.message);
+          pushToast("error", "A hesaplanamadı", error.message);
+        },
       },
     );
   }
 
   function computeB() {
+    setBError(null);
     if (inputs.pressure.temperature_c === null || inputs.pressure.pressure_bar === null) {
-      pushToast("error", "B hesaplanamadı", "Sıcaklık ve basınç girilmelidir.");
+      const msg = "Sıcaklık ve basınç girilmelidir.";
+      setBError(msg);
+      pushToast("error", "B hesaplanamadı", msg);
       return;
     }
     coefficientB.mutate(
@@ -162,6 +192,7 @@ export function CoefficientsPage() {
         pressure_bar: inputs.pressure.pressure_bar,
         steel_alpha_micro_per_c: inputs.helper.steel_alpha_micro_per_c,
         steel_model: inputs.modes.steel_model,
+        backend: activeWaterBackend,
       },
       {
         onSuccess: ({ data }) => {
@@ -175,7 +206,10 @@ export function CoefficientsPage() {
             `${fmt.b(data.b_micro_per_c)} · ${data.label}`,
           );
         },
-        onError: (error) => pushToast("error", "B hesaplanamadı", error.message),
+        onError: (error) => {
+          setBError(error.message);
+          pushToast("error", "B hesaplanamadı", error.message);
+        },
       },
     );
   }
@@ -192,6 +226,7 @@ export function CoefficientsPage() {
         pressure_bar: inputs.pressure.pressure_bar,
         steel_alpha_micro_per_c: inputs.helper.steel_alpha_micro_per_c,
         steel_model: inputs.modes.steel_model,
+        backend: activeWaterBackend,
       },
       {
         onError: (error) => setCompareError(error.message),
@@ -200,11 +235,35 @@ export function CoefficientsPage() {
   }
 
   function runBackendCompare() {
-    if (inputs.pressure.temperature_c === null || inputs.pressure.pressure_bar === null) return;
+    if (inputs.pressure.temperature_c === null || inputs.pressure.pressure_bar === null) {
+      pushToast("error", "Backend karşılaştırması yapılamadı", "Sıcaklık ve basınç girilmelidir.");
+      return;
+    }
     backendCompare.mutate({
       temperature_c: inputs.pressure.temperature_c,
       pressure_bar: inputs.pressure.pressure_bar,
     });
+  }
+
+  function exportBackendComparison(format: "txt" | "csv") {
+    const cmp = results.backendCompare;
+    if (!cmp || !meta) return;
+    const baseName = reportFileName(format, inputs.report.report_no ? `${inputs.report.report_no}_backend` : "backend_karsilastirma");
+    if (format === "csv") {
+      const csv = buildBackendComparisonCsv(cmp, activeWaterBackend);
+      downloadBlob(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" }), baseName);
+    } else {
+      const txt = buildBackendComparisonReportText(cmp, activeWaterBackend, meta);
+      downloadBlob(new Blob([txt], { type: "text/plain;charset=utf-8" }), baseName);
+    }
+    pushToast("success", "Karşılaştırma raporu indirildi", baseName);
+  }
+
+  function getRefItem(items: BackendComparisonItem[]): BackendComparisonItem | undefined {
+    return (
+      items.find((item) => item.backend.key === "table_v1" && !item.error) ??
+      items.find((item) => !item.error)
+    );
   }
 
   const activeA = aMode === "manual" ? context.a_micro_per_bar : aResult?.a_micro_per_bar ?? context.a_micro_per_bar;
@@ -218,10 +277,10 @@ export function CoefficientsPage() {
         meta={
           <>
             <span className="flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
-              A <CoefficientBadge state={aResult?.state ?? (activeA ? "manual" : "empty")} />
+              A <CoefficientBadge state={aResult?.state ?? (activeA !== null ? "manual" : "empty")} />
             </span>
             <span className="flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
-              B <CoefficientBadge state={bResult ? "reference" : inputs.pressure.b_micro_per_c ? "manual" : "empty"} />
+              B <CoefficientBadge state={bResult ? "reference" : inputs.pressure.b_micro_per_c !== null ? "manual" : "empty"} />
             </span>
             <span className="chip">{inputs.modes.steel_model}</span>
             <Badge tone={bCompare ? "pass" : "pending"}>
@@ -329,15 +388,8 @@ export function CoefficientsPage() {
             <div className="mt-3">
               <SelectField
                 label="Su özelliği backend'i"
-                value={
-                  (aTarget === "air" ? inputs.modes.air_a_reference : inputs.modes.pressure_a_reference) ||
-                  meta?.water_backends[0]?.key ||
-                  "table_v1"
-                }
-                onChange={(value) => {
-                  if (aTarget === "air") patchInputs({ modes: { air_a_reference: value } });
-                  else patchInputs({ modes: { pressure_a_reference: value } });
-                }}
+                value={activeWaterBackend}
+                onChange={(value) => patchInputs({ water_backend: value })}
                 options={(meta?.water_backends ?? []).map((backend) => ({
                   value: backend.key,
                   label: `${backend.label}${backend.distribution_ready ? "" : " (dağıtım dışı)"}`,
@@ -380,13 +432,13 @@ export function CoefficientsPage() {
               label="A"
               value={num(activeA, 6)}
               unit="10⁻⁶/bar"
-              tone={activeA ? (aMode === "manual" ? "info" : "pass") : undefined}
+              tone={activeA !== null ? (aMode === "manual" ? "info" : "pass") : undefined}
               hint={aResult?.backend.label ?? (aMode === "manual" ? "Manuel değer" : "Henüz hesaplanmadı")}
             />
             <ResultTile
               label="Backend"
               value={
-                <span className="text-[13px]">{aResult?.backend.key ?? (aMode === "table" ? "referans tablo" : aMode === "manual" ? "manuel" : "—")}</span>
+                <span className="text-[13px]">{aResult?.backend.key ?? (aMode === "table" ? "referans tablo" : aMode === "manual" ? "manuel" : activeWaterBackend)}</span>
               }
               hint={
                 aResult?.backend.label ??
@@ -394,13 +446,20 @@ export function CoefficientsPage() {
               }
             />
           </div>
+          {aError ? (
+            <div className="mt-3">
+              <InlineNotice tone="danger" title="A hazırlanamadı" icon={AlertTriangle}>
+                {aError}
+              </InlineNotice>
+            </div>
+          ) : null}
         </SectionCard>
 
         <SectionCard
           title="B — basınç değişim katsayısı"
           description="Varsayılan kurum içi tablodur. Otomatik modda β − 3α (hacimsel) kullanılır."
           icon={Sparkles}
-          action={<CoefficientBadge state={bResult?.source === "auto" ? "computed" : bResult ? "reference" : inputs.pressure.b_micro_per_c ? "manual" : "empty"} />}
+          action={<CoefficientBadge state={bResult?.source === "auto" ? "computed" : bResult ? "reference" : inputs.pressure.b_micro_per_c !== null ? "manual" : "empty"} />}
         >
           <div className="mb-3 seg-control" role="group" aria-label="B kaynağı">
             {B_SOURCES.map((source) => (
@@ -483,7 +542,7 @@ export function CoefficientsPage() {
             />
           </div>
 
-          <div className="mt-2">
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
             <SelectField
               label="Çelik preset"
               value={inputs.modes.steel_preset}
@@ -499,6 +558,17 @@ export function CoefficientsPage() {
               }}
               options={STEEL_PRESETS.map((preset) => ({ value: preset.label, label: preset.label }))}
             />
+            {inputs.modes.pressure_b_source === "auto" ? (
+              <SelectField
+                label="Su özelliği backend'i (auto β)"
+                value={activeWaterBackend}
+                onChange={(value) => patchInputs({ water_backend: value })}
+                options={(meta?.water_backends ?? []).map((backend) => ({
+                  value: backend.key,
+                  label: `${backend.label}${backend.distribution_ready ? "" : " (dağıtım dışı)"}`,
+                }))}
+              />
+            ) : null}
           </div>
 
           <div className="mt-3 flex items-center justify-between gap-2">
@@ -523,16 +593,69 @@ export function CoefficientsPage() {
               label="B"
               value={num(inputs.pressure.b_micro_per_c ?? bResult?.b_micro_per_c, 6)}
               unit="10⁻⁶/°C"
-              tone={inputs.pressure.b_micro_per_c ? "pass" : undefined}
+              tone={
+                effectiveB !== null
+                  ? effectiveB < 0
+                    ? "info"
+                    : "pass"
+                  : undefined
+              }
               hint={bResult?.label ?? B_SOURCES.find((s) => s.value === inputs.modes.pressure_b_source)?.note}
             />
             <ResultTile
               label="Su β"
               value={num(inputs.helper.water_beta_micro_per_c, 6)}
               unit="10⁻⁶/°C"
+              tone={
+                inputs.helper.water_beta_micro_per_c !== null && inputs.helper.water_beta_micro_per_c < 0
+                  ? "info"
+                  : undefined
+              }
               hint="Otomatik kaynakta dolar"
             />
           </div>
+
+          {bError ? (
+            <div className="mt-3">
+              <InlineNotice tone="danger" title="B hesaplanamadı" icon={AlertTriangle}>
+                <p>{bError}</p>
+                {inputs.modes.pressure_b_source !== "auto" && bTemp !== null && bTemp < 1 ? (
+                  <Button
+                    size="sm"
+                    variant="default"
+                    className="mt-2"
+                    onClick={() => {
+                      setBError(null);
+                      patchInputs({
+                        modes: { pressure_b_source: "auto", pressure_b_reference: "" },
+                        pressure: { b_micro_per_c: null },
+                      });
+                    }}
+                  >
+                    Otomatik β − 3α kaynağına geç
+                  </Button>
+                ) : null}
+              </InlineNotice>
+            </div>
+          ) : null}
+
+          {showNegativeBetaOrBNotice ? (
+            <div className="mt-3">
+              <InlineNotice
+                tone="info"
+                title="0–4 °C yoğunluk anomalisi / negatif β veya B"
+                icon={Info}
+              >
+                0–4 °C bölgesinde suyun maksimum yoğunluk noktası nedeniyle suyun ısıl genleşme
+                katsayısı (<span className="font-mono">β</span>) sıfırın altına inebilir ve{" "}
+                <span className="font-mono">B = β − 3α</span> negatif olur. Negatif{" "}
+                <span className="font-mono">B</span> ile teorik{" "}
+                <span className="font-mono">Pt</span> işareti ters döner ve fiziksel olarak
+                geçerlidir. Kurum içi/GAIL tabloları 1–25 °C aralığını kapsar; 1 °C altında{" "}
+                <span className="font-semibold">Otomatik</span> kaynak (0–40 °C) kullanılmalıdır.
+              </InlineNotice>
+            </div>
+          ) : null}
 
           {bResult?.note ? (
             <p className="mt-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-2 text-[10.5px] leading-relaxed text-[var(--text-muted)]">
@@ -627,47 +750,136 @@ export function CoefficientsPage() {
       <div className="grid gap-4 xl:grid-cols-2">
         <SectionCard
           title="Backend karşılaştırması"
-          description="Kurulu su özelliği backend'leri için A, β ve yoğunluk."
+          description="Kurulu su özelliği backend'leri için A, β, yoğunluk ve referansa göre fark."
           icon={Database}
           action={
-            <Button size="lg" icon={<RefreshCw size={15} />} loading={backendCompare.isPending} onClick={runBackendCompare}>
-              Çalıştır
-            </Button>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {results.backendCompare?.items.length ? (
+                <>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    icon={<Download size={12} />}
+                    onClick={() => exportBackendComparison("txt")}
+                  >
+                    TXT
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    icon={<Download size={12} />}
+                    onClick={() => exportBackendComparison("csv")}
+                  >
+                    CSV
+                  </Button>
+                </>
+              ) : null}
+              <Button
+                size="lg"
+                icon={<RefreshCw size={15} />}
+                loading={backendCompare.isPending}
+                onClick={runBackendCompare}
+              >
+                Çalıştır
+              </Button>
+            </div>
           }
         >
           {results.backendCompare ? (
-            <div className="table-wrap scroll-thin">
-              <table className="data">
-                <caption>T = {fmt.c(results.backendCompare.temperature_c)} · P = {fmt.bar(results.backendCompare.pressure_bar)}</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Backend</th>
-                    <th scope="col" className="num">A</th>
-                    <th scope="col" className="num">β</th>
-                    <th scope="col" className="num">ρ (kg/m³)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {results.backendCompare.items.map((item) => (
-                    <tr key={item.backend.key}>
-                      <td>
-                        <span className="font-medium text-[var(--text)]">{item.backend.label}</span>
-                        {!item.backend.distribution_ready ? (
-                          <Badge tone="warning" className="ml-2">dağıtım dışı</Badge>
-                        ) : null}
-                      </td>
-                      <td className="num">{num(item.a_micro_per_bar, 6)}</td>
-                      <td className="num">{num(item.beta_micro_per_c, 6)}</td>
-                      <td className="num">{num(item.density_kg_per_m3, 2)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            (() => {
+              const items = results.backendCompare.items;
+              const refItem = getRefItem(items);
+              return (
+                <div
+                  role="region"
+                  aria-labelledby={backendTableCaptionId}
+                  className="table-wrap scroll-thin"
+                >
+                  <table className="data compact">
+                    <caption id={backendTableCaptionId}>
+                      T = {fmt.c(results.backendCompare.temperature_c)} · P ={" "}
+                      {fmt.bar(results.backendCompare.pressure_bar)}
+                      {refItem ? ` · Referans: ${refItem.backend.label}` : ""}
+                    </caption>
+                    <thead>
+                      <tr>
+                        <th scope="col">Backend</th>
+                        <th scope="col" className="num">A</th>
+                        <th scope="col" className="num">ΔA</th>
+                        <th scope="col" className="num">β</th>
+                        <th scope="col" className="num">Δβ</th>
+                        <th scope="col" className="num">ρ (kg/m³)</th>
+                        <th scope="col">Seçim</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {items.map((item) => {
+                        const isSelected = item.backend.key === activeWaterBackend;
+                        const deltaA =
+                          refItem?.a_micro_per_bar != null && item.a_micro_per_bar != null
+                            ? item.a_micro_per_bar - refItem.a_micro_per_bar
+                            : null;
+                        const deltaBeta =
+                          refItem?.beta_micro_per_c != null && item.beta_micro_per_c != null
+                            ? item.beta_micro_per_c - refItem.beta_micro_per_c
+                            : null;
+                        return (
+                          <tr key={item.backend.key} className={cn(isSelected && "bg-[var(--primary-soft)]")}>
+                            <th scope="row">
+                              <div className="flex flex-wrap items-center gap-1.5 font-normal">
+                                <span className="font-medium text-[var(--text)]">{item.backend.label}</span>
+                                {isSelected ? <Badge tone="info">seçili</Badge> : null}
+                                {!item.backend.distribution_ready ? (
+                                  <Badge tone="warning">dağıtım dışı</Badge>
+                                ) : null}
+                              </div>
+                            </th>
+                            {item.error ? (
+                              <td colSpan={6} className="text-[11px] font-medium tone-danger">
+                                Hata: {item.error}
+                              </td>
+                            ) : (
+                              <>
+                                <td className="num">{num(item.a_micro_per_bar, 6)}</td>
+                                <td className="num text-[var(--text-faint)]">
+                                  {deltaA === null || deltaA === 0
+                                    ? "—"
+                                    : `${deltaA > 0 ? "+" : ""}${num(deltaA, 6)}`}
+                                </td>
+                                <td className="num">{num(item.beta_micro_per_c, 6)}</td>
+                                <td className="num text-[var(--text-faint)]">
+                                  {deltaBeta === null || deltaBeta === 0
+                                    ? "—"
+                                    : `${deltaBeta > 0 ? "+" : ""}${num(deltaBeta, 6)}`}
+                                </td>
+                                <td className="num">{num(item.density_kg_per_m3, 2)}</td>
+                                <td>
+                                  {isSelected ? (
+                                    <Badge tone="pass">Aktif</Badge>
+                                  ) : (
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => patchInputs({ water_backend: item.backend.key })}
+                                    >
+                                      Seç
+                                    </Button>
+                                  )}
+                                </td>
+                              </>
+                            )}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()
           ) : (
             <p className="text-[11.5px] leading-relaxed text-[var(--text-faint)]">
-              Backend listesi meta uçtan gelir. Karşılaştırma, A değerinin backend’e göre değişimini
-              gösterir.
+              Backend listesi meta uçtan gelir. Karşılaştırma, A ve β değerlerinin backend’e göre
+              farkını gösterir ve TXT/CSV rapor olarak indirilebilir.
             </p>
           )}
         </SectionCard>

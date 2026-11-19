@@ -81,7 +81,7 @@ export function DashboardPage() {
   }
 
   const airAReady = Boolean(inputs.air.a_micro_per_bar);
-  const bReady = Boolean(inputs.pressure.b_micro_per_c);
+  const bReady = inputs.pressure.b_micro_per_c !== null;
   const deltaReady = Boolean(inputs.pressure.delta_t_c !== null && inputs.pressure.actual_pressure_change_bar !== null);
 
   const nextStep = !projectId

@@ -1,11 +1,49 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 from typing import Final
 
 from .hydrotest_core import FLOAT_TOLERANCE, ValidationError
 
 AMBIENT_TEMP_LIMIT_C: float = 2.0
+
+
+@dataclass(frozen=True)
+class FillTemperatureResult:
+    """Result of evaluating ambient/fill temperature against Spec 10.1."""
+
+    ambient_temperature_c: float
+    limit_c: float
+    passed: bool
+    status: str
+    spec_reference: str
+    message: str
+
+
+def evaluate_fill_temperature(ambient_temp_c: float) -> FillTemperatureResult:
+    """Evaluate ambient or water fill temperature against Specification 10.1 (+2 C minimum)."""
+
+    if not isfinite(ambient_temp_c) or ambient_temp_c <= -273.15:
+        raise ValidationError("Ortam/dolum sicakligi sonlu ve fiziksel bir deger olmalidir.")
+
+    passed = ambient_temp_c >= AMBIENT_TEMP_LIMIT_C - FLOAT_TOLERANCE
+    status = "UYGUN" if passed else "UYARI"
+    message = (
+        f"Ortam/dolum sicakligi {ambient_temp_c:.1f} °C "
+        f"(+{AMBIENT_TEMP_LIMIT_C:.0f} °C sartname limiti saglaniyor)."
+        if passed
+        else f"Sartname 10.1 uyarisi: ortam/dolum sicakligi {ambient_temp_c:.1f} °C "
+        f"(+{AMBIENT_TEMP_LIMIT_C:.0f} °C limitinin altinda; dolum yapilmamali veya donmaya karsi onlem alinmalidir)."
+    )
+    return FillTemperatureResult(
+        ambient_temperature_c=ambient_temp_c,
+        limit_c=AMBIENT_TEMP_LIMIT_C,
+        passed=passed,
+        status=status,
+        spec_reference="Madde 10.1",
+        message=message,
+    )
 
 
 @dataclass(frozen=True)

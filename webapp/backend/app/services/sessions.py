@@ -96,6 +96,7 @@ def default_inputs() -> dict[str, Any]:
             "actual_pressure_change_bar": None,
             "t_initial_c": None,
             "t_final_c": None,
+            "derive_delta_t": False,
         },
         "field": {
             "ambient_temperature_c": None,
@@ -159,20 +160,27 @@ def normalize_inputs(raw: dict[str, Any] | None) -> dict[str, Any]:
         merged["check_details"] = {}
     if not isinstance(merged.get("report"), dict):
         merged["report"] = {}
+    raw_report_meta = merged.get("report_meta")
     for key in ("report_no", "operator", "date", "section_id"):
         val = merged["report"].get(key)
-        merged["report"][key] = "" if val is None else str(val)
+        text = "" if val is None else str(val)
+        if not text and isinstance(raw_report_meta, dict):
+            fallback_val = raw_report_meta.get(key)
+            if fallback_val is not None and str(fallback_val).strip():
+                text = str(fallback_val).strip()
+        merged["report"][key] = text
     if not isinstance(merged.get("report_entries"), list):
         merged["report_entries"] = []
-    # The SPA keeps ambient temperature under ``air``; mirror it to the
-    # canonical ``field.ambient_temperature_c`` when the latter is empty.
+    # Mirror ambient temperature symmetrically between ``air`` and canonical ``field``.
     air_block = merged.get("air")
     field_block = merged.get("field")
     if isinstance(air_block, dict) and isinstance(field_block, dict):
-        if field_block.get("ambient_temperature_c") is None:
-            ambient = as_float(air_block.get("ambient_temperature_c"))
-            if ambient is not None:
-                field_block["ambient_temperature_c"] = ambient
+        air_ambient = as_float(air_block.get("ambient_temperature_c"))
+        field_ambient = as_float(field_block.get("ambient_temperature_c"))
+        if field_ambient is None and air_ambient is not None:
+            field_block["ambient_temperature_c"] = air_ambient
+        elif air_ambient is None and field_ambient is not None:
+            air_block["ambient_temperature_c"] = field_ambient
     return merged
 
 

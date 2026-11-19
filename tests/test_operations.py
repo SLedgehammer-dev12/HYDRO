@@ -4,6 +4,7 @@ import unittest
 
 from hidrostatik_test.domain import ValidationError
 from hidrostatik_test.domain.operations import (
+    evaluate_fill_temperature,
     evaluate_pig_speed,
     get_pig_speed_limit,
     get_pig_speed_limit_options,
@@ -32,6 +33,27 @@ class PigSpeedOperationTests(unittest.TestCase):
 
         with self.assertRaises(ValidationError):
             evaluate_pig_speed(distance_m=0, travel_time_min=5, limit=limit)
+
+
+class FillTemperatureOperationTests(unittest.TestCase):
+    def test_fill_temperature_passes_at_and_above_two_celsius(self) -> None:
+        for temp in (2.0, 12.5):
+            result = evaluate_fill_temperature(temp)
+            self.assertTrue(result.passed)
+            self.assertEqual(result.status, "UYGUN")
+            self.assertEqual(result.spec_reference, "Madde 10.1")
+
+    def test_fill_temperature_warns_below_two_celsius(self) -> None:
+        for temp in (1.9, -5.0):
+            result = evaluate_fill_temperature(temp)
+            self.assertFalse(result.passed)
+            self.assertEqual(result.status, "UYARI")
+            self.assertIn("10.1", result.message)
+
+    def test_fill_temperature_rejects_non_finite_or_unphysical_values(self) -> None:
+        for bad in (float("nan"), float("inf"), -274.0):
+            with self.assertRaises(ValidationError):
+                evaluate_fill_temperature(bad)
 
 
 if __name__ == "__main__":

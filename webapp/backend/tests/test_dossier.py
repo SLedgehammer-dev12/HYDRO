@@ -1633,3 +1633,84 @@ def test_inputs_report_metadata_persisted_and_exported_to_report_context(client,
     assert r_txt.status_code == 200
     assert "RPR-2026-88" in r_txt.text
     assert "Kaan Aksoy" in r_txt.text
+
+
+def test_ambient_temp_manual_fallback_in_operational_checks():
+    from app.services.dossier import evaluate_operational_checks
+
+    cold_checks, cold_details = evaluate_operational_checks(
+        {"ambient_temperature_c": 1.5},
+        {},
+        {"air": {"status": "pending"}, "pressure": {"status": "pending"}},
+    )
+    assert cold_checks["ambient_temp"] is False
+    assert cold_details["ambient_temp"]["status"] == "failed"
+    assert "10.1" in cold_details["ambient_temp"]["message"]
+    assert cold_details["ambient_temp"]["source_forms"] == ["manual_input"]
+
+    ok_checks, ok_details = evaluate_operational_checks(
+        {"ambient_temperature_c": 5.0},
+        {},
+        {"air": {"status": "pending"}, "pressure": {"status": "pending"}},
+    )
+    assert ok_checks["ambient_temp"] is True
+    assert ok_details["ambient_temp"]["status"] == "passed"
+
+
+def test_ocr_report_meta_fallback_and_safety_report_export(client, headers):
+    from app.services.snapshot import apply_snapshot, build_snapshot
+
+    r_sess = client.post(
+        "/api/sessions",
+        json={
+            "name": "Guvenlik Rapor Testi",
+            "inputs": {
+                "water_backend": "table_v1_bicubic",
+                "report": {"report_no": "", "operator": "", "date": "", "section_id": ""},
+                "report_meta": {
+                    "report_no": "OCR-2026-09",
+                    "operator": "Ece Yilmaz",
+                    "date": "2026-11-19",
+                    "section_id": "K-22",
+                },
+                "air": {
+                    "temperature_c": 10.0,
+                    "pressure_bar": 50.0,
+                    "ambient_temperature_c": 1.0,
+                },
+                "pressure": {
+                    "temperature_c": 10.0,
+                    "pressure_bar": 50.0,
+                    "t_initial_c": 12.5,
+                    "t_final_c": 10.5,
+                    "delta_t_c": 2.0,
+                },
+            },
+        },
+        headers=headers,
+    )
+    assert r_sess.status_code == 201, r_sess.text
+    sess = r_sess.json()
+    assert sess["inputs"]["report"]["report_no"] == "OCR-2026-09"
+    assert sess["inputs"]["report"]["operator"] == "Ece Yilmaz"
+    assert sess["inputs"]["field"]["ambient_temperature_c"] == 1.0
+    assert sess["inputs"]["pressure"]["derive_delta_t"] is False
+
+    r_txt = client.get(f"/api/sessions/{sess['id']}/export?format=txt", headers=headers)
+    assert r_txt.status_code == 200
+    txt = r_txt.text
+    assert "OCR-2026-09" in txt
+    assert "Ece Yilmaz" in txt
+    assert (
+        "Su backend'i: Table Interpolation v1 (Bicubic)" in txt
+        or "Su backend'i: table_v1_bicubic" in txt
+    )
+    assert "UYARI (Sartname 10.1)" in txt
+    assert "Baslangic Tilk" in txt or "Baslangic sicakligi Tilk" in txt
+    assert "Su Ozelligi Backend Karsilastirmasi" in txt
+
+    snap = build_snapshot(sess["inputs"])
+    assert snap["report"]["report_no"] == "OCR-2026-09"
+    restored, _ = apply_snapshot({}, snap)
+    assert restored["water_backend"] == "table_v1_bicubic"
+    assert restored["report"]["operator"] == "Ece Yilmaz"

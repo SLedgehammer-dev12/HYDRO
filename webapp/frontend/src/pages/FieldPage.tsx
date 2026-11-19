@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowRight, CheckCircle2, ClipboardCheck, Gauge, Layers, Mountain, MoveRight, Waves } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowRight, CheckCircle2, ClipboardCheck, Gauge, Layers, Mountain, MoveRight, Waves } from "lucide-react";
 import { PageHeader } from "../components/layout/PageHeader";
 import { SectionCard, KpiCard, ResultTile } from "../components/ui/Card";
 import { Badge } from "../components/ui/Badge";
@@ -148,6 +148,11 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
       ? projectScene
       : sectionScene;
   const monitored = inputs.field.monitored_pressure_bar;
+  const ambientTemp = inputs.field.ambient_temperature_c ?? inputs.air.ambient_temperature_c;
+  const ambientWarning =
+    ambientTemp !== null && ambientTemp < 2
+      ? "Şartname 10.1: dolum sırasında ortam sıcaklığı +2 °C altında olmamalı."
+      : null;
 
   const limits = meta?.limits;
   const maxLength = limits?.max_test_section_length_m ?? 20_000;
@@ -707,6 +712,27 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
           icon={ClipboardCheck}
           action={<Badge tone={checked === 11 ? "pass" : "info"}>{Math.round((checked / 11) * 100)}%</Badge>}
         >
+          <div className="mb-3 space-y-2">
+            <NumberField
+              label="Ortam hava sıcaklığı (Şartname 10.1)"
+              unit="°C"
+              value={ambientTemp}
+              onChange={(value) =>
+                patchInputs({
+                  field: { ambient_temperature_c: value },
+                  air: { ambient_temperature_c: value },
+                })
+              }
+              error={ambientWarning}
+              help={ambientWarning ? undefined : "+2 °C altında su dolumu yapılmaz."}
+            />
+            {ambientWarning ? (
+              <InlineNotice tone="danger" title="Şartname 10.1 — +2 °C dolum kısıtı" icon={AlertTriangle}>
+                Ölçülen ortam sıcaklığı ({num(ambientTemp, 1)} °C) +2 °C sınırının altında. Donma
+                riski nedeniyle doluma izin verilmez.
+              </InlineNotice>
+            ) : null}
+          </div>
           <ProgressBar value={checked} max={CHECK_DEFINITIONS.length} tone={checked === 11 ? "pass" : "info"} className="mb-3" />
           <div className="grid gap-2">
             {CHECK_DEFINITIONS.map((check) => {

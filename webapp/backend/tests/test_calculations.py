@@ -439,3 +439,84 @@ def test_discharge_endpoint(client):
     bad = client.post("/api/calculations/discharge", json={**base, "destination": "ocean"})
     assert bad.status_code == 400
     assert bad.json()["code"] == "domain_validation_error"
+
+
+def test_pressure_variation_negative_b_flag_follows_b_sign(client):
+    pos_b_neg_dt = client.post(
+        "/api/calculations/pressure-variation",
+        json=pressure_payload(
+            b_micro_per_c=188.661,
+            delta_t_c=-2.0,
+            actual_pressure_change_bar=-5.9,
+        ),
+    ).json()
+    assert pos_b_neg_dt["theoretical_pressure_change_bar"] < 0
+    assert pos_b_neg_dt["negative_b"] is False
+    assert "B negatif" not in pos_b_neg_dt["decision"]["summary"]
+
+    neg_b_neg_dt = client.post(
+        "/api/calculations/pressure-variation",
+        json=pressure_payload(
+            b_micro_per_c=-60.0,
+            delta_t_c=-2.0,
+            actual_pressure_change_bar=1.9,
+        ),
+    ).json()
+    assert neg_b_neg_dt["theoretical_pressure_change_bar"] > 0
+    assert neg_b_neg_dt["negative_b"] is True
+    assert "B negatif" in neg_b_neg_dt["decision"]["summary"]
+
+    neg_b_zero_dt = client.post(
+        "/api/calculations/pressure-variation",
+        json=pressure_payload(
+            b_micro_per_c=-60.0,
+            delta_t_c=0.0,
+            actual_pressure_change_bar=0.0,
+        ),
+    ).json()
+    assert neg_b_zero_dt["theoretical_pressure_change_bar"] == 0.0
+    assert neg_b_zero_dt["negative_b"] is True
+
+
+def test_coefficients_b_and_compare_accept_backend_and_cold_range(client):
+    auto_cold = client.post(
+        "/api/coefficients/b",
+        json={
+            "source": "auto",
+            "temperature_c": 1.0,
+            "pressure_bar": 30.0,
+            "steel_alpha_micro_per_c": 12.0,
+            "steel_model": "volumetric",
+            "backend": "table_v1",
+        },
+    )
+    assert auto_cold.status_code == 200, auto_cold.text
+    cold_body = auto_cold.json()
+    assert cold_body["water_beta_micro_per_c"] < 0
+    assert cold_body["b_micro_per_c"] < 0
+    assert "table_v1" in cold_body["note"]
+
+    table_zero = client.post(
+        "/api/coefficients/b",
+        json={
+            "source": "institutional",
+            "temperature_c": 0.0,
+            "pressure_bar": 50.0,
+            "steel_alpha_micro_per_c": 12.0,
+            "steel_model": "volumetric",
+        },
+    )
+    assert table_zero.status_code == 400
+
+    cmp_res = client.post(
+        "/api/coefficients/compare",
+        json={
+            "temperature_c": 10.0,
+            "pressure_bar": 50.0,
+            "steel_alpha_micro_per_c": 12.0,
+            "steel_model": "volumetric",
+            "backend": "table_v1",
+        },
+    )
+    assert cmp_res.status_code == 200, cmp_res.text
+    assert "table_v1" in cmp_res.json()["auto"]["note"]

@@ -1,7 +1,27 @@
-import type { AppInputs, HistoryEntry, MetaResponse, ResultBundle, TestType } from "./types";
+import type {
+  AppInputs,
+  BackendComparisonItem,
+  BackendComparisonResponse,
+  HistoryEntry,
+  MetaResponse,
+  ResultBundle,
+  TestType,
+} from "./types";
 import { CHECK_DEFINITIONS } from "./constants";
 import { dateOnly, fmt, formatInput, num } from "./format";
 import { PUMP_LABELS } from "./constants";
+
+function resolveWaterBackendLabel(meta: MetaResponse, key: string): string {
+  const matched = meta.water_backends.find((b) => b.key === key);
+  return matched ? `${matched.label} (${matched.key})` : key || meta.water_backends[0]?.label || "table_v1";
+}
+
+function findReferenceItem(items: BackendComparisonItem[]): BackendComparisonItem | undefined {
+  return (
+    items.find((item) => item.backend.key === "table_v1" && !item.error) ??
+    items.find((item) => !item.error)
+  );
+}
 
 export function reportFileName(extension: string, reportNo?: string): string {
   const stamp = new Date()
@@ -50,6 +70,7 @@ export function buildReportText(
   lines.push(`Operatör        : ${inputs.report.operator || "—"}`);
   lines.push(`Tarih           : ${inputs.report.date ? dateOnly(inputs.report.date) : "—"}`);
   lines.push(`Bölüm           : ${inputs.report.section_id || "—"}`);
+  lines.push(`Su backend'i    : ${resolveWaterBackendLabel(meta, inputs.water_backend)}`);
   lines.push("");
 
   lines.push("1. BORU KESİTİ");
@@ -92,6 +113,8 @@ export function buildReportText(
     lines.push("");
   }
 
+  const ambientTemp = inputs.air.ambient_temperature_c ?? inputs.field.ambient_temperature_c;
+
   lines.push("3. HAVA İÇERİK TESTİ");
   lines.push(rule("-"));
   lines.push(`Su sıcaklığı    : ${fmt.c(inputs.air.temperature_c)}`);
@@ -100,6 +123,10 @@ export function buildReportText(
   lines.push(`Basınç artışı   : ${fmt.bar(inputs.air.pressure_rise_bar)}`);
   lines.push(`K faktörü       : ${num(inputs.air.k_factor, 4)}`);
   lines.push(`Fiili ilave su  : ${fmt.m3(inputs.air.actual_added_water_m3)}`);
+  lines.push(`Ortam sıcaklığı : ${fmt.c(ambientTemp)}`);
+  if (ambientTemp !== null && ambientTemp < 2) {
+    lines.push("UYARI (10.1)    : Ortam sıcaklığı +2 °C altındadır; Şartname 10.1 dolum kısıtı ihlali!");
+  }
   lines.push(`Teorik Vp       : ${fmt.m3(air?.theoretical_added_water_m3)}`);
   lines.push(`Kabul limiti    : ${fmt.m3(air?.acceptance_limit_m3)}`);
   lines.push(`Oran (Vpa/Vp)   : ${num(air?.ratio, 6)}`);
@@ -113,6 +140,10 @@ export function buildReportText(
   lines.push(`Su basıncı      : ${fmt.bar(inputs.pressure.pressure_bar)}`);
   lines.push(`A katsayısı     : ${fmt.a(inputs.pressure.a_micro_per_bar)}`);
   lines.push(`B katsayısı     : ${fmt.b(inputs.pressure.b_micro_per_c)}`);
+  if (inputs.pressure.t_initial_c !== null || inputs.pressure.t_final_c !== null) {
+    lines.push(`Başlangıç Tilk  : ${fmt.c(inputs.pressure.t_initial_c)}`);
+    lines.push(`Bitiş Tson      : ${fmt.c(inputs.pressure.t_final_c)}`);
+  }
   lines.push(`ΔT (Tilk−Tson)  : ${fmt.c(inputs.pressure.delta_t_c)}`);
   lines.push(`Pa (Pilk−Pson)  : ${fmt.bar(inputs.pressure.actual_pressure_change_bar)}`);
   lines.push(`Teorik Pt       : ${fmt.bar(pressure?.theoretical_pressure_change_bar)}`);
@@ -167,6 +198,39 @@ export function buildReportText(
     lines.push("");
   }
 
+  if (results.backendCompare && results.backendCompare.items.length > 0) {
+    const refItem = findReferenceItem(results.backendCompare.items);
+    lines.push(
+      `BACKEND KARŞILAŞTIRMASI (T=${fmt.c(results.backendCompare.temperature_c)}, P=${fmt.bar(
+        results.backendCompare.pressure_bar,
+      )})`,
+    );
+    lines.push(rule("-"));
+    for (const item of results.backendCompare.items) {
+      const marker = item.backend.key === inputs.water_backend ? "*" : " ";
+      if (item.error) {
+        lines.push(`${marker} ${item.backend.label}: HATA - ${item.error}`);
+        continue;
+      }
+      const deltaA =
+        refItem?.a_micro_per_bar != null && item.a_micro_per_bar != null
+          ? item.a_micro_per_bar - refItem.a_micro_per_bar
+          : null;
+      const deltaBeta =
+        refItem?.beta_micro_per_c != null && item.beta_micro_per_c != null
+          ? item.beta_micro_per_c - refItem.beta_micro_per_c
+          : null;
+      lines.push(
+        `${marker} ${item.backend.label}: A=${num(item.a_micro_per_bar, 6)} (ΔA=${
+          deltaA !== null ? num(deltaA, 6) : "—"
+        }) · β=${num(item.beta_micro_per_c, 6)} (Δβ=${
+          deltaBeta !== null ? num(deltaBeta, 6) : "—"
+        }) · ρ=${num(item.density_kg_per_m3, 2)} kg/m³`,
+      );
+    }
+    lines.push("");
+  }
+
   lines.push("9. NİHAİ KARAR");
   lines.push(rule("-"));
   lines.push(`Hava içerik     : ${airDecision} · Kural: Vpa < 1.06 x Vp`);
@@ -196,7 +260,11 @@ export function buildSnapshot(
     saved_at_utc: new Date().toISOString(),
     app_version: meta.app.version,
     active_tab: inputs.air.pressure_rise_bar === 1 ? "air" : "pressure",
-    water_backend_option: meta.water_backends[0]?.label ?? "Table Interpolation v1",
+    water_backend_option:
+      meta.water_backends.find((b) => b.key === inputs.water_backend)?.label ??
+      inputs.water_backend ??
+      meta.water_backends[0]?.label ??
+      "Table Interpolation v1",
     geometry: {
       outside_diameter_mm: str(inputs.geometry.outside_diameter_mm),
       wall_thickness_mm: str(inputs.geometry.wall_thickness_mm),
@@ -233,7 +301,7 @@ export function buildSnapshot(
       t_final_c: str(inputs.pressure.t_final_c),
     },
     field: {
-      ambient_temperature_c: str(inputs.field.ambient_temperature_c),
+      ambient_temperature_c: str(inputs.field.ambient_temperature_c ?? inputs.air.ambient_temperature_c),
       pig_distance_m: str(inputs.field.pig_distance_m),
       pig_travel_time_min: str(inputs.field.pig_travel_time_min),
       pig_speed_m_per_s: str(results.pig?.speed_m_per_s),
@@ -252,8 +320,114 @@ export function buildSnapshot(
       nps_label: segment.nps_label,
       schedule_label: segment.schedule_label,
     })),
+    report: { ...inputs.report },
     report_entries: [],
   };
+}
+
+export function buildBackendComparisonReportText(
+  comparison: BackendComparisonResponse,
+  activeBackendKey: string,
+  meta: MetaResponse,
+  generatedAt = new Date(),
+): string {
+  const rule = (char = "=") => char.repeat(76);
+  const refItem = findReferenceItem(comparison.items);
+  const lines: string[] = [
+    rule(),
+    "SU ÖZELLİĞİ BACKEND KARŞILAŞTIRMA RAPORU",
+    rule(),
+    `Uygulama        : ${meta.app.name} (${meta.app.version})`,
+    `Şartname        : ${meta.spec.code}`,
+    `Oluşturma       : ${generatedAt.toLocaleString("tr-TR")}`,
+    `Sıcaklık T      : ${fmt.c(comparison.temperature_c)}`,
+    `Basınç P        : ${fmt.bar(comparison.pressure_bar)}`,
+    `Seçili backend  : ${resolveWaterBackendLabel(meta, activeBackendKey)}`,
+    `Referans satır  : ${refItem ? refItem.backend.label : "yok"}`,
+    "",
+    "Backend                             A (10^-6/bar)    ΔA (ref)    β (10^-6/°C)    Δβ (ref)  ρ (kg/m³)  Durum",
+    rule("-"),
+  ];
+
+  for (const item of comparison.items) {
+    const label = `${item.backend.key === activeBackendKey ? "* " : "  "}${item.backend.label}`;
+    if (item.error) {
+      lines.push(`${label.padEnd(36)} — HATA: ${item.error}`);
+      continue;
+    }
+    const dA =
+      refItem?.a_micro_per_bar != null && item.a_micro_per_bar != null
+        ? item.a_micro_per_bar - refItem.a_micro_per_bar
+        : null;
+    const dBeta =
+      refItem?.beta_micro_per_c != null && item.beta_micro_per_c != null
+        ? item.beta_micro_per_c - refItem.beta_micro_per_c
+        : null;
+    const tag = item.backend.distribution_ready ? "Hazır" : "Geliştirme";
+    lines.push(
+      `${label.padEnd(36)} ${String(num(item.a_micro_per_bar, 6)).padStart(12)} ${String(
+        dA !== null ? num(dA, 6) : "—",
+      ).padStart(11)} ${String(num(item.beta_micro_per_c, 6)).padStart(14)} ${String(
+        dBeta !== null ? num(dBeta, 6) : "—",
+      ).padStart(11)} ${String(num(item.density_kg_per_m3, 2)).padStart(10)}  ${tag}`,
+    );
+  }
+  lines.push(rule());
+  return lines.join("\n");
+}
+
+function csvCell(value: string | number | boolean | null | undefined): string {
+  if (value === null || value === undefined) return "";
+  const raw = String(value);
+  return /[",\n\r]/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw;
+}
+
+export function buildBackendComparisonCsv(
+  comparison: BackendComparisonResponse,
+  activeBackendKey: string,
+): string {
+  const refItem = findReferenceItem(comparison.items);
+  const header = [
+    "backend_key",
+    "backend_label",
+    "active",
+    "distribution_ready",
+    "temperature_c",
+    "pressure_bar",
+    "a_micro_per_bar",
+    "delta_a_vs_ref",
+    "beta_micro_per_c",
+    "delta_beta_vs_ref",
+    "density_kg_per_m3",
+    "error",
+  ].join(",");
+
+  const rows = comparison.items.map((item) => {
+    const dA =
+      refItem?.a_micro_per_bar != null && item.a_micro_per_bar != null
+        ? Number((item.a_micro_per_bar - refItem.a_micro_per_bar).toFixed(6))
+        : "";
+    const dBeta =
+      refItem?.beta_micro_per_c != null && item.beta_micro_per_c != null
+        ? Number((item.beta_micro_per_c - refItem.beta_micro_per_c).toFixed(6))
+        : "";
+    return [
+      csvCell(item.backend.key),
+      csvCell(item.backend.label),
+      csvCell(item.backend.key === activeBackendKey),
+      csvCell(item.backend.distribution_ready),
+      csvCell(comparison.temperature_c),
+      csvCell(comparison.pressure_bar),
+      csvCell(item.a_micro_per_bar),
+      csvCell(dA),
+      csvCell(item.beta_micro_per_c),
+      csvCell(dBeta),
+      csvCell(item.density_kg_per_m3),
+      csvCell(item.error ?? ""),
+    ].join(",");
+  });
+
+  return [header, ...rows].join("\n");
 }
 
 export function downloadBlob(blob: Blob, filename: string): void {

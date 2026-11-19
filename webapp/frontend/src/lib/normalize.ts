@@ -45,6 +45,7 @@ const asBool = (value: unknown, fallback: boolean): boolean =>
 const A_MODES: AMode[] = ["auto", "table", "manual"];
 const B_SOURCES: BSource[] = ["institutional", "gail", "auto"];
 const STEEL_MODELS: SteelModel[] = ["volumetric", "linear", "volumetric_temperature"];
+const KNOWN_WATER_BACKENDS = new Set(["table_v1", "table_v1_bicubic", "coolprop", "iapws"]);
 
 function asAMode(value: unknown, fallback: AMode): AMode {
   return A_MODES.includes(value as AMode) ? (value as AMode) : fallback;
@@ -173,7 +174,21 @@ export function normalizeInputs(raw: unknown): AppInputs {
   const helper = asRecord(raw.helper);
   const modes = asRecord(raw.modes);
   const checks = asRecord(raw.checks);
-  const report = isRecord(raw.report) ? raw.report : asRecord(raw.report_meta);
+  const rawReport = asRecord(raw.report);
+  const rawReportMeta = asRecord(raw.report_meta);
+
+  const airRef = asString(modes.air_a_reference, base.modes.air_a_reference).trim();
+  const pressRef = asString(modes.pressure_a_reference, base.modes.pressure_a_reference).trim();
+  const explicitWaterBackend = asString(raw.water_backend).trim();
+  const migratedWaterBackend =
+    explicitWaterBackend ||
+    (KNOWN_WATER_BACKENDS.has(airRef) ? airRef : "") ||
+    (KNOWN_WATER_BACKENDS.has(pressRef) ? pressRef : "") ||
+    base.water_backend;
+
+  const airAmbient = asNumber(air.ambient_temperature_c, null);
+  const fieldAmbient = asNumber(field.ambient_temperature_c, null);
+  const resolvedAmbient = airAmbient ?? fieldAmbient;
 
   const airA = asNumber(air.a_micro_per_bar, base.air.a_micro_per_bar);
   const pressureA = asNumber(pressure.a_micro_per_bar, base.pressure.a_micro_per_bar);
@@ -185,6 +200,7 @@ export function normalizeInputs(raw: unknown): AppInputs {
 
   const next: AppInputs = {
     ...base,
+    water_backend: migratedWaterBackend,
     section_meta: {
       section_no: asString(sectionMeta.section_no, base.section_meta.section_no),
       description: asString(sectionMeta.description, base.section_meta.description),
@@ -226,7 +242,7 @@ export function normalizeInputs(raw: unknown): AppInputs {
       pressure_rise_bar: asNumberRequired(air.pressure_rise_bar, base.air.pressure_rise_bar),
       k_factor: asNumberRequired(air.k_factor, base.air.k_factor),
       actual_added_water_m3: asNumber(air.actual_added_water_m3, base.air.actual_added_water_m3),
-      ambient_temperature_c: asNumber(air.ambient_temperature_c, base.air.ambient_temperature_c),
+      ambient_temperature_c: resolvedAmbient,
     },
     pressure: {
       temperature_c: asNumber(pressure.temperature_c, base.pressure.temperature_c),
@@ -243,7 +259,7 @@ export function normalizeInputs(raw: unknown): AppInputs {
       derive_delta_t: asBool(pressure.derive_delta_t, base.pressure.derive_delta_t),
     },
     field: {
-      ambient_temperature_c: asNumber(field.ambient_temperature_c, base.field.ambient_temperature_c),
+      ambient_temperature_c: resolvedAmbient,
       pig_distance_m: asNumber(field.pig_distance_m, base.field.pig_distance_m),
       pig_travel_time_min: asNumber(field.pig_travel_time_min, base.field.pig_travel_time_min),
       pig_speed_m_per_s: asNumber(field.pig_speed_m_per_s, base.field.pig_speed_m_per_s),
@@ -259,9 +275,9 @@ export function normalizeInputs(raw: unknown): AppInputs {
     },
     modes: {
       air_a_mode: asAMode(modes.air_a_mode, base.modes.air_a_mode),
-      air_a_reference: asString(modes.air_a_reference, base.modes.air_a_reference),
+      air_a_reference: KNOWN_WATER_BACKENDS.has(airRef) ? base.modes.air_a_reference : airRef,
       pressure_a_mode: asAMode(modes.pressure_a_mode, base.modes.pressure_a_mode),
-      pressure_a_reference: asString(modes.pressure_a_reference, base.modes.pressure_a_reference),
+      pressure_a_reference: KNOWN_WATER_BACKENDS.has(pressRef) ? base.modes.pressure_a_reference : pressRef,
       pressure_b_mode: asBMode(modes.pressure_b_mode, base.modes.pressure_b_mode),
       pressure_b_source: asBSource(modes.pressure_b_source, base.modes.pressure_b_source),
       pressure_b_reference: asString(modes.pressure_b_reference, base.modes.pressure_b_reference),
@@ -280,10 +296,22 @@ export function normalizeInputs(raw: unknown): AppInputs {
       }, {})),
     },
     report: {
-      report_no: asString(report.report_no, base.report.report_no),
-      operator: asString(report.operator, base.report.operator),
-      date: asString(report.date, base.report.date),
-      section_id: asString(report.section_id, base.report.section_id),
+      report_no:
+        asString(rawReport.report_no).trim() ||
+        asString(rawReportMeta.report_no).trim() ||
+        base.report.report_no,
+      operator:
+        asString(rawReport.operator).trim() ||
+        asString(rawReportMeta.operator).trim() ||
+        base.report.operator,
+      date:
+        asString(rawReport.date).trim() ||
+        asString(rawReportMeta.date).trim() ||
+        base.report.date,
+      section_id:
+        asString(rawReport.section_id).trim() ||
+        asString(rawReportMeta.section_id).trim() ||
+        base.report.section_id,
     },
   };
 

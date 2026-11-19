@@ -25,6 +25,7 @@ def coefficient_b(payload: schemas.CoefficientBRequest) -> dict:
         pressure_bar=payload.pressure_bar,
         steel_alpha_micro_per_c=payload.steel_alpha_micro_per_c,
         steel_model=payload.steel_model,
+        backend=payload.backend,
     )
 
 
@@ -35,6 +36,7 @@ def coefficient_compare(payload: schemas.CoefficientCompareRequest) -> dict:
         pressure_bar=payload.pressure_bar,
         steel_alpha_micro_per_c=payload.steel_alpha_micro_per_c,
         steel_model=payload.steel_model,
+        backend=payload.backend,
     )
 
 

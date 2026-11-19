@@ -13,6 +13,11 @@ from hidrostatik_test.app_metadata import (
     SPEC_DOCUMENT_CODE,
     SPEC_DOCUMENT_TITLE,
 )
+from hidrostatik_test.domain import (
+    AMBIENT_TEMP_LIMIT_C,
+    ValidationError,
+    evaluate_fill_temperature,
+)
 from hidrostatik_test.services.report_export import (
     export_excel_report,
     export_pdf_report,
@@ -23,6 +28,7 @@ from ..core.errors import AppError
 from ..core.timeutil import as_float, fmt_number, iso_z, utcnow
 from ..desktop_labels import FIELD_CHECKS, KEY_TO_B_SOURCE_LABEL
 from ..models import HydroSession, TestResult
+from . import coefficients as coefficient_service
 from .snapshot import backend_label
 
 logger = logging.getLogger("hydro.web.reports")
@@ -67,11 +73,39 @@ def _geometry_rows(inputs: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def _resolve_report_meta(inputs: dict[str, Any]) -> dict[str, str]:
+    maybe_report = inputs.get("report")
+    maybe_legacy = inputs.get("report_meta")
+    raw_report: dict[str, Any] = maybe_report if isinstance(maybe_report, dict) else {}
+    raw_legacy: dict[str, Any] = maybe_legacy if isinstance(maybe_legacy, dict) else {}
+    resolved: dict[str, str] = {}
+    for key in ("report_no", "operator", "date", "section_id"):
+        val = raw_report.get(key)
+        text = "" if val is None else str(val).strip()
+        if not text:
+            legacy_val = raw_legacy.get(key)
+            if legacy_val is not None:
+                text = str(legacy_val).strip()
+        resolved[key] = text
+    return resolved
+
+
+def _resolve_ambient_temp(inputs: dict[str, Any]) -> float | None:
+    field = inputs.get("field") or {}
+    air = inputs.get("air") or {}
+    ambient = as_float(field.get("ambient_temperature_c"))
+    if ambient is None:
+        ambient = as_float(air.get("ambient_temperature_c"))
+    return ambient
+
+
 def build_context(session: HydroSession, results: Iterable[TestResult]) -> dict[str, Any]:
     inputs = session.inputs or {}
     latest = _latest_by_type(results)
     geometry = inputs.get("geometry") or {}
     profile = inputs.get("section_profile") or {}
+    air = inputs.get("air") or {}
+    pressure = inputs.get("pressure") or {}
     segments = _geometry_rows(inputs)
     total_length: float | None
     if segments:
@@ -83,15 +117,23 @@ def build_context(session: HydroSession, results: Iterable[TestResult]) -> dict[
         od = as_float(geometry.get("outside_diameter_mm"))
         wt = as_float(geometry.get("wall_thickness_mm"))
 
-    report_meta = inputs.get("report") or inputs.get("report_meta") or {}
+    report_meta = _resolve_report_meta(inputs)
     section_meta = inputs.get("section_meta") or {}
-    metadata = {
+    ambient_temp = _resolve_ambient_temp(inputs)
+    fill_eval = None
+    if ambient_temp is not None:
+        try:
+            fill_eval = evaluate_fill_temperature(ambient_temp)
+        except ValidationError:
+            fill_eval = None
+
+    metadata: dict[str, Any] = {
         "Surum": APP_VERSION,
         "Referans sartname": f"{SPEC_DOCUMENT_CODE} - {SPEC_DOCUMENT_TITLE}",
         "Olusturma zamani": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "Su backend'i": backend_label(
             str(inputs.get("water_backend") or ""),
-            fallback=str(inputs.get("water_backend") or ""),
+            fallback=str(inputs.get("water_backend") or "table_v1"),
         ),
         "B kaynagi": KEY_TO_B_SOURCE_LABEL.get(
             str((inputs.get("modes") or {}).get("pressure_b_source") or ""),
@@ -106,6 +148,27 @@ def build_context(session: HydroSession, results: Iterable[TestResult]) -> dict[
         "Rapor Tarihi": str(report_meta.get("date") or section_meta.get("test_date") or "-"),
         "Secili pompa konumu": str(inputs.get("pump_location") or "-"),
     }
+    if ambient_temp is not None and fill_eval is not None:
+        metadata["Ortam hava sicakligi (10.1)"] = f"{ambient_temp:.1f} °C ({fill_eval.status})"
+        if not fill_eval.passed:
+            metadata["Dolum sicaklik uyarisi (10.1)"] = fill_eval.message
+
+    ref_t = as_float(pressure.get("temperature_c"))
+    if ref_t is None:
+        ref_t = as_float(air.get("temperature_c"))
+    ref_p = as_float(pressure.get("pressure_bar"))
+    if ref_p is None:
+        ref_p = as_float(air.get("pressure_bar"))
+    backend_cmp: dict[str, Any] | None = None
+    if ref_t is not None and ref_p is not None and ref_p > 0:
+        try:
+            backend_cmp = coefficient_service.backend_comparison(
+                temperature_c=ref_t,
+                pressure_bar=ref_p,
+                include_dev_backends=False,
+            )
+        except Exception:
+            backend_cmp = None
     geometry_data = {
         "Dis cap (mm)": fmt_number(od, 2) or "-",
         "Et kalinligi (mm)": fmt_number(wt, 2) or "-",
@@ -155,6 +218,9 @@ def build_context(session: HydroSession, results: Iterable[TestResult]) -> dict[
         "checklist": checklist,
         "inputs": inputs,
         "latest": latest,
+        "ambient_temperature_c": ambient_temp,
+        "fill_temperature_eval": fill_eval,
+        "backend_comparison": backend_cmp,
     }
 
 
@@ -172,6 +238,9 @@ def build_report_text(context: dict[str, Any], session: HydroSession) -> str:
     helper = inputs.get("helper") or {}
     modes = inputs.get("modes") or {}
     profile = inputs.get("section_profile") or {}
+    ambient_temp: float | None = context.get("ambient_temperature_c")
+    fill_eval = context.get("fill_temperature_eval")
+    water_backend_text = context["metadata"].get("Su backend'i", "-")
 
     lines: list[str] = [
         f"{APP_NAME} Raporu",
@@ -183,6 +252,7 @@ def build_report_text(context: dict[str, Any], session: HydroSession) -> str:
         f"Rapor No: {context['metadata'].get('Rapor No', '-')}",
         f"Operator: {context['metadata'].get('Operator', '-')}",
         f"Rapor Tarihi: {context['metadata'].get('Rapor Tarihi', '-')}",
+        f"Su backend'i: {water_backend_text}",
         "",
         "Boru Kesiti",
         f"Dis cap (mm): {context['geometry_data']['Dis cap (mm)']}",
@@ -206,21 +276,38 @@ def build_report_text(context: dict[str, Any], session: HydroSession) -> str:
             )
         lines.append("")
 
-    lines.extend(
+    air_lines = [
+        "Hava Icerik Testi Girdileri",
+        f"Su sicakligi (°C): {fmt_number(as_float(air.get('temperature_c')))}",
+        f"Su basinci (bar): {fmt_number(as_float(air.get('pressure_bar')))}",
+        f"A (10^-6/bar): {fmt_number(as_float(air.get('a_micro_per_bar')))}",
+        f"Basinc artisi P (bar): {fmt_number(as_float(air.get('pressure_rise_bar')))}",
+        f"K faktor: {fmt_number(as_float(air.get('k_factor')))}",
+        f"Fiili ilave su Vpa (m³): {fmt_number(as_float(air.get('actual_added_water_m3')))}",
+        f"Ortam hava sicakligi (10.1, °C): {fmt_number(ambient_temp, 1) if ambient_temp is not None else '-'}",
+    ]
+    if ambient_temp is not None and ambient_temp < AMBIENT_TEMP_LIMIT_C and fill_eval is not None:
+        air_lines.append(f"UYARI (Sartname 10.1): {fill_eval.message}")
+
+    t_initial = as_float(pressure.get("t_initial_c"))
+    t_final = as_float(pressure.get("t_final_c"))
+    pressure_lines = [
+        "",
+        "Basinc Degisim Testi Girdileri",
+        f"Su sicakligi (°C): {fmt_number(as_float(pressure.get('temperature_c')))}",
+        f"Su basinci (bar): {fmt_number(as_float(pressure.get('pressure_bar')))}",
+        f"A (10^-6/bar): {fmt_number(as_float(pressure.get('a_micro_per_bar')))}",
+        f"B (10^-6/°C): {fmt_number(as_float(pressure.get('b_micro_per_c')))}",
+    ]
+    if t_initial is not None or t_final is not None:
+        pressure_lines.append(
+            f"Baslangic sicakligi Tilk (°C): {fmt_number(t_initial) if t_initial is not None else '-'}"
+        )
+        pressure_lines.append(
+            f"Bitis sicakligi Tson (°C): {fmt_number(t_final) if t_final is not None else '-'}"
+        )
+    pressure_lines.extend(
         [
-            "Hava Icerik Testi Girdileri",
-            f"Su sicakligi (°C): {fmt_number(as_float(air.get('temperature_c')))}",
-            f"Su basinci (bar): {fmt_number(as_float(air.get('pressure_bar')))}",
-            f"A (10^-6/bar): {fmt_number(as_float(air.get('a_micro_per_bar')))}",
-            f"Basinc artisi P (bar): {fmt_number(as_float(air.get('pressure_rise_bar')))}",
-            f"K faktor: {fmt_number(as_float(air.get('k_factor')))}",
-            f"Fiili ilave su Vpa (m³): {fmt_number(as_float(air.get('actual_added_water_m3')))}",
-            "",
-            "Basinc Degisim Testi Girdileri",
-            f"Su sicakligi (°C): {fmt_number(as_float(pressure.get('temperature_c')))}",
-            f"Su basinci (bar): {fmt_number(as_float(pressure.get('pressure_bar')))}",
-            f"A (10^-6/bar): {fmt_number(as_float(pressure.get('a_micro_per_bar')))}",
-            f"B (10^-6/°C): {fmt_number(as_float(pressure.get('b_micro_per_c')))}",
             "Su sicaklik degisimi dT = Tilk - Tson (°C): "
             f"{fmt_number(as_float(pressure.get('delta_t_c')))}",
             "Fiili basinc degisimi Pa = Pilk - Pson (bar): "
@@ -231,6 +318,7 @@ def build_report_text(context: dict[str, Any], session: HydroSession) -> str:
             "Operasyon Kontrol Noktalari",
         ]
     )
+    lines.extend([*air_lines, *pressure_lines])
     for item in context["checklist"]:
         lines.append(_checked_line(item["checked"], item["label"], item["ref"]))
 
@@ -280,6 +368,51 @@ def build_report_text(context: dict[str, Any], session: HydroSession) -> str:
             )
     else:
         lines.append("Kaydedilecek sonuc yok.")
+
+    backend_cmp = context.get("backend_comparison")
+    if isinstance(backend_cmp, dict) and backend_cmp.get("items"):
+        items = backend_cmp["items"]
+        ref_item = next(
+            (
+                i
+                for i in items
+                if (i.get("backend") or {}).get("key") == "table_v1" and not i.get("error")
+            ),
+            next((i for i in items if not i.get("error")), None),
+        )
+        ref_a = as_float(ref_item.get("a_micro_per_bar")) if ref_item else None
+        ref_beta = as_float(ref_item.get("beta_micro_per_c")) if ref_item else None
+        lines.extend(
+            [
+                "",
+                "Su Ozelligi Backend Karsilastirmasi "
+                f"(T={fmt_number(as_float(backend_cmp.get('temperature_c')), 1)} °C, "
+                f"P={fmt_number(as_float(backend_cmp.get('pressure_bar')), 1)} bar)",
+            ]
+        )
+        for item in items:
+            b_info = item.get("backend") or {}
+            label = str(b_info.get("label") or b_info.get("key") or "-")
+            err = item.get("error")
+            if err:
+                lines.append(f"- {label}: HATA - {err}")
+                continue
+            a_val = as_float(item.get("a_micro_per_bar"))
+            beta_val = as_float(item.get("beta_micro_per_c"))
+            rho_val = as_float(item.get("density_kg_per_m3"))
+            da_str = (
+                fmt_number(a_val - ref_a, 6) if a_val is not None and ref_a is not None else "-"
+            )
+            dbeta_str = (
+                fmt_number(beta_val - ref_beta, 6)
+                if beta_val is not None and ref_beta is not None
+                else "-"
+            )
+            lines.append(
+                f"- {label}: A={fmt_number(a_val, 6)} (dA={da_str}) | "
+                f"beta={fmt_number(beta_val, 6)} (dbeta={dbeta_str}) | "
+                f"rho={fmt_number(rho_val, 2)} kg/m3"
+            )
 
     lines.extend(
         [

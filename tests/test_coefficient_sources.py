@@ -141,6 +141,26 @@ class ResolveBValueTests(unittest.TestCase):
                 steel_model="quadratic",
             )
 
+    def test_auto_accepts_water_backend_and_produces_negative_beta_near_zero_c(self) -> None:
+        res_10 = resolve_b_value(
+            BSource.AUTO,
+            temp_c=10.0,
+            pressure_bar=50.0,
+            backend="table_v1_bicubic",
+        )
+        self.assertIn("table_v1_bicubic", res_10.note)
+        self.assertGreater(res_10.b_micro_per_c, 0.0)
+
+        res_cold = resolve_b_value(
+            BSource.AUTO,
+            temp_c=1.0,
+            pressure_bar=30.0,
+            backend="table_v1",
+        )
+        self.assertIsNotNone(res_cold.water_beta_micro_per_c)
+        self.assertLess(res_cold.water_beta_micro_per_c or 0.0, 0.0)
+        self.assertLess(res_cold.b_micro_per_c, 0.0)
+
 
 class CompareBSourcesTests(unittest.TestCase):
     def test_comparison_returns_all_three_sources_and_deltas(self) -> None:
@@ -192,6 +212,15 @@ class CompareBSourcesTests(unittest.TestCase):
     def test_comparison_requires_institutional_range(self) -> None:
         with self.assertRaises(ValidationError):
             compare_b_sources(temp_c=26.0, pressure_bar=30.0)
+
+    def test_comparison_accepts_explicit_water_backend(self) -> None:
+        comparison = compare_b_sources(
+            temp_c=10.0,
+            pressure_bar=50.0,
+            backend="table_v1",
+        )
+        self.assertIn("table_v1", comparison.auto.note)
+        self.assertTrue(isfinite(comparison.auto.b_micro_per_c))
 
 
 if __name__ == "__main__":

@@ -79,14 +79,15 @@ def calculate_pressure_variation(request: Any) -> dict[str, Any]:
         result = evaluate_pressure_variation_test(inputs)
     except Exception as exc:
         _reraise(exc)
-    decision = decisions.pressure_decision(result)
+    is_negative_b = request.b_micro_per_c < 0
+    decision = decisions.pressure_decision(result, negative_b=is_negative_b)
     return {
         "theoretical_pressure_change_bar": result.theoretical_pressure_change_bar,
         "allowable_upper_pressure_change_bar": result.allowable_upper_pressure_change_bar,
         "actual_pressure_change_bar": result.actual_pressure_change_bar,
         "margin_bar": result.margin_bar,
         "passed": result.passed,
-        "negative_b": result.theoretical_pressure_change_bar < 0,
+        "negative_b": is_negative_b,
         "geometry": geometry_summary(pipe),
         "decision": decision,
     }

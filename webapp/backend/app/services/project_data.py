@@ -1486,7 +1486,7 @@ def generate_sample_project(
                 "margin_bar": pres_res.margin_bar,
                 "passed": pres_res.passed,
             },
-            decisions.pressure_decision(pres_res),
+            decisions.pressure_decision(pres_res, negative_b=b_val < 0),
         )
         _store_test_result(
             db,

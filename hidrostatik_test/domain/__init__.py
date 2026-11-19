@@ -35,8 +35,10 @@ from .hydrotest_core import (
 )
 from .operations import (
     AMBIENT_TEMP_LIMIT_C,
+    FillTemperatureResult,
     PigSpeedLimit,
     PigSpeedResult,
+    evaluate_fill_temperature,
     evaluate_pig_speed,
     get_pig_speed_limit,
     get_pig_speed_limit_options,
@@ -119,6 +121,7 @@ __all__ = [
     "PressureVariationResult",
     "DepressurizationInputs",
     "DischargeInputs",
+    "FillTemperatureResult",
     "HoldReading",
     "OperationCheckResult",
     "PressureHoldInputs",
@@ -141,6 +144,7 @@ __all__ = [
     "calculate_water_density",
     "calculate_water_thermal_expansion_beta",
     "compare_b_sources",
+    "evaluate_fill_temperature",
     "evaluate_pig_speed",
     "evaluate_depressurization",
     "evaluate_discharge",

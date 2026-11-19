@@ -334,6 +334,7 @@ export function createDefaultSegments(): AppInputs["segments"] {
 
 export function createDefaultInputs(): AppInputs {
   const inputs: AppInputs = {
+    water_backend: "table_v1",
     section_meta: {
       section_no: "K-01",
       description: "Bölüm 12–13 · Doğu Hattı",
@@ -444,6 +445,7 @@ export function createDefaultInputs(): AppInputs {
 
 export function createEmptyInputs(): AppInputs {
   return {
+    water_backend: "table_v1",
     section_meta: {
       section_no: "",
       description: "",
@@ -654,10 +656,16 @@ export function computeA(inputs: CoefficientARequest): CoefficientAResponse {
   };
 }
 
+export function estimateWaterBeta(t: number, p: number): number {
+  const tZero = 3.98 - 0.021 * Math.max(0, p - 1);
+  const dt = t - tZero;
+  return round(14.5 * dt - 0.125 * dt * dt, 6);
+}
+
 export function computeB(inputs: CoefficientBRequest): BSourceResult {
   const t = inputs.temperature_c;
   const p = inputs.pressure_bar;
-  const beta = 218.297191 + 4.2 * (t - 20) - 0.03 * (p - 80);
+  const beta = estimateWaterBeta(t, p);
 
   if (inputs.source === "auto") {
     const alpha = inputs.steel_alpha_micro_per_c;
@@ -667,16 +675,17 @@ export function computeB(inputs: CoefficientBRequest): BSourceResult {
       const alphaAtT = 10.8 + 0.012 * t;
       effective = 3 * alphaAtT;
     }
+    const prefix = inputs.backend ? `Otomatik hesap (${inputs.backend})` : "Otomatik hesap";
     return {
       b_micro_per_c: round(beta - effective, 6),
       source: "auto",
       label: "Otomatik β - çelik genleşmesi",
       note:
         inputs.steel_model === "linear"
-          ? `Otomatik hesap: β = ${round(beta, 6)}, α = ${alpha.toFixed(3)}; B = β − α.`
+          ? `${prefix}: β = ${round(beta, 6)}, α = ${alpha.toFixed(3)}; B = β − α.`
           : inputs.steel_model === "volumetric_temperature"
-            ? `Otomatik hesap: β = ${round(beta, 6)}; α(T) = ${round(10.8 + 0.012 * t, 6)}; B = β − 3·α(T).`
-            : `Otomatik hesap: β = ${round(beta, 6)}, çelik α = ${alpha.toFixed(3)}; B = β − 3·α.`,
+            ? `${prefix}: β = ${round(beta, 6)}; α(T) = ${round(10.8 + 0.012 * t, 6)}; B = β − 3·α(T).`
+            : `${prefix}: β = ${round(beta, 6)}, çelik α = ${alpha.toFixed(3)}; B = β − 3·α.`,
       repaired_table: false,
       water_beta_micro_per_c: round(beta, 6),
       steel_alpha_micro_per_c: alpha,
@@ -1004,6 +1013,7 @@ export function computeBackendComparison(
   pressureBar: number,
 ): BackendComparisonResponse {
   const base = computeA({ temperature_c: temperatureC, pressure_bar: pressureBar });
+  const beta = estimateWaterBeta(temperatureC, pressureBar);
   return {
     temperature_c: temperatureC,
     pressure_bar: pressureBar,
@@ -1011,21 +1021,21 @@ export function computeBackendComparison(
       {
         backend: { key: "table_v1", label: "Table Interpolation v1", distribution_ready: true },
         a_micro_per_bar: base.a_micro_per_bar,
-        beta_micro_per_c: round(218.297191 + 4.2 * (temperatureC - 20), 6),
+        beta_micro_per_c: beta,
         density_kg_per_m3: computeDensity(temperatureC, pressureBar),
         error: null,
       },
       {
         backend: { key: "table_v1_bicubic", label: "Table Interpolation v1 (bicubic)", distribution_ready: true },
         a_micro_per_bar: round(base.a_micro_per_bar + 0.000004, 6),
-        beta_micro_per_c: round(218.297191 + 4.2 * (temperatureC - 20), 6),
+        beta_micro_per_c: round(beta + 0.00012, 6),
         density_kg_per_m3: computeDensity(temperatureC, pressureBar),
         error: null,
       },
       {
         backend: { key: "coolprop", label: "CoolProp EOS", distribution_ready: true },
         a_micro_per_bar: round(base.a_micro_per_bar - 0.000001, 6),
-        beta_micro_per_c: round(218.297191 + 4.2 * (temperatureC - 20), 6),
+        beta_micro_per_c: round(beta - 0.00005, 6),
         density_kg_per_m3: computeDensity(temperatureC, pressureBar),
         error: null,
       },
@@ -1110,12 +1120,14 @@ export function buildDemoResults(inputs: AppInputs): ResultBundle {
     ? computeA({
         temperature_c: inputs.air.temperature_c as number,
         pressure_bar: inputs.air.pressure_bar as number,
+        backend: inputs.water_backend,
       })
     : undefined;
   const pressureA = hasPressureTP
     ? computeA({
         temperature_c: inputs.pressure.temperature_c as number,
         pressure_bar: inputs.pressure.pressure_bar as number,
+        backend: inputs.water_backend,
       })
     : undefined;
   const pressureB = hasPressureTP
@@ -1125,6 +1137,7 @@ export function buildDemoResults(inputs: AppInputs): ResultBundle {
         pressure_bar: inputs.pressure.pressure_bar as number,
         steel_alpha_micro_per_c: inputs.helper.steel_alpha_micro_per_c,
         steel_model: inputs.modes.steel_model,
+        backend: inputs.water_backend,
       })
     : undefined;
 
@@ -1150,6 +1163,7 @@ export function buildDemoResults(inputs: AppInputs): ResultBundle {
             pressure_bar: inputs.pressure.pressure_bar as number,
             steel_alpha_micro_per_c: inputs.helper.steel_alpha_micro_per_c,
             steel_model: inputs.modes.steel_model,
+            backend: inputs.water_backend,
           }),
           backendCompare: computeBackendComparison(
             inputs.pressure.temperature_c as number,

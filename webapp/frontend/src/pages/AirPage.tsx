@@ -1,4 +1,4 @@
-import { ArrowRight, CheckCircle2, Gauge, History, Lock, Sigma, Wind } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2, Gauge, History, Lock, Sigma, Wind } from "lucide-react";
 import { PageHeader } from "../components/layout/PageHeader";
 import { SectionCard, ResultTile } from "../components/ui/Card";
 import { Badge, CoefficientBadge } from "../components/ui/Badge";
@@ -57,8 +57,10 @@ export function AirPage({ embedded = false }: { embedded?: boolean } = {}) {
     inputs.air.actual_added_water_m3 !== null && inputs.air.actual_added_water_m3 < 0
       ? "Vpa negatif olamaz."
       : null;
+  const effectiveAmbient =
+    inputs.air.ambient_temperature_c ?? inputs.field.ambient_temperature_c;
   const ambientError =
-    inputs.air.ambient_temperature_c !== null && inputs.air.ambient_temperature_c < 2
+    effectiveAmbient !== null && effectiveAmbient < 2
       ? "Şartname 10.1: dolum sırasında ortam sıcaklığı +2 °C altında olmamalı."
       : null;
 
@@ -150,7 +152,7 @@ export function AirPage({ embedded = false }: { embedded?: boolean } = {}) {
       {
         temperature_c: inputs.air.temperature_c,
         pressure_bar: effectivePressure,
-        backend: inputs.modes.air_a_reference || "table_v1",
+        backend: inputs.water_backend || "table_v1",
       },
       {
         onSuccess: ({ data }) => {
@@ -376,15 +378,26 @@ export function AirPage({ embedded = false }: { embedded?: boolean } = {}) {
               />
             </div>
 
-            <div className="mt-3">
+            <div className="mt-3 space-y-2">
               <NumberField
                 label="Ortam hava sıcaklığı (10.1)"
                 unit="°C"
-                value={inputs.air.ambient_temperature_c}
-                onChange={(value) => patchInputs({ air: { ambient_temperature_c: value } })}
+                value={effectiveAmbient}
+                onChange={(value) =>
+                  patchInputs({
+                    air: { ambient_temperature_c: value },
+                    field: { ambient_temperature_c: value },
+                  })
+                }
                 error={ambientError}
                 help={ambientError ? undefined : "Saha kontrolünde +2 °C limiti ayrıca işaretlenir."}
               />
+              {ambientError ? (
+                <InlineNotice tone="danger" title="Şartname 10.1 — +2 °C dolum kısıtı" icon={AlertTriangle}>
+                  Ölçülen ortam/dolum sıcaklığı ({num(effectiveAmbient, 1)} °C) +2 °C sınırının
+                  altında. Donma riskine karşı dolum durdurulmalı veya önlem alınmalıdır.
+                </InlineNotice>
+              ) : null}
             </div>
 
             <div className="mt-4 grid grid-cols-3 gap-2 border-t border-[var(--border)] pt-3">

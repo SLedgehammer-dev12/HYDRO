@@ -176,7 +176,7 @@ export function RightPanel() {
           <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--text-muted)]">
             {!geometry
               ? "Geometriyi tamamlayın."
-              : !inputs.pressure.b_micro_per_c
+              : inputs.pressure.b_micro_per_c === null
                 ? "B katsayısını hazırlayın."
                 : !results.air
                   ? "Hava içerik testini değerlendirin."

@@ -187,8 +187,8 @@ export function SettingsPage() {
           <div className="space-y-3">
             <SelectField
               label="Su özelliği backend'i"
-              value={inputs.modes.air_a_reference || meta?.water_backends[0]?.key || "table_v1"}
-              onChange={(value) => patchInputs({ modes: { air_a_reference: value } })}
+              value={inputs.water_backend || meta?.water_backends[0]?.key || "table_v1"}
+              onChange={(value) => patchInputs({ water_backend: value })}
               options={(meta?.water_backends ?? []).map((item) => ({
                 value: item.key,
                 label: `${item.label}${item.note ? ` · ${item.note}` : ""}`,
@@ -231,7 +231,9 @@ export function SettingsPage() {
             <div className="grid grid-cols-2 gap-2">
               <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-2">
                 <p className="text-[9.5px] uppercase tracking-wide text-[var(--text-faint)]">Su backend'i</p>
-                <p className="mt-0.5 truncate font-mono text-[10.5px]">{meta?.water_backends[0]?.key ?? "table_v1"}</p>
+                <p className="mt-0.5 truncate font-mono text-[10.5px]">
+                  {inputs.water_backend || meta?.water_backends[0]?.key || "table_v1"}
+                </p>
               </div>
               <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-2">
                 <p className="text-[9.5px] uppercase tracking-wide text-[var(--text-faint)]">Çelik α</p>

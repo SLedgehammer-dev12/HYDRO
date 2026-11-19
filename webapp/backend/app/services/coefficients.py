@@ -42,6 +42,7 @@ def coefficient_b(
     pressure_bar: float,
     steel_alpha_micro_per_c: float,
     steel_model: str,
+    backend: str | None = None,
 ) -> dict[str, Any]:
     from hidrostatik_test.domain import resolve_b_value
 
@@ -52,6 +53,7 @@ def coefficient_b(
             pressure_bar=pressure_bar,
             steel_alpha_micro_per_c=steel_alpha_micro_per_c,
             steel_model=steel_model,
+            backend=backend,
         )
     except Exception as exc:
         _reraise(exc, reference_table_hint=source in {"institutional", "gail"})
@@ -64,6 +66,7 @@ def coefficient_compare(
     pressure_bar: float,
     steel_alpha_micro_per_c: float,
     steel_model: str,
+    backend: str | None = None,
 ) -> dict[str, Any]:
     from hidrostatik_test.domain import compare_b_sources
 
@@ -73,6 +76,7 @@ def coefficient_compare(
             pressure_bar=pressure_bar,
             steel_alpha_micro_per_c=steel_alpha_micro_per_c,
             steel_model=steel_model,
+            backend=backend,
         )
     except Exception as exc:
         _reraise(exc, reference_table_hint=True)
