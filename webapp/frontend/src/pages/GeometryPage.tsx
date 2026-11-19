@@ -532,7 +532,7 @@ export function GeometryPage() {
               title={`Segment Denetimi: ${segmentSummary.headline}`}
             >
               {segmentSummary.issues.map((issue, i) => (
-                <p key={i} className="mt-1 text-[10.5px] leading-snug text-[var(--text-muted)]">
+                <p key={`${issue}-${i}`} className="mt-1 text-[10.5px] leading-snug text-[var(--text-muted)]">
                   {issue}
                 </p>
               ))}

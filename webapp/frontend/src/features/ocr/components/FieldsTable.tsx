@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import { Pencil, RotateCcw } from "lucide-react";
 import { confidenceTier, formatConfidence, formatUnit, formatValue } from "../format";
@@ -57,6 +57,13 @@ export default function FieldsTable({
 }: FieldsTableProps) {
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const editInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editingKey) {
+      editInputRef.current?.focus();
+    }
+  }, [editingKey]);
 
   const beginEdit = (item: FlatField) => {
     setEditingKey(item.descriptor.key);
@@ -177,7 +184,7 @@ export default function FieldsTable({
                   <td className="px-3 py-2.5">
                     {editing ? (
                       <input
-                        autoFocus
+                        ref={editInputRef}
                         value={draft}
                         onChange={(event) => setDraft(event.target.value)}
                         onBlur={() => commitEdit(key)}

@@ -116,8 +116,8 @@ export function SkeletonLine({ className }: { className?: string }) {
 export function SkeletonCards({ count = 4 }: { count?: number }) {
   return (
     <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-      {Array.from({ length: count }).map((_, index) => (
-        <div key={index} className="kpi space-y-3">
+      {Array.from({ length: count }, (_, idx) => `kpi-skeleton-${idx + 1}`).map((slot) => (
+        <div key={slot} className="kpi space-y-3">
           <SkeletonLine className="w-1/2" />
           <SkeletonLine className="h-6 w-2/3" />
           <SkeletonLine className="w-3/4" />

@@ -314,7 +314,7 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
               <InlineNotice tone="warning" title="Proje KP Sürekliliği Uyarısı">
                 <ul className="list-disc space-y-0.5 pl-4 text-[11.5px]">
                   {projectScene.warnings.map((w, idx) => (
-                    <li key={idx}>{w}</li>
+                    <li key={`${w}-${idx}`}>{w}</li>
                   ))}
                 </ul>
               </InlineNotice>

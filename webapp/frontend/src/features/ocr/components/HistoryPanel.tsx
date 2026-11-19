@@ -54,9 +54,9 @@ export default function HistoryPanel({
 
       {loading && items.length === 0 ? (
         <div className="mt-4 space-y-2" role="status" aria-label="Geçmiş yükleniyor">
-          {[0, 1, 2].map((index) => (
+          {["sk-1", "sk-2", "sk-3"].map((slot) => (
             <div
-              key={index}
+              key={slot}
               className="h-16 animate-pulse rounded-lg bg-[var(--surface-3)] motion-reduce:animate-none"
             />
           ))}
@@ -78,7 +78,7 @@ export default function HistoryPanel({
       ) : null}
 
       {items.length > 0 ? (
-        <ul className="mt-4 space-y-2" role="list">
+        <ul className="mt-4 space-y-2">
           {items.map((item) => {
             const tone = analysisStatusTone(item.status);
             const opening = openingId === item.id;

@@ -553,30 +553,31 @@ export default function DossierPanel({ analysisId, dossier, onCommitted }: Props
               const matchedSess = existingSessionMatchMap.get(sec.section_no);
 
               return (
-                <div
+                <article
                   key={sec.section_no}
-                  onClick={() => setActiveSectionNo(sec.section_no)}
-                  className={`cursor-pointer rounded-xl border p-3.5 transition-colors ${
+                  className={`rounded-xl border p-3.5 transition-colors ${
                     isActive
                       ? "border-[var(--primary)] bg-[var(--surface-1)] ring-2 ring-[var(--primary)]"
                       : "border-[var(--border)] bg-[var(--surface-2)] hover:border-[var(--border-strong)]"
                   }`}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] pb-2">
-                    <label
-                      className="flex cursor-pointer items-center gap-2"
-                      onClick={(e) => e.stopPropagation()}
-                    >
+                    <div className="flex items-center gap-2">
                       <input
                         type="checkbox"
                         aria-label={`${sec.section_no} kaydedilsin`}
                         checked={isChecked}
                         onChange={() => toggleSectionSelection(sec.section_no)}
                       />
-                      <span className="font-mono text-[15px] font-bold text-[var(--text)]">
+                      <button
+                        type="button"
+                        aria-pressed={isActive}
+                        onClick={() => setActiveSectionNo(sec.section_no)}
+                        className="font-mono text-[15px] font-bold text-[var(--text)] hover:text-[var(--primary)]"
+                      >
                         {sec.section_no}
-                      </span>
-                    </label>
+                      </button>
+                    </div>
                     <div className="flex flex-wrap items-center gap-1.5">
                       {projectMode === "existing" && selectedProjectId ? (
                         <Badge tone={matchedSess ? "info" : "pass"}>
@@ -648,11 +649,16 @@ export default function DossierPanel({ analysisId, dossier, onCommitted }: Props
 
                   <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-[var(--border)] pt-2 text-[11px] text-[var(--text-muted)]">
                     <span>Eksik: {sec.missing_required_forms.length} form</span>
-                    <span className="font-mono text-[10.5px] text-[var(--primary)]">
+                    <button
+                      type="button"
+                      aria-pressed={isActive}
+                      onClick={() => setActiveSectionNo(sec.section_no)}
+                      className="font-mono text-[10.5px] text-[var(--primary)] hover:underline"
+                    >
                       {isActive ? "Ayrıntı açık ↓" : "İncele →"}
-                    </span>
+                    </button>
                   </div>
-                </div>
+                </article>
               );
             })}
           </div>
@@ -887,10 +893,10 @@ export default function DossierPanel({ analysisId, dossier, onCommitted }: Props
           <InlineNotice tone="info" title="Doküman Ayrıştırma Notları">
             <ul className="list-disc space-y-1 pl-4 text-[11.5px]">
               {dossier.warnings.map((w, idx) => (
-                <li key={idx}>{w}</li>
+                <li key={`${w}-${idx}`}>{w}</li>
               ))}
-              {dossier.unassigned_pages.slice(0, 6).map((u, idx) => (
-                <li key={`u-${idx}`}>
+              {dossier.unassigned_pages.slice(0, 6).map((u) => (
+                <li key={`u-${u.page}-${u.section_no ?? ""}-${u.reason}`}>
                   Sayfa {u.page}
                   {u.section_no ? ` (${u.section_no})` : ""}: {u.reason}
                 </li>

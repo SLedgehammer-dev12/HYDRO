@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { num } from "../../lib/format";
 import { Badge } from "../../components/ui/Badge";
@@ -41,6 +42,7 @@ export function MonitoringFormEditor({
   ) => void;
   removeRow: (listKey: string, index: number, nestedParent?: string) => void;
 }) {
+  const monId = useId();
   const rows = toList(draft.rows);
 
   function applyPastedRows(newRows: Array<Record<string, unknown>>, replace: boolean) {
@@ -111,7 +113,6 @@ export function MonitoringFormEditor({
         />
 
         <div
-          tabIndex={0}
           role="region"
           aria-label="Su Dolum Saatlik İzleme Tablosu"
           onPaste={onPasteFilling}
@@ -292,7 +293,6 @@ export function MonitoringFormEditor({
         />
 
         <div
-          tabIndex={0}
           role="region"
           aria-label="Saatlik Basınç ve Sıcaklık İzleme Tablosu"
           onPaste={onPasteMonitoring}
@@ -436,11 +436,15 @@ export function MonitoringFormEditor({
   return (
     <div className="space-y-3">
       <div className="grid gap-2 sm:grid-cols-3">
-        <label className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-2">
-          <span className="block text-[10px] font-medium text-[var(--text-muted)]">
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-2">
+          <label
+            htmlFor={`${monId}-vp`}
+            className="block text-[10px] font-medium text-[var(--text-muted)]"
+          >
             Hava Testi Teorik Vp (m³)
-          </span>
+          </label>
           <CellInput
+            id={`${monId}-vp`}
             type="number"
             value={numVal(pr, "vp_m3")}
             onChange={(v) => setNestedKey("pressurization", "vp_m3", parseCellNum(v))}
@@ -448,12 +452,16 @@ export function MonitoringFormEditor({
             align="left"
             className="mt-1 w-full"
           />
-        </label>
-        <label className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-2">
-          <span className="block text-[10px] font-medium text-[var(--text-muted)]">
+        </div>
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-2">
+          <label
+            htmlFor={`${monId}-vpa`}
+            className="block text-[10px] font-medium text-[var(--text-muted)]"
+          >
             Ölçülen VpA (m³)
-          </span>
+          </label>
           <CellInput
+            id={`${monId}-vpa`}
             type="number"
             value={numVal(pr, "vpa_m3")}
             onChange={(v) => setNestedKey("pressurization", "vpa_m3", parseCellNum(v))}
@@ -461,12 +469,16 @@ export function MonitoringFormEditor({
             align="left"
             className="mt-1 w-full"
           />
-        </label>
-        <label className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-2">
-          <span className="block text-[10px] font-medium text-[var(--text-muted)]">
+        </div>
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-2">
+          <label
+            htmlFor={`${monId}-water`}
+            className="block text-[10px] font-medium text-[var(--text-muted)]"
+          >
             İlave Test Suyu Toplam (m³)
-          </span>
+          </label>
           <CellInput
+            id={`${monId}-water`}
             type="number"
             value={numVal(pr, "total_added_water_m3")}
             onChange={(v) =>
@@ -476,7 +488,7 @@ export function MonitoringFormEditor({
             align="left"
             className="mt-1 w-full"
           />
-        </label>
+        </div>
       </div>
 
       <div className="flex items-center justify-between">
@@ -511,7 +523,6 @@ export function MonitoringFormEditor({
       />
 
       <div
-        tabIndex={0}
         role="region"
         aria-label="Basınç Artışı P-V Adımları Tablosu"
         onPaste={onPastePressurization}

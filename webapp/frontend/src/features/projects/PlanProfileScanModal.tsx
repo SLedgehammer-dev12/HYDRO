@@ -426,7 +426,6 @@ export function PlanProfileScanModal({
             ) : null}
 
             <div
-              tabIndex={0}
               role="region"
               aria-label="Üretilen Taslak Kesitler Tablosu"
               className="table-wrap table-sticky max-h-[280px] overflow-auto scroll-thin"

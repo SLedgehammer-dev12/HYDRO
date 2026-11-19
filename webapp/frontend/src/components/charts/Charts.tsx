@@ -51,7 +51,10 @@ function ChartTooltip({
       {payload.map((entry, index) => {
         const numeric = typeof entry.value === "number" ? entry.value : Number(entry.value ?? 0);
         return (
-          <p key={index} className="flex items-center gap-1.5 text-[11px] text-[var(--text-soft)]">
+          <p
+            key={`${entry.name ?? "series"}-${entry.color ?? index}`}
+            className="flex items-center gap-1.5 text-[11px] text-[var(--text-soft)]"
+          >
             <span className="legend-dot" style={{ background: entry.color }} aria-hidden />
             <span>{entry.name}</span>
             <span className="ml-auto font-mono text-[var(--text)]">
@@ -373,7 +376,7 @@ export function UtilizationChart({
           <Bar dataKey="utilization" name="Kullanım" radius={[0, 4, 4, 0]} barSize={14} isAnimationActive={false}>
             {data.map((entry, index) => (
               <Cell
-                key={index}
+                key={entry.name || `seg-${index}`}
                 fill={
                   entry.utilization > 100
                     ? "var(--danger)"

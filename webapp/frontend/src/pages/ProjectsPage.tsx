@@ -140,7 +140,7 @@ function nextSectionNo(sections: SessionListItem[]): string {
 
 export function ProjectsPage() {
   const projectsQuery = useProjects();
-  const projects = projectsQuery.data ?? [];
+  const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data]);
 
   const setTab = useAppStore((state) => state.setTab);
   const openForm = useAppStore((state) => state.openForm);
@@ -166,7 +166,10 @@ export function ProjectsPage() {
     [projects, selectedId, projectId],
   );
   const sectionsQuery = useSessions(selected?.id ?? null, { enabled: Boolean(selected) });
-  const rawSections = selected ? (sectionsQuery.data ?? []) : [];
+  const rawSections = useMemo(
+    () => (selected ? (sectionsQuery.data ?? []) : []),
+    [selected, sectionsQuery.data],
+  );
 
   /* Projeye ait tüm kesitler için ardışık KP sürekliliği denetimi */
   const kpContinuity = useMemo(
@@ -586,7 +589,7 @@ export function ProjectsPage() {
               <InlineNotice tone="warning" title="Proje KP Sürekliliği Uyarısı">
                 <ul className="list-disc space-y-0.5 pl-4 text-[11.5px]">
                   {projectSceneQuery.data.warnings.map((w, idx) => (
-                    <li key={idx}>{w}</li>
+                    <li key={`${w}-${idx}`}>{w}</li>
                   ))}
                 </ul>
               </InlineNotice>
@@ -648,42 +651,43 @@ export function ProjectsPage() {
               }
             />
           ) : (
-            <div className="space-y-2" role="list">
+            <ul className="space-y-2">
               {projects.map((project) => {
                 const active = project.id === selected?.id;
                 return (
-                  <button
-                    key={project.id}
-                    type="button"
-                    role="listitem"
-                    className={`w-full rounded-xl border p-3 text-left transition-colors ${
-                      active
-                        ? "border-[color-mix(in_srgb,var(--primary)_45%,var(--border))] bg-[var(--primary-soft)]"
-                        : "border-[var(--border)] bg-[var(--surface-2)] hover:bg-[var(--surface-3)]"
-                    }`}
-                    onClick={() => chooseProject(project)}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="min-w-0">
-                        <span className="block truncate text-[12.5px] font-semibold text-[var(--text)]">
-                          {project.name}
+                  <li key={project.id}>
+                    <button
+                      type="button"
+                      aria-current={active ? "true" : undefined}
+                      className={`w-full rounded-xl border p-3 text-left transition-colors ${
+                        active
+                          ? "border-[color-mix(in_srgb,var(--primary)_45%,var(--border))] bg-[var(--primary-soft)]"
+                          : "border-[var(--border)] bg-[var(--surface-2)] hover:bg-[var(--surface-3)]"
+                      }`}
+                      onClick={() => chooseProject(project)}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="min-w-0">
+                          <span className="block truncate text-[12.5px] font-semibold text-[var(--text)]">
+                            {project.name}
+                          </span>
+                          <span className="mt-0.5 block truncate font-mono text-[10px] text-[var(--text-faint)]">
+                            {project.code || "kod yok"} · {project.client || "müşteri yok"}
+                          </span>
                         </span>
-                        <span className="mt-0.5 block truncate font-mono text-[10px] text-[var(--text-faint)]">
-                          {project.code || "kod yok"} · {project.client || "müşteri yok"}
+                        <Badge tone={active ? "info" : "neutral"}>{project.section_count}</Badge>
+                      </div>
+                      <span className="mt-2 flex items-center justify-between text-[10px] text-[var(--text-faint)]">
+                        <span>{relativeTime(project.updated_at)}</span>
+                        <span className="inline-flex items-center gap-1">
+                          Aç <ArrowRight size={10} />
                         </span>
                       </span>
-                      <Badge tone={active ? "info" : "neutral"}>{project.section_count}</Badge>
-                    </div>
-                    <span className="mt-2 flex items-center justify-between text-[10px] text-[var(--text-faint)]">
-                      <span>{relativeTime(project.updated_at)}</span>
-                      <span className="inline-flex items-center gap-1">
-                        Aç <ArrowRight size={10} />
-                      </span>
-                    </span>
-                  </button>
+                    </button>
+                  </li>
                 );
               })}
-            </div>
+            </ul>
           )}
         </SectionCard>
 

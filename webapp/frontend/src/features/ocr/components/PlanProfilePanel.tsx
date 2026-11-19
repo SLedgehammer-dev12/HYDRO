@@ -55,7 +55,7 @@ function strategyLabel(strategy: PlanProfileScanResponse["strategy"]): string {
 export default function PlanProfilePanel() {
   const queryClient = useQueryClient();
   const projectsQuery = useProjects();
-  const projects = projectsQuery.data ?? [];
+  const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data]);
 
   const activeProjectId = useAppStore((s) => s.projectId);
   const backend = useAppStore((s) => s.backend);
@@ -828,7 +828,7 @@ export default function PlanProfilePanel() {
             <InlineNotice tone="warning" title="Tarama Notları">
               <ul className="list-disc pl-4 text-[11.5px]">
                 {scanResult.warnings.map((w, idx) => (
-                  <li key={idx}>{w}</li>
+                  <li key={`${w}-${idx}`}>{w}</li>
                 ))}
               </ul>
             </InlineNotice>

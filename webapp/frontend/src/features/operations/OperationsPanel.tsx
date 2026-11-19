@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useRef, useState, type KeyboardEvent } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Droplets, ListChecks, Timer, TrendingUp } from "lucide-react";
 import { SectionCard } from "../../components/ui/Card";
@@ -466,6 +466,8 @@ export function OperationsPanel({
 } = {}) {
   const backend = useAppStore((state) => state.backend);
   const online = backend === "online";
+  const tabsId = useId();
+  const tabRefs = useRef<Partial<Record<OpTab, HTMLButtonElement | null>>>({});
   const visibleTabs = allowedTabs?.length
     ? TABS.filter((item) => allowedTabs.includes(item.key))
     : TABS;
@@ -473,6 +475,22 @@ export function OperationsPanel({
     ? defaultTab
     : (visibleTabs[0]?.key ?? "ramp");
   const [tab, setTab] = useState<OpTab>(initialTab);
+
+  function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight") nextIndex = (index + 1) % visibleTabs.length;
+    else if (event.key === "ArrowLeft")
+      nextIndex = (index - 1 + visibleTabs.length) % visibleTabs.length;
+    else if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = visibleTabs.length - 1;
+    if (nextIndex === null) return;
+    event.preventDefault();
+    const target = visibleTabs[nextIndex];
+    if (!target) return;
+    setTab(target.key);
+    tabRefs.current[target.key]?.focus();
+  }
+
   return (
     <SectionCard
       title="Basınçlandırma ve test sonrası operasyonlar"
@@ -484,23 +502,36 @@ export function OperationsPanel({
           <OfflineNotice>Bu kontroller yalnızca sunucu bağlıyken değerlendirilir.</OfflineNotice>
         ) : null}
         <div role="tablist" aria-label="Operasyon kontrolleri" className="flex flex-wrap gap-1.5">
-          {visibleTabs.map(({ key, label, icon: Icon }) => (
+          {visibleTabs.map(({ key, label, icon: Icon }, index) => (
             <button
               key={key}
+              ref={(el) => {
+                tabRefs.current[key] = el;
+              }}
+              id={`${tabsId}-tab-${key}`}
               type="button"
               role="tab"
               aria-selected={tab === key}
+              aria-controls={`${tabsId}-panel-${key}`}
+              tabIndex={tab === key ? 0 : -1}
               className={tab === key ? "btn btn-primary" : "btn btn-ghost"}
               onClick={() => setTab(key)}
+              onKeyDown={(event) => handleTabKeyDown(event, index)}
             >
               <Icon size={13} aria-hidden /> {label}
             </button>
           ))}
         </div>
-        {tab === "ramp" ? <RampSection online={online} /> : null}
-        {tab === "hold" ? <HoldSection online={online} /> : null}
-        {tab === "depressurize" ? <DepressurizeSection online={online} /> : null}
-        {tab === "discharge" ? <DischargeSection online={online} /> : null}
+        <div
+          role="tabpanel"
+          id={`${tabsId}-panel-${tab}`}
+          aria-labelledby={`${tabsId}-tab-${tab}`}
+        >
+          {tab === "ramp" ? <RampSection online={online} /> : null}
+          {tab === "hold" ? <HoldSection online={online} /> : null}
+          {tab === "depressurize" ? <DepressurizeSection online={online} /> : null}
+          {tab === "discharge" ? <DischargeSection online={online} /> : null}
+        </div>
       </div>
     </SectionCard>
   );

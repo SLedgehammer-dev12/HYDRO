@@ -28,6 +28,7 @@ export function strVal(obj: Record<string, unknown>, key: string): string {
 }
 
 export function CellInput({
+  id,
   value,
   onChange,
   placeholder = "—",
@@ -36,6 +37,7 @@ export function CellInput({
   ariaLabel,
   className = "",
 }: {
+  id?: string;
   value: string;
   onChange: (next: string) => void;
   placeholder?: string;
@@ -51,6 +53,7 @@ export function CellInput({
 
   return (
     <input
+      id={id}
       type="text"
       inputMode={isNumeric ? "decimal" : undefined}
       autoCorrect="off"

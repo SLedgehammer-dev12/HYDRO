@@ -149,6 +149,14 @@ export function ConfirmDialog({
   onConfirm: () => void;
   onClose: () => void;
 }) {
+  const cancelBtnRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (open && danger) {
+      requestAnimationFrame(() => cancelBtnRef.current?.focus());
+    }
+  }, [open, danger]);
+
   return (
     <Modal
       open={open}
@@ -156,7 +164,7 @@ export function ConfirmDialog({
       title={title}
       footer={
         <>
-          <Button variant="ghost" autoFocus={danger} onClick={onClose}>
+          <Button ref={cancelBtnRef} variant="ghost" onClick={onClose}>
             {cancelLabel}
           </Button>
           <Button

@@ -43,7 +43,6 @@ export function AcceptanceFormEditor({
         </div>
 
         <div
-          tabIndex={0}
           role="region"
           aria-label="Hava İçerik Testi Kabul Parametreleri"
           className="table-wrap table-sticky scroll-thin"
@@ -227,7 +226,6 @@ export function AcceptanceFormEditor({
       </div>
 
       <div
-        tabIndex={0}
         role="region"
         aria-label="Basınç Testi Kabul Parametreleri"
         className="table-wrap table-sticky scroll-thin"

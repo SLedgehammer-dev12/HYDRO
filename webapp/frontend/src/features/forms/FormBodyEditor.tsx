@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { Plus, Sparkles, Trash2 } from "lucide-react";
 import type { BotasFormCode } from "../../lib/types";
 import { Badge } from "../../components/ui/Badge";
@@ -43,6 +44,8 @@ export function FormBodyEditor({
   mergedHeader: Record<string, unknown>;
   formDate?: string;
 }) {
+  const formId = useId();
+
   function setNestedKey(sectionKey: string, fieldKey: string, value: unknown) {
     const cur = toRecord(draft[sectionKey]);
     onChange({
@@ -170,7 +173,6 @@ export function FormBodyEditor({
             </Button>
           </div>
           <div
-            tabIndex={0}
             role="region"
             aria-label="Test Bölümü Segment Hacimleri"
             className="table-wrap table-sticky scroll-thin"
@@ -342,7 +344,6 @@ export function FormBodyEditor({
           />
 
           <div
-            tabIndex={0}
             role="region"
             aria-label="Test Ölçüm Noktaları Tablosu"
             onPaste={onPasteMeasurements}
@@ -544,11 +545,15 @@ export function FormBodyEditor({
       <div className="space-y-4">
         {isDrying ? (
           <div className="grid gap-2 sm:grid-cols-3">
-            <label className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-2">
-              <span className="block text-[10px] font-medium text-[var(--text-muted)]">
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-2">
+              <label
+                htmlFor={`${formId}-dry-target`}
+                className="block text-[10px] font-medium text-[var(--text-muted)]"
+              >
                 Hedef Çiğlenme Noktası (°C)
-              </span>
+              </label>
               <CellInput
+                id={`${formId}-dry-target`}
                 type="number"
                 value={numVal(drying, "target_dew_point_c")}
                 placeholder="-20"
@@ -557,12 +562,16 @@ export function FormBodyEditor({
                 align="left"
                 className="mt-1 w-full"
               />
-            </label>
-            <label className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-2">
-              <span className="block text-[10px] font-medium text-[var(--text-muted)]">
+            </div>
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-2">
+              <label
+                htmlFor={`${formId}-dry-measured`}
+                className="block text-[10px] font-medium text-[var(--text-muted)]"
+              >
                 Ölçülen Çiğlenme Noktası (°C)
-              </span>
+              </label>
               <CellInput
+                id={`${formId}-dry-measured`}
                 type="number"
                 value={numVal(drying, "measured_dew_point_c")}
                 onChange={(v) => setNestedKey("drying", "measured_dew_point_c", parseCellNum(v))}
@@ -570,12 +579,16 @@ export function FormBodyEditor({
                 align="left"
                 className="mt-1 w-full"
               />
-            </label>
-            <label className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-2">
-              <span className="block text-[10px] font-medium text-[var(--text-muted)]">
+            </div>
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-2">
+              <label
+                htmlFor={`${formId}-dry-hours`}
+                className="block text-[10px] font-medium text-[var(--text-muted)]"
+              >
                 Kurutma Süresi (Saat)
-              </span>
+              </label>
               <CellInput
+                id={`${formId}-dry-hours`}
                 type="number"
                 value={numVal(drying, "duration_hours")}
                 onChange={(v) => setNestedKey("drying", "duration_hours", parseCellNum(v))}
@@ -583,7 +596,7 @@ export function FormBodyEditor({
                 align="left"
                 className="mt-1 w-full"
               />
-            </label>
+            </div>
           </div>
         ) : null}
 
@@ -620,7 +633,6 @@ export function FormBodyEditor({
           />
 
           <div
-            tabIndex={0}
             role="region"
             aria-label="Pig İzleme Tablosu"
             onPaste={onPastePigRuns}

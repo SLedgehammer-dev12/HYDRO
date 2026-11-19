@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
@@ -225,6 +225,7 @@ export default function OcrPage() {
   }, [applyMode, applyProjectId, applySessionId, targetSessions, activeSessionId]);
 
   const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
+  const calcToggleId = useId();
   const selectedProfile = useMemo(
     () => profiles.find((profile) => profile.id === selectedProfileId) ?? null,
     [profiles, selectedProfileId],
@@ -801,12 +802,12 @@ export default function OcrPage() {
     }
   };
 
-  const handleTabKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+  const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     event.preventDefault();
-    const buttons = Array.from(
-      event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
-    );
+    const tablist = event.currentTarget.closest('[role="tablist"]');
+    if (!tablist) return;
+    const buttons = Array.from(tablist.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
     const currentIndex = buttons.findIndex((button) => button.getAttribute("aria-selected") === "true");
     const direction = event.key === "ArrowRight" ? 1 : -1;
     const nextIndex = (currentIndex + direction + buttons.length) % buttons.length;
@@ -969,17 +970,18 @@ export default function OcrPage() {
                 Gelişmiş: Hesaplanan JSON ile karşılaştır (isteğe bağlı)
               </summary>
               <div className="mt-3">
-                <label className="flex cursor-pointer items-start gap-3">
+                <div className="flex items-start gap-3">
                   <input
+                    id={calcToggleId}
                     type="checkbox"
-                    className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--primary)]"
+                    className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-[var(--primary)]"
                     checked={useCalculated}
                     onChange={(event) => {
                       setUseCalculated(event.target.checked);
                       setCalculatedError(null);
                     }}
                   />
-                  <span>
+                  <label htmlFor={calcToggleId} className="cursor-pointer">
                     <span className="text-sm font-medium text-[var(--text)]">
                       Hesaplanan değerlerle karşılaştır
                     </span>
@@ -987,8 +989,8 @@ export default function OcrPage() {
                       Karşılaştırma verisini JSON olarak girebilirsiniz. Boş bırakılırsa yalnızca alan
                       çıkarımı yapılır.
                     </span>
-                  </span>
-                </label>
+                  </label>
+                </div>
 
                 {useCalculated ? (
                   <div className="mt-3">
@@ -1382,7 +1384,6 @@ export default function OcrPage() {
                         role="tablist"
                         aria-label="Analiz sonucu sekmeleri"
                         className="mt-3 flex flex-wrap gap-1 border-b hairline px-3"
-                        onKeyDown={handleTabKeyDown}
                       >
                         {tabs.map((item) => {
                           const selected = tab === item.key;
@@ -1396,6 +1397,7 @@ export default function OcrPage() {
                               aria-controls={`ocr-panel-${item.key}`}
                               tabIndex={selected ? 0 : -1}
                               onClick={() => setTab(item.key)}
+                              onKeyDown={handleTabKeyDown}
                               className={clsx(
                                 "inline-flex min-h-10 items-center gap-1.5 rounded-t-lg border-b-2 px-3 py-2 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]",
                                 selected

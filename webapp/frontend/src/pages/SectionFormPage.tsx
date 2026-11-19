@@ -109,6 +109,7 @@ export function SectionFormPage() {
 
   const uploadInputId = useId();
   const appendUploadInputId = useId();
+  const sigId = useId();
 
   function requestNavigate(nextCode: BotasFormCode) {
     if (nextCode === spec.code) return;
@@ -121,6 +122,8 @@ export function SectionFormPage() {
 
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
+  const formRecordRef = useRef(formRecord);
+  formRecordRef.current = formRecord;
   const loadedTargetRef = useRef<string | null>(null);
   const saveHandlerRef = useRef<() => void>(() => {});
 
@@ -144,8 +147,9 @@ export function SectionFormPage() {
       return;
     }
     loadedTargetRef.current = targetKey;
-    const ext = formRecord?.extracted_data ? structuredClone(formRecord.extracted_data) : {};
-    setDraftDate(formRecord?.form_date || "");
+    const latestRecord = formRecordRef.current;
+    const ext = latestRecord?.extracted_data ? structuredClone(latestRecord.extracted_data) : {};
+    setDraftDate(latestRecord?.form_date || "");
     setDraftData(ext);
     setDirty(false);
     if (contextChanged) {
@@ -658,14 +662,15 @@ export function SectionFormPage() {
             </label>
 
             <div className="grid gap-3 border-t border-[var(--border)] pt-3 sm:grid-cols-2">
-              <label className="block rounded-lg border border-[var(--border)] bg-[var(--canvas)] p-2.5">
+              <div className="block rounded-lg border border-[var(--border)] bg-[var(--canvas)] p-2.5">
                 <div className="flex items-center justify-between text-[10px] font-bold uppercase text-[var(--text-muted)]">
-                  <span>Müteahhit / Yüklenici Adı-Soyadı</span>
+                  <label htmlFor={`${sigId}-contractor`}>Müteahhit / Yüklenici Adı-Soyadı</label>
                   <Badge tone={asStr(sig, "contractor_name") ? "pass" : "neutral"}>
                     {asStr(sig, "contractor_name") ? "İmzalı" : "Boş"}
                   </Badge>
                 </div>
                 <input
+                  id={`${sigId}-contractor`}
                   type="text"
                   value={asStr(sig, "contractor_name")}
                   placeholder="Adı-Soyadı"
@@ -682,16 +687,17 @@ export function SectionFormPage() {
                   }}
                   className="mt-1 h-7 w-full rounded border border-[var(--border)] bg-[var(--surface)] px-2 text-xs text-[var(--text)]"
                 />
-              </label>
+              </div>
 
-              <label className="block rounded-lg border border-[var(--border)] bg-[var(--canvas)] p-2.5">
+              <div className="block rounded-lg border border-[var(--border)] bg-[var(--canvas)] p-2.5">
                 <div className="flex items-center justify-between text-[10px] font-bold uppercase text-[var(--text-muted)]">
-                  <span>BOTAŞ Kontrol Adı-Soyadı</span>
+                  <label htmlFor={`${sigId}-botas`}>BOTAŞ Kontrol Adı-Soyadı</label>
                   <Badge tone={asStr(sig, "botas_name") ? "pass" : "neutral"}>
                     {asStr(sig, "botas_name") ? "İmzalı" : "Boş"}
                   </Badge>
                 </div>
                 <input
+                  id={`${sigId}-botas`}
                   type="text"
                   value={asStr(sig, "botas_name")}
                   placeholder="Adı-Soyadı"
@@ -708,7 +714,7 @@ export function SectionFormPage() {
                   }}
                   className="mt-1 h-7 w-full rounded border border-[var(--border)] bg-[var(--surface)] px-2 text-xs text-[var(--text)]"
                 />
-              </label>
+              </div>
             </div>
           </div>
         </div>

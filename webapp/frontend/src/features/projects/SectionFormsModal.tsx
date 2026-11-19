@@ -102,7 +102,6 @@ export function SectionFormsModal({
           )}
 
           <div
-            tabIndex={0}
             role="region"
             aria-label="Kesit BOTAŞ Form Listesi"
             className="table-wrap table-sticky max-h-[340px] overflow-auto scroll-thin"
@@ -144,21 +143,25 @@ export function SectionFormsModal({
                             ? "Dolu"
                             : "Boş";
                   return (
-                    <tr
-                      key={row.id}
-                      className="cursor-pointer hover:bg-[var(--surface-2)]"
-                      title={`${row.form_title} formunu aç`}
-                      onClick={() => {
-                        if (!session) return;
-                        const s = session;
-                        onClose();
-                        onOpenSectionForm(s, row.form_code);
-                      }}
-                    >
+                    <tr key={row.id} className="hover:bg-[var(--surface-2)]">
                       <td className="font-mono text-[10.5px] text-[var(--primary)]">
                         {row.botas_code}
                       </td>
-                      <td className="font-medium text-[var(--text)]">{row.form_title}</td>
+                      <td>
+                        <button
+                          type="button"
+                          title={`${row.form_title} formunu aç`}
+                          onClick={() => {
+                            if (!session) return;
+                            const s = session;
+                            onClose();
+                            onOpenSectionForm(s, row.form_code);
+                          }}
+                          className="text-left font-medium text-[var(--text)] hover:text-[var(--primary)] hover:underline"
+                        >
+                          {row.form_title}
+                        </button>
+                      </td>
                       <td>
                         <Badge tone={row.required ? "info" : "neutral"}>
                           {row.required ? "Zorunlu" : "Ek"}
