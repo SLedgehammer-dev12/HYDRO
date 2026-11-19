@@ -668,6 +668,13 @@ def create_result(
     # updates the summary/status but must not invalidate the client's ETag.
     session.updated_at = now
 
+    if commit and test_type in {"depressurization", "discharge"}:
+        from . import dossier as dossier_service
+
+        dossier_service.sync_operation_result_to_dewatering_form(
+            db, session, test_type=test_type, payload=payload
+        )
+
     audit.record(
         db,
         action="result.create",

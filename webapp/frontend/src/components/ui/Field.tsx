@@ -217,6 +217,7 @@ export function SelectField({
           disabled={disabled}
           required={required}
           aria-invalid={error ? true : undefined}
+          aria-describedby={error ? `${selectId}-error` : help ? `${selectId}-help` : undefined}
           onChange={(event) => onChange(event.target.value)}
         >
           {placeholder ? <option value="">{placeholder}</option> : null}
@@ -286,6 +287,7 @@ export function TextField({
         required={required}
         maxLength={maxLength}
         aria-invalid={error ? true : undefined}
+        aria-describedby={error ? `${inputId}-error` : help ? `${inputId}-help` : undefined}
         onChange={(event) => onChange(event.target.value)}
       />
     </FieldFrame>

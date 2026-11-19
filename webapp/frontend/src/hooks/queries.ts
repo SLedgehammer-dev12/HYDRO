@@ -1076,6 +1076,7 @@ export function useDeleteSession() {
 }
 
 export function useSaveTestResult() {
+  const queryClient = useQueryClient();
   return useMutation<
     { saved: boolean; demo: boolean },
     Error,
@@ -1088,6 +1089,14 @@ export function useSaveTestResult() {
       }
       await api.saveResult(state.sessionId, { test_type: testType, payload }, state.revision);
       return { saved: true, demo: false };
+    },
+    onSuccess: (outcome) => {
+      if (!outcome.saved) return;
+      const sid = useAppStore.getState().sessionId;
+      if (sid) {
+        void queryClient.invalidateQueries({ queryKey: ["session-forms", sid] });
+      }
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
     },
   });
 }

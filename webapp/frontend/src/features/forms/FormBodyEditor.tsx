@@ -1,7 +1,15 @@
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Sparkles, Trash2 } from "lucide-react";
 import type { BotasFormCode } from "../../lib/types";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
+import { CheckboxRow, FieldGrid, NumberField, SelectField, TextField } from "../../components/ui/Field";
+import {
+  DEWATERING_DESTINATIONS,
+  TRI_OPTIONS,
+  boolToTri,
+  triToBool,
+  type Tri,
+} from "../operations/OperationsPanel";
 import { AcceptanceFormEditor } from "./AcceptanceFormEditor";
 import {
   CellInput,
@@ -26,12 +34,14 @@ export function FormBodyEditor({
   onChange,
   calculations,
   mergedHeader,
+  formDate = "",
 }: {
   formCode: BotasFormCode;
   draft: DraftData;
   onChange: (next: DraftData) => void;
   calculations: Record<string, Record<string, unknown>>;
   mergedHeader: Record<string, unknown>;
+  formDate?: string;
 }) {
   function setNestedKey(sectionKey: string, fieldKey: string, value: unknown) {
     const cur = toRecord(draft[sectionKey]);
@@ -489,6 +499,46 @@ export function FormBodyEditor({
     const runs = toList(draft.pig_runs);
     const drying = toRecord(draft.drying);
     const isDrying = formCode === "pre_drying" || formCode === "final_drying";
+    const dep = toRecord(draft.depressurization);
+    const dis = toRecord(draft.discharge);
+    const valveDiam =
+      typeof dep.release_valve_diameter_in === "number" &&
+      Number.isFinite(dep.release_valve_diameter_in)
+        ? dep.release_valve_diameter_in
+        : null;
+    const disDuration =
+      typeof dis.duration_min === "number" && Number.isFinite(dis.duration_min)
+        ? dis.duration_min
+        : null;
+
+    function fillDischargeFromRunsAndDate() {
+      const firstRun = runs[0] ?? {};
+      const nextDis: Record<string, unknown> = { ...dis };
+      if (!strVal(dis, "report_date") && formDate.trim()) {
+        nextDis.report_date = formDate.trim();
+      }
+      if (!strVal(dis, "report_time") && strVal(firstRun, "launch_time")) {
+        nextDis.report_time = strVal(firstRun, "launch_time");
+      }
+      if (!strVal(dis, "pig_name") && strVal(firstRun, "pig_type")) {
+        nextDis.pig_name = strVal(firstRun, "pig_type");
+      }
+      if (disDuration === null) {
+        const parsedDur =
+          typeof firstRun.duration_min === "number" && Number.isFinite(firstRun.duration_min)
+            ? firstRun.duration_min
+            : parseCellNum(strVal(firstRun, "duration_min"));
+        if (parsedDur !== null) {
+          nextDis.duration_min = parsedDur;
+        }
+      }
+      if (dis.used_discharge_pig === null || dis.used_discharge_pig === undefined) {
+        if (runs.length > 0) {
+          nextDis.used_discharge_pig = true;
+        }
+      }
+      onChange({ ...draft, discharge: nextDis });
+    }
 
     return (
       <div className="space-y-4">
@@ -661,6 +711,171 @@ export function FormBodyEditor({
             </table>
           </div>
         </div>
+
+        {formCode === "dewatering" ? (
+          <div className="space-y-4 border-t border-[var(--border)] pt-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--primary)]">
+                  Şartname 16–17 · Basınç Düşürme ve Boşaltma Kontrolleri
+                </span>
+                <p className="text-[10.5px] text-[var(--text-muted)]">
+                  BOT-FRM-İNB-001-023 / BOT-FRM-CDB-001-024 · Kaydettiğinizde bulgular ve resmi test sonuçları güncellenir.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={<Sparkles size={12} />}
+                onClick={fillDischargeFromRunsAndDate}
+              >
+                Tarih ve pig tablosundan doldur
+              </Button>
+            </div>
+
+            <div className="space-y-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3">
+              <p className="text-[11px] font-bold text-[var(--text)]">Bölüm 16 — Basınç Düşürme</p>
+              <FieldGrid cols={2}>
+                <SelectField
+                  label="Hidrostatik test başarıyla tamamlandı"
+                  value={boolToTri(dep.test_passed)}
+                  onChange={(v) => setNestedKey("depressurization", "test_passed", triToBool(v as Tri))}
+                  options={TRI_OPTIONS}
+                />
+                <NumberField
+                  label="Basınç düşürme vanası çapı"
+                  unit="inç"
+                  value={valveDiam}
+                  onChange={(v) => setNestedKey("depressurization", "release_valve_diameter_in", v)}
+                  min={0}
+                  step={0.5}
+                  help='En fazla 2".'
+                />
+                <SelectField
+                  label="Boru ve ekipman kontrolü yapıldı"
+                  value={boolToTri(dep.pipe_equipment_checked)}
+                  onChange={(v) =>
+                    setNestedKey("depressurization", "pipe_equipment_checked", triToBool(v as Tri))
+                  }
+                  options={TRI_OPTIONS}
+                />
+                <SelectField
+                  label="Çevresel etki önlemleri alındı"
+                  value={boolToTri(dep.environmental_impact_checked)}
+                  onChange={(v) =>
+                    setNestedKey("depressurization", "environmental_impact_checked", triToBool(v as Tri))
+                  }
+                  options={TRI_OPTIONS}
+                />
+              </FieldGrid>
+            </div>
+
+            <div className="space-y-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3">
+              <p className="text-[11px] font-bold text-[var(--text)]">
+                Bölüm 17 — Boşaltma &amp; 17.6 Rapor Bilgileri
+              </p>
+              <FieldGrid cols={2}>
+                <SelectField
+                  label="Boşaltma yeri"
+                  value={strVal(dis, "destination")}
+                  onChange={(v) => setNestedKey("discharge", "destination", v || null)}
+                  options={DEWATERING_DESTINATIONS}
+                />
+                <SelectField
+                  label="Boşaltma pigi kullanıldı (17)"
+                  value={boolToTri(dis.used_discharge_pig)}
+                  onChange={(v) => setNestedKey("discharge", "used_discharge_pig", triToBool(v as Tri))}
+                  options={TRI_OPTIONS}
+                />
+                <SelectField
+                  label="Hidrolik yük önlemleri alındı (17.1)"
+                  value={boolToTri(dis.hydraulic_load_measures_taken)}
+                  onChange={(v) =>
+                    setNestedKey("discharge", "hydraulic_load_measures_taken", triToBool(v as Tri))
+                  }
+                  options={TRI_OPTIONS}
+                />
+                <SelectField
+                  label="Gerekli onaylar alındı (17.3)"
+                  value={boolToTri(dis.approvals_obtained)}
+                  onChange={(v) => setNestedKey("discharge", "approvals_obtained", triToBool(v as Tri))}
+                  options={TRI_OPTIONS}
+                  help="Başka bölüme aktarımda gerekmez."
+                />
+                <SelectField
+                  label="Erozyon/silitasyon önlendi (17.5)"
+                  value={boolToTri(dis.erosion_prevented)}
+                  onChange={(v) => setNestedKey("discharge", "erosion_prevented", triToBool(v as Tri))}
+                  options={TRI_OPTIONS}
+                  help="Yalnızca su mecrası için."
+                />
+              </FieldGrid>
+
+              <CheckboxRow
+                checked={Boolean(dis.treatment_requested)}
+                onChange={(checked) => setNestedKey("discharge", "treatment_requested", checked)}
+                label="İdare su arıtma istedi (17.4)"
+              />
+              {dis.treatment_requested ? (
+                <SelectField
+                  label="Arıtma tamamlandı"
+                  value={boolToTri(dis.treatment_done)}
+                  onChange={(v) => setNestedKey("discharge", "treatment_done", triToBool(v as Tri))}
+                  options={TRI_OPTIONS}
+                />
+              ) : null}
+
+              <CheckboxRow
+                checked={Boolean(dis.sample_analysis_requested)}
+                onChange={(checked) => setNestedKey("discharge", "sample_analysis_requested", checked)}
+                label="İdare numune analizi istedi (17.4)"
+              />
+              {dis.sample_analysis_requested ? (
+                <SelectField
+                  label="Numune analizi yapıldı"
+                  value={boolToTri(dis.sample_analysis_done)}
+                  onChange={(v) => setNestedKey("discharge", "sample_analysis_done", triToBool(v as Tri))}
+                  options={TRI_OPTIONS}
+                />
+              ) : null}
+
+              <p className="pt-1 text-[11px] font-semibold text-[var(--text-soft)]">
+                Boşaltma raporu (17.6)
+              </p>
+              <FieldGrid cols={2}>
+                <TextField
+                  label="Tarih"
+                  value={strVal(dis, "report_date")}
+                  onChange={(v) => setNestedKey("discharge", "report_date", v)}
+                  placeholder="GG.AA.YYYY"
+                />
+                <TextField
+                  label="Saat"
+                  value={strVal(dis, "report_time")}
+                  onChange={(v) => setNestedKey("discharge", "report_time", v)}
+                  placeholder="SS:DD"
+                />
+                <TextField
+                  label="Kullanılan pig"
+                  value={strVal(dis, "pig_name")}
+                  onChange={(v) => setNestedKey("discharge", "pig_name", v)}
+                />
+                <TextField
+                  label="Boşaltma yeri"
+                  value={strVal(dis, "discharge_location")}
+                  onChange={(v) => setNestedKey("discharge", "discharge_location", v)}
+                />
+                <NumberField
+                  label="İşlem süresi"
+                  unit="dk"
+                  value={disDuration}
+                  onChange={(v) => setNestedKey("discharge", "duration_min", v)}
+                  min={0}
+                />
+              </FieldGrid>
+            </div>
+          </div>
+        ) : null}
       </div>
     );
   }

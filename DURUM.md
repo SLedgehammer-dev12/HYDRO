@@ -13,11 +13,11 @@
 | Alan | Durum | Kanıt |
 | --- | --- | --- |
 | Masaüstü uygulaması | Çalışıyor, kararlı | 709 unittest PASS (`skipped=1`) |
-| Web backend (FastAPI) | Çalışıyor | 176 pytest PASS, 81 OpenAPI path / 94 operation, 46 dosyada `mypy` temiz |
-| Web frontend (React 19) | Çalışıyor | `npm run typecheck` + `npm run build` PASS, `verify-tabs.mjs` 11/11 PASS, canlı tarayıcı smoke (0 konsol hatası) |
+| Web backend (FastAPI) | Çalışıyor | 181 pytest PASS, 81 OpenAPI path / 94 operation, 46 dosyada `mypy` temiz |
+| Web frontend (React 19) | Çalışıyor | `npm run typecheck` + `npm run build` PASS, `verify-tabs.mjs` 12/12 PASS, canlı tarayıcı smoke (0 konsol hatası) |
 | Program İkon & Marka Sistemi | Hazır | Boru kesiti + su dalgası + manometre ikonu (`tools/generate_icons.py`, `assets/icons/*`, `webapp/frontend/public/*`, `<HydroLogo />`, PyInstaller/Inno Setup/Tkinter) |
 | Web Güncelleme Yöneticisi | Çalışıyor | `/api/update/*`, SHA-256 + fail-closed Ed25519 `.sig` doğrulama, `UpdateManagerModal`, macOS `.dmg` / Win `.exe`/`.zip` kurulum |
-| BOTAŞ Test Bölümü Formları | Çalışıyor | Seçenek 1 sol menü (`015`..`023`, `KUR-001`, `KUR-002` + 5 ek), `SectionFormPage`, `rows`/`pig_runs`/`findings`, tekil OCR & `020`/`022` gömülü hesaplama |
+| BOTAŞ Test Bölümü Formları | Çalışıyor | Seçenek 1 sol menü (`015`..`023`, `KUR-001`, `KUR-002` + 5 ek), `SectionFormPage`, `rows`/`pig_runs`/`findings`, tekil OCR, `020`/`022` gömülü hesaplama ve `023` (`BOT-FRM-CDB-001-024`) Şartname 16–17 çift yönlü entegrasyonu |
 | Bağımsız Web paketleme | Hazır (`v1.9.1`) | `HydroWeb.spec`, `build_web_dmg.sh` (`arm64`, taranmış PDF `--self-test` PASS), `build_web_exe.ps1` (WinRT `Windows.Media.Ocr` + `Windows.Data.Pdf`) + `installer/hydro_web.iss` |
 | Kurumsal Windows OCR/PDF | Çalışıyor | Süreç-içi `Windows.Media.Ocr` + `Windows.Data.Pdf`, Proxy-bypass `127.0.0.1` + `instance_id` doğrulama, SQLite `WAL → DELETE` fallback |
 | Domain parity | Masaüstü ile aynı kaynak | `hidrostatik_test.domain` doğrudan import edilir |
@@ -81,7 +81,7 @@
 - **Test Bölümü Formları Ağacı & Sıralı Form Denetim Sayfaları (`Seçenek 1`)**:
   - Sol menüde (`Sidebar.tsx`) aktif proje & test bölümü hızlı seçici kartı, **`Test Bölümü Formları (Dolu/11)`** (`015`..`023`, `KUR-001`, `KUR-002`) ve **`Ek Raporlar (Dolu/5)`** (`EK-014`, `EK-SPL`, `001-027`, `EK-KRT`, `EK-KLP`) durum rozetli ağaç listesi.
   - `#/forms/{form_code}` rotasında (`SectionFormPage.tsx` + `FormBodyEditor.tsx`) resmî `BOT-FRM` başlık/imza/tablo düzeni, satır içi düzenleme (`PUT /api/sessions/{id}/forms/{code}`), tekil form OCR tarama (`POST /api/sessions/{id}/forms/{code}/scan`), `form_details.py` ile yapılandırılmış `rows`/`pig_runs`/`drying`/`findings` kalıcılığı ve `4-NGTL 0-GN-P-002-5007 R4` şartname bulguları.
-  - `020` (`air_acceptance`) ve `022` (`pressure_acceptance`) formlarında isteğe bağlı açılıp kapanan **"Detay Hesaplamaları Göster"** bandı ile mevcut `<AirPage embedded />` ve `<PressurePage embedded />` hesaplama modülleri satır içi gösterilir (`#/air` ve `#/pressure` doğrudan rotaları korunur).
+  - `020` (`air_acceptance`), `022` (`pressure_acceptance`) ve `023` (`dewatering` / `BOT-FRM-CDB-001-024`) formlarında isteğe bağlı açılıp kapanan **"Detay Hesaplamaları Göster"** bandı ile mevcut `<AirPage embedded />`, `<PressurePage embedded />` ve Şartname 16–17 `<OperationsPanel />` modülleri satır içi gösterilir; `023` formundaki Şartname 16–17 verileri ile oturum sonuçları çift yönlü senkronize edilir (`#/air` ve `#/pressure` doğrudan rotaları korunur).
   - `Projeler & Kesitler` sayfasında her kesit için genişletilmiş form bulgu özetleri (`findings_counts`, ilk bulgulu forma tek tıkla geçiş, `key_metrics`).
 - Bağımsız masaüstü Web dağıtımı (`v1.9.1`): `webapp/desktop_launcher.py` (yerel FastAPI + statik React + durum/durdurma penceresi + `--self-test`), `HydroWeb.spec`, macOS M1+ `arm64` `.dmg` (`build_web_dmg.sh`), Windows x64 Inno Setup kurulum `.exe` + taşınabilir `.zip` (`installer/hydro_web.iss`, `build_web_exe.ps1`).
 - **Domain İkon Sistemi & Faz 1–5 Web Arayüzü İyileştirmeleri (`tasks/web_ui_plan.md`)**:

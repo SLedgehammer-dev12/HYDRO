@@ -7,7 +7,7 @@ import { CheckboxRow, FieldGrid, NumberField, SelectField, TextField } from "../
 import { DecisionCard } from "../../components/ui/DecisionCard";
 import { InlineNotice, OfflineNotice } from "../../components/ui/State";
 import { api, apiErrorMessage } from "../../lib/api";
-import { useSaveTestResult } from "../../hooks/queries";
+import { useSaveTestResult, useSessionForms } from "../../hooks/queries";
 import { num, parseNumber } from "../../lib/format";
 import { useAppStore } from "../../store/useAppStore";
 import type {
@@ -17,10 +17,11 @@ import type {
   OperationCheckResponse,
   PressureHoldResponse,
   PressurizationRampResponse,
+  SectionFormRecord,
   TestType,
 } from "../../lib/types";
 
-type OpTab = "ramp" | "hold" | "depressurize" | "discharge";
+export type OpTab = "ramp" | "hold" | "depressurize" | "discharge";
 
 const TABS: Array<{ key: OpTab; label: string; icon: typeof Timer }> = [
   { key: "ramp", label: "Basınçlandırma (14.1–14.2)", icon: TrendingUp },
@@ -29,21 +30,37 @@ const TABS: Array<{ key: OpTab; label: string; icon: typeof Timer }> = [
   { key: "discharge", label: "Boşaltma (17)", icon: Droplets },
 ];
 
-type Tri = "" | "yes" | "no";
-const TRI_OPTIONS = [
+export type Tri = "" | "yes" | "no";
+export const TRI_OPTIONS = [
   { value: "", label: "Belirtilmedi" },
   { value: "yes", label: "Evet" },
   { value: "no", label: "Hayır" },
 ];
-const toTri = (value: Tri): boolean | null => (value === "" ? null : value === "yes");
+export const triToBool = (value: Tri): boolean | null => (value === "" ? null : value === "yes");
+export const boolToTri = (value: unknown): Tri =>
+  value === true ? "yes" : value === false ? "no" : "";
 
-const DESTINATIONS = [
+export const DEWATERING_DESTINATIONS = [
   { value: "", label: "Seçiniz" },
   { value: "other_section", label: "Başka test bölümüne aktarım" },
   { value: "watercourse", label: "Akar/durağan su mecrası" },
   { value: "public_land", label: "Devlet arazisi" },
   { value: "private_land", label: "Özel mülkiyet arazi" },
 ];
+
+function asRecord(val: unknown): Record<string, unknown> {
+  return val && typeof val === "object" && !Array.isArray(val) ? (val as Record<string, unknown>) : {};
+}
+
+function asNum(val: unknown): number | null {
+  return typeof val === "number" && Number.isFinite(val) ? val : null;
+}
+
+function useDewateringFormRecord(): SectionFormRecord | null {
+  const sessionId = useAppStore((state) => state.sessionId);
+  const formsQuery = useSessionForms(sessionId);
+  return formsQuery.data?.forms.find((form) => form.form_code === "dewatering") ?? null;
+}
 
 /** Satırlardan (sekme/noktalı virgül/boşluk ayrımlı) sayı demetleri okur. */
 function parseRows(text: string, columns: number): { rows: number[][]; error: string | null } {
@@ -256,6 +273,8 @@ function HoldSection({ online }: { online: boolean }) {
 }
 
 function DepressurizeSection({ online }: { online: boolean }) {
+  const pushToast = useAppStore((state) => state.pushToast);
+  const dewateringForm = useDewateringFormRecord();
   const [testPassed, setTestPassed] = useState<Tri>("");
   const [valve, setValve] = useState<number | null>(null);
   const [pipeChecked, setPipeChecked] = useState<Tri>("");
@@ -266,6 +285,17 @@ function DepressurizeSection({ online }: { online: boolean }) {
     onSuccess: (_data, body) => setLastPayload({ ...body }),
   });
   const result = mutation.data;
+  const formDep = asRecord(dewateringForm?.extracted_data?.depressurization);
+  const hasFormPrefill = Object.keys(formDep).length > 0;
+
+  function fillFromForm() {
+    setTestPassed(boolToTri(formDep.test_passed));
+    setValve(asNum(formDep.release_valve_diameter_in));
+    setPipeChecked(boolToTri(formDep.pipe_equipment_checked));
+    setEnvChecked(boolToTri(formDep.environmental_impact_checked));
+    pushToast("info", "023 formundan dolduruldu", "Basınç düşürme alanları yüklendi.");
+  }
+
   return (
     <div className="space-y-3">
       <FieldGrid cols={2}>
@@ -274,21 +304,28 @@ function DepressurizeSection({ online }: { online: boolean }) {
         <SelectField label="Boru ve ekipman kontrolü yapıldı" value={pipeChecked} onChange={(v) => setPipeChecked(v as Tri)} options={TRI_OPTIONS} />
         <SelectField label="Çevresel etki önlemleri alındı" value={envChecked} onChange={(v) => setEnvChecked(v as Tri)} options={TRI_OPTIONS} />
       </FieldGrid>
-      <Button
-        variant="primary"
-        disabled={!online}
-        loading={mutation.isPending}
-        onClick={() =>
-          mutation.mutate({
-            test_passed: toTri(testPassed),
-            release_valve_diameter_in: valve,
-            pipe_equipment_checked: toTri(pipeChecked),
-            environmental_impact_checked: toTri(envChecked),
-          })
-        }
-      >
-        Değerlendir
-      </Button>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          variant="primary"
+          disabled={!online}
+          loading={mutation.isPending}
+          onClick={() =>
+            mutation.mutate({
+              test_passed: triToBool(testPassed),
+              release_valve_diameter_in: valve,
+              pipe_equipment_checked: triToBool(pipeChecked),
+              environmental_impact_checked: triToBool(envChecked),
+            })
+          }
+        >
+          Değerlendir
+        </Button>
+        {hasFormPrefill ? (
+          <Button variant="ghost" size="sm" onClick={fillFromForm}>
+            023 Formundan doldur
+          </Button>
+        ) : null}
+      </div>
       {mutation.isError ? <InlineNotice tone="danger">{apiErrorMessage(mutation.error)}</InlineNotice> : null}
       {result ? (
         <>
@@ -302,6 +339,8 @@ function DepressurizeSection({ online }: { online: boolean }) {
 }
 
 function DischargeSection({ online }: { online: boolean }) {
+  const pushToast = useAppStore((state) => state.pushToast);
+  const dewateringForm = useDewateringFormRecord();
   const [destination, setDestination] = useState("");
   const [pig, setPig] = useState<Tri>("");
   const [hydraulic, setHydraulic] = useState<Tri>("");
@@ -322,10 +361,36 @@ function DischargeSection({ online }: { online: boolean }) {
     onSuccess: (_data, body) => setLastPayload({ ...body }),
   });
   const result = mutation.data;
+  const formExt = asRecord(dewateringForm?.extracted_data);
+  const formDis = asRecord(formExt.discharge);
+  const rawRuns = Array.isArray(formExt.pig_runs) ? formExt.pig_runs : [];
+  const firstRun = rawRuns.length > 0 ? asRecord(rawRuns[0]) : {};
+  const hasFormPrefill =
+    Object.keys(formDis).length > 0 || rawRuns.length > 0 || Boolean(dewateringForm?.form_date);
+
+  function fillFromForm() {
+    setDestination(String(formDis.destination ?? ""));
+    const pigTri = boolToTri(formDis.used_discharge_pig);
+    setPig(pigTri || (rawRuns.length > 0 ? "yes" : ""));
+    setHydraulic(boolToTri(formDis.hydraulic_load_measures_taken));
+    setApprovals(boolToTri(formDis.approvals_obtained));
+    setErosion(boolToTri(formDis.erosion_prevented));
+    setTreatmentRequested(Boolean(formDis.treatment_requested));
+    setTreatmentDone(boolToTri(formDis.treatment_done));
+    setAnalysisRequested(Boolean(formDis.sample_analysis_requested));
+    setAnalysisDone(boolToTri(formDis.sample_analysis_done));
+    setDate(String(formDis.report_date ?? dewateringForm?.form_date ?? ""));
+    setTime(String(formDis.report_time ?? firstRun.launch_time ?? ""));
+    setPigName(String(formDis.pig_name ?? firstRun.pig_type ?? ""));
+    setLocation(String(formDis.discharge_location ?? ""));
+    setDuration(asNum(formDis.duration_min) ?? asNum(firstRun.duration_min));
+    pushToast("info", "023 formundan dolduruldu", "Boşaltma alanları ve pig kaydı yüklendi.");
+  }
+
   return (
     <div className="space-y-3">
       <FieldGrid cols={2}>
-        <SelectField label="Boşaltma yeri" value={destination} onChange={setDestination} options={DESTINATIONS} />
+        <SelectField label="Boşaltma yeri" value={destination} onChange={setDestination} options={DEWATERING_DESTINATIONS} />
         <SelectField label="Boşaltma pigi kullanıldı (17)" value={pig} onChange={(v) => setPig(v as Tri)} options={TRI_OPTIONS} />
         <SelectField label="Hidrolik yük önlemleri alındı (17.1)" value={hydraulic} onChange={(v) => setHydraulic(v as Tri)} options={TRI_OPTIONS} />
         <SelectField label="Gerekli onaylar alındı (17.3)" value={approvals} onChange={(v) => setApprovals(v as Tri)} options={TRI_OPTIONS} help="Başka bölüme aktarımda gerekmez." />
@@ -347,31 +412,38 @@ function DischargeSection({ online }: { online: boolean }) {
         <TextField label="Boşaltma yeri" value={location} onChange={setLocation} />
         <NumberField label="İşlem süresi" unit="dk" value={duration} onChange={setDuration} min={0} />
       </FieldGrid>
-      <Button
-        variant="primary"
-        disabled={!online}
-        loading={mutation.isPending}
-        onClick={() =>
-          mutation.mutate({
-            destination: destination || null,
-            used_discharge_pig: toTri(pig),
-            hydraulic_load_measures_taken: toTri(hydraulic),
-            approvals_obtained: toTri(approvals),
-            treatment_requested: treatmentRequested,
-            treatment_done: toTri(treatmentDone),
-            sample_analysis_requested: analysisRequested,
-            sample_analysis_done: toTri(analysisDone),
-            erosion_prevented: toTri(erosion),
-            report_date: date,
-            report_time: time,
-            pig_name: pigName,
-            discharge_location: location,
-            duration_min: duration,
-          })
-        }
-      >
-        Değerlendir
-      </Button>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          variant="primary"
+          disabled={!online}
+          loading={mutation.isPending}
+          onClick={() =>
+            mutation.mutate({
+              destination: destination || null,
+              used_discharge_pig: triToBool(pig),
+              hydraulic_load_measures_taken: triToBool(hydraulic),
+              approvals_obtained: triToBool(approvals),
+              treatment_requested: treatmentRequested,
+              treatment_done: triToBool(treatmentDone),
+              sample_analysis_requested: analysisRequested,
+              sample_analysis_done: triToBool(analysisDone),
+              erosion_prevented: triToBool(erosion),
+              report_date: date,
+              report_time: time,
+              pig_name: pigName,
+              discharge_location: location,
+              duration_min: duration,
+            })
+          }
+        >
+          Değerlendir
+        </Button>
+        {hasFormPrefill ? (
+          <Button variant="ghost" size="sm" onClick={fillFromForm}>
+            023 Formundan doldur
+          </Button>
+        ) : null}
+      </div>
       {mutation.isError ? <InlineNotice tone="danger">{apiErrorMessage(mutation.error)}</InlineNotice> : null}
       {result ? (
         <>
@@ -385,10 +457,22 @@ function DischargeSection({ online }: { online: boolean }) {
 }
 
 /** Şartname 14–17 operasyon kontrolleri (sunucu karar metni gösterilir). */
-export function OperationsPanel() {
+export function OperationsPanel({
+  defaultTab = "ramp",
+  allowedTabs,
+}: {
+  defaultTab?: OpTab;
+  allowedTabs?: OpTab[];
+} = {}) {
   const backend = useAppStore((state) => state.backend);
   const online = backend === "online";
-  const [tab, setTab] = useState<OpTab>("ramp");
+  const visibleTabs = allowedTabs?.length
+    ? TABS.filter((item) => allowedTabs.includes(item.key))
+    : TABS;
+  const initialTab = visibleTabs.some((item) => item.key === defaultTab)
+    ? defaultTab
+    : (visibleTabs[0]?.key ?? "ramp");
+  const [tab, setTab] = useState<OpTab>(initialTab);
   return (
     <SectionCard
       title="Basınçlandırma ve test sonrası operasyonlar"
@@ -400,7 +484,7 @@ export function OperationsPanel() {
           <OfflineNotice>Bu kontroller yalnızca sunucu bağlıyken değerlendirilir.</OfflineNotice>
         ) : null}
         <div role="tablist" aria-label="Operasyon kontrolleri" className="flex flex-wrap gap-1.5">
-          {TABS.map(({ key, label, icon: Icon }) => (
+          {visibleTabs.map(({ key, label, icon: Icon }) => (
             <button
               key={key}
               type="button"

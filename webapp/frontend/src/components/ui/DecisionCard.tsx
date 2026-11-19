@@ -1,5 +1,5 @@
 import type { Decision } from "../../lib/types";
-import { decisionLabel, num, statusTone, truncate } from "../../lib/format";
+import { decisionLabel, num, statusTone } from "../../lib/format";
 import { Badge } from "./Badge";
 import { AlertTriangle, CheckCircle2, CircleDot, Info, XCircle } from "lucide-react";
 import type { ReactNode } from "react";
@@ -70,8 +70,8 @@ export function DecisionCard({
         </div>
 
         {decision?.summary ? (
-          <p className="mt-2.5 text-[12px] leading-relaxed text-[var(--text-muted)]">
-            {compact ? truncate(decision.summary, 150) : decision.summary}
+          <p className="mt-2.5 break-words text-[12px] leading-relaxed text-[var(--text-muted)]">
+            {decision.summary}
           </p>
         ) : (
           <p className="mt-2.5 text-[12px] leading-relaxed text-[var(--text-faint)]">

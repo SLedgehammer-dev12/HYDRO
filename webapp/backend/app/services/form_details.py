@@ -12,8 +12,15 @@ from hidrostatik_test.domain import (
     MAX_TEST_SECTION_LENGTH_M,
     MAX_TEST_SECTION_VOLUME_M3,
     PRESSURE_VARIATION_ACCEPTANCE_BAR,
+    ValidationError,
 )
 from hidrostatik_test.domain.operations import get_pig_speed_limit
+from hidrostatik_test.domain.post_test_operations import (
+    DepressurizationInputs,
+    DischargeInputs,
+    evaluate_depressurization,
+    evaluate_discharge,
+)
 from hidrostatik_test.services.report_ocr import parse_number
 
 MAX_TABLE_ROWS = 300
@@ -52,6 +59,208 @@ def _finite(val: Any) -> float | None:
     import math
 
     return num if math.isfinite(num) else None
+
+
+def _optional_bool(val: Any) -> bool | None:
+    return val if isinstance(val, bool) else None
+
+
+def build_effective_dewatering_payloads(
+    form_date: str,
+    extracted_data: dict[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Extract active Spec 16/17 payloads from a `dewatering` form, filling missing 17.6 gaps from date & pig runs."""
+    data = extracted_data if isinstance(extracted_data, dict) else {}
+
+    dep_payload: dict[str, Any] | None = None
+    raw_dep = data.get("depressurization")
+    if isinstance(raw_dep, dict):
+        cand_dep = {
+            "test_passed": _optional_bool(raw_dep.get("test_passed")),
+            "release_valve_diameter_in": _finite(raw_dep.get("release_valve_diameter_in")),
+            "pipe_equipment_checked": _optional_bool(raw_dep.get("pipe_equipment_checked")),
+            "environmental_impact_checked": _optional_bool(
+                raw_dep.get("environmental_impact_checked")
+            ),
+        }
+        if any(v is not None for v in cand_dep.values()):
+            dep_payload = cand_dep
+
+    dis_payload: dict[str, Any] | None = None
+    raw_dis = data.get("discharge")
+    if isinstance(raw_dis, dict):
+        has_dis_input = (
+            any(
+                raw_dis.get(k) is not None
+                for k in (
+                    "used_discharge_pig",
+                    "hydraulic_load_measures_taken",
+                    "approvals_obtained",
+                    "treatment_done",
+                    "sample_analysis_done",
+                    "erosion_prevented",
+                    "duration_min",
+                )
+            )
+            or any(
+                str(raw_dis.get(k) or "").strip() != ""
+                for k in (
+                    "destination",
+                    "report_date",
+                    "report_time",
+                    "pig_name",
+                    "discharge_location",
+                )
+            )
+            or bool(raw_dis.get("treatment_requested"))
+            or bool(raw_dis.get("sample_analysis_requested"))
+        )
+        if has_dis_input:
+            runs = [r for r in (data.get("pig_runs") or []) if isinstance(r, dict)]
+            first_run: dict[str, Any] = runs[0] if runs else {}
+            raw_ev = data.get("pig_events")
+            pig_ev: dict[str, Any] = raw_ev if isinstance(raw_ev, dict) else {}
+            last_dur = next(
+                (
+                    d
+                    for d in (_finite(r.get("duration_min")) for r in reversed(runs))
+                    if d is not None and d > 0
+                ),
+                None,
+            )
+            used_pig = _optional_bool(raw_dis.get("used_discharge_pig"))
+            if used_pig is None and (runs or bool(pig_ev.get("has_events"))):
+                used_pig = True
+
+            dest = str(raw_dis.get("destination") or "").strip() or None
+            rep_date = (
+                str(raw_dis.get("report_date") or "").strip()
+                or str(form_date or data.get("form_date") or "").strip()
+            )
+            rep_time = (
+                str(raw_dis.get("report_time") or "").strip()
+                or str(first_run.get("launch_time") or "").strip()
+                or str(pig_ev.get("first_time") or "").strip()
+            )
+            pig_name = (
+                str(raw_dis.get("pig_name") or "").strip()
+                or str(first_run.get("pig_type") or "").strip()
+            )
+            loc = str(raw_dis.get("discharge_location") or "").strip()
+            dur_min = (
+                _finite(raw_dis.get("duration_min"))
+                or last_dur
+                or _finite(pig_ev.get("travel_time_min"))
+            )
+            dis_payload = {
+                "destination": dest,
+                "used_discharge_pig": used_pig,
+                "hydraulic_load_measures_taken": _optional_bool(
+                    raw_dis.get("hydraulic_load_measures_taken")
+                ),
+                "approvals_obtained": _optional_bool(raw_dis.get("approvals_obtained")),
+                "treatment_requested": bool(raw_dis.get("treatment_requested", False)),
+                "treatment_done": _optional_bool(raw_dis.get("treatment_done")),
+                "sample_analysis_requested": bool(raw_dis.get("sample_analysis_requested", False)),
+                "sample_analysis_done": _optional_bool(raw_dis.get("sample_analysis_done")),
+                "erosion_prevented": _optional_bool(raw_dis.get("erosion_prevented")),
+                "report_date": rep_date,
+                "report_time": rep_time,
+                "pig_name": pig_name,
+                "discharge_location": loc,
+                "duration_min": dur_min,
+            }
+
+    return dep_payload, dis_payload
+
+
+def evaluate_dewatering_operations(
+    form_date: str,
+    extracted_data: dict[str, Any],
+) -> dict[str, Any]:
+    """Evaluate active Spec 16/17 blocks on a `dewatering` form via domain rules."""
+    dep_payload, dis_payload = build_effective_dewatering_payloads(form_date, extracted_data)
+
+    dep_eval: dict[str, Any] | None = None
+    if dep_payload is not None:
+        try:
+            dep_res = evaluate_depressurization(DepressurizationInputs(**dep_payload))
+            if dep_res.passed:
+                diam = _finite(dep_payload.get("release_valve_diameter_in"))
+                diam_txt = f'{diam:g}"' if diam is not None else '≤ 2"'
+                dep_eval = {
+                    "status": "passed",
+                    "violations": [],
+                    "missing": [],
+                    "payload": dep_payload,
+                    "message": f"Basınç düşürme önlemleri ve vana çapı ({diam_txt}) uygun (Md. 16).",
+                }
+            elif dep_res.violations:
+                dep_eval = {
+                    "status": "failed",
+                    "violations": list(dep_res.violations),
+                    "missing": list(dep_res.missing),
+                    "payload": dep_payload,
+                    "message": " ".join([*dep_res.violations, *dep_res.missing]),
+                }
+            else:
+                dep_eval = {
+                    "status": "warning",
+                    "violations": [],
+                    "missing": list(dep_res.missing),
+                    "payload": dep_payload,
+                    "message": " ".join(dep_res.missing),
+                }
+        except ValidationError as exc:
+            dep_eval = {
+                "status": "failed",
+                "violations": [str(exc)],
+                "missing": [],
+                "payload": dep_payload,
+                "message": str(exc),
+            }
+
+    dis_eval: dict[str, Any] | None = None
+    if dis_payload is not None:
+        try:
+            dis_res = evaluate_discharge(DischargeInputs(**dis_payload))
+            if dis_res.passed:
+                dis_eval = {
+                    "status": "passed",
+                    "violations": [],
+                    "missing": [],
+                    "payload": dis_payload,
+                    "message": (
+                        "Boşaltma pigi, önlemler, onaylar ve 17.6 rapor bilgileri uygun "
+                        "(BOT-FRM-İNB-001-023 / BOT-FRM-CDB-001-024)."
+                    ),
+                }
+            elif dis_res.violations:
+                dis_eval = {
+                    "status": "failed",
+                    "violations": list(dis_res.violations),
+                    "missing": list(dis_res.missing),
+                    "payload": dis_payload,
+                    "message": " ".join([*dis_res.violations, *dis_res.missing]),
+                }
+            else:
+                dis_eval = {
+                    "status": "warning",
+                    "violations": [],
+                    "missing": list(dis_res.missing),
+                    "payload": dis_payload,
+                    "message": " ".join(dis_res.missing),
+                }
+        except ValidationError as exc:
+            dis_eval = {
+                "status": "failed",
+                "violations": [str(exc)],
+                "missing": [],
+                "payload": dis_payload,
+                "message": str(exc),
+            }
+
+    return {"depressurization": dep_eval, "discharge": dis_eval}
 
 
 def _clean_text_value(raw: str) -> str:
@@ -710,6 +919,14 @@ def reconcile_form_extracted_data(form_code: str, raw_data: dict[str, Any]) -> d
                     "travel_time_min": None,
                 }
 
+    if form_code == "dewatering":
+        raw_dep = data.get("depressurization")
+        if isinstance(raw_dep, dict):
+            raw_dep["release_valve_diameter_in"] = _finite(raw_dep.get("release_valve_diameter_in"))
+        raw_dis = data.get("discharge")
+        if isinstance(raw_dis, dict):
+            raw_dis["duration_min"] = _finite(raw_dis.get("duration_min"))
+
     return data
 
 
@@ -763,6 +980,8 @@ def merge_form_extracted_data(
         "filling",
         "pressurization",
         "pig_events",
+        "depressurization",
+        "discharge",
     ):
         raw_base_sub = merged.get(dict_key)
         base_sub: dict[str, Any] = raw_base_sub if isinstance(raw_base_sub, dict) else {}
@@ -1150,6 +1369,34 @@ def evaluate_all_form_findings(
                         "4-NGTL Md. 9 / 16-17",
                     )
                 )
+            ops_eval = evaluate_dewatering_operations(
+                str(entry.get("form_date") or ext.get("form_date") or ""),
+                ext,
+            )
+            dep_eval = ops_eval.get("depressurization")
+            if dep_eval is not None:
+                items.append(
+                    _mk_finding(
+                        "dw_depressurization",
+                        "Basınç Düşürme Kontrolü (Md. 16)",
+                        str(dep_eval["status"]),
+                        str(dep_eval["message"]),
+                        "4-NGTL Md. 16",
+                        expected='Test başarılı, vana ≤ 2", önlemler onaylı',
+                    )
+                )
+            dis_eval = ops_eval.get("discharge")
+            if dis_eval is not None:
+                items.append(
+                    _mk_finding(
+                        "dw_discharge",
+                        "Boşaltma & Raporlama Kontrolü (Md. 17)",
+                        str(dis_eval["status"]),
+                        str(dis_eval["message"]),
+                        "4-NGTL Md. 17 / BOT-FRM-CDB-001-024",
+                        expected="Pig, 17.1–17.5 önlem/onay ve 17.6 raporu tam",
+                    )
+                )
 
         elif form_code in {"pre_drying", "final_drying"}:
             dry = ext.get("drying") or {}
@@ -1319,9 +1566,11 @@ def compute_extended_summary(
 __all__ = [
     "DEFAULT_TARGET_DEW_POINT_C",
     "MAX_TABLE_ROWS",
+    "build_effective_dewatering_payloads",
     "build_form_structured_payload",
     "compute_extended_summary",
     "evaluate_all_form_findings",
+    "evaluate_dewatering_operations",
     "extract_common_header_extras",
     "reconcile_form_extracted_data",
 ]

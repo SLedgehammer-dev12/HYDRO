@@ -27,6 +27,7 @@ import {
 } from "../hooks/queries";
 import { useAppStore } from "../store/useAppStore";
 import { FormBodyEditor } from "../features/forms/FormBodyEditor";
+import { OperationsPanel } from "../features/operations/OperationsPanel";
 import { AirPage } from "./AirPage";
 import { PressurePage } from "./PressurePage";
 import { Badge } from "../components/ui/Badge";
@@ -445,7 +446,7 @@ export function SectionFormPage() {
         </div>
       </div>
 
-      {/* 020 & 022 İçin Detay Hesaplama Geçiş Bandı */}
+      {/* 020, 022 & 023 İçin Detay Hesaplama Geçiş Bandı */}
       {spec.hasDetailCalc ? (
         <div className="rounded-xl border border-[var(--primary-border)] bg-[color-mix(in_srgb,var(--primary-soft)_55%,var(--surface))] px-4 py-2.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -454,7 +455,9 @@ export function SectionFormPage() {
               <span className="font-semibold text-[var(--text)]">
                 {spec.hasDetailCalc === "air"
                   ? "Bu form Hava İçerik Testi hesap motoruyla doğrudan bağlantılıdır."
-                  : "Bu form Basınç Değişim Testi hesap motoruyla doğrudan bağlantılıdır."}
+                  : spec.hasDetailCalc === "pressure"
+                    ? "Bu form Basınç Değişim Testi hesap motoruyla doğrudan bağlantılıdır."
+                    : "Bu form Şartname 16–17 Basınç Düşürme ve Boşaltma kontrolleriyle doğrudan bağlantılıdır (BOT-FRM-İNB-001-023 / BOT-FRM-CDB-001-024)."}
               </span>
             </div>
             <Button
@@ -467,7 +470,9 @@ export function SectionFormPage() {
                 ? "Detay Hesaplamayı Gizle"
                 : spec.hasDetailCalc === "air"
                   ? "Detay Hesaplamaları Göster (Hava İçerik Testi)"
-                  : "Detay Hesaplamaları Göster (Basınç Değişim Testi)"}
+                  : spec.hasDetailCalc === "pressure"
+                    ? "Detay Hesaplamaları Göster (Basınç Değişim Testi)"
+                    : "Detay Hesaplamaları Göster (Basınç Düşürme & Boşaltma)"}
             </Button>
           </div>
         </div>
@@ -487,10 +492,16 @@ export function SectionFormPage() {
         </InlineNotice>
       ) : null}
 
-      {/* 020 / 022 Detay Hesaplama Paneli (Açıldığında tam mevcut sayfayı gömer) */}
+      {/* 020 / 022 / 023 Detay Hesaplama Paneli */}
       {spec.hasDetailCalc && showDetailCalc ? (
         <div className="rounded-2xl border border-[var(--primary-border)] bg-[var(--surface)] p-4">
-          {spec.hasDetailCalc === "air" ? <AirPage embedded /> : <PressurePage embedded />}
+          {spec.hasDetailCalc === "air" ? (
+            <AirPage embedded />
+          ) : spec.hasDetailCalc === "pressure" ? (
+            <PressurePage embedded />
+          ) : (
+            <OperationsPanel defaultTab="discharge" allowedTabs={["depressurize", "discharge"]} />
+          )}
         </div>
       ) : null}
 
@@ -624,6 +635,7 @@ export function SectionFormPage() {
               }}
               calculations={calculations}
               mergedHeader={mergedHeader}
+              formDate={draftDate}
             />
           </div>
 

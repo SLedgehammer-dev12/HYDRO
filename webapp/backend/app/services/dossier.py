@@ -48,14 +48,16 @@ from hidrostatik_test.services.report_ocr import PageText, parse_number
 from ..core.errors import AppError
 from ..core.timeutil import iso_z, json_safe, utcnow
 from ..desktop_labels import FIELD_CHECKS
-from ..models import HydroSession, OcrAnalysis, Project, SectionForm, new_uuid
+from ..models import HydroSession, OcrAnalysis, Project, SectionForm, TestResult, new_uuid
 from . import audit
 from . import projects as project_service
 from . import sessions as session_service
 from .form_details import (
+    build_effective_dewatering_payloads,
     build_form_structured_payload,
     compute_extended_summary,
     evaluate_all_form_findings,
+    evaluate_dewatering_operations,
     merge_form_extracted_data,
     reconcile_form_extracted_data,
 )
@@ -412,6 +414,8 @@ def classify_form_text(text: str, sheet_hint: str = "") -> FormSpec | None:
             "23": "dewatering",
         }
         return FORM_SPEC_BY_CODE[mapping[m_inb.group(1)]]
+    if "bot-frm-cdb-001-024" in folded_all:
+        return FORM_SPEC_BY_CODE["dewatering"]
 
     # Per-section engineering calculation sheets (e.g. Hizan Section 1..21 calculation pages)
     folded_lines = fold_tr(text)
@@ -2883,7 +2887,107 @@ def evaluate_operational_checks(
     # 10) depressurize_discharge (16-17): Basınç düşürme ve boşaltma (023)
     lbl, ref = meta_by_key["depressurize_discharge"]
     pig_ev = dewat_data.get("pig_events") or {}
-    if dewat_form and pig_ev.get("has_events"):
+    ops_eval = (
+        evaluate_dewatering_operations(
+            str((dewat_form or {}).get("form_date") or dewat_data.get("form_date") or ""),
+            dewat_data,
+        )
+        if dewat_form
+        else {"depressurization": None, "discharge": None}
+    )
+    dep_eval = ops_eval.get("depressurization")
+    dis_eval = ops_eval.get("discharge")
+
+    if dep_eval is not None or dis_eval is not None:
+        speed_ms: float | None = None
+        pig_speed_ok: bool | None = None
+        if pig_ev.get("has_events"):
+            t_min = pig_ev.get("travel_time_min")
+            length_m = merged_header.get("length_m")
+            if t_min and length_m and float(t_min) > 0 and float(length_m) > 0:
+                speed_ms = float(length_m) / (float(t_min) * 60.0)
+                limit = get_pig_speed_limit("Temizlik pigi | max 2.500 m/sn | Madde 9")
+                pig_speed_ok = speed_ms <= (limit.max_speed_m_per_s or 2.5) + 1e-9
+
+        dep_st = dep_eval["status"] if dep_eval else None
+        dis_st = dis_eval["status"] if dis_eval else None
+        fail_msgs = [
+            ev["message"] for ev in (dep_eval, dis_eval) if ev and ev["status"] == "failed"
+        ]
+        warn_msgs = [
+            ev["message"] for ev in (dep_eval, dis_eval) if ev and ev["status"] == "warning"
+        ]
+        speed_txt = f"Ortalama pig hızı {speed_ms:.2f} m/s." if speed_ms is not None else ""
+
+        if pig_speed_ok is False or dep_st == "failed" or dis_st == "failed":
+            parts = []
+            if pig_speed_ok is False and speed_ms is not None:
+                parts.append(f"Boşaltma pig hızı sınırı aşıyor ({speed_ms:.2f} m/s).")
+            parts.extend(fail_msgs or warn_msgs)
+            _set(
+                "depressurize_discharge",
+                lbl,
+                ref,
+                checked=False,
+                status="failed",
+                message=" ".join(p for p in parts if p),
+                sources=["dewatering"],
+            )
+        elif dep_st == "warning" or dis_st == "warning":
+            parts = list(warn_msgs)
+            if speed_txt:
+                parts.append(speed_txt)
+            _set(
+                "depressurize_discharge",
+                lbl,
+                ref,
+                checked=False,
+                status="warning",
+                message=" ".join(p for p in parts if p),
+                sources=["dewatering"],
+            )
+        elif pig_speed_ok is True:
+            done_tags = [
+                tag
+                for tag, ev in (("Md. 16", dep_eval), ("Md. 17", dis_eval))
+                if ev and ev["status"] == "passed"
+            ]
+            ops_txt = f" ({' & '.join(done_tags)} uygun)" if done_tags else ""
+            _set(
+                "depressurize_discharge",
+                lbl,
+                ref,
+                checked=True,
+                status="passed",
+                message=(
+                    f"Boşaltma Kabul Raporu (023) ({pig_ev.get('first_time')}–{pig_ev.get('last_time')}, "
+                    f"ortalama pig hızı {speed_ms:.2f} m/s){ops_txt}."
+                ),
+                sources=["dewatering"],
+            )
+        elif dep_st == "passed" and dis_st == "passed":
+            _set(
+                "depressurize_discharge",
+                lbl,
+                ref,
+                checked=True,
+                status="passed",
+                message="Boşaltma Kabul Raporu (023) Md. 16 basınç düşürme ve Md. 17 boşaltma kontrolleri uygun.",
+                sources=["dewatering"],
+            )
+        else:
+            completed = "Md. 16 basınç düşürme" if dep_st == "passed" else "Md. 17 boşaltma"
+            other = "Md. 17 boşaltma" if dep_st == "passed" else "Md. 16 basınç düşürme"
+            _set(
+                "depressurize_discharge",
+                lbl,
+                ref,
+                checked=False,
+                status="warning",
+                message=f"Boşaltma Kabul Raporu (023): {completed} uygun; {other} veya pig hızı doğrulaması bekleniyor.",
+                sources=["dewatering"],
+            )
+    elif dewat_form and pig_ev.get("has_events"):
         t_min = pig_ev.get("travel_time_min")
         length_m = merged_header.get("length_m")
         if t_min and length_m and float(t_min) > 0 and float(length_m) > 0:
@@ -3772,6 +3876,7 @@ def _cumulative_recompute_section(
     header_hint: dict[str, Any],
     overwrite_values: bool = False,
     prefer_header_hint: bool = False,
+    bump_revision: bool = True,
 ) -> dict[str, Any]:
     """Re-evaluate geometry, calcs, 11 checks & TestResults across ALL filled forms in `session`."""
     all_forms = (
@@ -4060,7 +4165,8 @@ def _cumulative_recompute_section(
         session.status = "completed"
     elif summary["filled_required"] > 0 or summary["supplementary_filled"] > 0 or any_passed:
         session.status = "active"
-    session.revision = int(session.revision or 1) + 1
+    if bump_revision:
+        session.revision = int(session.revision or 1) + 1
     session.updated_at = utcnow()
 
     return {
@@ -4231,7 +4337,126 @@ def _persist_formal_test_results(
         except Exception as exc:
             logger.warning("Formal pig TestResult skipped for %s: %s", session_obj.id, exc)
 
+    # 5) Dewatering Spec 16/17 results (depressurization & discharge)
+    dewat_row = db.execute(
+        select(SectionForm).where(
+            SectionForm.session_id == session_obj.id, SectionForm.form_code == "dewatering"
+        )
+    ).scalar_one_or_none()
+    if dewat_row is not None and dewat_row.status != "empty":
+        dep_payload, dis_payload = build_effective_dewatering_payloads(
+            dewat_row.form_date or "",
+            dewat_row.extracted_data or {},
+        )
+        for t_type, t_payload in (("depressurization", dep_payload), ("discharge", dis_payload)):
+            if t_payload is None:
+                continue
+            latest = db.execute(
+                select(TestResult)
+                .where(
+                    TestResult.session_id == session_obj.id,
+                    TestResult.test_type == t_type,
+                )
+                .order_by(TestResult.computed_at.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+            if latest is not None and (latest.inputs or {}).get("payload") == t_payload:
+                continue
+            try:
+                with db.begin_nested():
+                    session_service.create_result(
+                        db,
+                        session_obj,
+                        test_type=t_type,
+                        payload=t_payload,
+                        commit=False,
+                    )
+                saved_types.append(t_type)
+            except Exception as exc:
+                logger.warning(
+                    "Formal %s TestResult skipped for %s: %s", t_type, session_obj.id, exc
+                )
+
     return saved_types
+
+
+def sync_operation_result_to_dewatering_form(
+    db: OrmSession,
+    session: HydroSession,
+    *,
+    test_type: str,
+    payload: dict[str, Any],
+) -> None:
+    """Mirror a saved `depressurization` / `discharge` result back into the `dewatering` SectionForm."""
+    if test_type not in {"depressurization", "discharge"}:
+        return
+
+    ensure_section_form_slots(db, session, commit=False)
+    row = db.execute(
+        select(SectionForm).where(
+            SectionForm.session_id == session.id, SectionForm.form_code == "dewatering"
+        )
+    ).scalar_one_or_none()
+    now = utcnow()
+    spec = FORM_SPEC_BY_CODE["dewatering"]
+    if row is None:
+        row = SectionForm(
+            id=new_uuid(),
+            workspace_id_hash=session.workspace_id_hash,
+            project_id=session.project_id,
+            session_id=session.id,
+            form_code=spec.code,
+            botas_code=spec.botas_code,
+            form_title=spec.title,
+            required=spec.required,
+            status="filled",
+            revision=0,
+            filled_at=now,
+        )
+        db.add(row)
+        db.flush()
+
+    ext = copy.deepcopy(row.extracted_data or {})
+    ext[test_type] = copy.deepcopy(payload)
+    if test_type == "discharge":
+        rep_date = str(payload.get("report_date") or "").strip()
+        if rep_date:
+            ext["form_date"] = rep_date
+            if not str(row.form_date or "").strip():
+                row.form_date = rep_date
+        if not ext.get("pig_runs"):
+            pig_name = str(payload.get("pig_name") or "").strip()
+            rep_time = str(payload.get("report_time") or "").strip()
+            dur_val = _finite_float(payload.get("duration_min"))
+            if pig_name or rep_time or dur_val is not None:
+                ext["pig_runs"] = [
+                    {
+                        "pig_type": pig_name or "Boşaltma Pigi",
+                        "launch_time": rep_time,
+                        "receive_time": "",
+                        "duration_min": dur_val,
+                        "note": str(payload.get("discharge_location") or "").strip(),
+                    }
+                ]
+
+    reconciled = reconcile_form_extracted_data("dewatering", ext)
+    row.extracted_data = json_safe(reconciled)
+    flag_modified(row, "extracted_data")
+    if row.status == "empty":
+        row.status = "filled"
+    row.filled_at = row.filled_at or now
+    row.revision = int(row.revision or 0) + 1
+    row.updated_at = now
+    db.flush()
+
+    _cumulative_recompute_section(
+        db,
+        session,
+        header_hint={},
+        overwrite_values=False,
+        prefer_header_hint=False,
+        bump_revision=False,
+    )
 
 
 def recompute_session_from_inputs_and_forms(
@@ -5138,5 +5363,6 @@ __all__ = [
     "get_single_session_form_payload",
     "normalize_section_no",
     "scan_single_form_upload",
+    "sync_operation_result_to_dewatering_form",
     "update_session_form",
 ]
