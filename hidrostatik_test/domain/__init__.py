@@ -41,6 +41,13 @@ from .operations import (
     get_pig_speed_limit,
     get_pig_speed_limit_options,
 )
+from .post_test_operations import (
+    DepressurizationInputs,
+    DischargeInputs,
+    OperationCheckResult,
+    evaluate_depressurization,
+    evaluate_discharge,
+)
 from .pressure_profile import (
     END_PUMP_LOCATION,
     MAX_TEST_SECTION_LENGTH_M,
@@ -60,6 +67,16 @@ from .pressurization import (
     PressurizationInputs,
     PressurizationResult,
     evaluate_pressurization,
+)
+from .pressurization_monitor import (
+    HoldReading,
+    PressureHoldInputs,
+    PressureHoldResult,
+    PressurizationRampInputs,
+    PressurizationRampResult,
+    PressurizationReading,
+    evaluate_pressure_hold,
+    evaluate_pressurization_ramp,
 )
 from .water_properties import (
     WaterPropertyBackend,
@@ -100,7 +117,16 @@ __all__ = [
     "PressureWindow",
     "PressureVariationInputs",
     "PressureVariationResult",
+    "DepressurizationInputs",
+    "DischargeInputs",
+    "HoldReading",
+    "OperationCheckResult",
+    "PressureHoldInputs",
+    "PressureHoldResult",
     "PressurizationInputs",
+    "PressurizationRampInputs",
+    "PressurizationRampResult",
+    "PressurizationReading",
     "PressurizationResult",
     "LocationClassRule",
     "START_PUMP_LOCATION",
@@ -116,7 +142,11 @@ __all__ = [
     "calculate_water_thermal_expansion_beta",
     "compare_b_sources",
     "evaluate_pig_speed",
+    "evaluate_depressurization",
+    "evaluate_discharge",
+    "evaluate_pressure_hold",
     "evaluate_pressurization",
+    "evaluate_pressurization_ramp",
     "evaluate_section_pressure_profile",
     "evaluate_air_content_test",
     "evaluate_pressure_variation_test",

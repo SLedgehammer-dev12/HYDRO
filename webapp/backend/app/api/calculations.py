@@ -40,6 +40,26 @@ def pressurization(payload: schemas.PressurizationRequest) -> dict:
     return calculation_service.calculate_pressurization(payload)
 
 
+@router.post("/pressurization-ramp")
+def pressurization_ramp(payload: schemas.PressurizationRampRequest) -> dict:
+    return calculation_service.calculate_pressurization_ramp(payload)
+
+
+@router.post("/pressure-hold")
+def pressure_hold(payload: schemas.PressureHoldRequest) -> dict:
+    return calculation_service.calculate_pressure_hold(payload)
+
+
+@router.post("/depressurization")
+def depressurization(payload: schemas.DepressurizationRequest) -> dict:
+    return calculation_service.calculate_depressurization(payload)
+
+
+@router.post("/discharge")
+def discharge(payload: schemas.DischargeRequest) -> dict:
+    return calculation_service.calculate_discharge(payload)
+
+
 @router.post("/thermal-balance")
 def thermal_balance(payload: schemas.ThermalBalanceRequest) -> dict:
     return calculation_service.calculate_thermal_balance(payload.records)

@@ -137,6 +137,53 @@ class PressurizationRequest(StrictModel):
     expected_pressure_bar: float
 
 
+class PressurizationReadingIn(StrictModel):
+    elapsed_min: float
+    pressure_bar: float
+    cumulative_added_volume_m3: float
+
+
+class PressurizationRampRequest(StrictModel):
+    readings: list[PressurizationReadingIn] = Field(default_factory=list)
+    test_pressure_100_smys_bar: float
+    total_filled_volume_m3: float
+
+
+class PressureHoldReadingIn(StrictModel):
+    elapsed_min: float
+    pressure_bar: float
+    temperature_c: float
+
+
+class PressureHoldRequest(StrictModel):
+    readings: list[PressureHoldReadingIn] = Field(default_factory=list)
+    target_pressure_bar: float
+
+
+class DepressurizationRequest(StrictModel):
+    test_passed: bool | None = None
+    release_valve_diameter_in: float | None = None
+    pipe_equipment_checked: bool | None = None
+    environmental_impact_checked: bool | None = None
+
+
+class DischargeRequest(StrictModel):
+    destination: str | None = None
+    used_discharge_pig: bool | None = None
+    hydraulic_load_measures_taken: bool | None = None
+    approvals_obtained: bool | None = None
+    treatment_requested: bool = False
+    treatment_done: bool | None = None
+    sample_analysis_requested: bool = False
+    sample_analysis_done: bool | None = None
+    erosion_prevented: bool | None = None
+    report_date: str = ""
+    report_time: str = ""
+    pig_name: str = ""
+    discharge_location: str = ""
+    duration_min: float | None = None
+
+
 class ThermalBalanceRecordIn(StrictModel):
     timestamp: datetime | None = None
     pressure_bar: float
@@ -447,7 +494,13 @@ __all__ = [
     "PlanProfileCommitRequest",
     "PressureProfileRequest",
     "PressureVariationRequest",
+    "PressurizationRampRequest",
+    "PressurizationReadingIn",
     "PressurizationRequest",
+    "PressureHoldReadingIn",
+    "PressureHoldRequest",
+    "DepressurizationRequest",
+    "DischargeRequest",
     "ProjectCloneRequest",
     "ProjectCreate",
     "ProjectExportRequest",

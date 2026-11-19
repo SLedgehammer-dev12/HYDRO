@@ -16,6 +16,11 @@ from hidrostatik_test.domain import (
     PRESSURE_VARIATION_ACCEPTANCE_BAR,
     PRESSURIZATION_VOLUME_DEVIATION_LIMIT_PERCENT,
 )
+from hidrostatik_test.domain.pressurization_monitor import (
+    HOLD_DURATION_MIN,
+    HOLD_READING_INTERVAL_MIN,
+    MAX_RAMP_RATE_BAR_PER_MIN,
+)
 from hidrostatik_test.domain.time_series import (
     THERMAL_BALANCE_MIN_HOURS,
     THERMAL_BALANCE_THRESHOLD_C,
@@ -36,6 +41,17 @@ PROFILE_RULE = (
 PRESSURIZATION_RULE = (
     f"hacim sapmasi <= %{PRESSURIZATION_VOLUME_DEVIATION_LIMIT_PERCENT} ve |dP| <= tolerans"
 )
+RAMP_RULE = (
+    f"%80-%95 SMYS artis hizi <= {MAX_RAMP_RATE_BAR_PER_MIN:g} bar/dk; "
+    f"%95 SMYS sonrasi basilan su <= %{PRESSURIZATION_VOLUME_DEVIATION_LIMIT_PERCENT} toplam hacim"
+)
+HOLD_RULE = (
+    f"bekleme >= {HOLD_DURATION_MIN:.0f} dk; okuma araligi <= {HOLD_READING_INTERVAL_MIN:.0f} dk"
+)
+DEPRESSURIZATION_RULE = (
+    'basinc dusurme vanasi <= 2"; test basarili; boru/ekipman ve cevre onlemleri'
+)
+DISCHARGE_RULE = "bosaltma pigi; hidrolik yuk onlemi; onaylar; cevre onlemleri; 17.6 raporu"
 THERMAL_RULE = (
     f"sure >= {THERMAL_BALANCE_MIN_HOURS:.0f} h ve |dT_4h| <= {THERMAL_BALANCE_THRESHOLD_C} °C"
 )
@@ -166,6 +182,77 @@ def pressurization_decision(result: Any) -> dict[str, Any]:
     return _decision(status, "Basinclandirma Kontrolu", summary, PRESSURIZATION_RULE, margin)
 
 
+def ramp_decision(result: Any) -> dict[str, Any]:
+    if result.passed is False:
+        status = STATUS_FAIL
+    elif result.passed is None:
+        status = STATUS_PENDING
+    else:
+        status = STATUS_PASS
+    parts = [
+        f"Azami artis hizi = {result.max_ramp_rate_bar_per_min:.3f} bar/dk "
+        f"(limit {result.ramp_rate_limit_bar_per_min:g}).",
+        f"%95 SMYS sonrasi basilan su = {result.pumped_since_95_smys_m3:.4f} m³ "
+        f"(limit {result.excess_volume_limit_m3:.4f} m³).",
+    ]
+    if result.ramp_rate_violations:
+        parts.append(f"{len(result.ramp_rate_violations)} aralikta artis hizi asildi (14.1).")
+    if result.stop_required:
+        parts.append("BASINCLANDIRMAYI DURDURUN ve Idarenin talimatini bekleyin (14.2).")
+    elif result.volume_limit_exceeded:
+        parts.append("Basilan su siniri asildi (14.2).")
+    if result.monitoring_gaps:
+        parts.append(f"{len(result.monitoring_gaps)} adimda 0,2 bar izleme araligi asildi.")
+    if result.passed is None:
+        parts.append("%100 SMYS'ye henuz ulasilmadi.")
+    margin = result.excess_volume_limit_m3 - result.pumped_since_95_smys_m3
+    return _decision(status, "Basinclandirma Izleme", " ".join(parts), RAMP_RULE, margin)
+
+
+def hold_decision(result: Any) -> dict[str, Any]:
+    status = STATUS_PASS if result.passed else STATUS_FAIL
+    parts = [
+        f"Sure = {result.duration_min:.0f} dk (en az {result.required_duration_min:.0f}).",
+        f"En uzun okuma araligi = {result.max_reading_gap_min:.1f} dk "
+        f"(en fazla {result.required_interval_min:.0f}).",
+        f"Basinc dususu = {result.pressure_drop_bar:.3f} bar.",
+    ]
+    if result.repressurize_required:
+        parts.append("Basinc yeniden izlenen basincin %100'une cikarilmali (14.3).")
+    margin = result.duration_min - result.required_duration_min
+    return _decision(status, "2 Saatlik Bekleme", " ".join(parts), HOLD_RULE, margin)
+
+
+def _operation_decision(result: Any, title: str, rule: str, ok_text: str) -> dict[str, Any]:
+    if result.violations:
+        status = STATUS_FAIL
+    elif result.missing:
+        status = STATUS_PENDING
+    else:
+        status = STATUS_PASS
+    parts: list[str] = list(result.violations) + list(result.missing)
+    summary = " ".join(parts) if parts else ok_text
+    return _decision(status, title, summary, rule, None)
+
+
+def depressurization_decision(result: Any) -> dict[str, Any]:
+    return _operation_decision(
+        result,
+        "Basincin Dusurulmesi",
+        DEPRESSURIZATION_RULE,
+        "Basinc dusurme kosullari saglandi (Sartname 16).",
+    )
+
+
+def discharge_decision(result: Any) -> dict[str, Any]:
+    return _operation_decision(
+        result,
+        "Bosaltma",
+        DISCHARGE_RULE,
+        "Bosaltma kosullari ve raporlama saglandi (Sartname 17).",
+    )
+
+
 def thermal_decision(
     *,
     duration_hours: float,
@@ -218,7 +305,15 @@ __all__ = [
     "STATUS_STALE",
     "STATUS_UNKNOWN",
     "THERMAL_RULE",
+    "RAMP_RULE",
+    "HOLD_RULE",
+    "DEPRESSURIZATION_RULE",
+    "DISCHARGE_RULE",
     "air_decision",
+    "depressurization_decision",
+    "discharge_decision",
+    "hold_decision",
+    "ramp_decision",
     "finite_or_none",
     "pending_decision",
     "pig_decision",

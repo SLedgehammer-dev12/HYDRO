@@ -310,3 +310,132 @@ def test_geometry_semantic_errors(client):
         response = client.post("/api/calculations/geometry", json={"sections": [section]})
         assert response.status_code == 400
         assert response.json()["code"] == "domain_validation_error"
+
+
+def _ramp_payload(readings, p100=100.0, total=1000.0):
+    return {
+        "readings": [
+            {"elapsed_min": t, "pressure_bar": p, "cumulative_added_volume_m3": v}
+            for t, p, v in readings
+        ],
+        "test_pressure_100_smys_bar": p100,
+        "total_filled_volume_m3": total,
+    }
+
+
+def test_pressurization_ramp_stop_on_excess_volume(client):
+    body = client.post(
+        "/api/calculations/pressurization-ramp",
+        json=_ramp_payload([(0, 95.0, 10.0), (30, 97.0, 11.0), (60, 98.0, 12.5)]),
+    ).json()
+    assert body["stop_required"] is True
+    assert body["passed"] is False
+    assert body["decision"]["status"] == "BASARISIZ"
+    assert "DURDURUN" in body["decision"]["summary"]
+
+
+def test_pressurization_ramp_pass_and_pending(client):
+    done = client.post(
+        "/api/calculations/pressurization-ramp",
+        json=_ramp_payload([(0, 80.0, 0.0), (10, 90.0, 0.5), (20, 95.0, 0.8), (40, 100.0, 1.5)]),
+    ).json()
+    assert done["passed"] is True
+    assert done["decision"]["status"] == "BASARILI"
+
+    pending = client.post(
+        "/api/calculations/pressurization-ramp",
+        json=_ramp_payload([(0, 95.0, 0.0), (10, 96.0, 0.1)]),
+    ).json()
+    assert pending["passed"] is None
+    assert pending["decision"]["status"] == "BEKLIYOR"
+
+
+def test_pressurization_ramp_domain_validation_error(client):
+    response = client.post(
+        "/api/calculations/pressurization-ramp",
+        json=_ramp_payload([(0, 80.0, 0.0)]),
+    )
+    assert response.status_code == 400
+    assert response.json()["code"] == "domain_validation_error"
+
+
+def test_pressure_hold_endpoint(client):
+    ok = client.post(
+        "/api/calculations/pressure-hold",
+        json={
+            "readings": [
+                {"elapsed_min": t, "pressure_bar": 100.0, "temperature_c": 12.0}
+                for t in range(0, 121, 15)
+            ],
+            "target_pressure_bar": 100.0,
+        },
+    ).json()
+    assert ok["passed"] is True
+    assert ok["repressurize_required"] is False
+    assert ok["decision"]["status"] == "BASARILI"
+
+    short = client.post(
+        "/api/calculations/pressure-hold",
+        json={
+            "readings": [
+                {"elapsed_min": 0, "pressure_bar": 100.0, "temperature_c": 12.0},
+                {"elapsed_min": 60, "pressure_bar": 99.0, "temperature_c": 12.0},
+            ],
+            "target_pressure_bar": 100.0,
+        },
+    ).json()
+    assert short["passed"] is False
+    assert short["repressurize_required"] is True
+
+
+def test_depressurization_endpoint(client):
+    ok = client.post(
+        "/api/calculations/depressurization",
+        json={
+            "test_passed": True,
+            "release_valve_diameter_in": 2,
+            "pipe_equipment_checked": True,
+            "environmental_impact_checked": True,
+        },
+    ).json()
+    assert ok["decision"]["status"] == "BASARILI"
+
+    big_valve = client.post(
+        "/api/calculations/depressurization",
+        json={
+            "test_passed": True,
+            "release_valve_diameter_in": 4,
+            "pipe_equipment_checked": True,
+            "environmental_impact_checked": True,
+        },
+    ).json()
+    assert big_valve["decision"]["status"] == "BASARISIZ"
+    assert big_valve["violations"]
+
+    empty = client.post("/api/calculations/depressurization", json={}).json()
+    assert empty["decision"]["status"] == "BEKLIYOR"
+
+
+def test_discharge_endpoint(client):
+    base = {
+        "destination": "other_section",
+        "used_discharge_pig": True,
+        "hydraulic_load_measures_taken": True,
+        "report_date": "2026-11-19",
+        "report_time": "14:30",
+        "pig_name": "PIG-07",
+        "discharge_location": "KP 12+300",
+        "duration_min": 95,
+    }
+    ok = client.post("/api/calculations/discharge", json=base).json()
+    assert ok["decision"]["status"] == "BASARILI"
+
+    river = client.post(
+        "/api/calculations/discharge",
+        json={**base, "destination": "watercourse", "approvals_obtained": False},
+    ).json()
+    assert river["decision"]["status"] == "BASARISIZ"
+
+    bad = client.post("/api/calculations/discharge", json={**base, "destination": "ocean"})
+    assert bad.status_code == 400
+    assert bad.json()["code"] == "domain_validation_error"

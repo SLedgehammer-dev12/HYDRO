@@ -12,8 +12,8 @@
 
 | Alan | Durum | Kanıt |
 | --- | --- | --- |
-| Masaüstü uygulaması | Çalışıyor, kararlı | 686 unittest PASS (`skipped=1`) |
-| Web backend (FastAPI) | Çalışıyor | 167 pytest PASS, 81 OpenAPI path / 94 operation, 46 dosyada `mypy` temiz |
+| Masaüstü uygulaması | Çalışıyor, kararlı | 709 unittest PASS (`skipped=1`) |
+| Web backend (FastAPI) | Çalışıyor | 173 pytest PASS, 81 OpenAPI path / 94 operation, 46 dosyada `mypy` temiz |
 | Web frontend (React 19) | Çalışıyor | `npm run typecheck` + `npm run build` PASS, `verify-tabs.mjs` 11/11 PASS, canlı tarayıcı smoke (0 konsol hatası) |
 | Program İkon & Marka Sistemi | Hazır | Boru kesiti + su dalgası + manometre ikonu (`tools/generate_icons.py`, `assets/icons/*`, `webapp/frontend/public/*`, `<HydroLogo />`, PyInstaller/Inno Setup/Tkinter) |
 | Web Güncelleme Yöneticisi | Çalışıyor | `/api/update/*`, SHA-256 + fail-closed Ed25519 `.sig` doğrulama, `UpdateManagerModal`, macOS `.dmg` / Win `.exe`/`.zip` kurulum |
@@ -130,9 +130,9 @@ Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen iş
 
 ### 4.2 Domain / masaüstü (P1–P2, `tasks/todo.md`)
 
-- [ ] 14.2 basınç–hacim ilişkisi ve `%0.2` ilave su alarm mantığını modele ekle.
+- [x] 14.1–14.3 basınç–hacim izleme, `%0.2` ilave su durdurma mantığı ve 2 saatlik bekleme domain + API (`pressurization_monitor.py`); [ ] UI/rapor bağlantısı.
 - [ ] 12 ve 15 için zaman serili termal dengeleme / 24 saatlik test kayıt veri modeli.
-- [ ] 16–17 basınç düşürme ve boşaltma iş akışlarını rapor bazlı tasarla.
+- [x] 16–17 basınç düşürme ve boşaltma kontrol listesi domain + API (`post_test_operations.py`); [ ] UI/rapor (BOT-FRM-CDB-001-024) bağlantısı.
 - [ ] 21. bölümdeki saha formlarına uygun rapor çıktısı.
 - [ ] Segmentli geometri indirgemesi için kurum içi metod notu.
 - [ ] +2 °C dolum kısıtı için saha uyarı mantığı.
@@ -174,10 +174,10 @@ python3 -m mypy hidrostatik_test/domain/                       # Success: no iss
 python3 -m mypy --ignore-missing-imports webapp/backend/app    # Success: no issues found (46 files)
 
 # Web backend
-python3 -m pytest webapp/backend/tests -q                      # 167 passed
+python3 -m pytest webapp/backend/tests -q                      # 173 passed
 
 # Masaüstü
-python3 -m unittest discover -s tests -p "test_*.py"           # 686 tests OK (skipped=1)
+python3 -m unittest discover -s tests -p "test_*.py"           # 709 tests OK (skipped=1)
 
 # Masaüstü paketli Web self-test
 python3 webapp/desktop_launcher.py --self-test                 # SELF_TEST_OK

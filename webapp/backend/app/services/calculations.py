@@ -220,6 +220,111 @@ def calculate_pressurization(request: Any) -> dict[str, Any]:
     }
 
 
+def calculate_pressurization_ramp(request: Any) -> dict[str, Any]:
+    from hidrostatik_test.domain import (
+        PressurizationRampInputs,
+        PressurizationReading,
+        evaluate_pressurization_ramp,
+    )
+
+    try:
+        inputs = PressurizationRampInputs(
+            readings=tuple(
+                PressurizationReading(
+                    elapsed_min=item.elapsed_min,
+                    pressure_bar=item.pressure_bar,
+                    cumulative_added_volume_m3=item.cumulative_added_volume_m3,
+                )
+                for item in request.readings
+            ),
+            test_pressure_100_smys_bar=request.test_pressure_100_smys_bar,
+            total_filled_volume_m3=request.total_filled_volume_m3,
+        )
+        result = evaluate_pressurization_ramp(inputs)
+    except Exception as exc:
+        _reraise(exc)
+    payload = dataclass_dict(result)
+    payload["decision"] = decisions.ramp_decision(result)
+    return payload
+
+
+def calculate_pressure_hold(request: Any) -> dict[str, Any]:
+    from hidrostatik_test.domain import HoldReading, PressureHoldInputs, evaluate_pressure_hold
+
+    try:
+        inputs = PressureHoldInputs(
+            readings=tuple(
+                HoldReading(
+                    elapsed_min=item.elapsed_min,
+                    pressure_bar=item.pressure_bar,
+                    temperature_c=item.temperature_c,
+                )
+                for item in request.readings
+            ),
+            target_pressure_bar=request.target_pressure_bar,
+        )
+        result = evaluate_pressure_hold(inputs)
+    except Exception as exc:
+        _reraise(exc)
+    payload = dataclass_dict(result)
+    payload["decision"] = decisions.hold_decision(result)
+    return payload
+
+
+def calculate_depressurization(request: Any) -> dict[str, Any]:
+    from hidrostatik_test.domain import DepressurizationInputs, evaluate_depressurization
+
+    try:
+        result = evaluate_depressurization(
+            DepressurizationInputs(
+                test_passed=request.test_passed,
+                release_valve_diameter_in=request.release_valve_diameter_in,
+                pipe_equipment_checked=request.pipe_equipment_checked,
+                environmental_impact_checked=request.environmental_impact_checked,
+            )
+        )
+    except Exception as exc:
+        _reraise(exc)
+    return {
+        "violations": list(result.violations),
+        "missing": list(result.missing),
+        "passed": result.passed,
+        "decision": decisions.depressurization_decision(result),
+    }
+
+
+def calculate_discharge(request: Any) -> dict[str, Any]:
+    from hidrostatik_test.domain import DischargeInputs, evaluate_discharge
+
+    try:
+        result = evaluate_discharge(
+            DischargeInputs(
+                destination=request.destination,
+                used_discharge_pig=request.used_discharge_pig,
+                hydraulic_load_measures_taken=request.hydraulic_load_measures_taken,
+                approvals_obtained=request.approvals_obtained,
+                treatment_requested=request.treatment_requested,
+                treatment_done=request.treatment_done,
+                sample_analysis_requested=request.sample_analysis_requested,
+                sample_analysis_done=request.sample_analysis_done,
+                erosion_prevented=request.erosion_prevented,
+                report_date=request.report_date,
+                report_time=request.report_time,
+                pig_name=request.pig_name,
+                discharge_location=request.discharge_location,
+                duration_min=request.duration_min,
+            )
+        )
+    except Exception as exc:
+        _reraise(exc)
+    return {
+        "violations": list(result.violations),
+        "missing": list(result.missing),
+        "passed": result.passed,
+        "decision": decisions.discharge_decision(result),
+    }
+
+
 def _thermal_reason(duration_hours: float, temp_diff: float | None) -> str:
     from hidrostatik_test.domain.time_series import THERMAL_BALANCE_MIN_HOURS
 
@@ -361,7 +466,11 @@ __all__ = [
     "calculate_pig_speed",
     "calculate_pressure_profile",
     "calculate_pressure_variation",
+    "calculate_depressurization",
+    "calculate_discharge",
+    "calculate_pressure_hold",
     "calculate_pressurization",
+    "calculate_pressurization_ramp",
     "calculate_thermal_balance",
     "calculate_water_density",
     "evaluate_test",
