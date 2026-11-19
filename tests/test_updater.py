@@ -1659,5 +1659,169 @@ class UpdateUiTests(unittest.TestCase):
         mocked_apply.assert_called_once()
 
 
+class SafetyGuardTests(UnsignedUpdateAllowedMixin, unittest.TestCase):
+    def test_single_file_update_script_never_removes_parent_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            downloads = base / "Downloads"
+            downloads.mkdir()
+            sibling_doc = downloads / "important_user_file.pdf"
+            sibling_doc.write_text("keep", encoding="utf-8")
+            exe_path = downloads / "HidrostatikTest.exe"
+            exe_path.write_bytes(_fake_pe_bytes())
+
+            work = base / "work"
+            work.mkdir()
+            stage = work / "stage"
+            (stage / BINARY_NAME).mkdir(parents=True)
+            (stage / BINARY_NAME / "HidrostatikTest.exe").write_bytes(_fake_pe_bytes())
+
+            script = _write_update_script(
+                working_root=work,
+                stage_dir=stage,
+                install_dir=downloads,
+                executable_path=exe_path,
+                current_pid=9999,
+                version="9.9.9",
+                single_file=True,
+            )
+            script_text = script.read_text(encoding="utf-8-sig")
+
+        self.assertIn("$BackupExe", script_text)
+        self.assertIn("Move-Item -LiteralPath $NewExe -Destination $ExePath -Force", script_text)
+        self.assertNotIn("Remove-Item -LiteralPath $TargetDir -Recurse -Force", script_text)
+
+    def test_install_update_blocks_zip_directory_swap_in_shared_folder(self) -> None:
+        info = UpdateInfo(
+            current_version=APP_VERSION,
+            latest_version=NEXT_TEST_VERSION,
+            tag_name=f"hidrostatik-test-v{NEXT_TEST_VERSION}",
+            html_url="https://example.com/update",
+            body="notes",
+            published_at="2026-03-30T12:00:00Z",
+            asset=ReleaseAsset(
+                name=f"HidrostatikTest-v{NEXT_TEST_VERSION}-windows-x64.zip",
+                download_url="https://example.com/update.zip",
+                size=1024,
+            ),
+            update_available=True,
+            source_repository="SLedgehammer-dev12/HYDRO",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            downloads = base / "Downloads"
+            downloads.mkdir()
+            (downloads / "user_report.pdf").write_text("do not delete", encoding="utf-8")
+            exe_path = downloads / "HidrostatikTest.exe"
+            exe_path.write_bytes(_fake_pe_bytes())
+            runtime = RuntimeContext(
+                frozen=True,
+                can_self_update=True,
+                executable_path=exe_path,
+                install_dir=downloads,
+            )
+
+            def write_zip(
+                asset: ReleaseAsset, target_path: Path, timeout: int, **kwargs: object
+            ) -> None:
+                del asset, timeout, kwargs
+                _make_zip(
+                    target_path,
+                    {f"{BINARY_NAME}/{BINARY_NAME}.exe": b"stub"},
+                )
+
+            with (
+                patch(
+                    "hidrostatik_test.services.updater.get_runtime_context", return_value=runtime
+                ),
+                patch("hidrostatik_test.services.updater._download_asset", side_effect=write_zip),
+            ):
+                with self.assertRaisesRegex(UpdateError, "paylasimli klasor"):
+                    install_update(info, download_root=base / "dl")
+
+    def test_install_update_reuses_predownloaded_asset_and_verifies_integrity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            app_dir = base / "AppDir"
+            app_dir.mkdir()
+            exe_path = app_dir / "HidrostatikTest.exe"
+            exe_path.write_bytes(_fake_pe_bytes())
+
+            pre_dir = base / "predownloaded"
+            pre_dir.mkdir()
+            pre_zip = pre_dir / f"HidrostatikTest-v{NEXT_TEST_VERSION}-windows-x64.zip"
+            _make_zip(pre_zip, {f"{BINARY_NAME}/{BINARY_NAME}.exe": _fake_pe_bytes()})
+            valid_sha = hashlib.sha256(pre_zip.read_bytes()).hexdigest()
+
+            info = UpdateInfo(
+                current_version=APP_VERSION,
+                latest_version=NEXT_TEST_VERSION,
+                tag_name=f"hidrostatik-test-v{NEXT_TEST_VERSION}",
+                html_url="https://example.com/update",
+                body="notes",
+                published_at="2026-03-30T12:00:00Z",
+                asset=ReleaseAsset(
+                    name=pre_zip.name,
+                    download_url="https://example.com/update.zip",
+                    size=pre_zip.stat().st_size,
+                ),
+                update_available=True,
+                source_repository="SLedgehammer-dev12/HYDRO",
+            )
+            runtime = RuntimeContext(
+                frozen=True,
+                can_self_update=True,
+                executable_path=exe_path,
+                install_dir=app_dir,
+            )
+
+            with (
+                patch(
+                    "hidrostatik_test.services.updater.get_runtime_context", return_value=runtime
+                ),
+                patch("hidrostatik_test.services.updater._download_asset") as download_mock,
+                patch(
+                    "hidrostatik_test.services.updater._download_checksum",
+                    return_value=valid_sha,
+                ) as checksum_mock,
+                patch(
+                    "hidrostatik_test.services.updater.verify_asset_signature",
+                    return_value=True,
+                ) as sig_mock,
+                patch("hidrostatik_test.services.updater.subprocess.Popen") as popen_mock,
+            ):
+                mode = install_update(
+                    info,
+                    download_root=base / "dl",
+                    predownloaded_asset_path=pre_zip,
+                )
+
+            self.assertEqual(mode, "self_update")
+            download_mock.assert_not_called()
+            checksum_mock.assert_called_once()
+            sig_mock.assert_called_once()
+            popen_mock.assert_called_once()
+
+            # Bozuk on-indirilmis dosya SHA-256 dogrulamasindan gecemez
+            pre_zip.write_bytes(b"corrupted zip bytes")
+            with (
+                patch(
+                    "hidrostatik_test.services.updater.get_runtime_context", return_value=runtime
+                ),
+                patch("hidrostatik_test.services.updater._download_asset") as download_mock,
+                patch(
+                    "hidrostatik_test.services.updater._download_checksum",
+                    return_value=valid_sha,
+                ),
+            ):
+                with self.assertRaises(UpdateError):
+                    install_update(
+                        info,
+                        download_root=base / "dl2",
+                        predownloaded_asset_path=pre_zip,
+                    )
+            download_mock.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

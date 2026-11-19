@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import types
 import unittest
 from pathlib import Path
@@ -1472,6 +1473,38 @@ class SpreadsheetExtractionTests(unittest.TestCase):
                 self.assertFalse(ocr._pypdfium2_usable())
         finally:
             ocr.clear_ocr_probe_cache()
+
+    def test_result_normalization_turkish_fail_negations_and_red(self) -> None:
+        self.assertEqual(ocr.normalize_result("KABUL EDİLMEMİŞTİR"), "FAIL")
+        self.assertEqual(ocr.normalize_result("Kabul edilmemiş"), "FAIL")
+        self.assertEqual(ocr.normalize_result("Uygun bulunmamıştır"), "FAIL")
+        self.assertEqual(ocr.normalize_result("RED"), "FAIL")
+        self.assertEqual(ocr.normalize_result("KABUL EDİLMİŞTİR"), "PASS")
+        self.assertIsNone(ocr.normalize_result("Redüktör kontrolü yapıldı"))
+
+    def test_analyze_report_respects_cancel_event_and_timeout_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sample = Path(tmp_dir) / "sample.png"
+            sample.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+            cancelled = threading.Event()
+            cancelled.set()
+            with self.assertRaises(ocr.ReportOcrError) as cancel_ctx:
+                ocr.analyze_report(sample, cancel_event=cancelled)
+            self.assertEqual(cancel_ctx.exception.code, ocr.ERROR_CANCELLED)
+
+            with self.assertRaises(ocr.ReportOcrError) as timeout_ctx:
+                ocr.analyze_report(sample, deadline_monotonic=0.0)
+            self.assertEqual(timeout_ctx.exception.code, ocr.ERROR_TIMEOUT)
+
+    def test_language_parameter_overrides_without_env_mutation(self) -> None:
+        with mock.patch.dict(os.environ, {"HYDRO_OCR_LANG": "tur"}, clear=False):
+            lang, warning = ocr._choose_tesseract_language(language="eng")
+            self.assertEqual(lang, "eng")
+            self.assertEqual(warning, "")
+            self.assertEqual(os.environ.get("HYDRO_OCR_LANG"), "tur")
+            self.assertEqual(ocr._resolve_vision_languages("eng"), ["en-US"])
+            self.assertEqual(ocr._resolve_vision_languages("tur+eng"), ["tr-TR", "en-US"])
 
 
 if __name__ == "__main__":

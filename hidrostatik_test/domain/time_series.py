@@ -3,13 +3,20 @@ from __future__ import annotations
 import csv
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Final
 
 THERMAL_BALANCE_THRESHOLD_C: Final[float] = 0.5
 THERMAL_BALANCE_MIN_HOURS: Final[float] = 24.0
 THERMAL_BALANCE_WINDOW_HOURS: Final[float] = 4.0
+
+
+def _comparable_ts(dt: datetime) -> datetime:
+    """Normalize aware UTC/offset and naive datetimes to comparable naive UTC."""
+    if dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
 
 
 @dataclass(frozen=True)
@@ -101,16 +108,17 @@ class TimeSeriesStore:
         return record
 
     def get_records(self) -> list[TimeSeriesRecord]:
-        return list(self.records)
+        return sorted(self.records, key=lambda r: _comparable_ts(r.timestamp))
 
     def get_duration_hours(self) -> float:
         if len(self.records) < 2:
             return 0.0
 
-        first = self.records[0].timestamp
-        last = self.records[-1].timestamp
+        ordered = self.get_records()
+        first = _comparable_ts(ordered[0].timestamp)
+        last = _comparable_ts(ordered[-1].timestamp)
         delta = last - first
-        return delta.total_seconds() / 3600.0
+        return max(0.0, delta.total_seconds() / 3600.0)
 
     def get_average_temperature(
         self,
@@ -120,12 +128,15 @@ class TimeSeriesStore:
         if not self.records:
             return None
 
+        ordered = self.get_records()
         if last_n_hours is not None:
-            end = reference_time if reference_time is not None else self.records[-1].timestamp
+            end = _comparable_ts(
+                reference_time if reference_time is not None else ordered[-1].timestamp
+            )
             cutoff = end - timedelta(hours=last_n_hours)
-            filtered = [r for r in self.records if cutoff <= r.timestamp <= end]
+            filtered = [r for r in ordered if cutoff <= _comparable_ts(r.timestamp) <= end]
         else:
-            filtered = self.records
+            filtered = ordered
 
         if not filtered:
             return None
@@ -136,18 +147,21 @@ class TimeSeriesStore:
         if len(self.records) < 2:
             return False, float("inf")
 
+        ordered = self.get_records()
         duration_hours = self.get_duration_hours()
         if duration_hours < THERMAL_BALANCE_MIN_HOURS:
             return False, float("inf")
 
         # Sartname 12: 4 saatlik araliklarla alinan son iki okuma blogunun ortalamalari.
         # Referans, canli saat degil arsivdeki son kayittir.
-        end = self.records[-1].timestamp
+        end = _comparable_ts(ordered[-1].timestamp)
         recent_start = end - timedelta(hours=THERMAL_BALANCE_WINDOW_HOURS)
         previous_start = end - timedelta(hours=2 * THERMAL_BALANCE_WINDOW_HOURS)
 
-        recent_records = [r for r in self.records if recent_start <= r.timestamp <= end]
-        previous_records = [r for r in self.records if previous_start <= r.timestamp < recent_start]
+        recent_records = [r for r in ordered if recent_start <= _comparable_ts(r.timestamp) <= end]
+        previous_records = [
+            r for r in ordered if previous_start <= _comparable_ts(r.timestamp) < recent_start
+        ]
 
         if not recent_records or not previous_records:
             return False, float("inf")

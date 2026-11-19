@@ -11,6 +11,7 @@ yetkili personel onayi gerektigi vurgulanir.
 
 from __future__ import annotations
 
+import inspect
 import json
 import math
 import queue
@@ -107,6 +108,7 @@ class ReportOcrDialog:
         self._destroyed = False
         self._analysis_running = False
         self._generation = 0
+        self._cancel_event: threading.Event | None = None
         self._result: OcrAnalysisResult | None = None
 
         self._dialog = tk.Toplevel(parent)
@@ -154,6 +156,11 @@ class ReportOcrDialog:
         )
         self.analysis_button.grid(row=0, column=3, sticky="e", padx=(8, 0))
 
+        self.cancel_button = ttk.Button(
+            file_frame, text="Iptal Et", command=self._cancel_analysis, state="disabled"
+        )
+        self.cancel_button.grid(row=0, column=4, sticky="e", padx=(8, 0))
+
         self.compare_var = tk.BooleanVar(value=True)
         self.compare_check = ttk.Checkbutton(
             file_frame,
@@ -167,7 +174,7 @@ class ReportOcrDialog:
             file_frame,
             text=f"Desteklenen dosyalar: {supported}",
             foreground="#35506B",
-        ).grid(row=2, column=0, columnspan=4, sticky="w", pady=(4, 0))
+        ).grid(row=2, column=0, columnspan=5, sticky="w", pady=(4, 0))
 
         self.compare_hint_var = tk.StringVar()
         self._refresh_compare_hint()
@@ -428,31 +435,63 @@ class ReportOcrDialog:
         if self.compare_var.get() and self._calculated_payload:
             payload = dict(self._calculated_payload)
 
+        if self._cancel_event is not None:
+            self._cancel_event.set()
+        cancel_event = threading.Event()
+        self._cancel_event = cancel_event
         self._generation += 1
         token = self._generation
         self._analysis_running = True
         self.analysis_button.configure(state="disabled")
         self.browse_button.configure(state="disabled")
         self.compare_check.configure(state="disabled")
+        self.cancel_button.configure(state="normal")
         self.analysis_status_var.set("Analiz ediliyor... Rapor okunuyor, lutfen bekleyin.")
 
         worker = threading.Thread(
             target=self._worker,
-            args=(token, path, payload),
+            args=(token, path, payload, cancel_event),
             name="ocr-report-analysis",
             daemon=True,
         )
         worker.start()
+
+    def _cancel_analysis(self) -> None:
+        if self._cancel_event is not None:
+            self._cancel_event.set()
+        if not self._analysis_running:
+            return
+        self._generation += 1
+        self._analysis_running = False
+        self.analysis_button.configure(state="normal")
+        self.browse_button.configure(state="normal")
+        self.compare_check.configure(state="normal")
+        self.cancel_button.configure(state="disabled")
+        self.analysis_status_var.set("Analiz kullanici tarafindan iptal edildi.")
 
     def _worker(
         self,
         token: int,
         path: str,
         payload: dict[str, Any] | None,
+        cancel_event: threading.Event | None = None,
     ) -> None:
         """Run the analyzer off the Tk thread; only the queue is touched."""
+        call_kwargs: dict[str, Any] = {}
+        if cancel_event is not None:
+            try:
+                sig = inspect.signature(self._analyzer)
+            except (TypeError, ValueError):
+                sig = None
+            if sig is not None and (
+                "cancel_event" in sig.parameters
+                or any(
+                    param.kind == inspect.Parameter.VAR_KEYWORD for param in sig.parameters.values()
+                )
+            ):
+                call_kwargs["cancel_event"] = cancel_event
         try:
-            result = self._analyzer(path, payload)
+            result = self._analyzer(path, payload, **call_kwargs)
         except Exception as exc:  # noqa: BLE001 - hata ana thread'de gosterilir
             self._events.put(("error", token, exc))
         else:
@@ -509,6 +548,8 @@ class ReportOcrDialog:
         if self._destroyed:
             return
         self._destroyed = True
+        if self._cancel_event is not None:
+            self._cancel_event.set()
         self._generation += 1
         if self._poll_job is not None:
             try:
@@ -570,6 +611,7 @@ class ReportOcrDialog:
         self.analysis_button.configure(state="normal")
         self.browse_button.configure(state="normal")
         self.compare_check.configure(state="normal")
+        self.cancel_button.configure(state="disabled")
         self.save_json_button.configure(state="normal")
         self.analysis_status_var.set("Analiz tamamlandi. Sonuclar insan onayina sunulmalidir.")
         self._render_summary(result)
@@ -584,6 +626,7 @@ class ReportOcrDialog:
         self.analysis_button.configure(state="normal")
         self.browse_button.configure(state="normal")
         self.compare_check.configure(state="normal")
+        self.cancel_button.configure(state="disabled")
         self.save_json_button.configure(state="normal" if self._result is not None else "disabled")
         self.analysis_status_var.set("Analiz basarisiz. Hata mesajini kontrol edin.")
 

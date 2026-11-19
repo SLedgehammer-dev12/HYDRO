@@ -334,7 +334,7 @@ class DatabaseManager:
                 (session_id, limit),
             )
             rows = cursor.fetchall()
-        return [dict(row) for row in rows]
+        return [dict(row) for row in reversed(rows)]
 
     # --- Statistics ---
 

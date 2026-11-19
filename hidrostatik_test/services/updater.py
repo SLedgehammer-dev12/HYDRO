@@ -745,6 +745,24 @@ def verify_asset_signature(
 # --- Download / install -----------------------------------------------------
 
 
+def _verify_downloaded_asset(
+    asset_path: Path,
+    asset: ReleaseAsset,
+    timeout_seconds: int,
+) -> None:
+    expected_sha = _download_checksum(asset.download_url, timeout_seconds)
+    _verify_sha256(asset_path, expected_sha)
+    signature_verified = verify_asset_signature(asset_path, asset.download_url, timeout_seconds)
+    if signature_verified:
+        logger.info("Guncelleme paketi imzali: %s", asset.name)
+    else:
+        logger.warning(
+            "Guncelleme paketi imza dogrulamasi olmadan kabul edildi "
+            "(gelistirici kacis bayragi etkin): %s",
+            asset.name,
+        )
+
+
 def _download_asset(
     asset: ReleaseAsset,
     target_path: Path,
@@ -757,18 +775,7 @@ def _download_asset(
         target_path,
         on_progress=progress_callback,
     )
-
-    expected_sha = _download_checksum(asset.download_url, timeout_seconds)
-    _verify_sha256(target_path, expected_sha)
-    signature_verified = verify_asset_signature(target_path, asset.download_url, timeout_seconds)
-    if signature_verified:
-        logger.info("Guncelleme paketi imzali: %s", asset.name)
-    else:
-        logger.warning(
-            "Guncelleme paketi imza dogrulamasi olmadan kabul edildi "
-            "(gelistirici kacis bayragi etkin): %s",
-            asset.name,
-        )
+    _verify_downloaded_asset(target_path, asset, timeout_seconds)
 
 
 def _append_update_log(log_path: Path | None, message: str) -> None:
@@ -931,6 +938,30 @@ def _safe_path_component(value: str) -> str:
     return cleaned or "previous"
 
 
+_SHARED_USER_DIR_NAMES = frozenset(
+    {"downloads", "desktop", "documents", "indirilenler", "masaustu", "masaüstü", "temp", "tmp"}
+)
+
+
+def _is_safe_directory_swap_target(install_dir: Path, executable_path: Path) -> bool:
+    """Return True when replacing ``install_dir`` as a whole cannot delete user files."""
+    resolved_dir = install_dir.resolve()
+    if resolved_dir.parent == resolved_dir:
+        return False
+    if (resolved_dir / "_internal").is_dir() or (resolved_dir / "unins000.exe").is_file():
+        return True
+    norm_name = resolved_dir.name.casefold().replace("_", "").replace("-", "").replace(" ", "")
+    if norm_name.startswith("hidrostatik"):
+        return True
+    if resolved_dir.name.casefold() in _SHARED_USER_DIR_NAMES:
+        return False
+    try:
+        entries = [entry.resolve() for entry in resolved_dir.iterdir()]
+    except OSError:
+        return False
+    return entries == [executable_path.resolve()]
+
+
 def _write_update_script(
     working_root: Path,
     stage_dir: Path,
@@ -941,18 +972,82 @@ def _write_update_script(
     backup_dir: Path | None = None,
     log_path: Path | None = None,
     new_dir: Path | None = None,
+    single_file: bool = False,
 ) -> Path:
     """Uygulama kapandiktan sonra calisacak yedekli/takasli kurulum betigi.
 
-    Betik once canli dizinin ``backup-<version>`` kopyasini alir, yeni icerigi
-    yan dizine cikarir, takas eder ve herhangi bir hata durumunda yedegi geri
-    yukler. Tum adimlar ``apply_update.log`` dosyasina yazilir.
+    Tek-dosya (``single_file=True``) modunda yalnizca ``$ExePath`` degistirilir;
+    boylece kullanicinin ``Downloads``/``Desktop`` klasorundeki diger dosyalara
+    dokunulmaz. Klasor (onedir) modunda ise canli uygulama dizini yedeklenerek
+    takas edilir. Tum adimlar ``apply_update.log`` dosyasina yazilir.
     """
     script_path = working_root / "apply_update.ps1"
     safe_version = _safe_path_component(version or "previous")
     backup_path = backup_dir or install_dir.with_name(f"{install_dir.name}-backup-{safe_version}")
     new_path = new_dir or install_dir.with_name(f"{install_dir.name}-new-{current_pid}")
     log_path = log_path or (working_root / UPDATE_LOG_NAME)
+    if single_file:
+        backup_exe = executable_path.with_name(f"{executable_path.name}.backup-{safe_version}")
+        new_exe = executable_path.with_name(f"{executable_path.name}.new-{current_pid}")
+        script = "\n".join(
+            [
+                "$ErrorActionPreference = 'Stop'",
+                f"$AppPid = {current_pid}",
+                f"$StageDir = '{_powershell_literal(str(stage_dir))}'",
+                f"$ExePath = '{_powershell_literal(str(executable_path))}'",
+                f"$BackupExe = '{_powershell_literal(str(backup_exe))}'",
+                f"$NewExe = '{_powershell_literal(str(new_exe))}'",
+                f"$LogPath = '{_powershell_literal(str(log_path))}'",
+                f"$SourceDir = Join-Path $StageDir '{BINARY_NAME}'",
+                f"$SourceExe = Join-Path $SourceDir '{WINDOWS_SINGLE_EXE_NAME}'",
+                "function Write-UpdateLog([string]$Message) {",
+                "    $line = ('{0} {1}' -f (Get-Date).ToString('s'), $Message)",
+                "    Add-Content -LiteralPath $LogPath -Value $line -Encoding UTF8",
+                "}",
+                f"Write-UpdateLog 'Tek-dosya guncelleme basladi (surum: {_powershell_literal(safe_version)}).'",
+                "$deadline = (Get-Date).AddSeconds(120)",
+                "while ((Get-Process -Id $AppPid -ErrorAction SilentlyContinue) -and ((Get-Date) -lt $deadline)) {",
+                "    Start-Sleep -Seconds 1",
+                "}",
+                "if (-not (Test-Path -LiteralPath $SourceExe)) {",
+                "    Write-UpdateLog 'HATA: Guncelleme calistirilabilir dosyasi bulunamadi.'",
+                "    throw 'Guncelleme calistirilabilir dosyasi bulunamadi.'",
+                "}",
+                "$swapped = $false",
+                "try {",
+                "    if (Test-Path -LiteralPath $BackupExe) { Remove-Item -LiteralPath $BackupExe -Force }",
+                "    if (Test-Path -LiteralPath $ExePath) {",
+                "        Copy-Item -LiteralPath $ExePath -Destination $BackupExe -Force",
+                "    }",
+                "    if (Test-Path -LiteralPath $NewExe) { Remove-Item -LiteralPath $NewExe -Force }",
+                "    Copy-Item -LiteralPath $SourceExe -Destination $NewExe -Force",
+                "    Move-Item -LiteralPath $NewExe -Destination $ExePath -Force",
+                "    $swapped = $true",
+                "    Write-UpdateLog 'Yeni surum calistirilabilir dosyasi yerlestirildi.'",
+                "} catch {",
+                "    Write-UpdateLog ('HATA: ' + $_.Exception.Message)",
+                "    if (-not $swapped -and (Test-Path -LiteralPath $BackupExe)) {",
+                "        try {",
+                "            Move-Item -LiteralPath $BackupExe -Destination $ExePath -Force",
+                "            Write-UpdateLog 'Geri alma tamamlandi.'",
+                "        } catch {",
+                "            Write-UpdateLog ('Geri alma basarisiz: ' + $_.Exception.Message)",
+                "        }",
+                "    }",
+                "    throw",
+                "}",
+                "try {",
+                "    Start-Process -FilePath $ExePath",
+                "    Write-UpdateLog 'Uygulama yeniden baslatildi.'",
+                "} catch {",
+                "    Write-UpdateLog ('UYARI: Uygulama baslatilamadi: ' + $_.Exception.Message)",
+                "}",
+                "Remove-Item -LiteralPath $StageDir -Recurse -Force -ErrorAction SilentlyContinue",
+            ]
+        )
+        script_path.write_text(script, encoding="utf-8-sig", newline="\r\n")
+        return script_path
+
     script = "\n".join(
         [
             "$ErrorActionPreference = 'Stop'",
@@ -1175,6 +1270,7 @@ def install_update(
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
     download_root: Path | None = None,
     progress_callback: ProgressCallback | None = None,
+    predownloaded_asset_path: Path | None = None,
 ) -> str:
     if not update_info.update_available:
         return "up_to_date"
@@ -1199,12 +1295,20 @@ def install_update(
 
     asset_path = working_root / update_info.asset.name
 
-    _download_asset(
-        update_info.asset,
-        asset_path,
-        timeout_seconds,
-        progress_callback=progress_callback,
-    )
+    if predownloaded_asset_path is not None and predownloaded_asset_path.is_file():
+        shutil.copy2(predownloaded_asset_path, asset_path)
+        _append_update_log(
+            log_path,
+            f"On-indirilmis paket kullaniliyor: {predownloaded_asset_path.name}",
+        )
+        _verify_downloaded_asset(asset_path, update_info.asset, timeout_seconds)
+    else:
+        _download_asset(
+            update_info.asset,
+            asset_path,
+            timeout_seconds,
+            progress_callback=progress_callback,
+        )
 
     if asset_path.suffix.lower() == ".dmg":
         if not sys.platform.startswith("darwin"):
@@ -1222,9 +1326,19 @@ def install_update(
         open_release_page(update_info.html_url)
         return "browser"
 
-    _prepare_staged_app(asset_path, working_root)
+    stage_app_dir = _prepare_staged_app(asset_path, working_root)
     stage_root = working_root / "stage"
     safe_version = _safe_path_component(update_info.latest_version)
+    is_single_file = asset_path.suffix.lower() == ".exe" and not (
+        (runtime.install_dir / "_internal").is_dir() or (stage_app_dir / "_internal").is_dir()
+    )
+    if not is_single_file and not _is_safe_directory_swap_target(
+        runtime.install_dir, runtime.executable_path
+    ):
+        raise UpdateError(
+            "Guvenlik nedeniyle paylasimli klasor icinde otomatik klasor degisimi "
+            "engellendi. Lutfen uygulamayi kendi klasorune tasiyip guncelleyin."
+        )
     backup_dir = runtime.install_dir.with_name(f"{runtime.install_dir.name}-backup-{safe_version}")
     new_dir = runtime.install_dir.with_name(f"{runtime.install_dir.name}-new-{os.getpid()}")
     script_path = _write_update_script(
@@ -1237,6 +1351,7 @@ def install_update(
         backup_dir=backup_dir,
         log_path=log_path,
         new_dir=new_dir,
+        single_file=is_single_file,
     )
     try:
         subprocess.Popen(

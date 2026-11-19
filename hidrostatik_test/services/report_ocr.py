@@ -39,7 +39,7 @@ from dataclasses import dataclass, replace
 from datetime import date as _date
 from datetime import datetime as _datetime
 from pathlib import Path
-from typing import Any, Final, Iterator, Sequence
+from typing import Any, Final, Iterator, Mapping, Sequence
 
 from hidrostatik_test.domain.report_schema import (
     FIELD_ALIASES,
@@ -75,6 +75,40 @@ ERROR_EMPTY_TEXT: Final[str] = "empty_text"
 ERROR_OCR_UNAVAILABLE: Final[str] = "ocr_unavailable"
 ERROR_DEPENDENCY_MISSING: Final[str] = "dependency_missing"
 ERROR_INVALID_CALCULATED: Final[str] = "invalid_calculated"
+ERROR_CANCELLED: Final[str] = "ocr_cancelled"
+ERROR_TIMEOUT: Final[str] = "ocr_timeout"
+
+DEFAULT_OCR_TOTAL_TIMEOUT_S: Final[float] = 600.0
+
+
+def _resolve_ocr_total_timeout_seconds() -> float:
+    raw = os.environ.get("HYDRO_OCR_TOTAL_TIMEOUT_S")
+    if raw is not None and raw.strip():
+        try:
+            value = float(raw.strip())
+        except ValueError:
+            return DEFAULT_OCR_TOTAL_TIMEOUT_S
+        if value <= 0:
+            return 0.0
+        return value
+    return DEFAULT_OCR_TOTAL_TIMEOUT_S
+
+
+def _check_ocr_abort(
+    cancel_event: threading.Event | None,
+    deadline_monotonic: float | None,
+) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise ReportOcrError(
+            "OCR analizi kullanici tarafindan iptal edildi.",
+            ERROR_CANCELLED,
+        )
+    if deadline_monotonic is not None and time.monotonic() > deadline_monotonic:
+        raise ReportOcrError(
+            "OCR analizi toplam zaman asimini asti.",
+            ERROR_TIMEOUT,
+        )
+
 
 #: Dosya boyutu guvenlik siniri (500 MB varsayilan; HYDRO_MAX_UPLOAD_MB ile
 #: 1..500 MB araliginda yapilandirilabilir).
@@ -294,7 +328,13 @@ def validate_input_path(path: str | os.PathLike[str]) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def extract_text(path: str | os.PathLike[str]) -> list[PageText]:
+def extract_text(
+    path: str | os.PathLike[str],
+    *,
+    language: str | None = None,
+    cancel_event: threading.Event | None = None,
+    deadline_monotonic: float | None = None,
+) -> list[PageText]:
     """Extract text pages from a PDF or an image report.
 
     PDF'lerde once gomulu metin katmani okunur. Metin katmani yoksa veya
@@ -302,12 +342,17 @@ def extract_text(path: str | os.PathLike[str]) -> list[PageText]:
     zayif-metin uyarisiyla donulur, metin de yoksa hata yukseltilir.
     """
 
+    _check_ocr_abort(cancel_event, deadline_monotonic)
     resolved = validate_input_path(path)
     suffix = resolved.suffix.lower()
     if suffix in SPREADSHEET_EXTENSIONS:
         return _extract_spreadsheet_text(resolved)
     if suffix == ".pdf":
-        pages = _extract_pdf_text(resolved)
+        pages = _extract_pdf_text(
+            resolved,
+            cancel_event=cancel_event,
+            deadline_monotonic=deadline_monotonic,
+        )
         if _text_char_count(pages) >= MIN_TEXT_LAYER_CHARS:
             return pages
 
@@ -325,8 +370,15 @@ def extract_text(path: str | os.PathLike[str]) -> list[PageText]:
             )
 
         try:
-            ocr_pages = _ocr_pdf_pages(resolved)
+            ocr_pages = _ocr_pdf_pages(
+                resolved,
+                language=language,
+                cancel_event=cancel_event,
+                deadline_monotonic=deadline_monotonic,
+            )
         except ReportOcrError as exc:
+            if exc.code in {ERROR_CANCELLED, ERROR_TIMEOUT}:
+                raise
             if _text_char_count(pages) > 0:
                 return _with_page_warning(
                     pages,
@@ -349,13 +401,15 @@ def extract_text(path: str | os.PathLike[str]) -> list[PageText]:
             )
         return ocr_pages
 
-    return [_ocr_image_page(resolved)]
+    _check_ocr_abort(cancel_event, deadline_monotonic)
+    return [_ocr_image_page(resolved, language=language)]
 
 
 _EXCEL_MAX_ROWS: Final[int] = 2000
 _EXCEL_MAX_COLS: Final[int] = 64
 _XLSX_MAX_ENTRIES: Final[int] = 500
-_XLSX_MAX_UNCOMPRESSED_BYTES: Final[int] = 1024 * 1024 * 1024
+_XLSX_MAX_UNCOMPRESSED_BYTES: Final[int] = 64 * 1024 * 1024
+_OCR_MAX_UPSCALE_PIXELS: Final[int] = 40_000_000
 _EXCEL_ERROR_TOKENS: Final[frozenset[str]] = frozenset(
     {"#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#N/A", "#NUM!", "#NULL!"}
 )
@@ -574,8 +628,9 @@ def _extract_xlsx_sheets(path: Path) -> list[tuple[str, list[list[str]]]]:
             ERROR_DEPENDENCY_MISSING,
         )
     excel_reader_mod = importlib.import_module("openpyxl.reader.excel")
+    base_reader_cls: type[Any] = excel_reader_mod.ExcelReader
 
-    class _WorksheetOnlyReader(excel_reader_mod.ExcelReader):  # type: ignore[misc]
+    class _WorksheetOnlyReader(base_reader_cls):
         """Skip chartsheets while keeping sheet indices aligned for defined names."""
 
         def read_chartsheet(self, sheet: Any, rel: Any) -> None:
@@ -710,11 +765,25 @@ def _extract_spreadsheet_text(path: Path) -> list[PageText]:
     return pages
 
 
-def _extract_pdf_text(path: Path) -> list[PageText]:
-    reader_pages = _extract_pdf_text_with_pypdf(path)
+def _extract_pdf_text(
+    path: Path,
+    *,
+    cancel_event: threading.Event | None = None,
+    deadline_monotonic: float | None = None,
+) -> list[PageText]:
+    _check_ocr_abort(cancel_event, deadline_monotonic)
+    reader_pages = _extract_pdf_text_with_pypdf(
+        path,
+        cancel_event=cancel_event,
+        deadline_monotonic=deadline_monotonic,
+    )
     if reader_pages is not None:
         return reader_pages
-    plumber_pages = _extract_pdf_text_with_pdfplumber(path)
+    plumber_pages = _extract_pdf_text_with_pdfplumber(
+        path,
+        cancel_event=cancel_event,
+        deadline_monotonic=deadline_monotonic,
+    )
     if plumber_pages is not None:
         return plumber_pages
     raise ReportOcrError(
@@ -723,7 +792,12 @@ def _extract_pdf_text(path: Path) -> list[PageText]:
     )
 
 
-def _extract_pdf_text_with_pypdf(path: Path) -> list[PageText] | None:
+def _extract_pdf_text_with_pypdf(
+    path: Path,
+    *,
+    cancel_event: threading.Event | None = None,
+    deadline_monotonic: float | None = None,
+) -> list[PageText] | None:
     if importlib.util.find_spec("pypdf") is None:
         return None
     pypdf = importlib.import_module("pypdf")
@@ -733,6 +807,7 @@ def _extract_pdf_text_with_pypdf(path: Path) -> list[PageText] | None:
         page_count = min(len(reader.pages), MAX_PDF_PAGES)
         pages: list[PageText] = []
         for index in range(page_count):
+            _check_ocr_abort(cancel_event, deadline_monotonic)
             try:
                 text = reader.pages[index].extract_text() or ""
             except Exception:  # tek sayfa bozuksa digerleri okunmaya devam eder
@@ -749,17 +824,27 @@ def _extract_pdf_text_with_pypdf(path: Path) -> list[PageText] | None:
         ) from exc
 
 
-def _extract_pdf_text_with_pdfplumber(path: Path) -> list[PageText] | None:
+def _extract_pdf_text_with_pdfplumber(
+    path: Path,
+    *,
+    cancel_event: threading.Event | None = None,
+    deadline_monotonic: float | None = None,
+) -> list[PageText] | None:
     if importlib.util.find_spec("pdfplumber") is None:
         return None
     pdfplumber = importlib.import_module("pdfplumber")
     try:
         with pdfplumber.open(str(path)) as pdf:
             page_count = min(len(pdf.pages), MAX_PDF_PAGES)
-            return [
-                PageText(page_number=index + 1, text=pdf.pages[index].extract_text() or "")
-                for index in range(page_count)
-            ]
+            pages: list[PageText] = []
+            for index in range(page_count):
+                _check_ocr_abort(cancel_event, deadline_monotonic)
+                pages.append(
+                    PageText(page_number=index + 1, text=pdf.pages[index].extract_text() or "")
+                )
+            return pages
+    except ReportOcrError:
+        raise
     except Exception as exc:
         raise ReportOcrError(
             "PDF dosyasi pdfplumber ile okunamadi.",
@@ -996,7 +1081,12 @@ def _run_winrt_coro(coro_factory: Any, *, timeout: float = 30.0) -> Any:
     return box.get("result")
 
 
-def _select_windows_ocr_engine(ocr_mod: Any, language_cls: Any) -> tuple[Any, str, tuple[str, ...]]:
+def _select_windows_ocr_engine(
+    ocr_mod: Any,
+    language_cls: Any,
+    *,
+    language: str | None = None,
+) -> tuple[Any, str, tuple[str, ...]]:
     """Select the best Windows.Media.Ocr engine preferring Turkish then user/English."""
 
     raw_langs = getattr(ocr_mod.OcrEngine, "available_recognizer_languages", ()) or ()
@@ -1006,7 +1096,7 @@ def _select_windows_ocr_engine(ocr_mod: Any, language_cls: Any) -> tuple[Any, st
         if getattr(item, "language_tag", "")
     )
     candidates: list[str] = []
-    env_lang = os.environ.get("HYDRO_OCR_LANG", "").strip()
+    env_lang = (language or "").strip() or os.environ.get("HYDRO_OCR_LANG", "").strip()
     if env_lang and "+" not in env_lang:
         candidates.append(env_lang)
     candidates.append("tr-TR")
@@ -1680,12 +1770,29 @@ def _render_pdf_pages(path: Path) -> list[Any]:
     return list(_iter_rendered_pdf_pages(path, max_pages=_max_ocr_pages(), dpi=200))
 
 
-def _ocr_pdf_pages(path: Path) -> list[PageText]:
+def _ocr_pdf_pages(
+    path: Path,
+    *,
+    language: str | None = None,
+    cancel_event: threading.Event | None = None,
+    deadline_monotonic: float | None = None,
+) -> list[PageText]:
+    _check_ocr_abort(cancel_event, deadline_monotonic)
     engine = _resolve_ocr_engine()
     if engine == "windows_ocr":
-        return _ocr_pdf_pages_with_windows_ocr(path)
+        return _ocr_pdf_pages_with_windows_ocr(
+            path,
+            language=language,
+            cancel_event=cancel_event,
+            deadline_monotonic=deadline_monotonic,
+        )
     if engine == "vision":
-        return _ocr_pdf_pages_with_vision(path)
+        return _ocr_pdf_pages_with_vision(
+            path,
+            language=language,
+            cancel_event=cancel_event,
+            deadline_monotonic=deadline_monotonic,
+        )
     if engine != "tesseract":
         raise ReportOcrError(
             "Taranmis PDF icin OCR motoru bulunamadi (Windows OCR, Tesseract veya macOS Vision).",
@@ -1696,7 +1803,8 @@ def _ocr_pdf_pages(path: Path) -> list[PageText]:
     for index, image in enumerate(
         _iter_rendered_pdf_pages(path, max_pages=_max_ocr_pages(), dpi=200)
     ):
-        text, confidence, warning = _run_tesseract(image)
+        _check_ocr_abort(cancel_event, deadline_monotonic)
+        text, confidence, warning = _run_tesseract(image, language=language)
         pages.append(
             PageText(
                 page_number=index + 1,
@@ -1709,13 +1817,20 @@ def _ocr_pdf_pages(path: Path) -> list[PageText]:
     return pages
 
 
-def _ocr_pdf_pages_with_vision(path: Path) -> list[PageText]:
+def _ocr_pdf_pages_with_vision(
+    path: Path,
+    *,
+    language: str | None = None,
+    cancel_event: threading.Event | None = None,
+    deadline_monotonic: float | None = None,
+) -> list[PageText]:
     """OCR PDF pages sequentially with the macOS Vision framework."""
     pages: list[PageText] = []
     for index, image in enumerate(
         _iter_rendered_pdf_pages(path, max_pages=_max_ocr_pages(), dpi=200)
     ):
-        text, confidence, warning = _run_vision(image)
+        _check_ocr_abort(cancel_event, deadline_monotonic)
+        text, confidence, warning = _run_vision(image, language=language)
         pages.append(
             PageText(
                 page_number=index + 1,
@@ -1728,13 +1843,20 @@ def _ocr_pdf_pages_with_vision(path: Path) -> list[PageText]:
     return pages
 
 
-def _ocr_pdf_pages_with_windows_ocr(path: Path) -> list[PageText]:
+def _ocr_pdf_pages_with_windows_ocr(
+    path: Path,
+    *,
+    language: str | None = None,
+    cancel_event: threading.Event | None = None,
+    deadline_monotonic: float | None = None,
+) -> list[PageText]:
     """OCR PDF pages sequentially in-process with Windows 10/11 WinRT OCR."""
     pages: list[PageText] = []
     for index, image in enumerate(
         _iter_rendered_pdf_pages(path, max_pages=_max_ocr_pages(), dpi=200)
     ):
-        text, confidence, warning = _run_windows_ocr(image)
+        _check_ocr_abort(cancel_event, deadline_monotonic)
+        text, confidence, warning = _run_windows_ocr(image, language=language)
         pages.append(
             PageText(
                 page_number=index + 1,
@@ -1794,15 +1916,15 @@ def ocr_pdf_page_rotated(
     )
 
 
-def _ocr_image_page(path: Path) -> PageText:
+def _ocr_image_page(path: Path, *, language: str | None = None) -> PageText:
     image = _load_image(path)
     engine = _resolve_ocr_engine()
     if engine == "windows_ocr":
-        text, confidence, warning = _run_windows_ocr(image)
+        text, confidence, warning = _run_windows_ocr(image, language=language)
     elif engine == "vision":
-        text, confidence, warning = _run_vision(image)
+        text, confidence, warning = _run_vision(image, language=language)
     elif engine == "tesseract":
-        text, confidence, warning = _run_tesseract(image)
+        text, confidence, warning = _run_tesseract(image, language=language)
     else:
         has_ocr_pkg = (
             importlib.util.find_spec("pytesseract") is not None
@@ -1844,52 +1966,69 @@ def _load_image(path: Path) -> Any:
             "Goruntu okumak icin Pillow gerekli.", ERROR_DEPENDENCY_MISSING
         ) from exc
 
+    bomb_errors: tuple[type[BaseException], ...] = tuple(
+        cls
+        for cls in (
+            getattr(Image, "DecompressionBombError", None),
+            getattr(Image, "DecompressionBombWarning", None),
+        )
+        if isinstance(cls, type) and issubclass(cls, BaseException)
+    )
+    image_errors: tuple[type[BaseException], ...] = (
+        UnidentifiedImageError,
+        OSError,
+        ValueError,
+        MemoryError,
+        *bomb_errors,
+    )
     try:
         with Image.open(path) as image:
             image.load()
             grayscale = image.convert("L")
-    except (UnidentifiedImageError, OSError, ValueError) as exc:
+    except image_errors as exc:
         raise ReportOcrError(
-            "Goruntu dosyasi bozuk veya desteklenmiyor.",
+            "Goruntu dosyasi bozuk, cok buyuk veya desteklenmiyor.",
             ERROR_CORRUPT_IMAGE,
             detail=str(exc),
         ) from exc
 
     if grayscale.width < OCR_MIN_IMAGE_WIDTH:
         scale = 2
-        grayscale = grayscale.resize(
-            (grayscale.width * scale, grayscale.height * scale),
-            Image.Resampling.LANCZOS,
-        )
+        upscaled_pixels = (grayscale.width * scale) * (grayscale.height * scale)
+        if upscaled_pixels <= _OCR_MAX_UPSCALE_PIXELS:
+            grayscale = grayscale.resize(
+                (grayscale.width * scale, grayscale.height * scale),
+                Image.Resampling.LANCZOS,
+            )
     return grayscale
 
 
-def _choose_tesseract_language() -> tuple[str, str]:
-    override = os.environ.get("HYDRO_OCR_LANG", "").strip()
+def _choose_tesseract_language(language: str | None = None) -> tuple[str, str]:
+    override = (language or "").strip() or os.environ.get("HYDRO_OCR_LANG", "").strip()
     if override:
         return override, ""
 
     ok, _, cached_langs = _probe_tesseract()
     available = set(cached_langs) if ok else set()
 
-    selected = [language for language in ("tur", "eng") if language in available]
+    selected = [lang for lang in ("tur", "eng") if lang in available]
     if selected:
         return "+".join(selected), ""
     return "eng", "Tesseract 'tur' dil paketi bulunamadi; OCR ingilizce ile yapildi."
 
 
-def _run_tesseract(image: Any) -> tuple[str, float | None, str]:
+def _run_tesseract(image: Any, *, language: str | None = None) -> tuple[str, float | None, str]:
     try:
         pytesseract = importlib.import_module("pytesseract")
         _configure_pytesseract(pytesseract)
     except ImportError as exc:  # pragma: no cover - onceden kontrol edilir
         raise ReportOcrError("OCR icin pytesseract gerekli.", ERROR_OCR_UNAVAILABLE) from exc
 
-    language, warning = _choose_tesseract_language()
+    resolved_language, warning = _choose_tesseract_language(language)
     try:
         data = pytesseract.image_to_data(
             image,
-            lang=language,
+            lang=resolved_language,
             output_type=pytesseract.Output.DICT,
             timeout=60,
         )
@@ -2110,11 +2249,34 @@ def _vision_blocks_to_text(blocks: Sequence[tuple[str, float, Sequence[float]]])
     return "\n".join(lines)
 
 
-def _run_vision(image: Any) -> tuple[str, float | None, str]:
+_VISION_LANGUAGE_ALIASES: Final[dict[str, str]] = {
+    "tur": "tr-TR",
+    "tr": "tr-TR",
+    "eng": "en-US",
+    "en": "en-US",
+}
+
+
+def _resolve_vision_languages(language: str | None) -> list[str]:
+    raw = (language or "").strip() or os.environ.get("HYDRO_OCR_LANG", "").strip()
+    if not raw:
+        return list(_VISION_LANGUAGES)
+    resolved: list[str] = []
+    for part in re.split(r"[+,;\s]+", raw):
+        token = part.strip()
+        if not token:
+            continue
+        mapped = _VISION_LANGUAGE_ALIASES.get(token.casefold(), token)
+        if mapped not in resolved:
+            resolved.append(mapped)
+    return resolved or list(_VISION_LANGUAGES)
+
+
+def _run_vision(image: Any, *, language: str | None = None) -> tuple[str, float | None, str]:
     """OCR one page with the macOS Vision framework (``ocrmac``)."""
 
     try:
-        from ocrmac import ocrmac  # type: ignore[import-not-found]
+        ocrmac = importlib.import_module("ocrmac.ocrmac")
     except ImportError as exc:  # pragma: no cover - onceden kontrol edilir
         raise ReportOcrError("OCR icin ocrmac gerekli.", ERROR_OCR_UNAVAILABLE) from exc
 
@@ -2124,11 +2286,12 @@ def _run_vision(image: Any) -> tuple[str, float | None, str]:
         image = Image.open(image)
 
     warning = ""
+    preferred_languages = _resolve_vision_languages(language)
     try:
         blocks = ocrmac.OCR(
             image,
             recognition_level="accurate",
-            language_preference=list(_VISION_LANGUAGES),
+            language_preference=preferred_languages,
         ).recognize()
     except ValueError:
         # Dil listesi bu macOS surumunde desteklenmiyorsa varsayilanla dene.
@@ -2221,7 +2384,7 @@ def _windows_ocr_words_to_vision_blocks(
     return blocks
 
 
-def _run_windows_ocr(image: Any) -> tuple[str, float | None, str]:
+def _run_windows_ocr(image: Any, *, language: str | None = None) -> tuple[str, float | None, str]:
     """OCR one page in-process with Windows 10/11 ``Windows.Media.Ocr``."""
 
     try:
@@ -2271,7 +2434,11 @@ def _run_windows_ocr(image: Any) -> tuple[str, float | None, str]:
 
             decoder = await img_mod.BitmapDecoder.create_async(stream)
             bitmap = await decoder.get_software_bitmap_async()
-            engine, active_lang, _ = _select_windows_ocr_engine(ocr_mod, glob_mod.Language)
+            engine, active_lang, _ = _select_windows_ocr_engine(
+                ocr_mod,
+                glob_mod.Language,
+                language=language,
+            )
             if engine is None:
                 raise ReportOcrError(
                     "Windows yerlesik OCR dil paketi bulunamadi (tr-TR / en-US).",
@@ -2470,10 +2637,16 @@ _PRESSURE_SECTION_RE = re.compile(
 )
 
 _FAIL_WORDS: Final[tuple[str, ...]] = (
+    "kabul edilmemistir",
+    "kabul edilmemis",
+    "kabul edilmedi",
+    "uygun bulunmamistir",
+    "uygun bulunmamis",
+    "basarisizdir",
     "basarisiz",
     "fail",
-    "kabul edilmedi",
     "uygun degil",
+    "reddedilmistir",
     "reddedildi",
 )
 _PASS_WORDS: Final[tuple[str, ...]] = (
@@ -2699,7 +2872,7 @@ def normalize_result(raw: str) -> str | None:
     """Return ``"PASS"``/``"FAIL"`` for a free-text result, else ``None``."""
 
     folded = _fold(str(raw)).casefold()
-    if any(word in folded for word in _FAIL_WORDS):
+    if any(word in folded for word in _FAIL_WORDS) or re.search(r"\bred\b", folded):
         return "FAIL"
     if any(word in folded for word in _PASS_WORDS):
         return "PASS"
@@ -2787,12 +2960,16 @@ def parse_report(
     candidates: list[_Candidate] = []
     order = 0
     a_seen = {"air": 0, "pressure": 0}
+    remaining_chars = MAX_TEXT_CHARS
 
     for page in pages:
+        if remaining_chars <= 0:
+            break
         section = ""
         pa_seen = 0
         start_kp_seen = False
-        page_text = page.text[:MAX_TEXT_CHARS]
+        page_text = page.text[:remaining_chars]
+        remaining_chars -= len(page_text)
         for raw_line in page_text.splitlines():
             folded = _fold(raw_line)
             stripped = folded.strip()
@@ -3653,13 +3830,34 @@ def analyze_report(
     path: str | os.PathLike[str],
     calculated: dict[str, Any] | None = None,
     *,
-    extra_aliases: dict[str, Sequence[str]] | None = None,
+    extra_aliases: Mapping[str, Sequence[str]] | None = None,
+    language: str | None = None,
+    cancel_event: threading.Event | None = None,
+    deadline_monotonic: float | None = None,
+    timeout_seconds: float | None = None,
 ) -> OcrAnalysisResult:
     """Extract, parse, validate and (optionally) compare one report."""
 
+    effective_deadline = deadline_monotonic
+    if effective_deadline is None:
+        budget = (
+            timeout_seconds if timeout_seconds is not None else _resolve_ocr_total_timeout_seconds()
+        )
+        if budget > 0:
+            effective_deadline = time.monotonic() + budget
+    _check_ocr_abort(cancel_event, effective_deadline)
     resolved = validate_input_path(path)
-    pages = extract_text(resolved)
-    report = parse_report(pages, extra_aliases=extra_aliases)
+    pages = extract_text(
+        resolved,
+        language=language,
+        cancel_event=cancel_event,
+        deadline_monotonic=effective_deadline,
+    )
+    _check_ocr_abort(cancel_event, effective_deadline)
+    report = parse_report(
+        pages,
+        extra_aliases=dict(extra_aliases) if extra_aliases is not None else None,
+    )
 
     issues = tuple(validate_report(report))
     warnings = list(report.warnings)
@@ -3705,6 +3903,7 @@ def analyze_report(
 
 
 __all__ = [
+    "ERROR_CANCELLED",
     "ERROR_CORRUPT_DOCUMENT",
     "ERROR_CORRUPT_IMAGE",
     "ERROR_DEPENDENCY_MISSING",
@@ -3716,6 +3915,7 @@ __all__ = [
     "ERROR_INVALID_CALCULATED",
     "ERROR_INVALID_PATH",
     "ERROR_OCR_UNAVAILABLE",
+    "ERROR_TIMEOUT",
     "ERROR_UNSUPPORTED_FORMAT",
     "MAX_ALLOWED_UPLOAD_MB",
     "MAX_FILE_SIZE_BYTES",

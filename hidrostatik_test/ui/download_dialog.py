@@ -96,6 +96,7 @@ class DownloadDialog:
         dest_path: Path,
         total_bytes: int = 0,
         title: str = "Guncelleme Indiriliyor",
+        expected_sha256: str = "",
     ) -> None:
         self._manager = _require_download_manager(download_manager)
         self._file_url = file_url
@@ -126,6 +127,7 @@ class DownloadDialog:
             url=file_url,
             destination=dest_path,
             total_bytes=total_bytes,
+            expected_sha256=expected_sha256,
         )
 
         self._build_ui()

@@ -133,7 +133,14 @@ from .constants import (
     TABLE_B_MODE,
 )
 from .helpers import format_field_message, format_required_marker, get_visual_level, truncate_text
-from .validators import safe_float as _safe_float_util
+from .validators import (
+    NUMBER_FORMAT_MESSAGE,
+    NumericInputError,
+    parse_finite_float,
+)
+from .validators import (
+    safe_float as _safe_float_util,
+)
 from .wizard import WizardController
 
 
@@ -3035,19 +3042,24 @@ class HydrostaticTestApp:
             self.download_manager = DownloadManager()
 
         try:
+            dest_path = (
+                Path(self._resolve_update_download_dir(create=True))
+                / self.latest_update_info.asset.name
+            )
+            expected_sha = str(getattr(self.latest_update_info.asset, "sha256", "") or "")
             dialog = DownloadDialog(
                 parent=self.root,
                 download_manager=self.download_manager,
                 file_url=self.latest_update_info.asset.download_url,
                 file_name=self.latest_update_info.asset.name,
-                dest_path=Path(self._resolve_update_download_dir(create=True))
-                / self.latest_update_info.asset.name,
+                dest_path=dest_path,
                 total_bytes=self.latest_update_info.asset.size,
                 title=f"Guncelleme: {self.latest_update_info.latest_version}",
+                expected_sha256=expected_sha,
             )
             result = dialog.wait()
             if result == "completed":
-                self._perform_update_install_after_download()
+                self._perform_update_install_after_download(downloaded_path=dest_path)
             elif result == "cancelled":
                 self._set_banner("Guncelleme kullanici tarafindan iptal edildi.", "info")
             else:
@@ -3061,7 +3073,7 @@ class HydrostaticTestApp:
         finally:
             self.update_install_in_progress = False
 
-    def _perform_update_install_after_download(self) -> None:
+    def _perform_update_install_after_download(self, downloaded_path: Path | None = None) -> None:
         import tempfile
 
         if self.latest_update_info is None:
@@ -3071,6 +3083,7 @@ class HydrostaticTestApp:
             install_mode = install_update(
                 self.latest_update_info,
                 download_root=Path(tempfile.mkdtemp(prefix="hidrostatik-install-")),
+                predownloaded_asset_path=downloaded_path,
             )
         except UpdateError as exc:
             self._handle_update_install_error(str(exc))
@@ -5972,9 +5985,27 @@ class HydrostaticTestApp:
             return ""
         return "Eksik: " + ", ".join(label for label, _field_key in missing)
 
+    def _is_report_draft(self) -> bool:
+        statuses = [
+            str(self._decisions.get(key, {}).get("status", "")).strip().upper()
+            for key in ("air", "pressure")
+        ]
+        has_final_decision = any(status in {"BASARILI", "BASARISIZ"} for status in statuses)
+        has_invalid_state = any(
+            status in {"DOGRULANAMADI", "STALE", "KATSAYI GUNCELLENMELI"} for status in statuses
+        )
+        return (not has_final_decision) or has_invalid_state
+
+    def _sync_report_button_label(self) -> None:
+        if hasattr(self, "save_report_button"):
+            self.save_report_button.configure(
+                text="Taslak Rapor Kaydet" if self._is_report_draft() else "Raporu Kaydet"
+            )
+
     def _refresh_action_gates(self) -> None:
         if not hasattr(self, "air_test_button"):
             return
+        self._sync_report_button_label()
         test_buttons = {
             "air": self.air_test_button,
             "pressure": self.pressure_test_button,
@@ -6445,30 +6476,21 @@ class HydrostaticTestApp:
     def _read_float(
         self, variable: tk.StringVar, field_name: str, section: str, field_key: str | None = None
     ) -> float:
-        normalized = variable.get().strip().replace(",", ".")
-        if not normalized:
-            message = f"{field_name} bos birakilamaz."
-            self._set_feedback(section, message)
-            if field_key is not None:
-                self._set_field_message(field_key, "Bu alan zorunlu.", "error")
-            self._focus_field(field_key)
-            raise ValidationError(message)
         try:
-            value = float(normalized)
-        except ValueError as exc:
-            message = f"{field_name} icin gecerli bir sayi girin."
+            value = parse_finite_float(variable.get(), field_name)
+        except NumericInputError as exc:
+            message = str(exc)
             self._set_feedback(section, message)
             if field_key is not None:
-                self._set_field_message(field_key, "Gecerli bir sayi girin.", "error")
+                if "bos birakilamaz" in message:
+                    hint = "Bu alan zorunlu."
+                elif "sonlu" in message:
+                    hint = "Sonlu bir sayi girin."
+                else:
+                    hint = NUMBER_FORMAT_MESSAGE
+                self._set_field_message(field_key, hint, "error")
             self._focus_field(field_key)
             raise ValidationError(message) from exc
-        if not math.isfinite(value):
-            message = f"{field_name} sonlu bir sayi olmalidir."
-            self._set_feedback(section, message)
-            if field_key is not None:
-                self._set_field_message(field_key, "Sonlu bir sayi girin.", "error")
-            self._focus_field(field_key)
-            raise ValidationError(message)
         if field_key is not None:
             limits = FIELD_VALUE_RANGES.get(field_key)
             if limits is not None and not (limits[0] <= value <= limits[1]):
@@ -6901,6 +6923,7 @@ class HydrostaticTestApp:
         self.header_status_var.set(f"{decision['status']} | {decision['title']}")
         self.header_rule_var.set(f"Kural: {rule}")
         self._style_decision_status_label(decision["status"])
+        self._sync_report_button_label()
 
     def _render_field_status_strip(self) -> None:
         checked_count = sum(1 for variable in self.control_check_vars.values() if variable.get())
@@ -7521,9 +7544,11 @@ class HydrostaticTestApp:
         )
 
     def _build_report_text(self) -> str:
+        is_draft = self._is_report_draft()
         lines = [
-            f"{APP_NAME} Raporu",
+            f"{APP_NAME} Raporu" + (" [TASLAK — RESMI KABUL DEGILDIR]" if is_draft else ""),
             f"Surum: {APP_VERSION}",
+            f"Rapor durumu: {'Taslak (resmi kabul degildir)' if is_draft else 'Kesin (degerlendirildi)'}",
             f"Referans sartname: {SPEC_DOCUMENT_CODE} - {SPEC_DOCUMENT_TITLE}",
             f"Olusturma zamani: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             "",
@@ -7993,6 +8018,7 @@ class HydrostaticTestApp:
             self.notebook.select(2)
         else:
             self.notebook.select(0)
+        self._reset_decision_card()
         self._on_tab_changed()
 
     def _save_input_snapshot(self) -> None:
@@ -8054,13 +8080,17 @@ class HydrostaticTestApp:
             return
 
         ext = Path(file_path).suffix.lower()
+        is_draft = self._is_report_draft()
         try:
             if ext in [".pdf", ".xlsx"]:
                 from ..services.report_export import export_excel_report, export_pdf_report
 
-                title = f"{APP_NAME} Raporu"
+                title = f"{APP_NAME} Raporu [TASLAK]" if is_draft else f"{APP_NAME} Raporu"
                 metadata = {
                     "Surum": APP_VERSION,
+                    "Rapor Durumu": (
+                        "Taslak — Resmi Kabul Degildir" if is_draft else "Kesin (Degerlendirildi)"
+                    ),
                     "Referans sartname": f"{SPEC_DOCUMENT_CODE} - {SPEC_DOCUMENT_TITLE}",
                     "Olusturma zamani": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "Su backend'i": self._selected_water_backend_info().label,
@@ -8209,6 +8239,7 @@ class HydrostaticTestApp:
         session = self.session_manager.get_active_session()
         if not session:
             return
+        self._reset_decision_card()
         if session.inputs:
             self._apply_input_snapshot(session.inputs)
 

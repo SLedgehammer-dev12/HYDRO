@@ -1983,7 +1983,7 @@ class UiWorkflowTests(unittest.TestCase):
 
         self.assertFalse(self.app.side_panel_visible_var.get())
         self.assertNotIn(str(self.app.side_panel), {str(p) for p in self.app.content_pane.panes()})
-        self.assertEqual(self.app.save_report_button.cget("text"), "Raporu Kaydet")
+        self.assertEqual(self.app.save_report_button.cget("text"), "Taslak Rapor Kaydet")
         self.assertTrue(self.app.save_report_button.winfo_manager())
         self.assertTrue(self.app.air_test_button.winfo_manager())
         self.assertTrue(self.app.pressure_test_button.winfo_manager())
@@ -1994,6 +1994,64 @@ class UiWorkflowTests(unittest.TestCase):
 
         self.assertTrue(self.app.side_panel_visible_var.get())
         self.assertIn(str(self.app.side_panel), {str(p) for p in self.app.content_pane.panes()})
+
+    def test_draft_report_stamp_and_button_label_update_on_evaluation(self) -> None:
+        self._fill_geometry()
+        self.assertTrue(self.app._is_report_draft())
+        self.assertEqual(self.app.save_report_button.cget("text"), "Taslak Rapor Kaydet")
+        draft_text = self.app._build_report_text()
+        self.assertIn("TASLAK", draft_text)
+
+        pdf_target = Path(tempfile.mkdtemp()) / "taslak_rapor.pdf"
+        with (
+            patch(
+                "hidrostatik_test.ui.app.filedialog.asksaveasfilename", return_value=str(pdf_target)
+            ),
+            patch("hidrostatik_test.services.report_export.export_pdf_report") as export_pdf,
+            patch("hidrostatik_test.ui.app.messagebox.showinfo"),
+        ):
+            self.app._save_report()
+        self.assertIn("TASLAK", export_pdf.call_args.args[1])
+        self.assertIn("Taslak", export_pdf.call_args.args[2]["Rapor Durumu"])
+
+        self.app._update_decision_card("Hava Icerik Testi", "BASARILI", "Test gecti")
+        self.assertFalse(self.app._is_report_draft())
+        self.assertEqual(self.app.save_report_button.cget("text"), "Raporu Kaydet")
+        final_text = self.app._build_report_text()
+        self.assertNotIn("[TASLAK", final_text)
+
+    def test_snapshot_and_session_switch_reset_stale_decisions(self) -> None:
+        self._fill_geometry()
+        self.app._update_decision_card("Hava Icerik Testi", "BASARILI", "Ilk oturum gecti")
+        self.assertEqual(self.app._decisions["air"]["status"], "BASARILI")
+
+        snapshot = self.app._build_input_snapshot()
+        self.app._apply_input_snapshot(snapshot)
+        self.assertEqual(self.app._decisions["air"]["status"], "BEKLIYOR")
+        self.assertEqual(self.app.decision_status_var.get(), "BEKLIYOR")
+
+        self.app._update_decision_card("Hava Icerik Testi", "BASARILI", "Oturum karari")
+        session = self.app.session_manager.create_session("Ikinci Oturum")
+        self.app.session_manager.switch_session(session.id)
+        self.app._apply_session_to_ui()
+        self.assertEqual(self.app._decisions["air"]["status"], "BEKLIYOR")
+        self.assertEqual(self.app._decisions["pressure"]["status"], "BEKLIYOR")
+
+    def test_read_float_delegates_to_unified_parser(self) -> None:
+        self.assertAlmostEqual(
+            self.app._read_float(tk.StringVar(value="1.234,56"), "Test", "air"),
+            1234.56,
+        )
+        self.assertAlmostEqual(
+            self.app._read_float(tk.StringVar(value="1,234.56"), "Test", "air"),
+            1234.56,
+        )
+        self.assertAlmostEqual(
+            self.app._read_float(tk.StringVar(value="1.000"), "Test", "air"),
+            1.0,
+        )
+        with self.assertRaises(ValidationError):
+            self.app._read_float(tk.StringVar(value="nan"), "Test", "air")
 
 
 if __name__ == "__main__":

@@ -328,6 +328,20 @@ class TimeSeriesTests(unittest.TestCase):
             self.assertEqual(len(loaded_csv_store.get_records()), 2)
             self.assertEqual(loaded_csv_store.get_records()[0].pressure_bar, 50.0)
 
+    def test_mixed_naive_and_utc_timestamps_and_chronological_sort(self) -> None:
+        from datetime import timezone
+
+        t0 = datetime(2026, 11, 18, 0, 0, tzinfo=timezone.utc)
+        self.store.add_record(60.0, 15.0, timestamp=t0 + timedelta(hours=25))
+        self.store.add_record(60.0, 15.0, timestamp=t0.replace(tzinfo=None))
+        self.store.add_record(60.0, 15.0, timestamp=t0 + timedelta(hours=18))
+        self.store.add_record(60.0, 15.0, timestamp=t0 + timedelta(hours=22))
+
+        self.assertAlmostEqual(self.store.get_duration_hours(), 25.0, places=2)
+        balanced, diff = self.store.check_thermal_balance()
+        self.assertTrue(balanced)
+        self.assertAlmostEqual(diff, 0.0, places=4)
+
 
 if __name__ == "__main__":
     unittest.main()

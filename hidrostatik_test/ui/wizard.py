@@ -539,6 +539,13 @@ class WizardController:
 
     def _validate_execution(self) -> bool:
         decision = _text_value(getattr(self.app, "decision_status_var", None)).upper()
+        decisions = getattr(self.app, "_decisions", None)
+        if isinstance(decisions, dict) and hasattr(self.app, "_active_tab_key"):
+            active_key = self.app._active_tab_key()
+            if active_key in ("air", "pressure"):
+                tab_status = str(decisions.get(active_key, {}).get("status", "")).strip().upper()
+                if tab_status:
+                    decision = tab_status
         if decision not in ALLOWED_EXECUTION_DECISIONS:
             if decision == "DOGRULANAMADI":
                 message = (
