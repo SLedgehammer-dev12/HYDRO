@@ -109,6 +109,7 @@ datas = [
     ('hidrostatik_test/data/water_property_table_v1.csv', 'hidrostatik_test/data'),
     ('hidrostatik_test/data/water_property_table_v1.meta.json', 'hidrostatik_test/data'),
     (str(FRONTEND_DIST), 'webapp_frontend_dist'),
+    (str(PROJECT_ROOT / 'webapp' / 'backend' / 'migrations'), 'webapp_migrations'),
 ]
 if ICON_PNG.is_file():
     datas.append((str(ICON_PNG), 'assets/icons'))
@@ -144,6 +145,8 @@ _SUBMODULE_PACKAGES = [
     'anyio',
     'h11',
     'sqlalchemy',
+    'alembic',
+    'mako',
     'multipart',
     'python_multipart',
     'pdfminer',

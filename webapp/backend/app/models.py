@@ -19,11 +19,20 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    MetaData,
     String,
     Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+NAMING_CONVENTION: dict[str, str] = {
+    "ix": "ix_%(column_0_label)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
 
 
 def utcnow() -> datetime:
@@ -35,7 +44,7 @@ def new_uuid() -> str:
 
 
 class Base(DeclarativeBase):
-    pass
+    metadata = MetaData(naming_convention=NAMING_CONVENTION)
 
 
 class SchemaMigration(Base):
@@ -119,11 +128,7 @@ class TestResult(Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    __table_args__ = (
-        Index("ix_results_session_computed", "session_id", "computed_at"),
-        Index("ix_results_type", "test_type"),
-        Index("ix_results_decision", "decision_status"),
-    )
+    __table_args__ = (Index("ix_results_session_computed", "session_id", "computed_at"),)
 
 
 class TimeSeriesRecord(Base):
@@ -160,11 +165,6 @@ class Attachment(Base):
     kind: Mapped[str] = mapped_column(String(32), default="other")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    __table_args__ = (
-        Index("ix_attachments_session", "session_id"),
-        Index("ix_attachments_sha", "sha256"),
-    )
-
 
 class OcrAnalysis(Base):
     __tablename__ = "ocr_analyses"
@@ -198,10 +198,7 @@ class OcrAnalysis(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
-    __table_args__ = (
-        Index("ix_ocr_status_created", "status", "created_at"),
-        Index("ix_ocr_attachment", "attachment_id"),
-    )
+    __table_args__ = (Index("ix_ocr_status_created", "status", "created_at"),)
 
 
 class OcrMappingProfile(Base):
@@ -259,10 +256,7 @@ class SectionForm(Base):
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
 
-    __table_args__ = (
-        UniqueConstraint("session_id", "form_code", name="uq_section_form_code"),
-        Index("ix_section_forms_project", "project_id"),
-    )
+    __table_args__ = (UniqueConstraint("session_id", "form_code", name="uq_section_form_code"),)
 
 
 class AuditEvent(Base):
@@ -280,10 +274,7 @@ class AuditEvent(Base):
     request_id: Mapped[str] = mapped_column(String(64), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    __table_args__ = (
-        Index("ix_audit_session_created", "session_id", "created_at"),
-        Index("ix_audit_action", "action"),
-    )
+    __table_args__ = (Index("ix_audit_session_created", "session_id", "created_at"),)
 
 
 __all__ = [
@@ -291,6 +282,7 @@ __all__ = [
     "AuditEvent",
     "Base",
     "HydroSession",
+    "NAMING_CONVENTION",
     "OcrAnalysis",
     "OcrMappingProfile",
     "Project",

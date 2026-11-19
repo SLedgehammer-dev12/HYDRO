@@ -13,7 +13,7 @@
 | Alan | Durum | Kanıt |
 | --- | --- | --- |
 | Masaüstü uygulaması | Çalışıyor, kararlı | 709 unittest PASS (`skipped=1`) |
-| Web backend (FastAPI) | Çalışıyor | 194 pytest PASS, 81 OpenAPI path / 94 operation, 47 dosyada `mypy` temiz |
+| Web backend (FastAPI) | Çalışıyor | 210 pytest PASS (Alembic `0003`), 81 OpenAPI path / 94 operation, 48 dosyada `mypy` temiz |
 | Web frontend (React 19) | Çalışıyor | `npm run lint` (0 hata, `jsx-a11y`), `npm test` (21 Vitest), `npm run typecheck` + `npm run build` + `check:bundle` PASS (`143,2 kB` gzip ilk yükleme JS), `verify-tabs.mjs` 12/12 PASS |
 | Program İkon & Marka Sistemi | Hazır | Boru kesiti + su dalgası + manometre ikonu (`tools/generate_icons.py`, `assets/icons/*`, `webapp/frontend/public/*`, `<HydroLogo />`, PyInstaller/Inno Setup/Tkinter) |
 | Web Güncelleme Yöneticisi | Çalışıyor | `/api/update/*`, SHA-256 + fail-closed Ed25519 `.sig` doğrulama, `UpdateManagerModal`, macOS `.dmg` / Win `.exe`/`.zip` kurulum |
@@ -27,7 +27,7 @@
 | OCR rapor kontrolü | Çalışıyor (Vision + Excel) | `ocrmac`, `.xlsx`/`.xls`, `commit-dossier` proje/bölüm kaydı, tekil onay/uygulama |
 | Docker / dağıtım | Hazır | `webapp/Dockerfile`, `docker-compose.yml`, `.github/workflows/release.yml` |
 
-**Durum:** MVP ve performans/güvenlik ön sertleştirmesi tamam. Kalan işler Alembic göçü, kurumsal Auth/OIDC/RBAC kararı ve kurum onayı bekleyen veri işleridir.
+**Durum:** MVP, performans/güvenlik ön sertleştirmesi ve Alembic şema göçü (`0003`) tamam. Kalan işler kurumsal Auth/OIDC/RBAC kararı, `psycopg` Postgres runtime testi ve kurum onayı bekleyen veri işleridir.
 
 ---
 
@@ -105,8 +105,8 @@ yeni proje/test bölümü açarak) kaydedilmesi, kümülatif hesaplama (`profile
 noktası değerlendirmesi ve canlı oturum hidrasyonu tamamlandı.
 
 Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen işlerdir:
-1. Alembic üretim migrasyonu (`migrations/`).
-2. Kurumsal Auth / OIDC + iki kişi onay politikası (kullanıcı mimari kararı bekliyor).
+1. Kurumsal Auth / OIDC + iki kişi onay politikası (kullanıcı mimari kararı bekliyor).
+2. Postgres runtime testi (`psycopg` kurulumu + test ortamı).
 3. Kurum onayı bekleyen resmi A/B ve form revizyonları.
 
 ---
@@ -123,7 +123,7 @@ Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen iş
 - [x] OCR Test Raporu Kontrolü kayıt & hesap hattı (`commit-dossier` liste sözleşmesi, mühendislik hesap paketi & boş `.xls` ayrımı, proje/KP kesit eşleme veya otomatik yeni proje + 11 zorunlu form slotu açma, `profile`/`air`/`pressure`/`pig` `TestResult` kaydı + canlı hidrasyon, tekil rapor onay/uygulama).
 - [x] OCR DB kuyruğu + worker + iptal (`ocr_queue.py` bounded executor, `async_mode`/`Prefer: respond-async` `202` + `estimated_wait_s`, `cancel_event`, `ocr_timeout_s`, parametrik `language`, başlangıç `worker_interrupted` toparlaması).
 - [x] Web güvenlik & dağıtım sertleştirmesi (geriye dönük uyumlu): fail-closed `HYDRO_AUTH_MODE` bağlanma kapısı + `desktop_launcher.py` `validate_bind_security`, harici `/theme-init.js` + CSP + `X-Content-Type-Options`/`X-Frame-Options`/`COOP`/`CORP`/`Cache-Control: no-store`, `Host` DNS-rebinding kapısı, `/api/update/*` yerel yönetici + same-origin/proxy başlık kapısı, akışlı dosya boyutu sınırı (`read_upload_bounded`), bellek-içi `RateLimiter` (`429 Retry-After`), maskelenmiş DB logları ve `Dockerfile`/`docker-compose.yml`/CI düzeltmeleri.
-- [ ] Alembic üretim migrasyonu (`create_all` + hafif kolon migrasyonu yerine).
+- [x] Alembic üretim migrasyonu (`migrations/versions/0002_baseline.py` → `0003_drop_duplicate_indexes.py`, `migrations_runner.py`, legacy `0001`/`0002` köprüsü, SQLite FK/Postgres advisory lock koruması, geri alınabilir `restore_db_backup`, `HYDRO_AUTO_MIGRATE`, `HydroWeb.spec` paketlemesi).
 - [ ] Auth / OIDC + iki kişi onay kuralı (MVP'de anonim `X-Session-ID`).
 - [ ] Postgres runtime testi (kod uyumlu, `psycopg` kurulu değil).
 - [x] Frontend birim testleri, kod bölme & paket bütçesi (`21` Vitest testi, rota/Recharts/3D lazy-loading, Vite 8 Rolldown chunk bölmesi, `check:bundle` ≤ `200 kB` gzip kapısı, `GZipMiddleware` + HTML `no-cache` bfcache uyumu + `verify-tabs.mjs`).
@@ -170,12 +170,12 @@ Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen iş
 
 ```bash
 # Lint & tip denetimi
-python3 -m ruff check . && python3 -m ruff format --check .     # PASS (141 dosya)
+python3 -m ruff check . && python3 -m ruff format --check .     # PASS (146 dosya)
 python3 -m mypy hidrostatik_test/domain/                       # Success: no issues found (14 files)
-python3 -m mypy --ignore-missing-imports webapp/backend/app    # Success: no issues found (47 files)
+python3 -m mypy --ignore-missing-imports webapp/backend/app    # Success: no issues found (48 files)
 
-# Web backend
-python3 -m pytest webapp/backend/tests -q                      # 194 passed
+# Web backend (Alembic + API + domain parity)
+python3 -m pytest webapp/backend/tests -q                      # 210 passed
 
 # Masaüstü
 python3 -m unittest discover -s tests -p "test_*.py"           # 709 tests OK (skipped=1)

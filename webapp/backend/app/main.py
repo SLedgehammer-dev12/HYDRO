@@ -149,7 +149,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     RATE_LIMITER.reset()
     db.configure_database(resolved.database_url)
-    db.init_db()
+    if resolved.auto_migrate:
+        db.init_db()
     OCR_QUEUE.configure(resolved.ocr_max_concurrency)
 
     app = FastAPI(

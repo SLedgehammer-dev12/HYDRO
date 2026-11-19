@@ -142,6 +142,7 @@ class Settings:
     local_admin_token: str = ""
     trusted_hosts: tuple[str, ...] = ()
     rate_limit_enabled: bool = True
+    auto_migrate: bool = True
     scene_vertical_exaggeration: float = 3.0
     log_level: str = "INFO"
     extra: dict[str, str] = field(default_factory=dict)
@@ -216,6 +217,7 @@ class Settings:
             local_admin_token=_env("HYDRO_LOCAL_ADMIN_TOKEN") or "",
             trusted_hosts=trusted_hosts,
             rate_limit_enabled=_env_bool("HYDRO_RATE_LIMIT_ENABLED", True),
+            auto_migrate=_env_bool("HYDRO_AUTO_MIGRATE", True),
             scene_vertical_exaggeration=float(_env("HYDRO_SCENE_VERTICAL_EXAGGERATION") or 3.0),
             log_level=_env("HYDRO_LOG_LEVEL") or "INFO",
         )

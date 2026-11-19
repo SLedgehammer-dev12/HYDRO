@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 import tempfile
@@ -25,7 +26,6 @@ from ..models import (
     OcrAnalysis,
     OcrMappingProfile,
     Project,
-    SchemaMigration,
     SectionForm,
     TestResult,
     TimeSeriesRecord,
@@ -33,6 +33,8 @@ from ..models import (
 from . import audit
 from . import projects as project_service
 from . import sessions as session_service
+
+logger = logging.getLogger("hydro.web.db_admin")
 
 SQLITE_MAGIC = b"SQLite format 3\x00"
 
@@ -279,9 +281,7 @@ def get_db_stats(db: OrmSession, settings: Settings, current_workspace_hash: str
     db_path = _sqlite_db_path(settings)
     is_sqlite = db_mod._is_sqlite(settings.database_url)
     engine = db_mod.get_engine()
-    schema_version = (
-        db.scalar(select(func.max(SchemaMigration.version))) or db_mod.CURRENT_MIGRATION
-    )
+    schema_version = db_mod.current_schema_version() or "uninitialized"
 
     db_size = 0
     wal_size = 0
@@ -483,6 +483,26 @@ def _validate_sqlite_backup_file(path: Path) -> None:
         conn.close()
 
 
+def _unlink_sqlite_sidecars(db_path: Path) -> None:
+    for sidecar in (Path(f"{db_path}-wal"), Path(f"{db_path}-shm")):
+        if sidecar.exists():
+            try:
+                sidecar.unlink()
+            except OSError:
+                pass
+
+
+def _copy_sqlite_file(source_path: Path, dest_path: Path) -> None:
+    src = sqlite3.connect(str(source_path), timeout=30.0)
+    dst = sqlite3.connect(str(dest_path), timeout=30.0)
+    try:
+        src.backup(dst)
+        dst.commit()
+    finally:
+        dst.close()
+        src.close()
+
+
 def restore_db_backup(
     settings: Settings,
     *,
@@ -533,24 +553,28 @@ def restore_db_backup(
 
         db_mod.dispose_database()
 
-        for sidecar in (Path(f"{db_path}-wal"), Path(f"{db_path}-shm")):
-            if sidecar.exists():
-                try:
-                    sidecar.unlink()
-                except OSError:
-                    pass
+        _unlink_sqlite_sidecars(db_path)
 
-        src = sqlite3.connect(str(source_path), timeout=30.0)
-        dst = sqlite3.connect(str(db_path), timeout=30.0)
+        _copy_sqlite_file(source_path, db_path)
+
         try:
-            src.backup(dst)
-            dst.commit()
-        finally:
-            dst.close()
-            src.close()
-
-        db_mod.configure_database(settings.database_url)
-        db_mod.init_db()
+            db_mod.configure_database(settings.database_url)
+            db_mod.init_db()
+        except Exception as exc:
+            logger.warning("Restored DB migration failed (%s): %s", source_label, exc)
+            db_mod.dispose_database()
+            _unlink_sqlite_sidecars(db_path)
+            if pre_backup is not None:
+                rollback_path = resolve_backup_path(settings, str(pre_backup["filename"]))
+                _copy_sqlite_file(rollback_path, db_path)
+            else:
+                db_path.unlink(missing_ok=True)
+            db_mod.configure_database(settings.database_url)
+            db_mod.init_db()
+            raise validation_error(
+                "Yedek veritabani bu uygulama surumuyle uyumlu degil veya butunluk denetiminden gecemedi.",
+                field="file",
+            ) from exc
 
         with db_mod.session_scope() as fresh_db:
             if workspace_hash:

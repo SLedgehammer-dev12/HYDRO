@@ -51,7 +51,7 @@ def test_legacy_0001_schema_migrates_to_0002(tmp_path: Path):
     with TestClient(app) as tc:
         health = tc.get("/api/health").json()
         assert health["db"]["ok"] is True
-        assert health["db"]["migration"] == "0002"
+        assert health["db"]["migration"] == "0003"
 
     conn = sqlite3.connect(str(db_file))
     cols = {row[1] for row in conn.execute("PRAGMA table_info(projects)").fetchall()}
@@ -62,6 +62,10 @@ def test_legacy_0001_schema_migrates_to_0002(tmp_path: Path):
     assert row == ("Eski Proje", "active")
     migs = {row[0] for row in conn.execute("SELECT version FROM schema_migrations").fetchall()}
     assert {"0001", "0002"}.issubset(migs)
+    alembic_revs = [
+        row[0] for row in conn.execute("SELECT version_num FROM alembic_version").fetchall()
+    ]
+    assert alembic_revs == ["0003"]
     conn.close()
     db.dispose_database()
 
@@ -500,7 +504,7 @@ def test_db_backup_restore_and_admin_guard(headers, tmp_path: Path):
         assert stats_res.status_code == 200
         stats_body = stats_res.json()
         assert stats_body["is_sqlite"] is True
-        assert stats_body["schema_migration"] == "0002"
+        assert stats_body["schema_migration"] == "0003"
         assert stats_body["table_counts"]["projects"] >= 1
 
         bkp_res = file_client.post(

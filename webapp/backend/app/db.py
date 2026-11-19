@@ -2,7 +2,8 @@
 
 SQLite is the default (WAL, foreign keys on). The same models work on
 PostgreSQL by changing ``HYDRO_DATABASE_URL`` (e.g.
-``postgresql+psycopg://user:pass@host/db``).
+``postgresql+psycopg://user:pass@host/db``). Schema lifecycle is managed by
+Alembic via :mod:`app.migrations_runner`.
 """
 
 from __future__ import annotations
@@ -10,11 +11,13 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Iterator
 
-from sqlalchemy import Engine, create_engine, event, func, inspect, select, text
+from sqlalchemy import Engine, create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-CURRENT_MIGRATION = "0002"
+from . import migrations_runner
+
+CURRENT_MIGRATION = migrations_runner.HEAD_REVISION
 
 _engine: Engine | None = None
 _session_factory: sessionmaker[Session] | None = None
@@ -87,68 +90,16 @@ def get_sessionmaker() -> sessionmaker[Session]:
     return _session_factory
 
 
-def _ensure_column(
-    inspector,  # noqa: ANN001
-    table: str,
-    column_name: str,
-    ddl_fragment: str,
-) -> None:
-    columns = {column["name"] for column in inspector.get_columns(table)}
-    if column_name not in columns:
-        with get_engine().begin() as connection:
-            connection.execute(text(f'ALTER TABLE "{table}" ADD COLUMN {ddl_fragment}'))
+def init_db() -> str:
+    """Run Alembic migrations (with legacy ``0001``/``0002`` bridge when needed)."""
+
+    return migrations_runner.run_migrations(get_engine())
 
 
-def _record_migration(version: str, description: str) -> None:
-    from .models import SchemaMigration, utcnow
+def current_schema_version() -> str | None:
+    """Return active database revision from ``alembic_version`` (or legacy fallback)."""
 
-    factory = get_sessionmaker()
-    db = factory()
-    try:
-        if db.get(SchemaMigration, version) is None:
-            db.add(
-                SchemaMigration(
-                    version=version,
-                    description=description,
-                    applied_at=utcnow(),
-                )
-            )
-            db.commit()
-    finally:
-        db.close()
-
-
-def _apply_migrations() -> None:
-    """Apply additive idempotent migrations and record versions in ``schema_migrations``."""
-
-    inspector = inspect(get_engine())
-    table_names = set(inspector.get_table_names())
-    if "projects" in table_names:
-        _ensure_column(inspector, "projects", "code", "\"code\" VARCHAR(64) DEFAULT ''")
-    if "ocr_analyses" in table_names:
-        _ensure_column(inspector, "ocr_analyses", "dossier", '"dossier" JSON')
-    _record_migration("0001", "Baseline schema with project code and OCR dossier")
-
-    inspector = inspect(get_engine())
-    if "projects" in set(inspector.get_table_names()):
-        _ensure_column(inspector, "projects", "contractor", '"contractor" VARCHAR(200)')
-        _ensure_column(inspector, "projects", "supervisor", '"supervisor" VARCHAR(200)')
-        _ensure_column(inspector, "projects", "pipeline_length_m", '"pipeline_length_m" FLOAT')
-        _ensure_column(inspector, "projects", "status", "\"status\" VARCHAR(24) DEFAULT 'active'")
-        _ensure_column(inspector, "projects", "defaults", '"defaults" JSON')
-        with get_engine().begin() as connection:
-            connection.execute(text("UPDATE projects SET status = 'active' WHERE status IS NULL"))
-            connection.execute(text("UPDATE projects SET defaults = '{}' WHERE defaults IS NULL"))
-    _record_migration("0002", "Project engineering metadata and defaults")
-
-
-def init_db() -> None:
-    """Create tables and apply incremental additive migrations."""
-
-    from . import models  # noqa: F401  (register mappers)
-
-    models.Base.metadata.create_all(bind=get_engine())
-    _apply_migrations()
+    return migrations_runner.get_current_revision(get_engine())
 
 
 def dispose_database() -> None:
@@ -189,20 +140,15 @@ def session_scope() -> Iterator[Session]:
 
 
 def database_health() -> dict[str, object]:
-    from .models import SchemaMigration
-
     try:
         engine = get_engine()
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))
-        migration: str | None = CURRENT_MIGRATION
+        migration: str | None = None
         try:
-            with session_scope() as db:
-                latest = db.scalar(select(func.max(SchemaMigration.version)))
-                if latest:
-                    migration = str(latest)
+            migration = current_schema_version()
         except Exception:
-            migration = CURRENT_MIGRATION
+            migration = None
         return {
             "ok": True,
             "dialect": engine.dialect.name,
@@ -220,6 +166,7 @@ def database_health() -> dict[str, object]:
 __all__ = [
     "CURRENT_MIGRATION",
     "configure_database",
+    "current_schema_version",
     "database_health",
     "dispose_database",
     "get_db",
