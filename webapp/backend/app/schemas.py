@@ -349,6 +349,15 @@ class SectionLandmarkIn(StrictModel):
     elevation_m: float | None = None
 
 
+class SectionEquipmentIn(StrictModel):
+    id: str = Field(default="", max_length=64)
+    type: str = Field(default="valve", max_length=32)
+    label: str = Field(min_length=1, max_length=120)
+    station_m: float = Field(ge=0, le=1_000_000)
+    elevation_m: float | None = Field(default=None, ge=-500, le=10_000)
+    status: str = Field(default="pass", max_length=16)
+
+
 class DraftSectionIn(StrictModel):
     section_no: str = Field(min_length=1, max_length=40)
     start_kp: str = Field(min_length=1, max_length=40)
@@ -368,6 +377,7 @@ class DraftSectionIn(StrictModel):
     notes: str | None = Field(default=None, max_length=400)
     profile_points: list[SectionProfilePointIn] = Field(default_factory=list, max_length=250)
     landmarks: list[SectionLandmarkIn] = Field(default_factory=list, max_length=40)
+    equipment: list[SectionEquipmentIn] = Field(default_factory=list, max_length=64)
 
 
 class DraftSectionBatchCreate(StrictModel):

@@ -1003,3 +1003,112 @@ def test_hizan_real_sheets_scan_commit_and_3d_scene(client, headers):
     sec20 = next(s for s in scene["sections"] if s["section_no"] == "BÖLÜM 20")
     sec21 = next(s for s in scene["sections"] if s["section_no"] == "BÖLÜM 21")
     assert abs(sec21["start_m"] - sec20["end_m"]) <= 1.0
+
+
+def test_project_scene_equipment_warnings_and_template_clone(client, headers):
+    project = _create_project(client, headers, name="3D Ekipman Projesi", code="3D-01")
+    s1 = _create_session(
+        client,
+        headers,
+        name="Bölüm 1",
+        project_id=project["id"],
+        inputs={
+            "section_meta": {"section_no": "B-01", "start_kp": "0+000", "end_kp": "1+000"},
+            "geometry": {
+                "outside_diameter_mm": 406.4,
+                "wall_thickness_mm": 8.74,
+                "length_m": 1000.0,
+            },
+            "section_profile": {
+                "start_elevation_m": 100.0,
+                "end_elevation_m": 200.0,
+                "highest_elevation_m": 200.0,
+                "lowest_elevation_m": 100.0,
+                "design_pressure_bar": 80.0,
+                "smys_mpa": 450.0,
+            },
+        },
+    )
+
+    approx_scene = client.get(f"/api/projects/{project['id']}/scene", headers=headers).json()
+    assert approx_scene["is_survey_profile"] is False
+    assert approx_scene["is_custom_equipment"] is False
+    joined_warnings = " ".join(approx_scene["warnings"])
+    assert "profile_points" in joined_warnings
+    assert "equipment" in joined_warnings
+
+    upd = client.put(
+        f"/api/sessions/{s1['id']}",
+        json={
+            "inputs": {
+                "profile_points": [
+                    {"station_m": 0.0, "elevation_m": 100.0},
+                    {"station_m": 1000.0, "elevation_m": 200.0},
+                ],
+                "equipment": [
+                    {"id": "s1-pump", "type": "pump", "label": "Ana Pompa", "station_m": 0.0},
+                    {"id": "s1-gauge", "kind": "gauge", "label": "Orta Olcer", "station_m": 500.0},
+                ],
+            }
+        },
+        headers={**headers, "If-Match": f'"{s1["revision"]}"'},
+    )
+    assert upd.status_code == 200, upd.text
+
+    commit_res = client.post(
+        "/api/projects/plan-profile/commit",
+        json={
+            "project_id": project["id"],
+            "sections": [
+                {
+                    "section_no": "B-02",
+                    "start_kp": "1+000",
+                    "end_kp": "2+000",
+                    "length_m": 1000.0,
+                    "outside_diameter_mm": 406.4,
+                    "wall_thickness_mm": 8.74,
+                    "profile_points": [
+                        {"station_m": 0.0, "elevation_m": 200.0},
+                        {"station_m": 1000.0, "elevation_m": 300.0},
+                    ],
+                    "equipment": [
+                        {
+                            "id": "s2-valve",
+                            "type": "valve",
+                            "label": "Bitis Vanasi",
+                            "station_m": 800.0,
+                            "status": "warning",
+                        }
+                    ],
+                }
+            ],
+        },
+        headers=headers,
+    )
+    assert commit_res.status_code == 201, commit_res.text
+
+    real_scene = client.get(f"/api/projects/{project['id']}/scene", headers=headers).json()
+    assert real_scene["is_survey_profile"] is True
+    assert real_scene["is_custom_equipment"] is True
+    assert not any("profile_points" in w or "equipment" in w for w in real_scene["warnings"])
+    eq_by_id = {item["id"]: item for item in real_scene["equipment"]}
+    assert eq_by_id["s1-gauge"]["distance_m"] == 500.0
+    assert eq_by_id["s1-gauge"]["elevation_m"] == 150.0
+    assert eq_by_id["s2-valve"]["distance_m"] == 1800.0
+    assert eq_by_id["s2-valve"]["elevation_m"] == 280.0
+    assert eq_by_id["s2-valve"]["status"] == "warning"
+
+    clone_res = client.post(
+        f"/api/projects/{project['id']}/clone",
+        json={"mode": "template", "name": "3D Şablon Kopya"},
+        headers=headers,
+    )
+    assert clone_res.status_code == 201, clone_res.text
+    cloned_id = clone_res.json()["project"]["id"]
+    cloned_sessions = client.get(f"/api/sessions?project_id={cloned_id}", headers=headers).json()[
+        "items"
+    ]
+    b01_meta = next(s for s in cloned_sessions if s["name"] == "Bölüm 1")
+    b01_clone = client.get(f"/api/sessions/{b01_meta['id']}", headers=headers).json()
+    assert len(b01_clone["inputs"]["equipment"]) == 2
+    assert b01_clone["inputs"]["equipment"][1]["id"] == "s1-gauge"

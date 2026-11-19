@@ -2195,6 +2195,30 @@ def create_sections_from_drafts(
                 }
             )
 
+        raw_eq: list[dict[str, Any]] = []
+        for idx, eq in enumerate(draft.get("equipment") or [], start=1):
+            if not isinstance(eq, dict):
+                continue
+            st_val = _parse_float(str(eq.get("station_m")))
+            label_val = str(eq.get("label") or "").strip()
+            if st_val is None or not label_val:
+                continue
+            el_val = (
+                _parse_float(str(eq.get("elevation_m")))
+                if eq.get("elevation_m") is not None
+                else None
+            )
+            raw_eq.append(
+                {
+                    "id": str(eq.get("id") or f"eq-{idx}"),
+                    "type": str(eq.get("type") or "valve"),
+                    "label": label_val,
+                    "station_m": round(max(0.0, min(length_m, st_val)), 1),
+                    "elevation_m": round(el_val, 1) if el_val is not None else None,
+                    "status": str(eq.get("status") or "pass"),
+                }
+            )
+
         inputs = session_service.default_inputs()
         inputs["section_meta"] = {
             "section_no": sec_no,
@@ -2222,6 +2246,7 @@ def create_sections_from_drafts(
         inputs["segments"] = []
         inputs["profile_points"] = raw_pts
         inputs["landmarks"] = raw_lms
+        inputs["equipment"] = raw_eq
         if draft.get("material_grade"):
             inputs["material_grade"] = str(draft["material_grade"])
 
@@ -2269,6 +2294,8 @@ def create_sections_from_drafts(
                 merged_inputs["segments"] = []
             merged_inputs["profile_points"] = raw_pts
             merged_inputs["landmarks"] = raw_lms
+            if raw_eq:
+                merged_inputs["equipment"] = raw_eq
             if inputs.get("material_grade"):
                 merged_inputs["material_grade"] = inputs["material_grade"]
             existing.inputs = session_service.normalize_inputs(merged_inputs)

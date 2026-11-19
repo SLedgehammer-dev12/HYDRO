@@ -1773,6 +1773,7 @@ def clone_project(
             dst_inputs["section_profile"] = copy.deepcopy(src_inputs.get("section_profile") or {})
             dst_inputs["profile_points"] = copy.deepcopy(src_inputs.get("profile_points") or [])
             dst_inputs["landmarks"] = copy.deepcopy(src_inputs.get("landmarks") or [])
+            dst_inputs["equipment"] = copy.deepcopy(src_inputs.get("equipment") or [])
             dst_inputs["material_grade"] = src_inputs.get("material_grade") or ""
             dst_inputs["location_class"] = (
                 src_inputs.get("location_class") or dst_inputs["location_class"]

@@ -337,24 +337,66 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
               ) : null}
               {scene.is_survey_profile ? (
                 <Badge tone="pass">Plan-Profil Topoğrafya</Badge>
-              ) : null}
+              ) : (
+                <Badge tone="warning">Yaklaşık Kot</Badge>
+              )}
+              {scene.is_custom_equipment ? (
+                <Badge tone="pass">Gerçek Ekipman ({scene.equipment.length})</Badge>
+              ) : (
+                <Badge tone="warning">Varsayılan Ekipman ({scene.equipment.length})</Badge>
+              )}
               {(scene.landmarks?.length ?? 0) > 0 ? (
                 <Badge tone="info">{scene.landmarks?.length} pafta noktası</Badge>
               ) : null}
               <Badge tone="info">{scene.segments.length} segment</Badge>
-              <Badge tone="neutral">{scene.equipment.length} ekipman</Badge>
             </div>
           }
           bodyClassName="pt-2"
         >
-          {effectiveProjectMode && projectScene && !projectScene.continuity_ok && projectScene.warnings?.length ? (
+          {(() => {
+            const continuityWarnings =
+              effectiveProjectMode && projectScene && !projectScene.continuity_ok
+                ? (projectScene.warnings ?? []).filter(
+                    (w) => !w.includes("profile_points") && !w.includes("equipment"),
+                  )
+                : [];
+            return continuityWarnings.length > 0 ? (
+              <div className="mb-3">
+                <InlineNotice tone="warning" title="Proje KP Sürekliliği Uyarısı">
+                  <ul className="list-disc space-y-0.5 pl-4 text-[11.5px]">
+                    {continuityWarnings.map((w, idx) => (
+                      <li key={`${w}-${idx}`}>{w}</li>
+                    ))}
+                  </ul>
+                </InlineNotice>
+              </div>
+            ) : null;
+          })()}
+          {scene.segments.length > 0 && (!scene.is_survey_profile || !scene.is_custom_equipment) ? (
             <div className="mb-3">
-              <InlineNotice tone="warning" title="Proje KP Sürekliliği Uyarısı">
-                <ul className="list-disc space-y-0.5 pl-4 text-[11.5px]">
-                  {projectScene.warnings.map((w, idx) => (
-                    <li key={`${w}-${idx}`}>{w}</li>
-                  ))}
-                </ul>
+              <InlineNotice tone="warning" title="Yaklaşık 3D sahne">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span>
+                    {!scene.is_survey_profile && !scene.is_custom_equipment
+                      ? "Gerçek kot profili (profile_points[]) ve saha ekipmanı (equipment[]) girilmediği için 3D görünüm 4 kot noktası ve varsayılan ekipman yerleşimiyle yaklaşık çizilir."
+                      : !scene.is_survey_profile
+                        ? "Gerçek kot profili (profile_points[]) girilmediği için zemin ve boru kotu 4 noktadan yaklaşık türetildi."
+                        : "Özel saha ekipmanı (equipment[]) tanımlanmadığı için vana, pompa ve pig yerleşimi varsayılan konumlarla gösteriliyor."}
+                  </span>
+                  {!effectiveProjectMode ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() =>
+                        document
+                          .getElementById("site-survey-panel")
+                          ?.scrollIntoView({ behavior: "smooth", block: "start" })
+                      }
+                    >
+                      Kot / ekipman gir
+                    </Button>
+                  ) : null}
+                </div>
               </InlineNotice>
             </div>
           ) : null}

@@ -523,3 +523,39 @@ def test_json_snapshot_is_serialisable(client):
     text = json.dumps(snapshot, ensure_ascii=False)
     assert "NaN" not in text
     assert "Infinity" not in text
+
+
+def test_scene_custom_equipment_and_approximate_warning(client):
+    default_session = create_session(client, inputs=full_inputs())
+    default_scene = client.get(f"/api/sessions/{default_session['id']}/scene").json()
+    assert default_scene["is_custom_equipment"] is False
+    assert any("ekipman" in w.lower() for w in default_scene["warnings"])
+
+    inputs = full_inputs(
+        geometry={"outside_diameter_mm": 406.4, "wall_thickness_mm": 8.74, "length_m": 1000.0},
+        profile_points=[
+            {"station_m": 0.0, "elevation_m": 100.0},
+            {"station_m": 1000.0, "elevation_m": 200.0},
+        ],
+        equipment=[
+            {"id": "eq-v1", "kind": "mainline", "label": "Giris Vanasi", "station_m": 0.0},
+            {"id": "eq-p1", "type": "pump", "label": "Ana Pompa", "station_m": 100.0},
+            {"id": "eq-h1", "type": "test-head", "label": "Test Basligi", "station_m": 150.0},
+            {"id": "eq-g1", "type": "gauge", "label": "Orta Olcer", "station_m": 500.0},
+        ],
+    )
+    updated = client.put(
+        f"/api/sessions/{default_session['id']}",
+        json={"inputs": inputs},
+        headers={"If-Match": f'"{default_session["revision"]}"'},
+    )
+    assert updated.status_code == 200, updated.text
+    assert len(updated.json()["inputs"]["equipment"]) == 4
+
+    scene = client.get(f"/api/sessions/{default_session['id']}/scene").json()
+    assert scene["approximate_profile"] is False
+    assert scene["is_custom_equipment"] is True
+    assert not any("ekipman" in w.lower() for w in scene["warnings"])
+    custom = {item["id"]: item for item in scene["custom_equipment"]}
+    assert custom["eq-v1"]["type"] == "valve"
+    assert custom["eq-g1"]["elevation_m"] == 150.0

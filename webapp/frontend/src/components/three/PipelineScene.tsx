@@ -201,10 +201,27 @@ export default function PipelineScene({ data, className, onOpenSession }: Pipeli
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="inline-block h-1.5 w-1.5 rounded-full bg-cyan" />
                 <p className="text-[11px] font-semibold text-mist-100">3D saha görünümü</p>
-                {!resolved.isDemo && scene.is_survey_profile ? (
-                  <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-medium text-emerald-300">
-                    Plan-Profil Gerçek Topoğrafya
-                  </span>
+                {!resolved.isDemo ? (
+                  <>
+                    <span
+                      className={
+                        scene.is_survey_profile
+                          ? "rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-medium text-emerald-300"
+                          : "rounded bg-amber/15 px-1.5 py-0.5 text-[9px] font-medium text-amber"
+                      }
+                    >
+                      {scene.is_survey_profile ? "Gerçek Topoğrafya" : "Yaklaşık Kot"}
+                    </span>
+                    <span
+                      className={
+                        scene.is_custom_equipment
+                          ? "rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-medium text-emerald-300"
+                          : "rounded bg-amber/15 px-1.5 py-0.5 text-[9px] font-medium text-amber"
+                      }
+                    >
+                      {scene.is_custom_equipment ? "Gerçek Ekipman" : "Varsayılan Ekipman"}
+                    </span>
+                  </>
                 ) : null}
               </div>
               <p className="numeric mt-0.5 text-[10px] text-mist-500">
@@ -220,7 +237,9 @@ export default function PipelineScene({ data, className, onOpenSession }: Pipeli
                   title={scene.warnings.join(" · ")}
                 >
                   <span className="font-semibold">
-                    {scene.is_survey_profile ? "Süreklilik / Kontrol" : "Yaklaşık sahne"}
+                    {!scene.is_survey_profile || !scene.is_custom_equipment
+                      ? "Yaklaşık sahne"
+                      : "Süreklilik / Kontrol"}
                   </span>{" "}
                   · {scene.warnings[0]}
                   {scene.warnings.length > 1 ? ` (+${scene.warnings.length - 1})` : ""}

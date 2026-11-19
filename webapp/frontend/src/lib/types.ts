@@ -5,8 +5,16 @@
  * Alan adları API ile birebir aynıdır; snake_case korunur.
  */
 
-export type { SceneData, SceneEquipment, SceneLandmark, ScenePoint, SceneSegment, SceneStatus } from "./scene";
-import type { SceneData, SceneStatus } from "./scene";
+export type {
+  SceneData,
+  SceneEquipment,
+  SceneEquipmentType,
+  SceneLandmark,
+  ScenePoint,
+  SceneSegment,
+  SceneStatus,
+} from "./scene";
+import type { SceneData, SceneEquipmentType, SceneStatus } from "./scene";
 
 /* ------------------------------------------------------------------ */
 /* Ortak enum'lar                                                      */
@@ -617,6 +625,15 @@ export interface SectionLandmarkItem {
   elevation_m?: number | null;
 }
 
+export interface EquipmentInputItem {
+  id: string;
+  type: SceneEquipmentType;
+  label: string;
+  station_m: number;
+  elevation_m: number | null;
+  status?: SceneStatus;
+}
+
 export interface DraftSectionItem {
   section_no: string;
   start_kp: string;
@@ -1108,6 +1125,7 @@ export interface AppInputs {
   segments: SegmentRow[];
   profile_points: ProfilePointItem[];
   landmarks: SectionLandmarkItem[];
+  equipment: EquipmentInputItem[];
   section_profile: SectionProfileInputs;
   material_grade: string;
   location_class: string;

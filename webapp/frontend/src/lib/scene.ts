@@ -62,6 +62,7 @@ export interface SceneData {
   pressure_max_bar?: number;
   start_kp_m?: number | null;
   is_survey_profile?: boolean;
+  is_custom_equipment?: boolean;
   /** Optional real survey points: [distance_m, elevation_m]. */
   profile_points?: ScenePoint[];
   landmarks?: SceneLandmark[];

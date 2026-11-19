@@ -196,6 +196,7 @@ export function resolveSceneData(data: SceneData | null | undefined): ResolvedSc
       landmarks: Array.isArray(data.landmarks) ? data.landmarks : [],
       start_kp_m: data.start_kp_m ?? null,
       is_survey_profile: Boolean(data.is_survey_profile),
+      is_custom_equipment: Boolean(data.is_custom_equipment),
       warnings: Array.isArray(data.warnings) ? data.warnings : [],
     },
     isDemo: false,

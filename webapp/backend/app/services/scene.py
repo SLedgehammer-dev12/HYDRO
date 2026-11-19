@@ -30,6 +30,33 @@ NO_ELEVATION_WARNING = "Kot bilgisi girilmedi; zemin 0 m kabul edildi."
 NO_PRESSURE_WARNING = "Izlenen basinc girilmedi; basinc renkleri hesaplanmadi."
 NEGATIVE_PRESSURE_WARNING = "Hidrostatik turetimde negatif basinc 0'a kirpildi."
 PUMP_ASSUMPTION_WARNING = "Pompa konumu secilmedi; baslangic noktasi kabul edildi."
+APPROXIMATE_EQUIPMENT_WARNING = "Ekipman konumlari varsayilan yerlesimle yaklasik gosteriliyor."
+
+_EQUIPMENT_TYPE_ALIASES: dict[str, str] = {
+    "valve": "valve",
+    "mainline": "valve",
+    "vent": "valve",
+    "drain": "valve",
+    "pump": "pump",
+    "test-head": "test-head",
+    "test_head": "test-head",
+    "pig-launcher": "pig-launcher",
+    "pig_launcher": "pig-launcher",
+    "pig-receiver": "pig-receiver",
+    "pig_receiver": "pig-receiver",
+    "gauge": "gauge",
+}
+_VALID_SCENE_STATUSES = {"pending", "pass", "fail", "warning"}
+
+
+def _normalize_equipment_type(raw_type: Any) -> str:
+    key = str(raw_type or "valve").strip().lower()
+    return _EQUIPMENT_TYPE_ALIASES.get(key, "valve")
+
+
+def _normalize_equipment_status(raw_status: Any) -> str:
+    val = str(raw_status or "pass").strip().lower()
+    return val if val in _VALID_SCENE_STATUSES else "pass"
 
 
 def _density() -> float:
@@ -360,30 +387,49 @@ def build_scene(inputs: dict[str, Any]) -> dict[str, Any]:
     }
 
     raw_equipment = inputs.get("equipment")
+    has_custom_equipment = False
+    custom_equipment: list[dict[str, Any]] = []
     if isinstance(raw_equipment, list) and raw_equipment:
         for index, item in enumerate(raw_equipment, start=1):
             if not isinstance(item, dict):
                 continue
-            kind = str(item.get("kind") or "mainline")
+            raw_kind = str(item.get("type") or item.get("kind") or "mainline").strip().lower()
+            norm_type = _normalize_equipment_type(raw_kind)
             station_value = as_float(item.get("station_m"))
+            if station_value is None:
+                station_value = as_float(item.get("distance_m"))
             if station_value is None:
                 continue
             station_value = max(0.0, min(total_length, station_value))
             elevation = as_float(item.get("elevation_m"))
             if elevation is None:
                 elevation = elevation_at(station_value)
-            if kind in {"valve", "mainline", "vent", "drain"}:
+            eq_id = str(item.get("id") or f"v-{index}")
+            label_val = str(item.get("label") or raw_kind).strip() or norm_type
+            eq_status = _normalize_equipment_status(item.get("status"))
+            has_custom_equipment = True
+            custom_equipment.append(
+                {
+                    "id": eq_id,
+                    "type": norm_type,
+                    "label": label_val,
+                    "distance_m": round(station_value, 1),
+                    "elevation_m": round(elevation, 1),
+                    "status": eq_status,
+                }
+            )
+            if raw_kind in {"valve", "mainline", "vent", "drain"}:
                 valves.append(
                     {
-                        "id": str(item.get("id") or f"v-{index}"),
+                        "id": eq_id,
                         "station_m": station_value,
                         "elevation_m": elevation,
-                        "kind": kind,
-                        "label": str(item.get("label") or kind),
+                        "kind": raw_kind,
+                        "label": label_val,
                         "state": str(item.get("state") or "unknown"),
                     }
                 )
-            elif kind == "pump":
+            elif norm_type == "pump":
                 pump.update(
                     {
                         "station_m": station_value,
@@ -391,7 +437,7 @@ def build_scene(inputs: dict[str, Any]) -> dict[str, Any]:
                         "side": "start" if station_value <= total_length / 2 else "end",
                     }
                 )
-            elif kind == "test_head":
+            elif norm_type == "test-head":
                 test_head.update(
                     {
                         "station_m": station_value,
@@ -399,6 +445,9 @@ def build_scene(inputs: dict[str, Any]) -> dict[str, Any]:
                         "label": str(item.get("label") or "Test basligi"),
                     }
                 )
+
+    if not has_custom_equipment:
+        warnings.append(APPROXIMATE_EQUIPMENT_WARNING)
 
     if not valves:
         for index, station_value in enumerate(boundary_stations, start=1):
@@ -470,6 +519,7 @@ def build_scene(inputs: dict[str, Any]) -> dict[str, Any]:
             "test_head": test_head,
             "pig": pig,
         },
+        "custom_equipment": custom_equipment,
         "ranges": {
             "pressure_bar": {
                 "min": min(sampled_pressures) if sampled_pressures else 0.0,
@@ -493,6 +543,7 @@ def build_scene(inputs: dict[str, Any]) -> dict[str, Any]:
         ],
         "warnings": warnings,
         "approximate_profile": approximate,
+        "is_custom_equipment": has_custom_equipment,
         "profile_points": profile_points,
         "totals": totals,
         "generated_at": iso_z(utcnow()),
@@ -705,10 +756,13 @@ def build_project_scene(
     total_length_m = round(cursor_m, 2)
     density = _density()
     any_survey_profile = False
+    survey_section_count = 0
+    any_custom_equipment = False
     global_profile_points: list[tuple[float, float]] = []
     boundary_xs: set[float] = set()
     segments: list[dict[str, Any]] = []
     equipment: list[dict[str, Any]] = []
+    custom_equipment: list[dict[str, Any]] = []
     landmarks: list[dict[str, Any]] = []
     seen_landmarks: list[tuple[float, str, str]] = []
     sections_summary: list[dict[str, Any]] = []
@@ -747,6 +801,7 @@ def build_project_scene(
         has_local_survey = len(local_pts) >= 2
         if has_local_survey:
             any_survey_profile = True
+            survey_section_count += 1
             if local_pts[0][0] > 0.0:
                 local_pts.insert(0, (0.0, local_pts[0][1]))
             if local_pts[-1][0] < sec_len:
@@ -953,6 +1008,34 @@ def build_project_scene(
                 }
             )
 
+        raw_eq_val = inputs.get("equipment")
+        raw_eq_items: list[Any] = raw_eq_val if isinstance(raw_eq_val, list) else []
+        for eq_idx, eq_item in enumerate(raw_eq_items, start=1):
+            if not isinstance(eq_item, dict):
+                continue
+            eq_st = as_float(eq_item.get("station_m"))
+            if eq_st is None:
+                eq_st = as_float(eq_item.get("distance_m"))
+            eq_type = _normalize_equipment_type(eq_item.get("type") or eq_item.get("kind"))
+            eq_lbl = str(eq_item.get("label") or eq_type).strip()
+            if eq_st is None or not eq_lbl:
+                continue
+            clamped_st = max(0.0, min(sec_len, eq_st))
+            eq_el = as_float(eq_item.get("elevation_m"))
+            if eq_el is None:
+                eq_el = round(local_interp(clamped_st), 1)
+            any_custom_equipment = True
+            custom_equipment.append(
+                {
+                    "id": str(eq_item.get("id") or f"eq-{rec['sec_no']}-{eq_idx}"),
+                    "type": eq_type,
+                    "label": eq_lbl,
+                    "distance_m": round(offset_m + clamped_st, 1),
+                    "elevation_m": round(eq_el, 1),
+                    "status": _normalize_equipment_status(eq_item.get("status")),
+                }
+            )
+
         sections_summary.append(
             {
                 "session_id": sess.id,
@@ -970,72 +1053,89 @@ def build_project_scene(
     thinned_profile = _thin_points(global_profile_points, 300, required_xs=boundary_xs)
     global_interp = _elevation_interpolator(thinned_profile)
 
-    # Başlangıç / bitiş ve ekstremum kot göstergeleri
-    start_el_g = round(global_interp(0.0), 1) if thinned_profile else 0.0
-    end_el_g = round(global_interp(total_length_m), 1) if thinned_profile else 0.0
-    equipment.insert(
-        0,
-        {
-            "id": "eq-pump-start",
-            "type": "pump",
-            "label": "Hat Başlangıcı / Pompa",
-            "distance_m": 0.0,
-            "elevation_m": start_el_g,
-            "status": "pass",
-        },
-    )
-    equipment.insert(
-        0,
-        {
-            "id": "eq-launcher-start",
-            "type": "pig-launcher",
-            "label": "Pig Başlatıcı",
-            "distance_m": 0.0,
-            "elevation_m": start_el_g,
-            "status": "pass",
-        },
-    )
-    equipment.append(
-        {
-            "id": "eq-receiver-end",
-            "type": "pig-receiver",
-            "label": "Hat Sonu / Pig Alıcı",
-            "distance_m": round(total_length_m, 1),
-            "elevation_m": end_el_g,
-            "status": "pass",
-        }
-    )
+    if any_custom_equipment:
+        equipment = sorted(custom_equipment, key=lambda item: float(item["distance_m"]))
+    else:
+        # Başlangıç / bitiş ve ekstremum kot göstergeleri
+        start_el_g = round(global_interp(0.0), 1) if thinned_profile else 0.0
+        end_el_g = round(global_interp(total_length_m), 1) if thinned_profile else 0.0
+        equipment.insert(
+            0,
+            {
+                "id": "eq-pump-start",
+                "type": "pump",
+                "label": "Hat Başlangıcı / Pompa",
+                "distance_m": 0.0,
+                "elevation_m": start_el_g,
+                "status": "pass",
+            },
+        )
+        equipment.insert(
+            0,
+            {
+                "id": "eq-launcher-start",
+                "type": "pig-launcher",
+                "label": "Pig Başlatıcı",
+                "distance_m": 0.0,
+                "elevation_m": start_el_g,
+                "status": "pass",
+            },
+        )
+        equipment.append(
+            {
+                "id": "eq-receiver-end",
+                "type": "pig-receiver",
+                "label": "Hat Sonu / Pig Alıcı",
+                "distance_m": round(total_length_m, 1),
+                "elevation_m": end_el_g,
+                "status": "pass",
+            }
+        )
 
-    if len(thinned_profile) >= 3:
-        max_pt = max(thinned_profile, key=lambda pt: pt[1])
-        min_pt = min(thinned_profile, key=lambda pt: pt[1])
-        if 40.0 < max_pt[0] < total_length_m - 40.0:
-            kp_txt = (
-                f" (KP {format_kp(origin_kp_m + max_pt[0])})" if origin_kp_m is not None else ""
+        if len(thinned_profile) >= 3:
+            max_pt = max(thinned_profile, key=lambda pt: pt[1])
+            min_pt = min(thinned_profile, key=lambda pt: pt[1])
+            if 40.0 < max_pt[0] < total_length_m - 40.0:
+                kp_txt = (
+                    f" (KP {format_kp(origin_kp_m + max_pt[0])})" if origin_kp_m is not None else ""
+                )
+                equipment.append(
+                    {
+                        "id": "eq-global-summit",
+                        "type": "gauge",
+                        "label": f"Zirve · {max_pt[1]:.1f} m{kp_txt}",
+                        "distance_m": round(max_pt[0], 1),
+                        "elevation_m": round(max_pt[1], 1),
+                        "status": "warning",
+                    }
+                )
+            if 40.0 < min_pt[0] < total_length_m - 40.0 and abs(min_pt[0] - max_pt[0]) > 40.0:
+                kp_txt = (
+                    f" (KP {format_kp(origin_kp_m + min_pt[0])})" if origin_kp_m is not None else ""
+                )
+                equipment.append(
+                    {
+                        "id": "eq-global-lowpoint",
+                        "type": "gauge",
+                        "label": f"Maks. Statik Yük · {min_pt[1]:.1f} m{kp_txt}",
+                        "distance_m": round(min_pt[0], 1),
+                        "elevation_m": round(min_pt[1], 1),
+                        "status": "pass",
+                    }
+                )
+
+    if records:
+        if survey_section_count == 0:
+            warnings.append(
+                "Gerçek kot profili (profile_points) girilmedi; 3D sahne 4 noktadan yaklaşık türetildi."
             )
-            equipment.append(
-                {
-                    "id": "eq-global-summit",
-                    "type": "gauge",
-                    "label": f"Zirve · {max_pt[1]:.1f} m{kp_txt}",
-                    "distance_m": round(max_pt[0], 1),
-                    "elevation_m": round(max_pt[1], 1),
-                    "status": "warning",
-                }
+        elif survey_section_count < len(records):
+            warnings.append(
+                "Bazı test bölümlerinde gerçek kot profili yok; eksik kesitler 4 noktadan yaklaşık türetildi."
             )
-        if 40.0 < min_pt[0] < total_length_m - 40.0 and abs(min_pt[0] - max_pt[0]) > 40.0:
-            kp_txt = (
-                f" (KP {format_kp(origin_kp_m + min_pt[0])})" if origin_kp_m is not None else ""
-            )
-            equipment.append(
-                {
-                    "id": "eq-global-lowpoint",
-                    "type": "gauge",
-                    "label": f"Maks. Statik Yük · {min_pt[1]:.1f} m{kp_txt}",
-                    "distance_m": round(min_pt[0], 1),
-                    "elevation_m": round(min_pt[1], 1),
-                    "status": "pass",
-                }
+        if not any_custom_equipment:
+            warnings.append(
+                "Gerçek saha ekipmanı (equipment) girilmedi; ekipman konumları varsayılan yerleşimle gösteriliyor."
             )
 
     pressures = [
@@ -1053,6 +1153,7 @@ def build_project_scene(
         "landmarks": landmarks,
         "start_kp_m": origin_kp_m,
         "is_survey_profile": any_survey_profile,
+        "is_custom_equipment": any_custom_equipment,
         "warnings": list(dict.fromkeys(warnings)),
         "sections": sections_summary,
     }
@@ -1063,6 +1164,7 @@ def build_project_scene(
 
 
 __all__ = [
+    "APPROXIMATE_EQUIPMENT_WARNING",
     "APPROXIMATE_PROFILE_WARNING",
     "SCENE_SCHEMA_VERSION",
     "build_project_scene",

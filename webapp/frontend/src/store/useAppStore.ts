@@ -91,6 +91,8 @@ export interface AppStore {
 
   patchInputs: (patch: InputPatch) => void;
   setSegments: (segments: AppInputs["segments"]) => void;
+  setProfilePoints: (points: AppInputs["profile_points"]) => void;
+  setEquipment: (items: AppInputs["equipment"]) => void;
   updateSegment: (id: string, patch: Partial<AppInputs["segments"][number]>) => void;
   addSegment: () => void;
   removeSegment: (id: string) => void;
@@ -205,6 +207,12 @@ export const useAppStore = create<AppStore>()(
 
       setSegments: (segments) =>
         set((state) => ({ inputs: { ...state.inputs, segments }, dirty: true })),
+
+      setProfilePoints: (profile_points) =>
+        set((state) => ({ inputs: { ...state.inputs, profile_points }, dirty: true })),
+
+      setEquipment: (equipment) =>
+        set((state) => ({ inputs: { ...state.inputs, equipment }, dirty: true })),
 
       updateSegment: (id, patch) =>
         set((state) => ({

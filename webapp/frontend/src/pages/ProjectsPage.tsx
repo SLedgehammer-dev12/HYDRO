@@ -583,16 +583,37 @@ export function ProjectsPage() {
           }
           bodyClassName="pt-2"
         >
+          {(() => {
+            const continuityWarnings =
+              projectSceneQuery.data && !projectSceneQuery.data.continuity_ok
+                ? (projectSceneQuery.data.warnings ?? []).filter(
+                    (w) => !w.includes("profile_points") && !w.includes("equipment"),
+                  )
+                : [];
+            return continuityWarnings.length > 0 ? (
+              <div className="mb-3">
+                <InlineNotice tone="warning" title="Proje KP Sürekliliği Uyarısı">
+                  <ul className="list-disc space-y-0.5 pl-4 text-[11.5px]">
+                    {continuityWarnings.map((w, idx) => (
+                      <li key={`${w}-${idx}`}>{w}</li>
+                    ))}
+                  </ul>
+                </InlineNotice>
+              </div>
+            ) : null;
+          })()}
           {projectSceneQuery.data &&
-          !projectSceneQuery.data.continuity_ok &&
-          projectSceneQuery.data.warnings?.length ? (
+          projectSceneQuery.data.segments.length > 0 &&
+          (!projectSceneQuery.data.is_survey_profile ||
+            !projectSceneQuery.data.is_custom_equipment) ? (
             <div className="mb-3">
-              <InlineNotice tone="warning" title="Proje KP Sürekliliği Uyarısı">
-                <ul className="list-disc space-y-0.5 pl-4 text-[11.5px]">
-                  {projectSceneQuery.data.warnings.map((w, idx) => (
-                    <li key={`${w}-${idx}`}>{w}</li>
-                  ))}
-                </ul>
+              <InlineNotice tone="warning" title="Yaklaşık 3D sahne">
+                {!projectSceneQuery.data.is_survey_profile &&
+                !projectSceneQuery.data.is_custom_equipment
+                  ? "Bazı veya tüm kesitlerde gerçek kot profili (profile_points[]) ve özel saha ekipmanı (equipment[]) bulunmadığı için sahne yaklaşık türetildi."
+                  : !projectSceneQuery.data.is_survey_profile
+                    ? "Gerçek kot profili eksik olan kesitler 4 kot noktasından yaklaşık türetildi."
+                    : "Özel saha ekipmanı girilmediği için bölüm sınır vanaları ve varsayılan ekipman yerleşimi gösteriliyor."}
               </InlineNotice>
             </div>
           ) : null}

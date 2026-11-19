@@ -7,7 +7,10 @@ import type {
   BSource,
   CheckAutoDetail,
   CheckKey,
+  EquipmentInputItem,
   ProfilePointItem,
+  SceneEquipmentType,
+  SceneStatus,
   SectionFormsSummary,
   SectionLandmarkItem,
   SegmentRow,
@@ -95,6 +98,47 @@ function asProfilePoints(value: unknown): ProfilePointItem[] {
   return points.sort((a, b) => a.station_m - b.station_m);
 }
 
+const EQUIPMENT_TYPE_MAP: Record<string, SceneEquipmentType> = {
+  valve: "valve",
+  mainline: "valve",
+  vent: "valve",
+  drain: "valve",
+  pump: "pump",
+  "test-head": "test-head",
+  test_head: "test-head",
+  "pig-launcher": "pig-launcher",
+  pig_launcher: "pig-launcher",
+  "pig-receiver": "pig-receiver",
+  pig_receiver: "pig-receiver",
+  gauge: "gauge",
+};
+
+const EQUIPMENT_STATUS_SET = new Set<SceneStatus>(["pending", "pass", "fail", "warning"]);
+
+function asEquipment(value: unknown): EquipmentInputItem[] {
+  if (!Array.isArray(value)) return [];
+  const items: EquipmentInputItem[] = [];
+  for (let i = 0; i < value.length; i += 1) {
+    const row = asRecord(value[i]);
+    const station = asNumber(row.station_m ?? row.distance_m, null);
+    const rawType = asString(row.type ?? row.kind, "valve").trim().toLowerCase();
+    const normType: SceneEquipmentType = EQUIPMENT_TYPE_MAP[rawType] ?? "valve";
+    const label = asString(row.label).trim();
+    if (station === null || !label) continue;
+    const rawStatus = asString(row.status, "pass").trim().toLowerCase() as SceneStatus;
+    const status: SceneStatus = EQUIPMENT_STATUS_SET.has(rawStatus) ? rawStatus : "pass";
+    items.push({
+      id: asString(row.id).trim() || `eq-item-${i + 1}`,
+      type: normType,
+      label,
+      station_m: station,
+      elevation_m: asNumber(row.elevation_m, null),
+      status,
+    });
+  }
+  return items.sort((a, b) => a.station_m - b.station_m);
+}
+
 function asLandmarks(value: unknown): SectionLandmarkItem[] {
   if (!Array.isArray(value)) return [];
   const items: SectionLandmarkItem[] = [];
@@ -163,6 +207,7 @@ export function normalizeInputs(raw: unknown): AppInputs {
     segments: asSegments(raw.segments, base.segments),
     profile_points: asProfilePoints(raw.profile_points),
     landmarks: asLandmarks(raw.landmarks),
+    equipment: asEquipment(raw.equipment),
     section_profile: {
       highest_elevation_m: asNumber(profile.highest_elevation_m, base.section_profile.highest_elevation_m),
       lowest_elevation_m: asNumber(profile.lowest_elevation_m, base.section_profile.lowest_elevation_m),

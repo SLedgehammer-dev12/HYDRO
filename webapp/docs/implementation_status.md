@@ -9,7 +9,7 @@ Dal: `main` (`v1.9.1`)
 
 | Alan | Durum | Kanit |
 | --- | --- | --- |
-| Backend API | Calisiyor | 81 OpenAPI path (94 operation), 210 pytest (Alembic `0003`), 48 backend dosyada `mypy` temiz |
+| Backend API | Calisiyor | 81 OpenAPI path (94 operation), 212 pytest (Alembic `0003`), 48 backend dosyada `mypy` temiz |
 | Frontend kabuk | Calisiyor | 9 sekme (Projeler & Kesitler, birlesik Geometri & Saha, son sekmede birlesik Katsayilar & Detay), responsive, tema |
 | Hesaplamalar | Parity | A/B, hava, basinc, profil, pig, pressurization, termal denge |
 | Proje & Kesit DB | Calisiyor | `projects` + `sessions.project_id` + `inputs.section_meta`, kesit siralama/acma/kopyalama/silme |
@@ -23,7 +23,7 @@ Dal: `main` (`v1.9.1`)
 ## Dogrulama
 
 ```bash
-python3 -m pytest webapp/backend/tests -q          # 210 passed
+python3 -m pytest webapp/backend/tests -q          # 212 passed
 python3 -m unittest discover -s tests -p "test_*.py"  # 709 passed (skipped=1)
 cd webapp/frontend && npm run typecheck && npm run build  # PASS
 cd webapp/frontend && HYDRO_APP_URL=http://127.0.0.1:8099 node scripts/verify-tabs.mjs  # 12/12 PASS
@@ -80,5 +80,5 @@ docker compose -f webapp/docker-compose.yml up --build
 3. **Alembic uretim gocu (tamamlandi):** `webapp/backend/migrations/` (`0002` → `0003`), `migrations_runner.py`, eski `0001`/`0002` koprusu, SQLite FK / Postgres advisory lock korumasi ve asamali geri alinabilir yedek geri yukleme tamamlandi.
 4. **Auth/OIDC ve iki-kisi kurali:** MVP'de yok (kurumsal mimari karar bekleniyor).
 5. **Postgres:** kod uyumlu, `psycopg` kurulu degil; canli Postgres runtime testi yapilmadi.
-6. **Frontend kod bolme & birim testleri (tamamlandi):** rota/Recharts/three.js lazy-loading + `check:bundle` (`143,2 kB` gzip ilk yukleme JS) ve 21 Vitest bilesen/birim testi eklendi.
-7. **3D gercek veri:** `profile_points[]`/`equipment[]` opsiyonel; yoksa yaklasik sahne.
+6. **Frontend kod bolme & birim testleri (tamamlandi):** rota/Recharts/three.js lazy-loading + `check:bundle` (`143,8 kB` gzip ilk yukleme JS) ve 28 Vitest bilesen/birim testi eklendi.
+7. **3D gercek veri (tamamlandi):** `profile_points[]` ve `equipment[]` girdileri (`SiteSurveyPanel.tsx`, `buildSceneData()`, `build_scene()`, `build_project_scene()`), yoksa acik yaklasik sahne uyarilari gosterilir.

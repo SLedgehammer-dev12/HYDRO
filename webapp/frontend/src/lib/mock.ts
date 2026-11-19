@@ -18,6 +18,7 @@ import type {
   CoefficientBRequest,
   CoefficientCompareRequest,
   DecisionStatus,
+  EquipmentInputItem,
   GeometryIn,
   GeometryResponse,
   GeometrySummary,
@@ -351,6 +352,7 @@ export function createDefaultInputs(): AppInputs {
     segments: createDefaultSegments(),
     profile_points: [],
     landmarks: [],
+    equipment: [],
     section_profile: {
       highest_elevation_m: 320,
       lowest_elevation_m: 180,
@@ -464,6 +466,7 @@ export function createEmptyInputs(): AppInputs {
     segments: [],
     profile_points: [],
     landmarks: [],
+    equipment: [],
     section_profile: {
       highest_elevation_m: null,
       lowest_elevation_m: null,
@@ -1362,56 +1365,120 @@ function interpolateElevation(profile: Array<{ x: number; y: number }>, x: numbe
   return profile[profile.length - 1].y;
 }
 
-export function buildSceneData(inputs: AppInputs, results: { profile?: PressureProfileResponse; pig?: PigSpeedResponse }): SceneData {
-  const sections = sectionsFromInputs(inputs);
-  if (sections.length === 0) {
-    return { segments: [], equipment: [], warnings: ["Geometri girilmediği için sahne boş."] };
-  }
-
-  const totalLength = sections.reduce((sum, s) => sum + s.length_m, 0);
+export function resolveProfileCurve(
+  inputs: AppInputs,
+  totalLength: number,
+): { points: Array<{ x: number; y: number }>; hasSurveyProfile: boolean } {
   const sp = inputs.section_profile;
   const startElev = sp.start_elevation_m ?? sp.lowest_elevation_m ?? 0;
   const endElev = sp.end_elevation_m ?? sp.highest_elevation_m ?? startElev;
   const highest = sp.highest_elevation_m ?? Math.max(startElev, endElev);
   const lowest = sp.lowest_elevation_m ?? Math.min(startElev, endElev);
 
-  const hasSurveyProfile =
-    Array.isArray(inputs.profile_points) && inputs.profile_points.length >= 2;
-
-  let profile: Array<{ x: number; y: number }>;
-  if (hasSurveyProfile) {
-    const rawSorted = inputs.profile_points
-      .filter((pt) => Number.isFinite(pt.station_m) && Number.isFinite(pt.elevation_m))
-      .map((pt) => ({ x: clamp(pt.station_m, 0, totalLength), y: pt.elevation_m }))
-      .sort((a, b) => a.x - b.x);
-    profile = [];
-    for (const pt of rawSorted) {
-      const prev = profile[profile.length - 1];
-      if (!prev || Math.abs(pt.x - prev.x) > 0.5) {
-        profile.push(pt);
-      } else {
-        profile[profile.length - 1] = pt;
-      }
-    }
-    if (profile.length === 0) {
-      profile = [
-        { x: 0, y: startElev },
-        { x: totalLength, y: endElev },
-      ];
+  const rawSorted = (inputs.profile_points ?? [])
+    .filter((pt) => Number.isFinite(pt.station_m) && Number.isFinite(pt.elevation_m))
+    .map((pt) => ({ x: clamp(pt.station_m, 0, totalLength), y: pt.elevation_m }))
+    .sort((a, b) => a.x - b.x);
+  const deduped: Array<{ x: number; y: number }> = [];
+  for (const pt of rawSorted) {
+    const prev = deduped[deduped.length - 1];
+    if (!prev || Math.abs(pt.x - prev.x) > 0.5) {
+      deduped.push(pt);
     } else {
-      if (profile[0].x > 0) profile.unshift({ x: 0, y: profile[0].y });
-      if (profile[profile.length - 1].x < totalLength) {
-        profile.push({ x: totalLength, y: profile[profile.length - 1].y });
-      }
+      deduped[deduped.length - 1] = pt;
     }
-  } else {
-    profile = [
-      { x: 0, y: startElev },
-      { x: totalLength * 0.33, y: highest },
-      { x: totalLength * 0.68, y: lowest },
-      { x: totalLength, y: endElev },
-    ].sort((a, b) => a.x - b.x);
   }
+
+  if (deduped.length >= 2) {
+    if (deduped[0].x > 0) deduped.unshift({ x: 0, y: deduped[0].y });
+    if (deduped[deduped.length - 1].x < totalLength) {
+      deduped.push({ x: totalLength, y: deduped[deduped.length - 1].y });
+    }
+    return { points: deduped, hasSurveyProfile: true };
+  }
+
+  const approx = [
+    { x: 0, y: startElev },
+    { x: totalLength * 0.33, y: highest },
+    { x: totalLength * 0.68, y: lowest },
+    { x: totalLength, y: endElev },
+  ].sort((a, b) => a.x - b.x);
+  return { points: approx, hasSurveyProfile: false };
+}
+
+export function buildDefaultEquipmentInputs(inputs: AppInputs): EquipmentInputItem[] {
+  const sections = sectionsFromInputs(inputs);
+  const totalLength = sections.reduce((sum, s) => sum + s.length_m, 0);
+  const { points: profile } = resolveProfileCurve(inputs, totalLength);
+  const pumpAtStart =
+    !inputs.pump_location.includes("Bitis") && !inputs.pump_location.includes("Bitiş");
+  const pumpStation = pumpAtStart ? 0 : totalLength;
+  const pumpElev = round(interpolateElevation(profile, pumpStation), 1);
+  const offsetHead = Math.min(40, totalLength * 0.01);
+  const headStation = round(pumpAtStart ? offsetHead : Math.max(0, totalLength - offsetHead), 1);
+  const launcherStation = round(
+    pumpAtStart ? Math.min(20, totalLength) : Math.max(0, totalLength - 20),
+    1,
+  );
+
+  return [
+    {
+      id: "eq-valve-start",
+      type: "valve",
+      label: "Başlangıç vanası",
+      station_m: 0,
+      elevation_m: round(interpolateElevation(profile, 0), 1),
+      status: "pass",
+    },
+    {
+      id: "eq-pump",
+      type: "pump",
+      label: "Pompa",
+      station_m: round(pumpStation, 1),
+      elevation_m: pumpElev,
+      status: "pass",
+    },
+    {
+      id: "eq-head",
+      type: "test-head",
+      label: "Test başlığı",
+      station_m: headStation,
+      elevation_m: round(interpolateElevation(profile, headStation), 1),
+      status: "pass",
+    },
+    {
+      id: "eq-launcher",
+      type: "pig-launcher",
+      label: "Pig başlatıcı",
+      station_m: launcherStation,
+      elevation_m: round(interpolateElevation(profile, launcherStation), 1),
+      status: "pass",
+    },
+    {
+      id: "eq-valve-end",
+      type: "valve",
+      label: "Bitiş vanası",
+      station_m: round(totalLength, 1),
+      elevation_m: round(interpolateElevation(profile, totalLength), 1),
+      status: "pass",
+    },
+  ];
+}
+
+export function buildSceneData(inputs: AppInputs, results: { profile?: PressureProfileResponse; pig?: PigSpeedResponse }): SceneData {
+  const sections = sectionsFromInputs(inputs);
+  if (sections.length === 0) {
+    return {
+      segments: [],
+      equipment: [],
+      is_survey_profile: false,
+      is_custom_equipment: false,
+      warnings: ["Geometri girilmediği için sahne boş."],
+    };
+  }
+
+  const totalLength = sections.reduce((sum, s) => sum + s.length_m, 0);
+  const { points: profile, hasSurveyProfile } = resolveProfileCurve(inputs, totalLength);
 
   const startKpM = parseKpMeters(inputs.section_meta.start_kp);
   const pumpAtStart = !inputs.pump_location.includes("Bitis") && !inputs.pump_location.includes("Bitiş");
@@ -1559,50 +1626,27 @@ export function buildSceneData(inputs: AppInputs, results: { profile?: PressureP
     });
   }
 
-  const equipment: SceneEquipment[] = [
-    {
-      id: "eq-valve-start",
-      type: "valve",
-      label: "Başlangıç vanası",
-      distance_m: 0,
-      elevation_m: interpolateElevation(profile, 0),
-      status: "pass",
-    },
-    {
-      id: "eq-valve-end",
-      type: "valve",
-      label: "Bitiş vanası",
-      distance_m: totalLength,
-      elevation_m: interpolateElevation(profile, totalLength),
-      status: "pass",
-    },
-    {
-      id: "eq-pump",
-      type: "pump",
-      label: "Pompa",
-      distance_m: pumpStation,
-      elevation_m: pumpElev,
-      status: "pass",
-    },
-    {
-      id: "eq-head",
-      type: "test-head",
-      label: "Test başlığı",
-      distance_m: pumpAtStart ? Math.min(40, totalLength * 0.01) : totalLength - Math.min(40, totalLength * 0.01),
-      elevation_m: pumpElev,
-      status: "pass",
-    },
-    {
-      id: "eq-launcher",
-      type: "pig-launcher",
-      label: "Pig başlatıcı",
-      distance_m: pumpAtStart ? 20 : totalLength - 20,
-      elevation_m: interpolateElevation(profile, pumpAtStart ? 20 : totalLength - 20),
-      status: "pass",
-    },
-  ];
+  const rawCustomEquipment = (inputs.equipment ?? []).filter(
+    (item) => Number.isFinite(item.station_m) && item.label.trim().length > 0,
+  );
+  const hasCustomEquipment = rawCustomEquipment.length > 0;
+  const equipmentSource = hasCustomEquipment
+    ? rawCustomEquipment
+    : buildDefaultEquipmentInputs(inputs);
 
-  if (hasSurveyProfile && profile.length >= 3) {
+  const equipment: SceneEquipment[] = equipmentSource.map((item) => {
+    const dist = clamp(item.station_m, 0, totalLength);
+    return {
+      id: item.id,
+      type: item.type,
+      label: item.label.trim(),
+      distance_m: round(dist, 1),
+      elevation_m: round(item.elevation_m ?? interpolateElevation(profile, dist), 1),
+      status: item.status ?? "pass",
+    };
+  });
+
+  if (!hasCustomEquipment && hasSurveyProfile && profile.length >= 3) {
     let maxPt = profile[0];
     let minPt = profile[0];
     for (const pt of profile) {
@@ -1655,8 +1699,16 @@ export function buildSceneData(inputs: AppInputs, results: { profile?: PressureP
   const warnings: string[] = [];
   if (results.profile?.feasible === false) {
     warnings.push("Basınç penceresi üç limitin tamamını sağlamıyor; sahne yalnızca gösterim amaçlıdır.");
-  } else if (!hasSurveyProfile) {
-    warnings.push("Kot profili 4 noktadan yaklaşık türetildi.");
+  }
+  if (!hasSurveyProfile) {
+    warnings.push(
+      "Kot profili 4 noktadan yaklaşık türetildi; gerçek topoğrafya için kot profili noktaları (profile_points) girin.",
+    );
+  }
+  if (!hasCustomEquipment) {
+    warnings.push(
+      "Ekipman konumları varsayılan yerleşimle yaklaşık gösteriliyor; gerçek saha ekipmanları (equipment) eklenebilir.",
+    );
   }
 
   return {
@@ -1675,6 +1727,7 @@ export function buildSceneData(inputs: AppInputs, results: { profile?: PressureP
       computedMaxPressure ?? results.profile?.selected_window.maximum_allowable_pressure_bar ?? undefined,
     start_kp_m: startKpM,
     is_survey_profile: hasSurveyProfile,
+    is_custom_equipment: hasCustomEquipment,
     profile_points: profile.map((p) => [round(p.x, 2), round(p.y, 2)]),
     landmarks,
     warnings,

@@ -23,6 +23,7 @@ import { NumberField, SelectField, FieldGrid, ReadonlyValue } from "../component
 import { ConfirmDialog } from "../components/ui/Dialog";
 import { InlineNotice, EmptyState } from "../components/ui/State";
 import { ElevationProfileChart, UtilizationChart } from "../components/charts/LazyCharts";
+import { SiteSurveyPanel } from "../components/geometry/SiteSurveyPanel";
 import { FieldPage } from "./FieldPage";
 import { useCatalog, useCalculateGeometry, useMeta } from "../hooks/queries";
 import { useAppStore } from "../store/useAppStore";
@@ -685,6 +686,8 @@ export function GeometryPage() {
           Tek kesit veya en az bir geçerli segment girildiğinde toplamlar ve doğrulama etkinleşir.
         </InlineNotice>
       ) : null}
+
+      <SiteSurveyPanel totalLength={totalLength} />
 
       <FieldPage embedded />
 

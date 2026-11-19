@@ -78,6 +78,7 @@ def default_inputs() -> dict[str, Any]:
         "segments": [],
         "profile_points": [],
         "landmarks": [],
+        "equipment": [],
         "air": {
             "temperature_c": None,
             "pressure_bar": None,
@@ -148,6 +149,8 @@ def normalize_inputs(raw: dict[str, Any] | None) -> dict[str, Any]:
         merged["profile_points"] = []
     if not isinstance(merged.get("landmarks"), list):
         merged["landmarks"] = []
+    if not isinstance(merged.get("equipment"), list):
+        merged["equipment"] = []
     if not isinstance(merged.get("checks"), dict):
         merged["checks"] = {}
     for key in FIELD_CHECK_KEYS:
