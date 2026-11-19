@@ -71,14 +71,17 @@ export class PageErrorBoundary extends Component<Props, State> {
                 >
                   <RefreshCw size={12} aria-hidden /> Sayfayı yenile
                 </button>
-              ) : null}
-              <button
-                type="button"
-                className="btn btn-sm"
-                onClick={() => this.setState({ hasError: false, message: "", isChunkError: false })}
-              >
-                <RefreshCw size={12} aria-hidden /> Tekrar dene
-              </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() =>
+                    this.setState({ hasError: false, message: "", isChunkError: false })
+                  }
+                >
+                  <RefreshCw size={12} aria-hidden /> Tekrar dene
+                </button>
+              )}
             </div>
           </div>
         </div>

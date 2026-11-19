@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session as OrmSession
 
 from ..core import security
 from ..core.config import Settings
+from ..core.rate_limit import enforce_rate_limit
 from ..core.timeutil import json_safe
 from ..db import get_db
 from ..services import project_archive as project_archive_service
@@ -48,6 +49,7 @@ def import_desktop_snapshot(
 
 @router.post("/desktop-db", status_code=201)
 async def import_desktop_db(
+    request: Request,
     file: UploadFile = File(...),
     project_name: str | None = Form(default=None),
     project_code: str | None = Form(default=None),
@@ -55,6 +57,7 @@ async def import_desktop_db(
     settings: Settings = Depends(get_settings),
     workspace: Workspace = Depends(get_workspace),
 ) -> dict:
+    enforce_rate_limit(request, settings, bucket="desktop_db_import", limit=30)
     db_bytes = await security.read_upload_bounded(file, settings.max_upload_bytes)
     return json_safe(
         project_archive_service.import_desktop_db(

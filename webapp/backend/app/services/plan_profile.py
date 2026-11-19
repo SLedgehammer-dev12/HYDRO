@@ -1579,9 +1579,10 @@ def _extract_dxf_plan_profile(
     try:
         doc = ezdxf.readfile(dxf_path)
     except Exception as exc:
+        logger.warning("DXF parse failed (%s): %s", file_name, exc)
         raise AppError(
             "cad_parse_error",
-            f"CAD dosyası okunamadı: {exc}",
+            "CAD dosyasi okunamadi. Gecerli bir DXF/DWG dosyasi yukleyin.",
             status_code=422,
         ) from exc
 

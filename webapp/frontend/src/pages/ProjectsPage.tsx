@@ -570,7 +570,8 @@ export function ProjectsPage() {
                 onClick={() => {
                   setProject(selected);
                   setSceneScope("project");
-                  setTab("field");
+                  useAppStore.getState().setPendingScrollTarget("sahne-3d");
+                  setTab("geometry");
                 }}
               >
                 Saha Sekmesinde Aç
@@ -615,7 +616,7 @@ export function ProjectsPage() {
                     openSession.mutate(sid, {
                       onSuccess: () => {
                         setSceneScope("section");
-                        setTab("field");
+                        setTab("geometry");
                       },
                     })
                   }

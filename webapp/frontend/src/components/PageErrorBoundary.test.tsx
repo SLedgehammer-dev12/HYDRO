@@ -33,6 +33,6 @@ describe("PageErrorBoundary", () => {
     );
 
     expect(screen.getByRole("button", { name: /Sayfayı yenile/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Tekrar dene/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Tekrar dene/i })).not.toBeInTheDocument();
   });
 });

@@ -47,6 +47,12 @@ def _sanitize_update_payload(payload: dict[str, Any]) -> dict[str, Any]:
         cleaned["runtime"] = {
             key: value for key, value in runtime.items() if key not in _HIDDEN_RUNTIME_KEYS
         }
+    job = payload.get("job")
+    if isinstance(job, dict):
+        job_copy = dict(job)
+        if "verified_path" in job_copy:
+            job_copy["verified_path"] = ""
+        cleaned["job"] = job_copy
     return cleaned
 
 

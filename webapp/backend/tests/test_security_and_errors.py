@@ -457,3 +457,61 @@ def test_trash_restore_session_does_not_restore_other_workspace_parent_project(
         still_deleted = session.get(Project, proj_id)
         assert still_deleted is not None
         assert still_deleted.deleted_at is not None
+
+
+def test_trusted_hosts_normalizes_ports_and_ipv6_brackets(tmp_path: Path):
+    s = Settings(
+        host="0.0.0.0",
+        data_dir=tmp_path / "th",
+        database_url=f"sqlite:///{tmp_path / 'th' / 'hydro.db'}",
+        trusted_hosts=("App.Example.Com:8443", "[::1]:8080"),
+    )
+    assert s.trusted_hosts == ("app.example.com", "::1")
+
+    app = create_app(s)
+    try:
+        c = TestClient(app)
+        assert c.get("/api/health", headers={"Host": "app.example.com:8443"}).status_code == 200
+        assert c.get("/api/health", headers={"Host": "[::1]"}).status_code == 200
+        bad = c.get("/api/health", headers={"Host": "rogue.example"})
+        assert bad.status_code == 400
+        assert bad.json()["code"] == "invalid_host"
+    finally:
+        db.dispose_database()
+
+
+def test_db_maintenance_clean_exports_removes_nested_directories(client, headers, settings):
+    adhoc_dir = settings.exports_dir / "_adhoc"
+    sess_dir = settings.exports_dir / "session-nested"
+    adhoc_dir.mkdir(parents=True, exist_ok=True)
+    sess_dir.mkdir(parents=True, exist_ok=True)
+    f1 = adhoc_dir / "a.txt"
+    f2 = sess_dir / "b.pdf"
+    f1.write_text("report a", encoding="utf-8")
+    f2.write_bytes(b"%PDF-1.4\ntest")
+
+    res = client.post(
+        "/api/system/db-maintenance",
+        headers=headers,
+        json={"clean_exports": True, "clean_orphan_uploads": False},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["removed_export_files"] == 2
+    assert not f1.exists()
+    assert not f2.exists()
+    assert not adhoc_dir.exists()
+    assert not sess_dir.exists()
+    assert settings.exports_dir.exists()
+
+
+def test_update_status_redacts_job_verified_path(client, monkeypatch):
+    from app.api import system as system_api
+
+    fake_status = system_api.WEB_UPDATE_MANAGER.get_status()
+    fake_status["job"]["verified_path"] = "/Users/secret/path/HydroWeb.dmg"
+    monkeypatch.setattr(system_api.WEB_UPDATE_MANAGER, "get_status", lambda: fake_status)
+
+    res = client.get("/api/update/status")
+    assert res.status_code == 200
+    assert res.json()["job"]["verified_path"] == ""

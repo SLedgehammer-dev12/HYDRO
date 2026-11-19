@@ -784,7 +784,8 @@ def run_db_maintenance(
     removed_export_files = 0
     reclaimed_export_bytes = 0
     if clean_exports and settings.exports_dir.exists():
-        for item in settings.exports_dir.iterdir():
+        exports_root = settings.exports_dir.resolve()
+        for item in exports_root.rglob("*"):
             if item.is_file():
                 try:
                     sz = item.stat().st_size
@@ -793,6 +794,15 @@ def run_db_maintenance(
                     reclaimed_export_bytes += sz
                 except OSError:
                     continue
+        for subdir in sorted(
+            (p for p in exports_root.rglob("*") if p.is_dir()),
+            key=lambda p: len(p.parts),
+            reverse=True,
+        ):
+            try:
+                subdir.rmdir()
+            except OSError:
+                continue
 
     removed_orphan_files = 0
     reclaimed_upload_bytes = 0

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, Form, Header, Query, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session as OrmSession
 
 from .. import schemas
 from ..core.config import Settings
 from ..core.errors import AppError, validation_error
+from ..core.rate_limit import enforce_rate_limit
 from ..core.timeutil import json_safe
 from ..db import get_db
 from ..services import audit
@@ -147,6 +148,7 @@ def update_session_form(
 
 @router.post("/{session_id}/forms/{form_code}/scan")
 def scan_single_form(
+    request: Request,
     session_id: str,
     form_code: str,
     file: UploadFile | None = File(default=None),
@@ -158,6 +160,7 @@ def scan_single_form(
     settings: Settings = Depends(get_settings),
     workspace: Workspace = Depends(get_workspace),
 ) -> dict:
+    enforce_rate_limit(request, settings, bucket="form_ocr_scan", limit=30)
     raw_uploads = list(files) if files else ([file] if file is not None else [])
     if not raw_uploads:
         raise AppError(

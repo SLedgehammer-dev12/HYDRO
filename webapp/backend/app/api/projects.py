@@ -81,7 +81,9 @@ async def import_project_archive(
     workspace: Workspace = Depends(get_workspace),
 ) -> dict:
     enforce_rate_limit(request, settings, bucket="project_import", limit=30)
-    archive_bytes = await security.read_upload_bounded(file, settings.max_upload_bytes)
+    archive_bytes = await security.read_upload_bounded(
+        file, min(settings.max_upload_bytes, project_archive_service.MAX_ARCHIVE_BYTES)
+    )
     return json_safe(
         project_archive_service.import_project_archive(
             db,

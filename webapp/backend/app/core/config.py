@@ -156,6 +156,11 @@ class Settings:
         )
         if not self.database_url:
             object.__setattr__(self, "database_url", _default_database_url(data_dir))
+        if self.trusted_hosts:
+            normalized_hosts = tuple(
+                h for h in (normalize_host_header(item) for item in self.trusted_hosts) if h
+            )
+            object.__setattr__(self, "trusted_hosts", normalized_hosts)
 
     # -- derived paths ----------------------------------------------------
     @property
@@ -220,6 +225,20 @@ class Settings:
             path.mkdir(parents=True, exist_ok=True)
 
 
+def normalize_host_header(raw_host: str | None) -> str:
+    """Normalize an incoming or configured Host value by stripping brackets and ports."""
+
+    value = (raw_host or "").strip().lower()
+    if not value:
+        return ""
+    if value.startswith("["):
+        end = value.find("]")
+        return value[1:end] if end > 0 else ""
+    if ":" in value:
+        return value.split(":", 1)[0]
+    return value
+
+
 def validate_bind_security(settings: Settings) -> str | None:
     """Reject non-loopback binds without enforced app auth unless explicitly allowed."""
 
@@ -268,6 +287,7 @@ __all__ = [
     "_default_data_dir",
     "_default_frontend_dist",
     "ensure_repo_on_path",
+    "normalize_host_header",
     "safe_database_url",
     "validate_bind_security",
 ]

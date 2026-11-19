@@ -16,7 +16,12 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
-from .core.config import Settings, ensure_repo_on_path, safe_database_url
+from .core.config import (
+    Settings,
+    ensure_repo_on_path,
+    normalize_host_header,
+    safe_database_url,
+)
 
 ensure_repo_on_path()
 
@@ -87,18 +92,6 @@ def _sanitize_request_id(raw: str | None) -> str:
         return str(uuid.uuid4())
     cleaned = re.sub(r"[^A-Za-z0-9._:-]", "", raw.strip())[:64]
     return cleaned or str(uuid.uuid4())
-
-
-def _extract_host(raw_host: str | None) -> str:
-    value = (raw_host or "").strip().lower()
-    if not value:
-        return ""
-    if value.startswith("["):
-        end = value.find("]")
-        return value[1:end] if end > 0 else ""
-    if ":" in value:
-        return value.split(":", 1)[0]
-    return value
 
 
 def _apply_security_headers(response, path: str, request_id: str, raw_workspace: str) -> None:  # noqa: ANN001
@@ -184,7 +177,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         path = request.url.path
         client_host = (request.client.host if request.client else "").strip().lower()
-        host_name = _extract_host(request.headers.get("host"))
+        host_name = normalize_host_header(request.headers.get("host"))
         allowed_hosts: set[str] | None = None
         if resolved.trusted_hosts:
             allowed_hosts = set(resolved.trusted_hosts)
