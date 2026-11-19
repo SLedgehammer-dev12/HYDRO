@@ -227,12 +227,12 @@ def test_0003_downgrade_and_reupgrade_preserves_data(tmp_path: Path):
 
 
 def test_0002_baseline_fk_table_creation_order_and_downgrade_base(tmp_path: Path):
-    # Compile offline Postgres DDL to verify FK table order strictly (ocr_mapping_profiles before ocr_analyses)
+    # Compile offline Postgres DDL through 0003/head and verify FK table order + offline 0003 SQL
     buf = io.StringIO()
     cfg = Config(output_buffer=buf)
     cfg.set_main_option("script_location", str(migrations_runner.resolve_migrations_dir()))
     cfg.set_main_option("sqlalchemy.url", "postgresql+psycopg://hydro:pass@localhost/hydro")
-    command.upgrade(cfg, "0002", sql=True)
+    command.upgrade(cfg, "head", sql=True)
     ddl = buf.getvalue()
     assert "PRAGMA" not in ddl
     pos_profiles = ddl.index("CREATE TABLE ocr_mapping_profiles")
@@ -241,6 +241,17 @@ def test_0002_baseline_fk_table_creation_order_and_downgrade_base(tmp_path: Path
     pos_sessions = ddl.index("CREATE TABLE sessions")
     assert pos_projects < pos_sessions
     assert pos_profiles < pos_analyses
+    assert "DROP INDEX ix_results_type" in ddl
+    assert "DROP INDEX ix_ocr_attachment" in ddl
+
+    down_buf = io.StringIO()
+    down_cfg = Config(output_buffer=down_buf)
+    down_cfg.set_main_option("script_location", str(migrations_runner.resolve_migrations_dir()))
+    down_cfg.set_main_option("sqlalchemy.url", "postgresql+psycopg://hydro:pass@localhost/hydro")
+    command.downgrade(down_cfg, "0003:0002", sql=True)
+    ddl_down = down_buf.getvalue()
+    assert "CREATE INDEX ix_results_type" in ddl_down
+    assert "CREATE INDEX ix_ocr_attachment" in ddl_down
 
     # Online SQLite upgrade -> downgrade base -> upgrade head with foreign keys enabled
     db_file = tmp_path / "base_rt.db"
@@ -358,19 +369,35 @@ def test_sqlite_foreign_keys_toggled_outside_tx_and_restored_on_error(tmp_path: 
     try:
         engine = db.configure_database(f"sqlite:///{db_file.as_posix()}")
         observed_during_guard: list[int] = []
+        isolation_during_guard: list[str] = []
         with engine.connect() as conn:
+            initial_level = conn.get_isolation_level()
             assert conn.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
             with migrations_runner.migration_connection_guard(conn):
                 fk_value = conn.exec_driver_sql("PRAGMA foreign_keys").scalar()
                 assert fk_value is not None
                 observed_during_guard.append(int(fk_value))
+                isolation_during_guard.append(conn.get_isolation_level())
+            assert conn.in_transaction() is False
+            assert conn.get_isolation_level() == initial_level
             assert conn.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
+            conn.commit()
         assert observed_during_guard == [0]
+        assert isolation_during_guard == [initial_level]
 
         with engine.connect() as conn:
+            initial_level = conn.get_isolation_level()
+            conn.exec_driver_sql("CREATE TABLE rollback_probe (id INTEGER PRIMARY KEY)")
+            conn.commit()
             with pytest.raises(RuntimeError, match="forced"):
                 with migrations_runner.migration_connection_guard(conn):
+                    assert conn.get_isolation_level() == initial_level
+                    conn.exec_driver_sql("INSERT INTO rollback_probe (id) VALUES (42)")
                     raise RuntimeError("forced")
+            assert conn.in_transaction() is False
+            assert conn.get_isolation_level() == initial_level
+            assert conn.exec_driver_sql("SELECT COUNT(*) FROM rollback_probe").scalar() == 0
+            conn.commit()
             assert conn.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
     finally:
         db.dispose_database()
@@ -385,8 +412,13 @@ def test_postgres_advisory_lock_acquire_and_release_on_success_and_error():
     class _FakeConn:
         dialect = _FakeDialect()
 
-        def __init__(self, *, fail_in_tx: bool = False) -> None:
+        def __init__(self, *, fail_in_tx: bool = False, fail_on_unlock: bool = False) -> None:
             self._in_tx = fail_in_tx
+            self._isolation = "READ COMMITTED"
+            self._fail_on_unlock = fail_on_unlock
+
+        def get_isolation_level(self) -> str:
+            return self._isolation
 
         def in_transaction(self) -> bool:
             return self._in_tx
@@ -400,24 +432,32 @@ def test_postgres_advisory_lock_acquire_and_release_on_success_and_error():
             executed.append(("ROLLBACK", None))
 
         def execution_options(self, **kwargs: Any):
+            if "isolation_level" in kwargs:
+                self._isolation = str(kwargs["isolation_level"])
             executed.append(("EXEC_OPTS", kwargs))
             return self
 
         def execute(self, stmt, params=None):  # noqa: ANN001
-            executed.append((str(stmt), params))
+            text_sql = str(stmt)
+            executed.append((text_sql, (params, self._isolation)))
+            if self._fail_on_unlock and "pg_advisory_unlock" in text_sql:
+                raise ConnectionError("lost connection during unlock")
 
     conn_ok = _FakeConn()
     with migrations_runner.migration_connection_guard(conn_ok):  # type: ignore[arg-type]
-        pass
+        assert conn_ok.get_isolation_level() == "READ COMMITTED"
+    assert conn_ok.get_isolation_level() == "READ COMMITTED"
     sql_texts = [s for s, _ in executed]
     assert any("pg_advisory_lock" in s for s in sql_texts)
     assert any("pg_advisory_unlock" in s for s in sql_texts)
+    assert any("pg_advisory_lock" in s and meta[1] == "AUTOCOMMIT" for s, meta in executed)
     assert not any("PRAGMA" in s for s in sql_texts)
 
     executed.clear()
     conn_err = _FakeConn(fail_in_tx=True)
     with pytest.raises(ValueError, match="boom"):
         with migrations_runner.migration_connection_guard(conn_err):  # type: ignore[arg-type]
+            assert conn_err.get_isolation_level() == "READ COMMITTED"
             conn_err._in_tx = True
             raise ValueError("boom")
     err_sql = [s for s, _ in executed]
@@ -425,6 +465,15 @@ def test_postgres_advisory_lock_acquire_and_release_on_success_and_error():
     assert err_sql.index("ROLLBACK") < next(
         i for i, s in enumerate(err_sql) if "pg_advisory_unlock" in s
     )
+    assert conn_err.get_isolation_level() == "READ COMMITTED"
+
+    # Unlock failure in finally must NOT mask original migration exception
+    executed.clear()
+    conn_unlock_err = _FakeConn(fail_in_tx=True, fail_on_unlock=True)
+    with pytest.raises(ValueError, match="boom"):
+        with migrations_runner.migration_connection_guard(conn_unlock_err):  # type: ignore[arg-type]
+            conn_unlock_err._in_tx = True
+            raise ValueError("boom")
     assert -(2**63) <= migrations_runner.POSTGRES_ADVISORY_LOCK_KEY < 2**63
 
 
@@ -451,7 +500,7 @@ def test_hydro_auto_migrate_flag(tmp_path: Path, monkeypatch):
         db.dispose_database()
 
 
-def test_restore_db_backup_future_revision_and_broken_fk_roll_back_422(tmp_path: Path):
+def test_restore_db_backup_future_revision_and_broken_fk_roll_back_422(tmp_path: Path, monkeypatch):
     data_dir = tmp_path / "data"
     live_db = data_dir / "hydro_web.db"
     app = create_app(
@@ -467,15 +516,16 @@ def test_restore_db_backup_future_revision_and_broken_fk_roll_back_422(tmp_path:
         assert created.status_code == 201
         live_proj_id = created.json()["id"]
 
-        # 1) Future revision backup -> 422 and rollback via multipart + backup_filename
+        # 1) Valid schema cloned from live_db + future Alembic revision -> 422 via multipart AND backup_filename
         future_db = tmp_path / "future.db"
-        conn = sqlite3.connect(str(future_db))
-        conn.execute("CREATE TABLE projects (id VARCHAR(36) PRIMARY KEY, name VARCHAR(200))")
-        conn.execute("INSERT INTO projects VALUES ('p-future', 'Gelecek Surum')")
-        conn.execute("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)")
-        conn.execute("INSERT INTO alembic_version VALUES ('9999_future')")
-        conn.commit()
-        conn.close()
+        src_live = sqlite3.connect(str(live_db))
+        dst_future = sqlite3.connect(str(future_db))
+        src_live.backup(dst_future)
+        dst_future.execute("UPDATE alembic_version SET version_num = '9999_future'")
+        dst_future.execute("UPDATE projects SET name = 'Gelecek Surum Projesi'")
+        dst_future.commit()
+        dst_future.close()
+        src_live.close()
 
         res_future = tc.post(
             "/api/system/db-restore",
@@ -484,10 +534,22 @@ def test_restore_db_backup_future_revision_and_broken_fk_roll_back_422(tmp_path:
         )
         assert res_future.status_code == 422
         assert res_future.json()["code"] == "validation_error"
+        assert "uyumlu degil" in res_future.json()["message"]
 
-        # 2) Backup with orphaned FK row -> 422 and rollback
+        backups_dir = data_dir / "backups"
+        backups_dir.mkdir(parents=True, exist_ok=True)
+        (backups_dir / "future_test.db").write_bytes(future_db.read_bytes())
+        res_future_named = tc.post(
+            "/api/system/db-restore",
+            headers=ws,
+            json={"backup_filename": "future_test.db"},
+        )
+        assert res_future_named.status_code == 422
+        assert res_future_named.json()["code"] == "validation_error"
+        assert "uyumlu degil" in res_future_named.json()["message"]
+
+        # 2) Backup with orphaned FK row -> 422 in staging before touching live DB
         broken_fk_db = tmp_path / "broken_fk.db"
-        # Copy current valid live schema into broken_fk_db and inject an orphaned test_results row
         src_live = sqlite3.connect(str(live_db))
         dst_broken = sqlite3.connect(str(broken_fk_db))
         src_live.backup(dst_broken)
@@ -507,12 +569,43 @@ def test_restore_db_backup_future_revision_and_broken_fk_roll_back_422(tmp_path:
         )
         assert res_fk.status_code == 422
         assert res_fk.json()["code"] == "validation_error"
+        assert "uyumlu degil" in res_fk.json()["message"]
+
+        # 3) Live-swap failure after staging succeeds -> creates pre_restore snapshot and rolls back live DB
+        valid_swap_db = tmp_path / "swap_target.db"
+        src_live = sqlite3.connect(str(live_db))
+        dst_swap = sqlite3.connect(str(valid_swap_db))
+        src_live.backup(dst_swap)
+        dst_swap.execute("DELETE FROM projects")
+        dst_swap.commit()
+        dst_swap.close()
+        src_live.close()
+
+        orig_init_db = db.init_db
+        swap_calls = {"n": 0}
+
+        def _flaky_init_db() -> str:
+            swap_calls["n"] += 1
+            if swap_calls["n"] == 1:
+                raise RuntimeError("simulated swap failure")
+            return orig_init_db()
+
+        monkeypatch.setattr(db, "init_db", _flaky_init_db)
+        res_swap_err = tc.post(
+            "/api/system/db-restore",
+            headers=ws,
+            files={
+                "file": ("swap_target.db", valid_swap_db.read_bytes(), "application/octet-stream")
+            },
+        )
+        monkeypatch.undo()
+        assert res_swap_err.status_code == 422
+        assert any(p.name.endswith("_pre_restore.db") for p in backups_dir.iterdir())
 
         # Live app must still contain live_proj_id and accept new writes cleanly
         items = tc.get("/api/projects", headers=ws).json()["items"]
         ids = {item["id"] for item in items}
         assert live_proj_id in ids
-        assert "p-future" not in ids
         health = tc.get("/api/health").json()
         assert health["db"]["ok"] is True
         assert health["db"]["migration"] == "0003"
@@ -527,20 +620,22 @@ def test_restore_db_backup_from_legacy_0002_upgrades_to_0003(tmp_path: Path):
     # Create a legacy pre-0003 backup containing project P_OLD
     old_db = tmp_path / "old_0002.db"
     db.dispose_database()
-    old_eng = db.configure_database(f"sqlite:///{old_db.as_posix()}")
-    migrations_runner.run_migrations(old_eng, target="0002")
-    with db.get_sessionmaker()() as s:
-        from app.core import security as sec
+    try:
+        old_eng = db.configure_database(f"sqlite:///{old_db.as_posix()}")
+        migrations_runner.run_migrations(old_eng, target="0002")
+        with db.get_sessionmaker()() as s:
+            from app.core import security as sec
 
-        s.add(
-            Project(
-                id="p-old",
-                workspace_id_hash=sec.workspace_hash("ws-old"),
-                name="Yedekten Donen Proje",
+            s.add(
+                Project(
+                    id="p-old",
+                    workspace_id_hash=sec.workspace_hash("ws-old"),
+                    name="Yedekten Donen Proje",
+                )
             )
-        )
-        s.commit()
-    db.dispose_database()
+            s.commit()
+    finally:
+        db.dispose_database()
     old_bytes = old_db.read_bytes()
 
     data_dir = tmp_path / "live"
@@ -591,8 +686,22 @@ def test_frozen_migrations_dir_resolution_and_cli_roundtrip(tmp_path: Path, monk
     monkeypatch.setattr(sys, "_MEIPASS", str(meipass), raising=False)
     assert migrations_runner.resolve_migrations_dir() == meipass / "webapp_migrations"
 
-    monkeypatch.delattr(sys, "frozen", raising=False)
+    # Also verify exe_dir / _internal and exe_dir sibling fallbacks when _MEIPASS is unset
     monkeypatch.delattr(sys, "_MEIPASS", raising=False)
+    exe_dir = tmp_path / "dist_app"
+    exe_file = exe_dir / "HydroWeb.exe"
+    internal_dir = exe_dir / "_internal" / "webapp_migrations"
+    internal_dir.mkdir(parents=True)
+    (internal_dir / "env.py").write_text("# internal", encoding="utf-8")
+    monkeypatch.setattr(sys, "executable", str(exe_file))
+    assert migrations_runner.resolve_migrations_dir() == internal_dir
+
+    direct_dir = exe_dir / "webapp_migrations"
+    direct_dir.mkdir(parents=True)
+    (direct_dir / "env.py").write_text("# direct", encoding="utf-8")
+    assert migrations_runner.resolve_migrations_dir() == direct_dir
+
+    monkeypatch.undo()
 
     repo_root = Path(__file__).resolve().parents[3]
     cli_db = tmp_path / "cli_test.db"
@@ -606,3 +715,27 @@ def test_frozen_migrations_dir_resolution_and_cli_roundtrip(tmp_path: Path, monk
             cmd, cwd=str(repo_root), env=env, capture_output=True, text=True, check=False
         )
         assert proc.returncode == 0, f"cmd={cmd}\nstdout={proc.stdout}\nstderr={proc.stderr}"
+
+    offline_proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "alembic",
+            "-c",
+            "webapp/backend/alembic.ini",
+            "upgrade",
+            "head",
+            "--sql",
+        ],
+        cwd=str(repo_root),
+        env={
+            **os.environ,
+            "HYDRO_DATABASE_URL": "postgresql+psycopg://hydro:pass@localhost/hydro",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert offline_proc.returncode == 0, offline_proc.stderr
+    assert "CREATE TABLE ocr_mapping_profiles" in offline_proc.stdout
+    assert "DROP INDEX ix_results_type" in offline_proc.stdout

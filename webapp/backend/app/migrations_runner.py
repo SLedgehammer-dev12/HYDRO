@@ -6,7 +6,7 @@ import logging
 import sys
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Callable, Iterator
 
 import sqlalchemy as sa
 from alembic import command
@@ -49,21 +49,55 @@ def build_alembic_config(connection: Connection) -> Config:
     return cfg
 
 
-def _set_sqlite_foreign_keys(conn: Connection, enabled: bool) -> None:
-    """Toggle SQLite ``PRAGMA foreign_keys`` outside any open transaction."""
+def _run_autocommit(conn: Connection, fn: Callable[[Connection], Any]) -> None:
+    """Execute ``fn`` in ``AUTOCOMMIT`` mode and restore the caller's isolation level."""
 
     if conn.in_transaction():
         conn.commit()
+    prev_isolation = conn.get_isolation_level()
+    autocommit_conn = conn.execution_options(isolation_level="AUTOCOMMIT")
+    failed = False
+    try:
+        fn(autocommit_conn)
+    except Exception:
+        failed = True
+        raise
+    finally:
+        try:
+            if autocommit_conn.in_transaction():
+                if failed:
+                    autocommit_conn.rollback()
+                else:
+                    autocommit_conn.commit()
+            if conn.in_transaction():
+                if failed:
+                    conn.rollback()
+                else:
+                    conn.commit()
+            conn.execution_options(isolation_level=prev_isolation)
+        except Exception:
+            if not failed:
+                raise
+            logger.exception("Failed to restore DB connection isolation level")
+
+
+def _set_sqlite_foreign_keys(conn: Connection, enabled: bool) -> None:
+    """Toggle SQLite ``PRAGMA foreign_keys`` outside any open transaction."""
+
     value = "ON" if enabled else "OFF"
-    conn.execution_options(isolation_level="AUTOCOMMIT").exec_driver_sql(
-        f"PRAGMA foreign_keys={value}"
-    )
+    _run_autocommit(conn, lambda c: _exec_sqlite_pragma_fk(c, value))
+
+
+def _exec_sqlite_pragma_fk(conn: Connection, value: str) -> None:
+    conn.exec_driver_sql(f"PRAGMA foreign_keys={value}")
 
 
 def _check_sqlite_foreign_keys(conn: Connection) -> None:
     """Verify no foreign-key constraint violations remain after migrations."""
 
     rows = conn.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
+    if conn.in_transaction():
+        conn.commit()
     if rows:
         raise RuntimeError(f"SQLite foreign key integrity check failed: {len(rows)} violation(s)")
 
@@ -95,28 +129,38 @@ def migration_connection_guard(conn: Connection) -> Iterator[None]:
         return
 
     if dialect == "postgresql":
-        if conn.in_transaction():
-            conn.commit()
-        autocommit_conn = conn.execution_options(isolation_level="AUTOCOMMIT")
-        autocommit_conn.execute(
-            text("SELECT pg_advisory_lock(:key)"),
-            {"key": POSTGRES_ADVISORY_LOCK_KEY},
+        _run_autocommit(
+            conn,
+            lambda c: c.execute(
+                text("SELECT pg_advisory_lock(:key)"),
+                {"key": POSTGRES_ADVISORY_LOCK_KEY},
+            ),
         )
+        failed = False
         try:
             yield
             if conn.in_transaction():
                 conn.commit()
         except Exception:
+            failed = True
             if conn.in_transaction():
                 conn.rollback()
             raise
         finally:
-            if conn.in_transaction():
-                conn.rollback()
-            autocommit_conn.execute(
-                text("SELECT pg_advisory_unlock(:key)"),
-                {"key": POSTGRES_ADVISORY_LOCK_KEY},
-            )
+            try:
+                if conn.in_transaction():
+                    conn.rollback()
+                _run_autocommit(
+                    conn,
+                    lambda c: c.execute(
+                        text("SELECT pg_advisory_unlock(:key)"),
+                        {"key": POSTGRES_ADVISORY_LOCK_KEY},
+                    ),
+                )
+            except Exception:
+                if not failed:
+                    raise
+                logger.exception("Failed to release PostgreSQL migration advisory lock")
         return
 
     try:

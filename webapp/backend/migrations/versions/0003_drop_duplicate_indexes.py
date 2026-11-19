@@ -8,7 +8,7 @@ Create Date: 2026-11-19
 from __future__ import annotations
 
 import sqlalchemy as sa
-from alembic import op
+from alembic import context, op
 
 revision: str = "0003"
 down_revision: str | tuple[str, ...] | None = "0002"
@@ -27,6 +27,11 @@ _DUPLICATE_INDEXES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
 
 
 def upgrade() -> None:
+    if context.is_offline_mode():
+        for table_name, index_name, _cols in _DUPLICATE_INDEXES:
+            op.drop_index(index_name, table_name=table_name)
+        return
+
     inspector = sa.inspect(op.get_bind())
     for table_name, index_name, _cols in _DUPLICATE_INDEXES:
         existing = {idx["name"] for idx in inspector.get_indexes(table_name)}
@@ -35,6 +40,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    if context.is_offline_mode():
+        for table_name, index_name, cols in _DUPLICATE_INDEXES:
+            op.create_index(index_name, table_name, list(cols))
+        return
+
     inspector = sa.inspect(op.get_bind())
     for table_name, index_name, cols in _DUPLICATE_INDEXES:
         existing = {idx["name"] for idx in inspector.get_indexes(table_name)}

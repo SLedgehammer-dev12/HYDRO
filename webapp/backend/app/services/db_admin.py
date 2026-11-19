@@ -6,15 +6,18 @@ import logging
 import os
 import sqlite3
 import tempfile
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import func, select, text
+from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session as OrmSession
+from sqlalchemy.pool import NullPool
 
 from .. import db as db_mod
+from .. import migrations_runner
 from ..core import security
 from ..core.config import Settings
 from ..core.errors import AppError, not_found, validation_error
@@ -37,6 +40,7 @@ from . import sessions as session_service
 logger = logging.getLogger("hydro.web.db_admin")
 
 SQLITE_MAGIC = b"SQLite format 3\x00"
+_RESTORE_LOCK = threading.RLock()
 
 
 def list_workspaces(db: OrmSession, current_workspace_hash: str) -> dict[str, Any]:
@@ -459,10 +463,14 @@ def create_db_backup(settings: Settings, *, reason: str = "manual") -> dict[str,
 
 
 def _validate_sqlite_backup_file(path: Path) -> None:
-    head = path.read_bytes()[:16] if path.exists() else b""
+    if not path.exists():
+        head = b""
+    else:
+        with path.open("rb") as handle:
+            head = handle.read(16)
     if not head.startswith(SQLITE_MAGIC):
         raise validation_error("Yedek dosyasi gecerli bir SQLite veritabani degil.", field="file")
-    conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+    conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
     try:
         ic = conn.execute("PRAGMA integrity_check").fetchone()
         if not ic or str(ic[0]).lower() != "ok":
@@ -503,6 +511,20 @@ def _copy_sqlite_file(source_path: Path, dest_path: Path) -> None:
         src.close()
 
 
+def _verify_and_migrate_staging_sqlite(staging_path: Path) -> None:
+    stage_url = f"sqlite:///{staging_path.resolve().as_posix()}"
+    stage_engine = create_engine(
+        stage_url,
+        connect_args={"check_same_thread": False},
+        poolclass=NullPool,
+        future=True,
+    )
+    try:
+        migrations_runner.run_migrations(stage_engine)
+    finally:
+        stage_engine.dispose()
+
+
 def restore_db_backup(
     settings: Settings,
     *,
@@ -510,7 +532,7 @@ def restore_db_backup(
     backup_filename: str | None = None,
     workspace_hash: str = "",
 ) -> dict[str, Any]:
-    """Validate a SQLite backup, save a ``pre_restore`` snapshot, replace live DB cleanly and re-migrate."""
+    """Validate and stage-migrate a SQLite backup, then swap live DB with rollback safety."""
 
     db_path = _sqlite_db_path(settings)
     if db_path is None:
@@ -521,84 +543,103 @@ def restore_db_backup(
         raise validation_error("Geri yukleme icin yedek dosyasi veya dosya adi gereklidir.")
 
     temp_source: Path | None = None
+    staging_path: Path | None = None
     try:
-        if backup_bytes is not None:
-            if len(backup_bytes) < 100 or not backup_bytes.startswith(SQLITE_MAGIC):
-                raise validation_error(
-                    "Yuklenen dosya gecerli bir SQLite veritabani degil.", field="file"
-                )
-            if len(backup_bytes) > settings.max_upload_bytes:
-                raise AppError(
-                    "file_too_large", "Yedek dosyasi boyut sinirini asti.", status_code=413
-                )
-            fd, tmp_name = tempfile.mkstemp(prefix="hydro_restore_", suffix=".db")
-            temp_source = Path(tmp_name)
+        with _RESTORE_LOCK:
+            if backup_bytes is not None:
+                if len(backup_bytes) < 100 or not backup_bytes.startswith(SQLITE_MAGIC):
+                    raise validation_error(
+                        "Yuklenen dosya gecerli bir SQLite veritabani degil.", field="file"
+                    )
+                if len(backup_bytes) > settings.max_upload_bytes:
+                    raise AppError(
+                        "file_too_large", "Yedek dosyasi boyut sinirini asti.", status_code=413
+                    )
+                fd, tmp_name = tempfile.mkstemp(prefix="hydro_restore_", suffix=".db")
+                temp_source = Path(tmp_name)
+                try:
+                    os.fchmod(fd, 0o600)
+                except OSError:
+                    pass
+                with os.fdopen(fd, "wb") as handle:
+                    handle.write(backup_bytes)
+                source_path = temp_source
+                source_label = "uploaded_file"
+            else:
+                source_path = resolve_backup_path(settings, str(backup_filename))
+                source_label = source_path.name
+
+            _validate_sqlite_backup_file(source_path)
+
+            sfd, stage_name = tempfile.mkstemp(prefix="hydro_restore_stage_", suffix=".db")
+            os.close(sfd)
+            staging_path = Path(stage_name)
             try:
-                os.fchmod(fd, 0o600)
+                os.chmod(staging_path, 0o600)
             except OSError:
                 pass
-            with os.fdopen(fd, "wb") as handle:
-                handle.write(backup_bytes)
-            source_path = temp_source
-            source_label = "uploaded_file"
-        else:
-            source_path = resolve_backup_path(settings, str(backup_filename))
-            source_label = source_path.name
+            _copy_sqlite_file(source_path, staging_path)
+            try:
+                _verify_and_migrate_staging_sqlite(staging_path)
+            except Exception as exc:
+                logger.warning("Staging backup migration failed (%s): %s", source_label, exc)
+                raise validation_error(
+                    "Yedek veritabani bu uygulama surumuyle uyumlu degil veya butunluk denetiminden gecemedi.",
+                    field="file",
+                ) from exc
 
-        _validate_sqlite_backup_file(source_path)
+            pre_backup: dict[str, Any] | None = None
+            if db_path.exists() and db_path.stat().st_size > 0:
+                pre_backup = create_db_backup(settings, reason="pre_restore")
 
-        pre_backup: dict[str, Any] | None = None
-        if db_path.exists() and db_path.stat().st_size > 0:
-            pre_backup = create_db_backup(settings, reason="pre_restore")
-
-        db_mod.dispose_database()
-
-        _unlink_sqlite_sidecars(db_path)
-
-        _copy_sqlite_file(source_path, db_path)
-
-        try:
-            db_mod.configure_database(settings.database_url)
-            db_mod.init_db()
-        except Exception as exc:
-            logger.warning("Restored DB migration failed (%s): %s", source_label, exc)
             db_mod.dispose_database()
-            _unlink_sqlite_sidecars(db_path)
-            if pre_backup is not None:
-                rollback_path = resolve_backup_path(settings, str(pre_backup["filename"]))
-                _copy_sqlite_file(rollback_path, db_path)
-            else:
-                db_path.unlink(missing_ok=True)
-            db_mod.configure_database(settings.database_url)
-            db_mod.init_db()
-            raise validation_error(
-                "Yedek veritabani bu uygulama surumuyle uyumlu degil veya butunluk denetiminden gecemedi.",
-                field="file",
-            ) from exc
+            try:
+                _unlink_sqlite_sidecars(db_path)
+                _copy_sqlite_file(staging_path, db_path)
+                db_mod.configure_database(settings.database_url)
+                db_mod.init_db()
+            except Exception as exc:
+                logger.warning("Restored DB migration failed (%s): %s", source_label, exc)
+                db_mod.dispose_database()
+                _unlink_sqlite_sidecars(db_path)
+                if pre_backup is not None:
+                    rollback_path = resolve_backup_path(settings, str(pre_backup["filename"]))
+                    _copy_sqlite_file(rollback_path, db_path)
+                else:
+                    db_path.unlink(missing_ok=True)
+                db_mod.configure_database(settings.database_url)
+                db_mod.init_db()
+                raise validation_error(
+                    "Yedek veritabani bu uygulama surumuyle uyumlu degil veya butunluk denetiminden gecemedi.",
+                    field="file",
+                ) from exc
 
-        with db_mod.session_scope() as fresh_db:
-            if workspace_hash:
-                audit.record(
+            with db_mod.session_scope() as fresh_db:
+                if workspace_hash:
+                    audit.record(
+                        fresh_db,
+                        action="db.restore",
+                        entity_type="database",
+                        entity_id=db_path.name,
+                        workspace_hash=workspace_hash,
+                        after={"source": source_label, "pre_backup": pre_backup},
+                    )
+                stats = get_db_stats(
                     fresh_db,
-                    action="db.restore",
-                    entity_type="database",
-                    entity_id=db_path.name,
-                    workspace_hash=workspace_hash,
-                    after={"source": source_label, "pre_backup": pre_backup},
+                    settings,
+                    workspace_hash or security.workspace_hash(security.DEFAULT_WORKSPACE),
                 )
-            stats = get_db_stats(
-                fresh_db,
-                settings,
-                workspace_hash or security.workspace_hash(security.DEFAULT_WORKSPACE),
-            )
 
-        return {
-            "restored": True,
-            "source": source_label,
-            "pre_restore_backup": pre_backup,
-            "stats": stats,
-        }
+            return {
+                "restored": True,
+                "source": source_label,
+                "pre_restore_backup": pre_backup,
+                "stats": stats,
+            }
     finally:
+        if staging_path is not None:
+            _unlink_sqlite_sidecars(staging_path)
+            staging_path.unlink(missing_ok=True)
         if temp_source is not None and temp_source.exists():
             temp_source.unlink(missing_ok=True)
 

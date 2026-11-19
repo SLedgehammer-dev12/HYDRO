@@ -18,6 +18,8 @@ Environment variables (all optional):
     queue/worker switch (default true).
 ``HYDRO_OCR_LANG``
     Tesseract language hint (default ``tur+eng``).
+``HYDRO_AUTO_MIGRATE``
+    run Alembic migrations automatically in ``create_app()`` (default true).
 """
 
 from __future__ import annotations

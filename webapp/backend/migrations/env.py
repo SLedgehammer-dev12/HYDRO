@@ -10,11 +10,12 @@ from pathlib import Path
 from alembic import context
 from sqlalchemy import create_engine, pool
 
-BACKEND_ROOT = Path(__file__).resolve().parents[1]
-REPO_ROOT = BACKEND_ROOT.parents[1]
-for candidate in (str(BACKEND_ROOT), str(REPO_ROOT)):
-    if candidate not in sys.path:
-        sys.path.insert(0, candidate)
+if not getattr(sys, "frozen", False):
+    BACKEND_ROOT = Path(__file__).resolve().parents[1]
+    REPO_ROOT = BACKEND_ROOT.parents[1]
+    for candidate in (str(BACKEND_ROOT), str(REPO_ROOT)):
+        if candidate not in sys.path:
+            sys.path.insert(0, candidate)
 
 from app.core.config import Settings  # noqa: E402
 from app.migrations_runner import migration_connection_guard  # noqa: E402
@@ -22,7 +23,7 @@ from app.models import Base  # noqa: E402
 
 config = context.config
 if config.config_file_name and config.attributes.get("configure_logger", True):
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

@@ -142,13 +142,13 @@ def session_scope() -> Iterator[Session]:
 def database_health() -> dict[str, object]:
     try:
         engine = get_engine()
+        migration: str | None = None
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))
-        migration: str | None = None
-        try:
-            migration = current_schema_version()
-        except Exception:
-            migration = None
+            try:
+                migration = migrations_runner.get_current_revision(connection)
+            except Exception:
+                migration = None
         return {
             "ok": True,
             "dialect": engine.dialect.name,
