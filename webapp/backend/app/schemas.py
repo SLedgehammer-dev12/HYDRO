@@ -24,6 +24,10 @@ TEST_TYPE = Literal[
     "pig",
     "pressurization",
     "thermal_balance",
+    "pressurization_ramp",
+    "pressure_hold",
+    "depressurization",
+    "discharge",
 ]
 
 

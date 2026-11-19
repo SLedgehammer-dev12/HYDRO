@@ -451,6 +451,20 @@ def evaluate_test(test_type: str, payload: dict[str, Any]) -> tuple[dict[str, An
         request_tb = schemas.ThermalBalanceRequest.model_validate(payload)
         result = calculate_thermal_balance(request_tb.records)
         return result, result["decision"]
+    if test_type == "pressurization_ramp":
+        result = calculate_pressurization_ramp(
+            schemas.PressurizationRampRequest.model_validate(payload)
+        )
+        return result, result["decision"]
+    if test_type == "pressure_hold":
+        result = calculate_pressure_hold(schemas.PressureHoldRequest.model_validate(payload))
+        return result, result["decision"]
+    if test_type == "depressurization":
+        result = calculate_depressurization(schemas.DepressurizationRequest.model_validate(payload))
+        return result, result["decision"]
+    if test_type == "discharge":
+        result = calculate_discharge(schemas.DischargeRequest.model_validate(payload))
+        return result, result["decision"]
     raise AppError(
         "validation_error",
         f"Bilinmeyen test tipi: {test_type}",

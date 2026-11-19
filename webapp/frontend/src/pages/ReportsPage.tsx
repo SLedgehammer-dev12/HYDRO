@@ -58,12 +58,13 @@ export function ReportsPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const isOffline = backend !== "online";
 
+  const history = useAppStore((state) => state.history);
   const reportText = useMemo(() => {
-    const base = buildReportText(inputs, results, meta, generatedAt);
+    const base = buildReportText(inputs, results, meta, generatedAt, history);
     return isOffline
       ? `[TASLAK / ÇEVRİMDIŞI DEMO — RESMİ KABUL DEĞİLDİR]\nSunucu bağlantısı olmadan tarayıcıda üretilmiştir.\n\n${base}`
       : base;
-  }, [inputs, results, meta, generatedAt, isOffline]);
+  }, [inputs, results, meta, generatedAt, history, isOffline]);
 
   const sectionsStatus = [
     { label: "Geometri", ready: Boolean(results.geometry), detail: results.geometry ? fmt.m(results.geometry.total_length_m, 0) : "hesap yok" },

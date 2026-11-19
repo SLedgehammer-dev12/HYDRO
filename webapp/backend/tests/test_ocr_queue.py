@@ -19,6 +19,27 @@ from fastapi.testclient import TestClient
 from hidrostatik_test.services import report_ocr
 
 
+@pytest.fixture()
+def settings(tmp_path: Path) -> Settings:
+    # File-backed SQLite: the shared in-memory StaticPool connection is not safe when an
+    # OCR worker thread and request threads touch the database concurrently.
+    return Settings(
+        database_url=f"sqlite:///{tmp_path / 'queue_tests.db'}",
+        data_dir=tmp_path / "data",
+        frontend_dist=tmp_path / "dist",
+        max_upload_mb=1,
+    )
+
+
+@pytest.fixture()
+def client(settings: Settings):
+    db.dispose_database()
+    application = create_app(settings)
+    with TestClient(application) as test_client:
+        yield test_client
+    db.dispose_database()
+
+
 def _make_report_pdf(path: Path) -> Path:
     pytest.importorskip("reportlab")
     from reportlab.lib.pagesizes import A4

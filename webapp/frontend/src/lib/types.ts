@@ -34,7 +34,11 @@ export type TestType =
   | "profile"
   | "pig"
   | "pressurization"
-  | "thermal_balance";
+  | "thermal_balance"
+  | "pressurization_ramp"
+  | "pressure_hold"
+  | "depressurization"
+  | "discharge";
 
 export type PigStatus = "UYGUN" | "LIMIT ASILDI" | "BILGI";
 export type LocationClassNumber = 1 | 2 | 3 | 4;

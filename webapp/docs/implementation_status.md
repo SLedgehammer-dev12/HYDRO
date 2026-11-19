@@ -9,7 +9,7 @@ Dal: `main` (`v1.9.1`)
 
 | Alan | Durum | Kanit |
 | --- | --- | --- |
-| Backend API | Calisiyor | 81 OpenAPI path (94 operation), 173 pytest, 46 backend dosyada `mypy` temiz |
+| Backend API | Calisiyor | 81 OpenAPI path (94 operation), 176 pytest, 46 backend dosyada `mypy` temiz |
 | Frontend kabuk | Calisiyor | 9 sekme (Projeler & Kesitler, birlesik Geometri & Saha, son sekmede birlesik Katsayilar & Detay), responsive, tema |
 | Hesaplamalar | Parity | A/B, hava, basinc, profil, pig, pressurization, termal denge |
 | Proje & Kesit DB | Calisiyor | `projects` + `sessions.project_id` + `inputs.section_meta`, kesit siralama/acma/kopyalama/silme |
@@ -23,7 +23,7 @@ Dal: `main` (`v1.9.1`)
 ## Dogrulama
 
 ```bash
-python3 -m pytest webapp/backend/tests -q          # 173 passed
+python3 -m pytest webapp/backend/tests -q          # 176 passed
 python3 -m unittest discover -s tests -p "test_*.py"  # 709 passed (skipped=1)
 cd webapp/frontend && npm run typecheck && npm run build  # PASS
 cd webapp/frontend && HYDRO_APP_URL=http://127.0.0.1:8098 node scripts/verify-tabs.mjs  # 11/11 PASS

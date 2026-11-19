@@ -13,7 +13,7 @@
 | Alan | Durum | Kanıt |
 | --- | --- | --- |
 | Masaüstü uygulaması | Çalışıyor, kararlı | 709 unittest PASS (`skipped=1`) |
-| Web backend (FastAPI) | Çalışıyor | 173 pytest PASS, 81 OpenAPI path / 94 operation, 46 dosyada `mypy` temiz |
+| Web backend (FastAPI) | Çalışıyor | 176 pytest PASS, 81 OpenAPI path / 94 operation, 46 dosyada `mypy` temiz |
 | Web frontend (React 19) | Çalışıyor | `npm run typecheck` + `npm run build` PASS, `verify-tabs.mjs` 11/11 PASS, canlı tarayıcı smoke (0 konsol hatası) |
 | Program İkon & Marka Sistemi | Hazır | Boru kesiti + su dalgası + manometre ikonu (`tools/generate_icons.py`, `assets/icons/*`, `webapp/frontend/public/*`, `<HydroLogo />`, PyInstaller/Inno Setup/Tkinter) |
 | Web Güncelleme Yöneticisi | Çalışıyor | `/api/update/*`, SHA-256 + fail-closed Ed25519 `.sig` doğrulama, `UpdateManagerModal`, macOS `.dmg` / Win `.exe`/`.zip` kurulum |
@@ -130,9 +130,9 @@ Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen iş
 
 ### 4.2 Domain / masaüstü (P1–P2, `tasks/todo.md`)
 
-- [x] 14.1–14.3 basınç–hacim izleme, `%0.2` ilave su durdurma mantığı ve 2 saatlik bekleme domain + API (`pressurization_monitor.py`); [x] Web UI paneli (Basınç Değişim sayfası, `OperationsPanel`); [ ] oturum kaydı/rapor bağlantısı.
+- [x] 14.1–14.3 basınç–hacim izleme, `%0.2` ilave su durdurma mantığı ve 2 saatlik bekleme domain + API (`pressurization_monitor.py`); [x] Web UI paneli (Basınç Değişim sayfası, `OperationsPanel`); [x] oturum kaydı, özet ve TXT/PDF/XLSX rapor bağlantısı.
 - [ ] 12 ve 15 için zaman serili termal dengeleme / 24 saatlik test kayıt veri modeli.
-- [x] 16–17 basınç düşürme ve boşaltma kontrol listesi domain + API (`post_test_operations.py`); [x] Web UI paneli (`OperationsPanel`); [ ] rapor/BOT-FRM-CDB-001-024 bağlantısı.
+- [x] 16–17 basınç düşürme ve boşaltma kontrol listesi domain + API (`post_test_operations.py`); [x] Web UI paneli (`OperationsPanel`); [x] oturum kaydı ve rapor bağlantısı; [ ] BOT-FRM-CDB-001-024 formu bağlantısı.
 - [ ] 21. bölümdeki saha formlarına uygun rapor çıktısı.
 - [ ] Segmentli geometri indirgemesi için kurum içi metod notu.
 - [ ] +2 °C dolum kısıtı için saha uyarı mantığı.
@@ -174,7 +174,7 @@ python3 -m mypy hidrostatik_test/domain/                       # Success: no iss
 python3 -m mypy --ignore-missing-imports webapp/backend/app    # Success: no issues found (46 files)
 
 # Web backend
-python3 -m pytest webapp/backend/tests -q                      # 173 passed
+python3 -m pytest webapp/backend/tests -q                      # 176 passed
 
 # Masaüstü
 python3 -m unittest discover -s tests -p "test_*.py"           # 709 tests OK (skipped=1)

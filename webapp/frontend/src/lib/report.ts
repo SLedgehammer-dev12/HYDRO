@@ -1,4 +1,4 @@
-import type { AppInputs, MetaResponse, ResultBundle } from "./types";
+import type { AppInputs, HistoryEntry, MetaResponse, ResultBundle, TestType } from "./types";
 import { CHECK_DEFINITIONS } from "./constants";
 import { dateOnly, fmt, formatInput, num } from "./format";
 import { PUMP_LABELS } from "./constants";
@@ -13,11 +13,19 @@ export function reportFileName(extension: string, reportNo?: string): string {
   return `${prefix.replace(/[^a-zA-Z0-9._-]+/g, "_")}_${stamp}.${extension}`;
 }
 
+const OPERATION_TITLES: Array<[TestType, string]> = [
+  ["pressurization_ramp", "Basınçlandırma izleme (14.1–14.2)"],
+  ["pressure_hold", "2 saatlik bekleme (14.3)"],
+  ["depressurization", "Basınç düşürme (16)"],
+  ["discharge", "Boşaltma (17)"],
+];
+
 export function buildReportText(
   inputs: AppInputs,
   results: ResultBundle,
   meta: MetaResponse,
   generatedAt = new Date(),
+  history: HistoryEntry[] = [],
 ): string {
   const air = results.air;
   const pressure = results.pressure;
@@ -144,13 +152,28 @@ export function buildReportText(
     lines.push("");
   }
 
-  lines.push("8. NİHAİ KARAR");
+  const operationLines: string[] = [];
+  for (const [testType, title] of OPERATION_TITLES) {
+    const entry = history.find((item) => item.testType === testType);
+    if (entry) {
+      operationLines.push(`${title.padEnd(36)}: ${entry.status}`);
+      operationLines.push(`  ${entry.summary}`);
+    }
+  }
+  if (operationLines.length > 0) {
+    lines.push("8. OPERASYON SONUÇLARI (14–17)");
+    lines.push(rule("-"));
+    lines.push(...operationLines);
+    lines.push("");
+  }
+
+  lines.push("9. NİHAİ KARAR");
   lines.push(rule("-"));
   lines.push(`Hava içerik     : ${airDecision} · Kural: Vpa < 1.06 x Vp`);
   lines.push(`Basınç değişim  : ${pressureDecision} · Kural: (Pa − Pt) ≤ 0,3 bar`);
   lines.push("");
 
-  lines.push("9. NOT");
+  lines.push("10. NOT");
   lines.push(rule("-"));
   lines.push("Nihai karar ASME B31.8 ve proje prosedürü ile birlikte değerlendirilmelidir.");
   lines.push("İşaret sözleşmesi: ΔT = Tilk − Tson; Pa = Pilk − Pson.");

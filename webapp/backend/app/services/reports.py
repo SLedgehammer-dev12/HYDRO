@@ -129,6 +129,10 @@ def build_context(session: HydroSession, results: Iterable[TestResult]) -> dict[
     add_test("pig", "Pig")
     add_test("pressurization", "Basinclandirma")
     add_test("thermal_balance", "Termal Denge")
+    add_test("pressurization_ramp", "Basinclandirma Izleme")
+    add_test("pressure_hold", "2 Saatlik Bekleme")
+    add_test("depressurization", "Basinc Dusurme")
+    add_test("discharge", "Bosaltma")
 
     checks = inputs.get("checks") or {}
     checklist = [
@@ -250,6 +254,10 @@ def build_report_text(context: dict[str, Any], session: HydroSession) -> str:
         ("pig", "Pig Hiz Hesabi"),
         ("pressurization", "Basinclandirma Kontrolu"),
         ("thermal_balance", "Termal Denge"),
+        ("pressurization_ramp", "Basinclandirma Izleme"),
+        ("pressure_hold", "2 Saatlik Bekleme"),
+        ("depressurization", "Basinc Dusurme"),
+        ("discharge", "Bosaltma"),
     ):
         decision = _decision(latest.get(key))
         lines.extend(

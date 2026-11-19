@@ -988,6 +988,10 @@ def session_summary(db: OrmSession, session: HydroSession) -> dict[str, Any]:
             "pig",
             "pressurization",
             "thermal_balance",
+            "pressurization_ramp",
+            "pressure_hold",
+            "depressurization",
+            "discharge",
             "coefficient_a",
             "coefficient_b",
         )

@@ -7,14 +7,17 @@ import { CheckboxRow, FieldGrid, NumberField, SelectField, TextField } from "../
 import { DecisionCard } from "../../components/ui/DecisionCard";
 import { InlineNotice, OfflineNotice } from "../../components/ui/State";
 import { api, apiErrorMessage } from "../../lib/api";
+import { useSaveTestResult } from "../../hooks/queries";
 import { num, parseNumber } from "../../lib/format";
 import { useAppStore } from "../../store/useAppStore";
 import type {
+  Decision,
   DepressurizationRequest,
   DischargeRequest,
   OperationCheckResponse,
   PressureHoldResponse,
   PressurizationRampResponse,
+  TestType,
 } from "../../lib/types";
 
 type OpTab = "ramp" | "hold" | "depressurize" | "discharge";
@@ -57,6 +60,52 @@ function parseRows(text: string, columns: number): { rows: number[][]; error: st
   return { rows, error: null };
 }
 
+function SaveResultButton({
+  testType,
+  payload,
+  decision,
+}: {
+  testType: TestType;
+  payload: Record<string, unknown> | null;
+  decision: Decision | undefined;
+}) {
+  const save = useSaveTestResult();
+  const sessionId = useAppStore((state) => state.sessionId);
+  const pushToast = useAppStore((state) => state.pushToast);
+  const addHistory = useAppStore((state) => state.addHistory);
+  if (!payload || !decision) return null;
+  return (
+    <Button
+      loading={save.isPending}
+      disabled={!sessionId}
+      title={sessionId ? undefined : "Kaydetmek için aktif bir oturum gerekli"}
+      onClick={() =>
+        save.mutate(
+          { testType, payload },
+          {
+            onSuccess: (outcome) => {
+              if (outcome.saved) {
+                addHistory({
+                  testType,
+                  title: decision.title,
+                  status: decision.status,
+                  summary: decision.summary,
+                });
+                pushToast("success", "Sonuç oturuma kaydedildi", decision.title);
+              } else {
+                pushToast("warning", "Sonuç kaydedilemedi", "Sunucu bağlantısı veya oturum yok.");
+              }
+            },
+            onError: (error) => pushToast("error", "Kaydedilemedi", apiErrorMessage(error)),
+          },
+        )
+      }
+    >
+      Oturuma kaydet
+    </Button>
+  );
+}
+
 function Findings({ result }: { result: OperationCheckResponse }) {
   if (result.violations.length === 0 && result.missing.length === 0) return null;
   return (
@@ -88,6 +137,7 @@ function RampSection({ online }: { online: boolean }) {
   const [p100, setP100] = useState<number | null>(null);
   const [total, setTotal] = useState<number | null>(null);
   const [text, setText] = useState("");
+  const [lastPayload, setLastPayload] = useState<Record<string, unknown> | null>(null);
   const mutation = useMutation<PressurizationRampResponse, Error, void>({
     mutationFn: async () => {
       const { rows, error } = parseRows(text, 3);
@@ -96,7 +146,7 @@ function RampSection({ online }: { online: boolean }) {
       if (p100 === null || totalVolume === null) {
         throw new Error("%100 SMYS test basıncı ve doldurulan toplam hacim gerekli.");
       }
-      return api.pressurizationRamp({
+      const body = {
         readings: rows.map(([t, p, v]) => ({
           elapsed_min: t,
           pressure_bar: p,
@@ -104,7 +154,10 @@ function RampSection({ online }: { online: boolean }) {
         })),
         test_pressure_100_smys_bar: p100,
         total_filled_volume_m3: totalVolume,
-      });
+      };
+      const response = await api.pressurizationRamp(body);
+      setLastPayload(body);
+      return response;
     },
   });
   const result = mutation.data;
@@ -143,6 +196,7 @@ function RampSection({ online }: { online: boolean }) {
       {result ? (
         <>
           <DecisionCard decision={result.decision} testName="Basınçlandırma izleme" compact />
+          <SaveResultButton testType="pressurization_ramp" payload={lastPayload} decision={result.decision} />
           <p className="text-[11px] text-[var(--text-faint)]">
             Azami artış hızı {num(result.max_ramp_rate_bar_per_min, 3)} bar/dk · %95 SMYS sonrası basılan su{" "}
             {num(result.pumped_since_95_smys_m3, 4)} m³ (limit {num(result.excess_volume_limit_m3, 4)} m³)
@@ -156,15 +210,19 @@ function RampSection({ online }: { online: boolean }) {
 function HoldSection({ online }: { online: boolean }) {
   const [target, setTarget] = useState<number | null>(null);
   const [text, setText] = useState("");
+  const [lastPayload, setLastPayload] = useState<Record<string, unknown> | null>(null);
   const mutation = useMutation<PressureHoldResponse, Error, void>({
     mutationFn: async () => {
       const { rows, error } = parseRows(text, 3);
       if (error) throw new Error(error);
       if (target === null) throw new Error("Hedef (izlenen) basınç gerekli.");
-      return api.pressureHold({
+      const body = {
         readings: rows.map(([t, p, c]) => ({ elapsed_min: t, pressure_bar: p, temperature_c: c })),
         target_pressure_bar: target,
-      });
+      };
+      const response = await api.pressureHold(body);
+      setLastPayload(body);
+      return response;
     },
   });
   const result = mutation.data;
@@ -187,7 +245,12 @@ function HoldSection({ online }: { online: boolean }) {
         Değerlendir
       </Button>
       {mutation.isError ? <InlineNotice tone="danger">{apiErrorMessage(mutation.error)}</InlineNotice> : null}
-      {result ? <DecisionCard decision={result.decision} testName="2 saatlik bekleme" compact /> : null}
+      {result ? (
+        <>
+          <DecisionCard decision={result.decision} testName="2 saatlik bekleme" compact />
+          <SaveResultButton testType="pressure_hold" payload={lastPayload} decision={result.decision} />
+        </>
+      ) : null}
     </div>
   );
 }
@@ -197,8 +260,10 @@ function DepressurizeSection({ online }: { online: boolean }) {
   const [valve, setValve] = useState<number | null>(null);
   const [pipeChecked, setPipeChecked] = useState<Tri>("");
   const [envChecked, setEnvChecked] = useState<Tri>("");
+  const [lastPayload, setLastPayload] = useState<Record<string, unknown> | null>(null);
   const mutation = useMutation<OperationCheckResponse, Error, DepressurizationRequest>({
     mutationFn: (body) => api.depressurization(body),
+    onSuccess: (_data, body) => setLastPayload({ ...body }),
   });
   const result = mutation.data;
   return (
@@ -228,6 +293,7 @@ function DepressurizeSection({ online }: { online: boolean }) {
       {result ? (
         <>
           <DecisionCard decision={result.decision} testName="Basınç düşürme" compact />
+          <SaveResultButton testType="depressurization" payload={lastPayload} decision={result.decision} />
           <Findings result={result} />
         </>
       ) : null}
@@ -250,8 +316,10 @@ function DischargeSection({ online }: { online: boolean }) {
   const [pigName, setPigName] = useState("");
   const [location, setLocation] = useState("");
   const [duration, setDuration] = useState<number | null>(null);
+  const [lastPayload, setLastPayload] = useState<Record<string, unknown> | null>(null);
   const mutation = useMutation<OperationCheckResponse, Error, DischargeRequest>({
     mutationFn: (body) => api.discharge(body),
+    onSuccess: (_data, body) => setLastPayload({ ...body }),
   });
   const result = mutation.data;
   return (
@@ -308,6 +376,7 @@ function DischargeSection({ online }: { online: boolean }) {
       {result ? (
         <>
           <DecisionCard decision={result.decision} testName="Boşaltma" compact />
+          <SaveResultButton testType="discharge" payload={lastPayload} decision={result.decision} />
           <Findings result={result} />
         </>
       ) : null}
