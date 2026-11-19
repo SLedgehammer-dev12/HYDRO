@@ -26,8 +26,14 @@ from hidrostatik_test.data.gail_reference_table import (
 from hidrostatik_test.data.pipe_catalog import API_5L_PSL2_GRADES, PIPE_CATALOG
 
 
+def _to_float(val: object, default: float = 0.0) -> float:
+    return float(val) if isinstance(val, (int, float, str)) else default
+
+
 def _pipe_option_label(item: dict[str, Any]) -> str:
-    return f"NPS {item['nps']} (DN {item['dn']}) - OD {float(item['outside_diameter_mm']):.2f} mm"
+    return (
+        f"NPS {item['nps']} (DN {item['dn']}) - OD {_to_float(item['outside_diameter_mm']):.2f} mm"
+    )
 
 
 def _schedules(item: dict[str, Any]) -> list[dict[str, Any]]:
@@ -38,7 +44,7 @@ def _schedules(item: dict[str, Any]) -> list[dict[str, Any]]:
         rows.append(
             {
                 "label": formatted,
-                "wall_thickness_mm": float(schedule.get("wall_thickness_mm", 0.0)),
+                "wall_thickness_mm": _to_float(schedule.get("wall_thickness_mm", 0.0)),
             }
         )
     return rows
@@ -56,7 +62,7 @@ def list_pipes(*, q: str | None = None, limit: int = 200, offset: int = 0) -> di
             {
                 "nps": str(item["nps"]),
                 "dn": str(item["dn"]),
-                "outside_diameter_mm": float(item["outside_diameter_mm"]),
+                "outside_diameter_mm": _to_float(item["outside_diameter_mm"]),
                 "option_label": label,
                 "schedules": _schedules(item),
             }
@@ -85,7 +91,7 @@ def pipe_schedules(nps: str) -> dict[str, Any]:
     return {
         "nps": str(match["nps"]),
         "dn": str(match["dn"]),
-        "outside_diameter_mm": float(match["outside_diameter_mm"]),
+        "outside_diameter_mm": _to_float(match["outside_diameter_mm"]),
         "option_label": label,
         "items": _schedules(match),
     }
@@ -100,7 +106,7 @@ def list_grades() -> dict[str, Any]:
             {
                 "grade": str(spec.get("grade", "")),
                 "iso_label": str(spec.get("iso_label", "")),
-                "smys_mpa": float(spec.get("smys_mpa", 0.0)),
+                "smys_mpa": _to_float(spec.get("smys_mpa", 0.0)),
                 "option_label": label,
             }
         )

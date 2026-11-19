@@ -576,13 +576,15 @@ def build_project_scene(
 
     records: list[dict[str, Any]] = []
     for idx, sess in enumerate(rows, start=1):
-        inputs = sess.inputs if isinstance(sess.inputs, dict) else {}
-        meta = inputs.get("section_meta") if isinstance(inputs.get("section_meta"), dict) else {}
-        geom = inputs.get("geometry") if isinstance(inputs.get("geometry"), dict) else {}
-        sp = (
-            inputs.get("section_profile") if isinstance(inputs.get("section_profile"), dict) else {}
-        )
-        raw_segs = inputs.get("segments") if isinstance(inputs.get("segments"), list) else []
+        inputs: dict[str, Any] = sess.inputs if isinstance(sess.inputs, dict) else {}
+        raw_meta = inputs.get("section_meta")
+        meta: dict[str, Any] = raw_meta if isinstance(raw_meta, dict) else {}
+        raw_geom = inputs.get("geometry")
+        geom: dict[str, Any] = raw_geom if isinstance(raw_geom, dict) else {}
+        raw_sp = inputs.get("section_profile")
+        sp: dict[str, Any] = raw_sp if isinstance(raw_sp, dict) else {}
+        raw_segs_val = inputs.get("segments")
+        raw_segs: list[Any] = raw_segs_val if isinstance(raw_segs_val, list) else []
 
         sec_no = (
             str(meta.get("section_no") or "").strip()
@@ -788,9 +790,12 @@ def build_project_scene(
         local_interp = _elevation_interpolator(local_pts)
 
         # Basınç, SMYS ve durum değerlendirmesi
-        field_in = inputs.get("field") if isinstance(inputs.get("field"), dict) else {}
-        pres_in = inputs.get("pressure") if isinstance(inputs.get("pressure"), dict) else {}
-        air_in = inputs.get("air") if isinstance(inputs.get("air"), dict) else {}
+        raw_field = inputs.get("field")
+        field_in: dict[str, Any] = raw_field if isinstance(raw_field, dict) else {}
+        raw_pres = inputs.get("pressure")
+        pres_in: dict[str, Any] = raw_pres if isinstance(raw_pres, dict) else {}
+        raw_air = inputs.get("air")
+        air_in: dict[str, Any] = raw_air if isinstance(raw_air, dict) else {}
         base_p = as_float(field_in.get("monitored_pressure_bar"))
         if base_p is None:
             base_p = as_float(sp.get("monitored_pressure_bar"))
@@ -913,7 +918,8 @@ def build_project_scene(
             )
 
         # Pafta saha geçiş noktaları (landmarks)
-        raw_lms = inputs.get("landmarks") if isinstance(inputs.get("landmarks"), list) else []
+        raw_lms_val = inputs.get("landmarks")
+        raw_lms: list[Any] = raw_lms_val if isinstance(raw_lms_val, list) else []
         for lm in raw_lms:
             if not isinstance(lm, dict):
                 continue

@@ -5,13 +5,15 @@ services:
       dockerfile: webapp/Dockerfile
     image: hydro-web:local
     ports:
-      - "8080:8080"
+      # Guvenlik: Yalnizca konak makinenin loopback adresinde yayinlanir (dis aga dogrudan acilmaz).
+      # Dis erisim gerekiyorsa onune TLS + temel kimlik dogrulamali reverse proxy (Caddy/nginx) koyun.
+      - "127.0.0.1:8080:8080"
     environment:
       HYDRO_HOST: "0.0.0.0"
       HYDRO_PORT: "8080"
+      HYDRO_ALLOW_REMOTE: "1"
       HYDRO_DATA_DIR: "/data"
       HYDRO_DATABASE_URL: "sqlite:////data/hydro_web.db"
-      # Auth'suz MVP yalniz guvenilir agda calistirilmalidir.
       HYDRO_CORS_ORIGINS: "http://localhost:8080,http://127.0.0.1:8080"
     volumes:
       - hydro-data:/data

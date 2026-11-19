@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 from typing import Any, Iterable
 
 from sqlalchemy import func, select
@@ -23,13 +24,16 @@ from ..core.timeutil import (
 )
 from ..desktop_labels import FIELD_CHECK_KEYS
 from ..models import (
+    Attachment,
     HydroSession,
+    OcrAnalysis,
     Project,
     TestResult,
     TimeSeriesRecord,
     new_uuid,
 )
 from . import audit
+from .storage import resolve_stored_path
 
 ENGINE_VERSION = f"{APP_VERSION}/schema1"
 
@@ -121,6 +125,12 @@ def default_inputs() -> dict[str, Any]:
             "pressure_a": {"state": "empty", "source": "empty"},
             "pressure_b": {"state": "empty", "source": "empty"},
         },
+        "report": {
+            "report_no": "",
+            "operator": "",
+            "date": "",
+            "section_id": "",
+        },
         "report_entries": [],
     }
 
@@ -144,6 +154,11 @@ def normalize_inputs(raw: dict[str, Any] | None) -> dict[str, Any]:
         merged["checks"].setdefault(key, False)
     if not isinstance(merged.get("check_details"), dict):
         merged["check_details"] = {}
+    if not isinstance(merged.get("report"), dict):
+        merged["report"] = {}
+    for key in ("report_no", "operator", "date", "section_id"):
+        val = merged["report"].get(key)
+        merged["report"][key] = "" if val is None else str(val)
     if not isinstance(merged.get("report_entries"), list):
         merged["report_entries"] = []
     # The SPA keeps ambient temperature under ``air``; mirror it to the
@@ -178,10 +193,9 @@ def serialize_session(session: HydroSession) -> dict[str, Any]:
 
 def session_brief(session: HydroSession) -> dict[str, Any]:
     summary = session.result_summary or {}
-    raw_inputs = session.inputs if isinstance(session.inputs, dict) else {}
-    raw_meta = (
-        raw_inputs.get("section_meta") if isinstance(raw_inputs.get("section_meta"), dict) else {}
-    )
+    raw_inputs: dict[str, Any] = session.inputs if isinstance(session.inputs, dict) else {}
+    raw_meta_val = raw_inputs.get("section_meta")
+    raw_meta: dict[str, Any] = raw_meta_val if isinstance(raw_meta_val, dict) else {}
     section_meta = {
         "section_no": str(raw_meta.get("section_no") or ""),
         "description": str(raw_meta.get("description") or ""),
@@ -250,6 +264,61 @@ def _next_name(db: OrmSession, workspace_hash: str) -> str:
     return f"Oturum {(count or 0) + 1}"
 
 
+def _apply_project_defaults(
+    normalized: dict[str, Any],
+    project: Project | None,
+    *,
+    raw_inputs: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if project is None or not isinstance(getattr(project, "defaults", None), dict):
+        return normalized
+    defaults = project.defaults
+    if not defaults:
+        return normalized
+
+    raw = raw_inputs if isinstance(raw_inputs, dict) else {}
+    geom = normalized.setdefault("geometry", {})
+    for key in ("outside_diameter_mm", "wall_thickness_mm"):
+        if geom.get(key) is None and as_float(defaults.get(key)) is not None:
+            geom[key] = float(defaults[key])
+
+    catalog = normalized.setdefault("geometry_catalog", {})
+    for key in ("size_option", "schedule_option"):
+        if not str(catalog.get(key) or "").strip() and defaults.get(key):
+            catalog[key] = str(defaults[key]).strip()
+
+    profile = normalized.setdefault("section_profile", {})
+    for key in ("smys_mpa", "design_pressure_bar"):
+        if profile.get(key) is None and as_float(defaults.get(key)) is not None:
+            profile[key] = float(defaults[key])
+
+    if not str(normalized.get("material_grade") or "").strip() and defaults.get("material_grade"):
+        normalized["material_grade"] = str(defaults["material_grade"]).strip()
+
+    if not str(normalized.get("pump_location") or "").strip() and defaults.get("pump_location"):
+        normalized["pump_location"] = str(defaults["pump_location"]).strip()
+
+    raw_loc = str(raw.get("location_class") or "").strip()
+    if not raw_loc and defaults.get("location_class"):
+        normalized["location_class"] = str(defaults["location_class"]).strip()
+
+    raw_air_val = raw.get("air")
+    raw_air: dict[str, Any] = raw_air_val if isinstance(raw_air_val, dict) else {}
+    if raw_air.get("k_factor") is None and as_float(defaults.get("k_factor")) is not None:
+        normalized.setdefault("air", {})["k_factor"] = float(defaults["k_factor"])
+
+    raw_helper_val = raw.get("helper")
+    raw_helper: dict[str, Any] = raw_helper_val if isinstance(raw_helper_val, dict) else {}
+    if (
+        raw_helper.get("steel_alpha_micro_per_c") is None
+        and as_float(defaults.get("steel_alpha_micro_per_c")) is not None
+    ):
+        normalized.setdefault("helper", {})["steel_alpha_micro_per_c"] = float(
+            defaults["steel_alpha_micro_per_c"]
+        )
+    return normalized
+
+
 def create_session(
     db: OrmSession,
     *,
@@ -261,13 +330,19 @@ def create_session(
     commit: bool = True,
 ) -> HydroSession:
     _validate_project(db, project_id, workspace_hash)
+    project = db.get(Project, project_id) if project_id is not None else None
+    merged_inputs = _apply_project_defaults(
+        normalize_inputs(inputs),
+        project,
+        raw_inputs=inputs,
+    )
     session = HydroSession(
         id=new_uuid(),
         workspace_id_hash=workspace_hash,
         project_id=project_id,
         name=(name or "").strip() or _next_name(db, workspace_hash),
         status="draft",
-        inputs=normalize_inputs(inputs),
+        inputs=merged_inputs,
         wizard_state=wizard_state,
         result_summary={},
         revision=1,
@@ -394,13 +469,54 @@ def update_session(
     return session
 
 
+def _unlink_stored_attachments(
+    db: OrmSession,
+    stored_paths: list[str],
+    uploads_dir: Path | None,
+) -> None:
+    if uploads_dir is None or not stored_paths:
+        return
+    for rel_path in stored_paths:
+        if not rel_path:
+            continue
+        still_referenced = db.scalar(
+            select(func.count(Attachment.id)).where(Attachment.stored_path == rel_path)
+        )
+        if still_referenced:
+            continue
+        try:
+            target = resolve_stored_path(uploads_dir, rel_path)
+            target.unlink(missing_ok=True)
+        except AppError:
+            pass
+
+
 def delete_session(
     db: OrmSession,
     session: HydroSession,
     *,
     hard: bool = False,
+    uploads_dir: Path | None = None,
 ) -> None:
+    stored_paths: list[str] = []
     if hard:
+        attachments = (
+            db.execute(select(Attachment).where(Attachment.session_id == session.id))
+            .scalars()
+            .all()
+        )
+        attachment_ids = [att.id for att in attachments]
+        stored_paths = [att.stored_path for att in attachments if att.stored_path]
+        if attachment_ids:
+            analyses = (
+                db.execute(select(OcrAnalysis).where(OcrAnalysis.attachment_id.in_(attachment_ids)))
+                .scalars()
+                .all()
+            )
+            for item in analyses:
+                db.delete(item)
+            for att in attachments:
+                db.delete(att)
         db.delete(session)
     else:
         session.deleted_at = utcnow()
@@ -416,6 +532,8 @@ def delete_session(
         after={"hard": hard},
     )
     db.commit()
+    if hard:
+        _unlink_stored_attachments(db, stored_paths, uploads_dir)
 
 
 def duplicate_session(
@@ -791,7 +909,14 @@ def profile_summary(inputs: dict[str, Any]) -> dict[str, Any] | None:
         end = as_float(profile.get("end_elevation_m"))
         location_class = (inputs.get("location_class") or "").strip()
         pump_location = (inputs.get("pump_location") or "").strip()
-        if None in (design, smys, highest, lowest, start, end):
+        if (
+            design is None
+            or smys is None
+            or highest is None
+            or lowest is None
+            or start is None
+            or end is None
+        ):
             return None
         if not location_class or not pump_location:
             return None

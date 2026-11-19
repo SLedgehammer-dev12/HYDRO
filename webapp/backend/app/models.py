@@ -38,6 +38,14 @@ class Base(DeclarativeBase):
     pass
 
 
+class SchemaMigration(Base):
+    __tablename__ = "schema_migrations"
+
+    version: Mapped[str] = mapped_column(String(16), primary_key=True)
+    description: Mapped[str] = mapped_column(String(200), default="")
+    applied_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Project(Base):
     __tablename__ = "projects"
 
@@ -46,6 +54,11 @@ class Project(Base):
     code: Mapped[str] = mapped_column(String(64), default="")
     name: Mapped[str] = mapped_column(String(200))
     client: Mapped[str | None] = mapped_column(String(200), default=None)
+    contractor: Mapped[str | None] = mapped_column(String(200), default=None)
+    supervisor: Mapped[str | None] = mapped_column(String(200), default=None)
+    pipeline_length_m: Mapped[float | None] = mapped_column(Float, default=None)
+    status: Mapped[str] = mapped_column(String(24), default="active")
+    defaults: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     description: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -281,6 +294,7 @@ __all__ = [
     "OcrAnalysis",
     "OcrMappingProfile",
     "Project",
+    "SchemaMigration",
     "SectionForm",
     "TestResult",
     "TimeSeriesRecord",

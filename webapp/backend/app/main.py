@@ -18,6 +18,8 @@ from .core.config import Settings, ensure_repo_on_path
 
 ensure_repo_on_path()
 
+from hidrostatik_test import APP_VERSION
+
 from . import db
 from .api import (
     calculations as calculations_router,
@@ -55,6 +57,7 @@ from .core.errors import (
     register_exception_handlers,
 )
 from .core.security import actor_for, normalize_workspace, workspace_hash
+from .services.ocr_queue import OCR_QUEUE
 
 logger = logging.getLogger("hydro.web")
 
@@ -63,13 +66,29 @@ API_PREFIX = "/api"
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    s = app.state.settings
+    try:
+        recovered = OCR_QUEUE.recover_interrupted_jobs(db.get_sessionmaker())
+    except Exception:
+        recovered = 0
+    if recovered:
+        logger.warning("Marked %d stale queued/running OCR jobs as worker_interrupted", recovered)
+    if s.auth_mode == "none" and not s.is_loopback_host:
+        logger.warning(
+            "SECURITY WARNING: HYDRO Web running without authentication on host=%s. "
+            "Remote DB admin/workspace claim endpoints are disabled; enforce reverse-proxy auth!",
+            s.host,
+        )
     logger.info(
         "HYDRO web ready: db=%s data_dir=%s frontend=%s",
-        app.state.settings.database_url,
-        app.state.settings.data_dir,
-        "built" if (app.state.settings.frontend_dist / "index.html").exists() else "absent",
+        s.database_url,
+        s.data_dir,
+        "built" if (s.frontend_dist / "index.html").exists() else "absent",
     )
-    yield
+    try:
+        yield
+    finally:
+        OCR_QUEUE.shutdown(wait=True)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -78,10 +97,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     db.configure_database(resolved.database_url)
     db.init_db()
+    OCR_QUEUE.configure(resolved.ocr_max_concurrency)
 
     app = FastAPI(
         title="HYDRO Web API",
-        version="1.0.0",
+        version=APP_VERSION,
         description=(
             "Hidrostatik test degerlendirme API'si. Hesaplama motoru "
             "hidrostatik_test paketinden import edilir."

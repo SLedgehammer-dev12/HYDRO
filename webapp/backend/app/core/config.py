@@ -129,7 +129,11 @@ class Settings:
     ocr_lang: str = "tur+eng"
     tesseract_cmd: str = ""
     ocr_timeout_s: int = 600
+    ocr_max_concurrency: int = 1
     auth_mode: str = "none"
+    allow_remote: bool = False
+    allow_workspace_claim: bool = False
+    local_admin_token: str = ""
     scene_vertical_exaggeration: float = 3.0
     log_level: str = "INFO"
     extra: dict[str, str] = field(default_factory=dict)
@@ -162,6 +166,10 @@ class Settings:
     def repo_root(self) -> Path:
         return REPO_ROOT
 
+    @property
+    def is_loopback_host(self) -> bool:
+        return self.host.strip().lower() in {"127.0.0.1", "localhost", "::1"}
+
     @classmethod
     def from_env(cls) -> "Settings":
         data_dir = Path(_env("HYDRO_DATA_DIR") or _default_data_dir())
@@ -183,7 +191,11 @@ class Settings:
             ocr_lang=_env("HYDRO_OCR_LANG") or "tur+eng",
             tesseract_cmd=_env("HYDRO_TESSERACT_CMD") or "",
             ocr_timeout_s=_env_int("HYDRO_OCR_TIMEOUT_S", 600),
+            ocr_max_concurrency=max(1, min(_env_int("HYDRO_OCR_MAX_CONCURRENCY", 1), 4)),
             auth_mode=_env("HYDRO_AUTH_MODE") or "none",
+            allow_remote=_env_bool("HYDRO_ALLOW_REMOTE", False),
+            allow_workspace_claim=_env_bool("HYDRO_ALLOW_WORKSPACE_CLAIM", False),
+            local_admin_token=_env("HYDRO_LOCAL_ADMIN_TOKEN") or "",
             scene_vertical_exaggeration=float(_env("HYDRO_SCENE_VERTICAL_EXAGGERATION") or 3.0),
             log_level=_env("HYDRO_LOG_LEVEL") or "INFO",
         )

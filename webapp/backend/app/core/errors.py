@@ -53,11 +53,16 @@ def not_found(resource: str, resource_id: str | None = None) -> AppError:
     )
 
 
-def validation_error(message: str, *, field: str | None = None) -> AppError:
-    details: dict[str, Any] = {}
+def validation_error(
+    message: str,
+    *,
+    field: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> AppError:
+    merged: dict[str, Any] = dict(details or {})
     if field:
-        details["field"] = field
-    return AppError("validation_error", message, status_code=422, details=details)
+        merged["field"] = field
+    return AppError("validation_error", message, status_code=422, details=merged)
 
 
 def domain_error(status_code: int, code: str, message: str, **details: Any) -> AppError:

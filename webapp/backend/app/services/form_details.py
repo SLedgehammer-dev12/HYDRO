@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import re
 import statistics
 from typing import Any, Sequence
@@ -147,28 +148,30 @@ def extract_common_header_extras(text: str) -> dict[str, Any]:
             if cleaned and len(note_lines) < 6:
                 note_lines.append(cleaned)
 
-    # Signature names near bottom of form
+    # Signature names across all pages (signatures may sit on page 1 before a trailing annex/table page)
     contractor_person = ""
     botas_person = ""
-    tail_lines = lines[-16:] if len(lines) > 16 else lines
-    has_contractor_hdr = False
-    has_botas_hdr = False
-    for line in tail_lines:
+    contractor_hdr_idx = -100
+    botas_hdr_idx = -100
+    for idx, line in enumerate(lines):
         f = _fold(line)
         if "muteahhit" in f or "yuklenici" in f:
-            has_contractor_hdr = True
+            contractor_hdr_idx = idx
         if "botas" in f or "boru hatlari" in f:
-            has_botas_hdr = True
+            botas_hdr_idx = idx
         if "adi-soyadi" in f or "adi soyadi" in f:
             segments = re.split(r"adi[-\s]*soyad[iı]\s*[:=]*", line, flags=re.IGNORECASE)
             cleaned_segs = [_clean_text_value(s) for s in segments[1:] if _clean_text_value(s)]
+            has_contractor_hdr = 0 <= (idx - contractor_hdr_idx) <= 6
+            has_botas_hdr = 0 <= (idx - botas_hdr_idx) <= 6
             if len(cleaned_segs) >= 2:
-                contractor_person, botas_person = cleaned_segs[0], cleaned_segs[1]
+                contractor_person = cleaned_segs[0] or contractor_person
+                botas_person = cleaned_segs[1] or botas_person
             elif len(cleaned_segs) == 1:
-                if has_botas_hdr and not has_contractor_hdr:
-                    botas_person = cleaned_segs[0]
+                if has_botas_hdr and (not has_contractor_hdr or botas_hdr_idx > contractor_hdr_idx):
+                    botas_person = cleaned_segs[0] or botas_person
                 else:
-                    contractor_person = cleaned_segs[0]
+                    contractor_person = cleaned_segs[0] or contractor_person
 
     return {
         "header_extras": header,
@@ -207,8 +210,15 @@ def _extract_test_data_tables(text: str) -> dict[str, Any]:
             in_meas = True
             continue
         if in_meas:
-            if "aciklama" in f or "botas" in f or "yuklenici" in f:
-                break
+            if (
+                "aciklama" in f
+                or "botas" in f
+                or "yuklenici" in f
+                or "muteahhit" in f
+                or "sayfa" in f
+            ):
+                in_meas = False
+                continue
             nums = [_finite(parse_number(tok)) for tok in re.findall(r"[-+]?\d+(?:[.,]\d+)?", line)]
             nums_f = [n for n in nums if n is not None]
             if len(nums_f) >= 3 and 50 <= abs(nums_f[0]) <= 5000:
@@ -257,8 +267,9 @@ def _extract_pig_runs(text: str) -> list[dict[str, Any]]:
         ):
             in_table = True
             continue
-        if in_table and any(stop in f for stop in ("aciklama", "botas", "muteahhit")):
-            break
+        if in_table and any(stop in f for stop in ("aciklama", "botas", "muteahhit", "yuklenici")):
+            in_table = False
+            continue
         times = re.findall(r"\b\d{1,2}:\d{2}\b", line)
         if in_table or (times and any(k in f for k in pig_keywords)):
             if not times:
@@ -497,142 +508,325 @@ def reconcile_form_extracted_data(form_code: str, raw_data: dict[str, Any]) -> d
     if not isinstance(data.get("header"), dict):
         data["header"] = {}
 
-    if form_code == "filling" and isinstance(data.get("rows"), list) and data["rows"]:
+    if form_code == "filling" and isinstance(data.get("rows"), list):
         rows = data["rows"][:MAX_TABLE_ROWS]
         data["rows"] = rows
         data["time_log"] = _compute_time_stats([str(r.get("time_str") or "") for r in rows])
-        vols = [
-            v
-            for r in rows
-            for v in (_finite(r.get("total_volume_m3")), _finite(r.get("meter_reading_m3")))
-            if v is not None
-        ]
-        temps = [t for r in rows if (t := _finite(r.get("water_inlet_temp_c"))) is not None]
-        press = [p for r in rows if (p := _finite(r.get("water_pressure_bar"))) is not None]
-        data["filling"] = {
-            "total_filled_m3": round(max(vols), 3) if vols else None,
-            "min_temp_c": round(min(temps), 2) if temps else None,
-            "max_temp_c": round(max(temps), 2) if temps else None,
-            "max_pressure_bar": round(max(press), 2) if press else None,
-        }
+        if rows:
+            total_vols = [
+                v for r in rows if (v := _finite(r.get("total_volume_m3"))) is not None and v >= 0
+            ]
+            deltas = [
+                v for r in rows if (v := _finite(r.get("delta_volume_m3"))) is not None and v >= 0
+            ]
+            meters = [
+                v for r in rows if (v := _finite(r.get("meter_reading_m3"))) is not None and v >= 0
+            ]
+            if total_vols:
+                total_filled = round(max(total_vols), 3)
+            elif len(meters) >= 2 and meters[-1] > meters[0]:
+                total_filled = round(meters[-1] - meters[0], 3)
+            elif deltas:
+                total_filled = round(sum(deltas), 3)
+            elif meters:
+                total_filled = round(max(meters), 3)
+            else:
+                total_filled = None
+            temps = [t for r in rows if (t := _finite(r.get("water_inlet_temp_c"))) is not None]
+            press = [p for r in rows if (p := _finite(r.get("water_pressure_bar"))) is not None]
+            data["filling"] = {
+                "total_filled_m3": total_filled,
+                "min_temp_c": round(min(temps), 2) if temps else None,
+                "max_temp_c": round(max(temps), 2) if temps else None,
+                "max_pressure_bar": round(max(press), 2) if press else None,
+            }
+        else:
+            data["filling"] = {
+                "total_filled_m3": None,
+                "min_temp_c": None,
+                "max_temp_c": None,
+                "max_pressure_bar": None,
+            }
 
-    elif (
-        form_code in {"leak_stabilization", "pressure_test"}
-        and isinstance(data.get("rows"), list)
-        and data["rows"]
+    elif form_code in {"leak_stabilization", "pressure_test"} and isinstance(
+        data.get("rows"), list
     ):
         rows = data["rows"][:MAX_TABLE_ROWS]
         data["rows"] = rows
         data["time_log"] = _compute_time_stats([str(r.get("time_str") or "") for r in rows])
-        press = [p for r in rows if (p := _finite(r.get("pressure_bar"))) is not None]
-        temps: list[float] = []
-        pipe_avgs: list[float] = []
-        probe_pairs = 0
-        for r in rows:
-            s1, p1 = _finite(r.get("soil_1_c")), _finite(r.get("pipe_1_c"))
-            if s1 is not None and p1 is not None:
-                probe_pairs += 1
-            for k in ("ambient_temp_c", "soil_1_c", "pipe_1_c", "avg_soil_c", "avg_pipe_c"):
-                val = _finite(r.get(k))
-                if val is not None:
-                    temps.append(val)
-            avg_p = _finite(r.get("avg_pipe_c"))
-            if avg_p is not None:
-                pipe_avgs.append(avg_p)
-            else:
-                pipes = [
-                    v
-                    for k in ("pipe_1_c", "pipe_2_c", "pipe_3_c", "pipe_4_c")
-                    if (v := _finite(r.get(k))) is not None
-                ]
-                if pipes:
-                    pipe_avgs.append(sum(pipes) / len(pipes))
-        last_4h: float | None = None
-        if len(pipe_avgs) >= 2:
-            if len(pipe_avgs) >= 8:
-                prev4 = sum(pipe_avgs[-8:-4]) / 4.0
-                last4 = sum(pipe_avgs[-4:]) / 4.0
-                last_4h = round(abs(last4 - prev4), 3)
-            else:
-                last_4h = round(abs(pipe_avgs[-1] - pipe_avgs[0]), 3)
-        prev_mon = data.get("monitoring") if isinstance(data.get("monitoring"), dict) else {}
-        data["monitoring"] = {
-            **prev_mon,
-            "min_temp_c": round(min(temps), 2) if temps else prev_mon.get("min_temp_c"),
-            "max_temp_c": round(max(temps), 2) if temps else prev_mon.get("max_temp_c"),
-            "probe_pair_count": probe_pairs or int(prev_mon.get("probe_pair_count") or 0),
-            "block_avg_count": len(pipe_avgs),
-            "last_4h_delta_c": last_4h if last_4h is not None else prev_mon.get("last_4h_delta_c"),
-            "pipe_start_c": round(pipe_avgs[0], 3) if pipe_avgs else prev_mon.get("pipe_start_c"),
-            "pipe_end_c": round(pipe_avgs[-1], 3) if pipe_avgs else prev_mon.get("pipe_end_c"),
-            "p_start_bar": press[0] if press else prev_mon.get("p_start_bar"),
-            "p_end_bar": press[-1] if press else prev_mon.get("p_end_bar"),
-        }
+        if rows:
+            press = [p for r in rows if (p := _finite(r.get("pressure_bar"))) is not None]
+            mon_temps: list[float] = []
+            pipe_avgs: list[float] = []
+            probe_pairs = 0
+            for r in rows:
+                s1, p1 = _finite(r.get("soil_1_c")), _finite(r.get("pipe_1_c"))
+                if s1 is not None and p1 is not None:
+                    probe_pairs += 1
+                for k in ("ambient_temp_c", "soil_1_c", "pipe_1_c", "avg_soil_c", "avg_pipe_c"):
+                    val = _finite(r.get(k))
+                    if val is not None:
+                        mon_temps.append(val)
+                avg_p = _finite(r.get("avg_pipe_c"))
+                if avg_p is not None:
+                    pipe_avgs.append(avg_p)
+                else:
+                    pipes = [
+                        v
+                        for k in ("pipe_1_c", "pipe_2_c", "pipe_3_c", "pipe_4_c")
+                        if (v := _finite(r.get(k))) is not None
+                    ]
+                    if pipes:
+                        pipe_avgs.append(sum(pipes) / len(pipes))
+            last_4h: float | None = None
+            if len(pipe_avgs) >= 2:
+                if len(pipe_avgs) >= 8:
+                    prev4 = sum(pipe_avgs[-8:-4]) / 4.0
+                    last4 = sum(pipe_avgs[-4:]) / 4.0
+                    last_4h = round(abs(last4 - prev4), 3)
+                else:
+                    last_4h = round(abs(pipe_avgs[-1] - pipe_avgs[0]), 3)
+            raw_prev_mon = data.get("monitoring")
+            prev_mon: dict[str, Any] = raw_prev_mon if isinstance(raw_prev_mon, dict) else {}
+            data["monitoring"] = {
+                **prev_mon,
+                "min_temp_c": round(min(mon_temps), 2) if mon_temps else prev_mon.get("min_temp_c"),
+                "max_temp_c": round(max(mon_temps), 2) if mon_temps else prev_mon.get("max_temp_c"),
+                "probe_pair_count": probe_pairs or int(prev_mon.get("probe_pair_count") or 0),
+                "block_avg_count": len(pipe_avgs),
+                "last_4h_delta_c": last_4h
+                if last_4h is not None
+                else prev_mon.get("last_4h_delta_c"),
+                "pipe_start_c": round(pipe_avgs[0], 3)
+                if pipe_avgs
+                else prev_mon.get("pipe_start_c"),
+                "pipe_end_c": round(pipe_avgs[-1], 3) if pipe_avgs else prev_mon.get("pipe_end_c"),
+                "p_start_bar": press[0] if press else prev_mon.get("p_start_bar"),
+                "p_end_bar": press[-1] if press else prev_mon.get("p_end_bar"),
+            }
+        else:
+            raw_prev_mon = data.get("monitoring")
+            prev_mon = raw_prev_mon if isinstance(raw_prev_mon, dict) else {}
+            data["monitoring"] = {
+                **prev_mon,
+                "min_temp_c": None,
+                "max_temp_c": None,
+                "probe_pair_count": 0,
+                "block_avg_count": 0,
+                "last_4h_delta_c": None,
+                "pipe_start_c": None,
+                "pipe_end_c": None,
+                "p_start_bar": None,
+                "p_end_bar": None,
+            }
 
-    elif (
-        form_code in {"strength", "pressurization"}
-        and isinstance(data.get("rows"), list)
-        and data["rows"]
-    ):
+    elif form_code in {"strength", "pressurization"} and isinstance(data.get("rows"), list):
         rows = data["rows"][:MAX_TABLE_ROWS]
         data["rows"] = rows
         data["time_log"] = _compute_time_stats([str(r.get("time_str") or "") for r in rows])
-        ps = [
-            v
-            for r in rows
-            for v in (_finite(r.get("p_initial_bar")), _finite(r.get("p_final_bar")))
-            if v is not None
-        ]
-        step_vs = [v for r in rows if (v := _finite(r.get("step_water_m3"))) is not None]
-        tot_vs = [v for r in rows if (v := _finite(r.get("total_water_m3"))) is not None]
-        temps = [v for r in rows if (v := _finite(r.get("water_temp_c"))) is not None]
-        prev_pr = data.get("pressurization") if isinstance(data.get("pressurization"), dict) else {}
-        data["pressurization"] = {
-            **prev_pr,
-            "p_min_bar": min(ps) if ps else prev_pr.get("p_min_bar"),
-            "p_max_bar": max(ps) if ps else prev_pr.get("p_max_bar"),
-            "total_added_water_m3": (
-                round(max(tot_vs), 4)
-                if tot_vs
-                else (round(sum(step_vs), 4) if step_vs else prev_pr.get("total_added_water_m3"))
-            ),
-            "temp_c": round(statistics.median(temps), 2) if temps else prev_pr.get("temp_c"),
-        }
+        if rows:
+            ps = [
+                v
+                for r in rows
+                for v in (_finite(r.get("p_initial_bar")), _finite(r.get("p_final_bar")))
+                if v is not None
+            ]
+            step_vs = [v for r in rows if (v := _finite(r.get("step_water_m3"))) is not None]
+            tot_vs = [v for r in rows if (v := _finite(r.get("total_water_m3"))) is not None]
+            pr_temps = [v for r in rows if (v := _finite(r.get("water_temp_c"))) is not None]
+            raw_prev_pr = data.get("pressurization")
+            prev_pr: dict[str, Any] = raw_prev_pr if isinstance(raw_prev_pr, dict) else {}
+            data["pressurization"] = {
+                **prev_pr,
+                "p_min_bar": min(ps) if ps else prev_pr.get("p_min_bar"),
+                "p_max_bar": max(ps) if ps else prev_pr.get("p_max_bar"),
+                "total_added_water_m3": (
+                    round(max(tot_vs), 4)
+                    if tot_vs
+                    else (
+                        round(sum(step_vs), 4) if step_vs else prev_pr.get("total_added_water_m3")
+                    )
+                ),
+                "temp_c": round(statistics.median(pr_temps), 2)
+                if pr_temps
+                else prev_pr.get("temp_c"),
+            }
+        else:
+            raw_prev_pr = data.get("pressurization")
+            prev_pr = raw_prev_pr if isinstance(raw_prev_pr, dict) else {}
+            data["pressurization"] = {
+                **prev_pr,
+                "p_min_bar": None,
+                "p_max_bar": None,
+                "total_added_water_m3": None,
+                "temp_c": None,
+            }
 
     elif form_code in {"cleaning", "dewatering", "pre_drying", "final_drying"}:
         runs = data.get("pig_runs")
-        if isinstance(runs, list) and runs:
-            durations: list[float] = []
-            first_t: str | None = None
-            last_t: str | None = None
-            for idx, r in enumerate(runs):
-                lt = str(r.get("launch_time") or "").strip()
-                rt = str(r.get("receive_time") or "").strip()
-                if idx == 0 and lt:
-                    first_t = lt
-                if rt:
-                    last_t = rt
-                d_val = _finite(r.get("duration_min"))
-                if d_val is None and lt and rt:
-                    t0, t1 = _parse_hhmm_to_min(lt), _parse_hhmm_to_min(rt)
-                    if t0 is not None and t1 is not None:
-                        if t1 < t0:
-                            t1 += 24 * 60.0
-                        d_val = round(t1 - t0, 1)
-                        r["duration_min"] = d_val
-                if d_val is not None and d_val > 0:
-                    durations.append(d_val)
-            prev_ev = data.get("pig_events") if isinstance(data.get("pig_events"), dict) else {}
-            data["pig_events"] = {
-                **prev_ev,
-                "has_events": True,
-                "event_count": len(runs),
-                "first_time": first_t or prev_ev.get("first_time"),
-                "last_time": last_t or prev_ev.get("last_time"),
-                "travel_time_min": durations[-1] if durations else prev_ev.get("travel_time_min"),
-            }
+        if isinstance(runs, list):
+            if runs:
+                durations: list[float] = []
+                first_t: str | None = None
+                last_t: str | None = None
+                for idx, r in enumerate(runs):
+                    lt = str(r.get("launch_time") or "").strip()
+                    rt = str(r.get("receive_time") or "").strip()
+                    if idx == 0 and lt:
+                        first_t = lt
+                    if rt:
+                        last_t = rt
+                    d_val = _finite(r.get("duration_min"))
+                    if d_val is None and lt and rt:
+                        t0, t1 = _parse_hhmm_to_min(lt), _parse_hhmm_to_min(rt)
+                        if t0 is not None and t1 is not None:
+                            if t1 < t0:
+                                t1 += 24 * 60.0
+                            d_val = round(t1 - t0, 1)
+                            r["duration_min"] = d_val
+                    if d_val is not None and d_val > 0:
+                        durations.append(d_val)
+                raw_prev_ev = data.get("pig_events")
+                prev_ev: dict[str, Any] = raw_prev_ev if isinstance(raw_prev_ev, dict) else {}
+                data["pig_events"] = {
+                    **prev_ev,
+                    "has_events": True,
+                    "event_count": len(runs),
+                    "first_time": first_t or prev_ev.get("first_time"),
+                    "last_time": last_t or prev_ev.get("last_time"),
+                    "travel_time_min": durations[-1]
+                    if durations
+                    else prev_ev.get("travel_time_min"),
+                }
+            else:
+                raw_prev_ev = data.get("pig_events")
+                prev_ev = raw_prev_ev if isinstance(raw_prev_ev, dict) else {}
+                data["pig_events"] = {
+                    **prev_ev,
+                    "has_events": False,
+                    "event_count": 0,
+                    "first_time": None,
+                    "last_time": None,
+                    "travel_time_min": None,
+                }
 
     return data
+
+
+def _merge_dict_fill_missing(base: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+    out = copy.deepcopy(base)
+    for k, v in incoming.items():
+        if v is None or v == "":
+            continue
+        cur = out.get(k)
+        if cur is None or cur == "":
+            out[k] = copy.deepcopy(v)
+    return out
+
+
+def _append_unique_dicts(
+    existing: Sequence[Any], incoming: Sequence[Any], *, limit: int
+) -> list[dict[str, Any]]:
+    combined: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in [*existing, *incoming]:
+        if not isinstance(item, dict):
+            continue
+        fp = json.dumps(item, sort_keys=True, ensure_ascii=False, default=str)
+        if fp in seen:
+            continue
+        seen.add(fp)
+        combined.append(copy.deepcopy(item))
+        if len(combined) >= limit:
+            break
+    return combined
+
+
+def merge_form_extracted_data(
+    form_code: str,
+    existing_data: dict[str, Any],
+    incoming_data: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge a continuation page's extracted data into an existing SectionForm record."""
+    merged = copy.deepcopy(existing_data or {})
+    inc = copy.deepcopy(incoming_data or {})
+
+    for dict_key in (
+        "header",
+        "header_extras",
+        "drying",
+        "parameters",
+        "air",
+        "pressure_acceptance",
+        "air_acceptance",
+        "monitoring",
+        "filling",
+        "pressurization",
+        "pig_events",
+    ):
+        raw_base_sub = merged.get(dict_key)
+        base_sub: dict[str, Any] = raw_base_sub if isinstance(raw_base_sub, dict) else {}
+        raw_inc_sub = inc.get(dict_key)
+        inc_sub: dict[str, Any] = raw_inc_sub if isinstance(raw_inc_sub, dict) else {}
+        if base_sub or inc_sub:
+            merged[dict_key] = _merge_dict_fill_missing(base_sub, inc_sub)
+
+    if isinstance(merged.get("rows"), list) or isinstance(inc.get("rows"), list):
+        merged["rows"] = _append_unique_dicts(
+            merged.get("rows") or [],
+            inc.get("rows") or [],
+            limit=MAX_TABLE_ROWS,
+        )
+
+    if isinstance(merged.get("pig_runs"), list) or isinstance(inc.get("pig_runs"), list):
+        merged["pig_runs"] = _append_unique_dicts(
+            merged.get("pig_runs") or [],
+            inc.get("pig_runs") or [],
+            limit=30,
+        )
+
+    raw_base_td = merged.get("test_data")
+    base_td: dict[str, Any] = raw_base_td if isinstance(raw_base_td, dict) else {}
+    raw_inc_td = inc.get("test_data")
+    inc_td: dict[str, Any] = raw_inc_td if isinstance(raw_inc_td, dict) else {}
+    if base_td or inc_td:
+        merged["test_data"] = {
+            "volume_segments": _append_unique_dicts(
+                base_td.get("volume_segments") or [],
+                inc_td.get("volume_segments") or [],
+                limit=25,
+            ),
+            "test_measurements": _append_unique_dicts(
+                base_td.get("test_measurements") or [],
+                inc_td.get("test_measurements") or [],
+                limit=40,
+            ),
+        }
+
+    existing_notes = str(merged.get("notes") or "").strip()
+    incoming_notes = str(inc.get("notes") or "").strip()
+    if incoming_notes and incoming_notes not in existing_notes:
+        merged["notes"] = (
+            f"{existing_notes}\n{incoming_notes}" if existing_notes else incoming_notes
+        )[:1000]
+
+    raw_base_sig = merged.get("signatures")
+    base_sig: dict[str, Any] = raw_base_sig if isinstance(raw_base_sig, dict) else {}
+    raw_inc_sig = inc.get("signatures")
+    inc_sig: dict[str, Any] = raw_inc_sig if isinstance(raw_inc_sig, dict) else {}
+    if base_sig or inc_sig:
+        contractor_name = str(
+            base_sig.get("contractor_name") or inc_sig.get("contractor_name") or ""
+        ).strip()
+        botas_name = str(base_sig.get("botas_name") or inc_sig.get("botas_name") or "").strip()
+        merged["signatures"] = {
+            "contractor_name": contractor_name,
+            "contractor_signed": bool(contractor_name),
+            "botas_name": botas_name,
+            "botas_signed": bool(botas_name),
+        }
+
+    return reconcile_form_extracted_data(form_code, merged)
 
 
 def _mk_finding(

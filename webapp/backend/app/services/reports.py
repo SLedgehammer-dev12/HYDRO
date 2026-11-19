@@ -70,6 +70,7 @@ def build_context(session: HydroSession, results: Iterable[TestResult]) -> dict[
     geometry = inputs.get("geometry") or {}
     profile = inputs.get("section_profile") or {}
     segments = _geometry_rows(inputs)
+    total_length: float | None
     if segments:
         total_length = sum(as_float(item.get("length_m")) or 0.0 for item in segments)
         od = as_float(segments[0].get("outside_diameter_mm"))
@@ -79,6 +80,8 @@ def build_context(session: HydroSession, results: Iterable[TestResult]) -> dict[
         od = as_float(geometry.get("outside_diameter_mm"))
         wt = as_float(geometry.get("wall_thickness_mm"))
 
+    report_meta = inputs.get("report") or inputs.get("report_meta") or {}
+    section_meta = inputs.get("section_meta") or {}
     metadata = {
         "Surum": APP_VERSION,
         "Referans sartname": f"{SPEC_DOCUMENT_CODE} - {SPEC_DOCUMENT_TITLE}",
@@ -92,6 +95,12 @@ def build_context(session: HydroSession, results: Iterable[TestResult]) -> dict[
             str((inputs.get("modes") or {}).get("pressure_b_source") or ""),
         ),
         "Oturum": session.name,
+        "Test Bolumu": str(
+            report_meta.get("section_id") or section_meta.get("section_no") or session.name or "-"
+        ),
+        "Rapor No": str(report_meta.get("report_no") or "-"),
+        "Operator": str(report_meta.get("operator") or "-"),
+        "Rapor Tarihi": str(report_meta.get("date") or section_meta.get("test_date") or "-"),
         "Secili pompa konumu": str(inputs.get("pump_location") or "-"),
     }
     geometry_data = {
@@ -163,6 +172,10 @@ def build_report_text(context: dict[str, Any], session: HydroSession) -> str:
         f"Referans sartname: {SPEC_DOCUMENT_CODE} - {SPEC_DOCUMENT_TITLE}",
         f"Olusturma zamani: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         f"Oturum: {session.name}",
+        f"Test Bolumu: {context['metadata'].get('Test Bolumu', '-')}",
+        f"Rapor No: {context['metadata'].get('Rapor No', '-')}",
+        f"Operator: {context['metadata'].get('Operator', '-')}",
+        f"Rapor Tarihi: {context['metadata'].get('Rapor Tarihi', '-')}",
         "",
         "Boru Kesiti",
         f"Dis cap (mm): {context['geometry_data']['Dis cap (mm)']}",

@@ -70,6 +70,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def validate_bind_security(settings) -> str | None:  # noqa: ANN001
+    """Reject unauthenticated binding to non-loopback interfaces unless explicitly allowed."""
+
+    if not settings.is_loopback_host and settings.auth_mode == "none" and not settings.allow_remote:
+        return (
+            "HATA: Kimlik dogrulamasi olmadan 0.0.0.0 veya dis arayuzlere baglanma guvenlik "
+            "nedeniyle engellendi. Yalnizca reverse proxy / kimlik dogrulama arkasinda "
+            "calistiriyorsaniz HYDRO_ALLOW_REMOTE=1 ile acin."
+        )
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
 
@@ -94,6 +106,10 @@ def main(argv: list[str] | None = None) -> int:
         frontend_dist=Path(args.frontend_dist),
         log_level=str(args.log_level).upper(),
     )
+    bind_err = validate_bind_security(settings)
+    if bind_err is not None:
+        print(bind_err, file=sys.stderr)
+        return 2
     settings.ensure_directories()
 
     if settings.ocr_lang:

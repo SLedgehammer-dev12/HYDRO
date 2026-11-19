@@ -56,6 +56,7 @@ from .form_details import (
     build_form_structured_payload,
     compute_extended_summary,
     evaluate_all_form_findings,
+    merge_form_extracted_data,
     reconcile_form_extracted_data,
 )
 
@@ -1241,7 +1242,8 @@ def _extract_pig_events(text: str) -> dict[str, Any]:
             in_table = True
             continue
         if in_table and any(stop in folded for stop in ("aciklama", "botas", "test formeni")):
-            break
+            in_table = False
+            continue
         if in_table or "pig" in folded:
             for m_d in _DATE_RE.finditer(line):
                 dates.append(m_d.group(1))
@@ -1510,18 +1512,7 @@ def _normalize_calc_text(text: str) -> str:
     out = fold_tr(text)
     # Keep raw case for chainage/labels when needed? We use a non-lowercased version for KP/case-sensitive needs:
     cleaned = text.translate(
-        str.maketrans(
-            {
-                "\u00a0": " ",
-                "\u2010": "-",
-                "\u2011": "-",
-                "\u2012": "-",
-                "\u2013": "-",
-                "\u2014": "-",
-                "\u2212": "-",
-                "\xad": "-",
-            }
-        )
+        str.maketrans("\u00a0\u2010\u2011\u2012\u2013\u2014\u2212\xad", " -------")
     )
     cleaned = re.sub(r"(\d)\s*\.\s*(\d)", r"\1.\2", cleaned)
     cleaned = re.sub(r"\bm\s+m\b", "mm", cleaned, flags=re.IGNORECASE)
@@ -1802,24 +1793,34 @@ def _extract_form_specific_data(form_code: str, text: str) -> dict[str, Any]:
         log_entries = list(log.get("entries") or [])
         temps: list[float] = []
         volumes: list[float] = []
+        meter_readings: list[float] = []
         pressures: list[float] = []
         for ent in log["entries"]:
             nums = ent["nums"]
             # Typical row: Counter (m3), DeltaVol (m3), TotalVol (m3), WaterTemp (C), Pressure (Bar)
             if len(nums) >= 5:
-                volumes.append(nums[0])
+                if nums[0] >= 0:
+                    meter_readings.append(nums[0])
+                if nums[2] >= 0:
+                    volumes.append(nums[2])
                 if -5.0 <= nums[3] <= 55.0:
                     temps.append(nums[3])
                 if 0.0 <= nums[4] <= 300.0:
                     pressures.append(nums[4])
             elif len(nums) >= 2:
+                if nums[0] >= 0:
+                    meter_readings.append(nums[0])
                 for val in nums:
                     if 0.0 <= val <= 45.0:
                         temps.append(val)
                         break
+            elif len(nums) == 1 and nums[0] >= 0:
+                volumes.append(nums[0])
+        if not volumes and len(meter_readings) >= 2 and meter_readings[-1] > meter_readings[0]:
+            volumes = [round(meter_readings[-1] - meter_readings[0], 3)]
         payload["time_log"] = {k: v for k, v in log.items() if k != "entries"}
         payload["filling"] = {
-            "total_filled_m3": max(volumes) if volumes else None,
+            "total_filled_m3": round(max(volumes), 3) if volumes else None,
             "min_temp_c": round(min(temps), 2) if temps else None,
             "max_temp_c": round(max(temps), 2) if temps else None,
             "max_pressure_bar": round(max(pressures), 2) if pressures else None,
@@ -1887,7 +1888,7 @@ def _extract_form_specific_data(form_code: str, text: str) -> dict[str, Any]:
         pressures = []
         step_vols: list[float] = []
         cum_vols: list[float] = []
-        temps: list[float] = []
+        pr_temps: list[float] = []
         for ent in log["entries"]:
             nums = ent["nums"]
             p_cands = [v for v in nums[:3] if 5.0 <= v <= 450.0]
@@ -1896,7 +1897,7 @@ def _extract_form_specific_data(form_code: str, text: str) -> dict[str, Any]:
                 step_vols.append(nums[2])
                 cum_vols.append(nums[-2] if len(nums) >= 5 else nums[-1])
                 if len(nums) >= 5 and -5.0 <= nums[-1] <= 55.0:
-                    temps.append(nums[-1])
+                    pr_temps.append(nums[-1])
             elif len(nums) >= 2:
                 pressures.extend(p_cands if p_cands else [nums[1]])
                 step_vols.append(nums[2] if len(nums) >= 3 else 0.0)
@@ -1910,7 +1911,7 @@ def _extract_form_specific_data(form_code: str, text: str) -> dict[str, Any]:
             "total_added_water_m3": max(cum_vols)
             if cum_vols
             else (round(sum(step_vols), 4) if step_vols else None),
-            "temp_c": round(statistics.median(temps), 2) if temps else None,
+            "temp_c": round(statistics.median(pr_temps), 2) if pr_temps else None,
         }
 
     elif form_code == "air_acceptance":
@@ -2196,7 +2197,7 @@ def evaluate_section_calculations(
         and pa_val is not None
     ):
         try:
-            res = evaluate_pressure_variation_test(
+            pressure_res = evaluate_pressure_variation_test(
                 PressureVariationInputs(
                     pipe=pipe,
                     a_micro_per_bar=float(a_pres),
@@ -2206,18 +2207,18 @@ def evaluate_section_calculations(
                 )
             )
             pressure_eval = {
-                "status": "passed" if res.passed else "failed",
-                "passed": res.passed,
-                "pa_bar": round(res.actual_pressure_change_bar, 4),
-                "pt_bar": round(res.theoretical_pressure_change_bar, 4),
-                "margin_bar": round(res.margin_bar, 4),
+                "status": "passed" if pressure_res.passed else "failed",
+                "passed": pressure_res.passed,
+                "pa_bar": round(pressure_res.actual_pressure_change_bar, 4),
+                "pt_bar": round(pressure_res.theoretical_pressure_change_bar, 4),
+                "margin_bar": round(pressure_res.margin_bar, 4),
                 "delta_t_c": float(dt_val),
                 "a_micro_per_bar": float(a_pres),
                 "b_micro_per_c": float(b_pres),
                 "pl_bar": pl_bar,
                 "summary": (
-                    f"{'BAŞARILI' if res.passed else 'BAŞARISIZ'}: PA={res.actual_pressure_change_bar:.3f} bar, "
-                    f"Pt={res.theoretical_pressure_change_bar:.3f} bar, (PA−Pt)={res.margin_bar:+.3f} bar "
+                    f"{'BAŞARILI' if pressure_res.passed else 'BAŞARISIZ'}: PA={pressure_res.actual_pressure_change_bar:.3f} bar, "
+                    f"Pt={pressure_res.theoretical_pressure_change_bar:.3f} bar, (PA−Pt)={pressure_res.margin_bar:+.3f} bar "
                     f"(limit ≤ {pl_bar:.2f} bar){pl_note}."
                 ),
             }
@@ -2581,8 +2582,11 @@ def evaluate_operational_checks(
     leak_delta = leak_mon.get("last_4h_delta_c")
     if leak_form and int(leak_log.get("row_count") or 0) >= 2:
         dur_ok = leak_dur >= THERMAL_BALANCE_MIN_HOURS - 1e-9
-        temp_ok = leak_delta is not None and float(leak_delta) <= THERMAL_BALANCE_THRESHOLD_C + 1e-9
-        if dur_ok and temp_ok:
+        if (
+            dur_ok
+            and leak_delta is not None
+            and float(leak_delta) <= THERMAL_BALANCE_THRESHOLD_C + 1e-9
+        ):
             _set(
                 "thermal_balance",
                 lbl,
@@ -2672,19 +2676,47 @@ def evaluate_operational_checks(
     pr_pr = press_data.get("pressurization") or {}
     vt_geom = merged_header.get("section_volume_m3")
     filled_m3 = (fill_data.get("filling") or {}).get("total_filled_m3")
-    press_added = pr_pr.get("total_added_water_m3") or str_pr.get("total_added_water_m3")
+    press_added = (
+        pr_pr.get("total_added_water_m3")
+        if pr_pr.get("total_added_water_m3") is not None
+        else str_pr.get("total_added_water_m3")
+    )
     if strength_form or press_form:
         has_pv = int(str_log.get("row_count") or 0) >= 3 or int(pr_log.get("row_count") or 0) >= 3
-        if has_pv and vt_geom and filled_m3 and press_added is not None and float(filled_m3) > 0:
-            # Verify Madde 14.2 excess fraction on P-V log or compare pressurized volume
+        if (
+            has_pv
+            and vt_geom
+            and float(vt_geom) > 0
+            and filled_m3 is not None
+            and press_added is not None
+            and float(filled_m3) > 0
+        ):
+            # Verify Madde 14.2: compare pressurized volume against geometric volume (detect both overfill & underfill)
             total_filled = float(filled_m3) + float(press_added)
-            dev_pct = (
-                max(0.0, ((total_filled - float(vt_geom)) / total_filled) * 100.0)
+            signed_dev_pct = ((total_filled - float(vt_geom)) / float(vt_geom)) * 100.0
+            excess_dev_pct = (
+                ((total_filled - float(vt_geom)) / total_filled) * 100.0
                 if total_filled > 0
                 else 0.0
             )
+            underfill_limit_m3 = float(vt_geom) * (
+                1.0 - PRESSURIZATION_VOLUME_DEVIATION_LIMIT_PERCENT / 100.0
+            )
             p_span = f"{pr_pr.get('p_min_bar') or str_pr.get('p_min_bar') or '?'}–{pr_pr.get('p_max_bar') or str_pr.get('p_max_bar') or '?'} bar"
-            if dev_pct <= PRESSURIZATION_VOLUME_DEVIATION_LIMIT_PERCENT + 1e-9:
+            if total_filled < underfill_limit_m3 - 1e-9:
+                _set(
+                    "pressurization_volume",
+                    lbl,
+                    ref,
+                    checked=False,
+                    status="failed" if signed_dev_pct < -5.0 else "warning",
+                    message=(
+                        f"Basınçlandırılan toplam su hacmi ({total_filled:.2f} m³), geometrik hacmin "
+                        f"({float(vt_geom):.2f} m³) altında (sapma %{signed_dev_pct:+.2f}); sayaç/dolum kaydını kontrol edin."
+                    ),
+                    sources=[f["form_code"] for f in (strength_form, press_form) if f],
+                )
+            elif excess_dev_pct <= PRESSURIZATION_VOLUME_DEVIATION_LIMIT_PERCENT + 1e-9:
                 _set(
                     "pressurization_volume",
                     lbl,
@@ -2705,7 +2737,7 @@ def evaluate_operational_checks(
                     checked=False,
                     status="warning",
                     message=(
-                        f"Basınç-hacim kaydı okundu (hacim sapması %{dev_pct:.2f}, limit %{PRESSURIZATION_VOLUME_DEVIATION_LIMIT_PERCENT:.1f}); "
+                        f"Basınç-hacim kaydı okundu (fazla su sapması %{excess_dev_pct:.2f}, limit %{PRESSURIZATION_VOLUME_DEVIATION_LIMIT_PERCENT:.1f}); "
                         "saha sayacı başlangıç/bitiş değerlerini doğrulayın."
                     ),
                     sources=[f["form_code"] for f in (strength_form, press_form) if f],
@@ -3336,15 +3368,15 @@ def analyze_dossier_pages(
     for sec_no in section_order:
         forms_by_code: dict[str, dict[str, Any]] = {}
         for form_code, raw_slot in grouped[sec_no].items():
-            spec: FormSpec = raw_slot["spec"]
+            slot_spec: FormSpec = raw_slot["spec"]
             combined_text = "\n".join(raw_slot["texts"])
             extracted = _extract_form_specific_data(form_code, combined_text)
             forms_by_code[form_code] = {
-                "form_code": spec.code,
-                "botas_code": spec.botas_code,
-                "form_title": spec.title,
-                "required": spec.required,
-                "order": spec.order,
+                "form_code": slot_spec.code,
+                "botas_code": slot_spec.botas_code,
+                "form_title": slot_spec.title,
+                "required": slot_spec.required,
+                "order": slot_spec.order,
                 "status": "filled",
                 "source_filename": source_filename,
                 "pages": raw_slot["pages"],
@@ -3515,7 +3547,7 @@ def _list_project_sessions(
     workspace_hash: str,
     project_id: str,
 ) -> list[HydroSession]:
-    return (
+    return list(
         db.execute(
             select(HydroSession).where(
                 HydroSession.project_id == project_id,
@@ -3720,12 +3752,16 @@ def _set_if_needed(target: dict[str, Any], key: str, value: Any, overwrite: bool
         target[key] = value
 
 
+def _grade_smys_value(entry: dict[str, Any]) -> float:
+    raw = entry.get("smys_mpa")
+    return float(raw) if isinstance(raw, (int, float, str)) else 0.0
+
+
 def _match_api_5l_grade_label(smys_mpa: float) -> str | None:
-    best = min(API_5L_PSL2_GRADES, key=lambda g: abs(float(g["smys_mpa"]) - smys_mpa))
-    if abs(float(best["smys_mpa"]) - smys_mpa) <= 3.0:
-        return (
-            f"API 5L PSL2 {best['grade']} / {best['iso_label']} - SMYS {best['smys_mpa']:.0f} MPa"
-        )
+    best = min(API_5L_PSL2_GRADES, key=lambda g: abs(_grade_smys_value(g) - smys_mpa))
+    best_smys = _grade_smys_value(best)
+    if abs(best_smys - smys_mpa) <= 3.0:
+        return f"API 5L PSL2 {best['grade']} / {best['iso_label']} - SMYS {best_smys:.0f} MPa"
     return None
 
 
@@ -3741,7 +3777,7 @@ def _cumulative_recompute_section(
     all_forms = (
         db.execute(select(SectionForm).where(SectionForm.session_id == session.id)).scalars().all()
     )
-    filled_by_code = {
+    filled_by_code: dict[str, dict[str, Any]] = {
         row.form_code: {
             "form_code": row.form_code,
             "botas_code": row.botas_code,
@@ -4349,6 +4385,7 @@ def commit_dossier_to_project(
             init_inputs = session_service.default_inputs()
             start_kp = str(header.get("start_kp") or "").strip()
             end_kp = str(header.get("end_kp") or "").strip()
+            raw_dossier = analysis.dossier if isinstance(analysis.dossier, dict) else {}
             init_inputs["section_meta"] = {
                 "section_no": sec_no,
                 "description": f"{project.name} · {sec_no}",
@@ -4357,7 +4394,7 @@ def commit_dossier_to_project(
                 "end_kp": end_kp,
                 "test_date": "",
                 "test_type": "Hidrostatik test",
-                "notes": f"OCR hakediş paketinden oluşturuldu: {analysis.dossier.get('source_filename', '')}",
+                "notes": f"OCR hakediş paketinden oluşturuldu: {raw_dossier.get('source_filename', '')}",
             }
             init_inputs["geometry"] = {
                 "outside_diameter_mm": header.get("outside_diameter_mm"),
@@ -4788,87 +4825,166 @@ def scan_single_form_upload(
     workspace_hash: str,
     session: HydroSession,
     form_code: str,
-    file_name: str | None,
-    stream: Any,
+    file_name: str | None = None,
+    stream: Any = None,
+    uploads: Sequence[tuple[str | None, Any]] | None = None,
     language: str | None = None,
     overwrite: bool = True,
+    mode: str = "replace",
 ) -> dict[str, Any]:
-    """Scan a single form PDF/image/spreadsheet directly into the active section's target form."""
+    """Scan single or multi-file form PDFs/images/spreadsheets into the active section's target form."""
     from hidrostatik_test.services.report_ocr import extract_text
 
     from ..models import Attachment
     from . import ocr as ocr_service
     from .storage import resolve_stored_path
 
+    norm_mode = (mode or "replace").strip().lower()
+    if norm_mode not in {"replace", "append"}:
+        raise AppError(
+            "invalid_scan_mode",
+            "Gecersiz tarama modu; 'replace' veya 'append' olmalidir.",
+            status_code=422,
+        )
+
+    upload_items = (
+        list(uploads) if uploads else ([(file_name, stream)] if stream is not None else [])
+    )
+    if not upload_items:
+        raise AppError(
+            "missing_file",
+            "Taranacak en az bir dokuman secilmelidir.",
+            status_code=400,
+        )
+
     spec = _require_form_spec(form_code)
     ensure_section_form_slots(db, session, commit=False)
 
-    analysis, _ = ocr_service.analyze_upload(
-        db,
-        settings,
-        workspace_hash,
-        file_name=file_name,
-        stream=stream,
-        calculated_raw=None,
-        session_id=session.id,
-        mapping_profile_id=None,
-        language=language,
-        force=True,
-    )
-
     sec_meta = (session.inputs or {}).get("section_meta") or {}
     target_sec_norm = normalize_section_no(sec_meta.get("section_no") or "")
-    dossier = analysis.dossier if isinstance(analysis.dossier, dict) else {}
-    sections = list(dossier.get("sections") or [])
 
     chosen_incoming: dict[str, Any] | None = None
     extra_forms: list[dict[str, Any]] = []
+    analysis: Any = None
+    src_filename = ""
 
-    if sections:
-        matched_sec = None
-        if target_sec_norm:
-            for sec in sections:
-                if (
-                    normalize_section_no(sec.get("section_no")) or sec.get("section_no")
-                ) == target_sec_norm:
-                    matched_sec = sec
-                    break
-        if matched_sec is None:
-            for sec in sections:
-                if any(f.get("form_code") == form_code for f in (sec.get("present_forms") or [])):
-                    matched_sec = sec
-                    break
-        if matched_sec is None:
-            matched_sec = sections[0]
+    if len(upload_items) == 1:
+        single_name, single_stream = upload_items[0]
+        analysis, _ = ocr_service.analyze_upload(
+            db,
+            settings,
+            workspace_hash,
+            file_name=single_name,
+            stream=single_stream,
+            calculated_raw=None,
+            session_id=session.id,
+            mapping_profile_id=None,
+            language=language,
+            force=True,
+        )
+        dossier = analysis.dossier if isinstance(analysis.dossier, dict) else {}
+        sections = list(dossier.get("sections") or [])
 
-        for f in matched_sec.get("present_forms") or []:
-            if f.get("form_code") == form_code:
-                chosen_incoming = f
+        if sections:
+            matched_sec = None
+            if target_sec_norm:
+                for sec in sections:
+                    if (
+                        normalize_section_no(sec.get("section_no")) or sec.get("section_no")
+                    ) == target_sec_norm:
+                        matched_sec = sec
+                        break
+            if matched_sec is None:
+                for sec in sections:
+                    if any(
+                        f.get("form_code") == form_code for f in (sec.get("present_forms") or [])
+                    ):
+                        matched_sec = sec
+                        break
+            if matched_sec is None:
+                matched_sec = sections[0]
+
+            for f in matched_sec.get("present_forms") or []:
+                if f.get("form_code") == form_code:
+                    chosen_incoming = f
+                else:
+                    extra_forms.append(f)
+
+        attachment = db.get(Attachment, analysis.attachment_id)
+        src_filename = attachment.filename if attachment else (single_name or "")
+
+        if chosen_incoming is None and attachment is not None:
+            cached_pages = getattr(analysis, "_extracted_pages", None)
+            if cached_pages is not None:
+                pages = list(cached_pages)
             else:
-                extra_forms.append(f)
+                stored_path = resolve_stored_path(settings.uploads_dir, attachment.stored_path)
+                pages = extract_text(stored_path)
+            combined_text = "\n".join(pg.text for pg in pages)
+            ext_data = _extract_form_specific_data(form_code, combined_text)
+            chosen_incoming = {
+                "form_code": spec.code,
+                "botas_code": spec.botas_code,
+                "form_title": spec.title,
+                "required": spec.required,
+                "status": "filled",
+                "source_filename": src_filename,
+                "pages": [pg.page_number for pg in pages],
+                "form_date": ext_data.get("form_date") or "",
+                "extracted_data": ext_data,
+                "warnings": [],
+            }
+    else:
+        all_texts: list[str] = []
+        total_pages = 0
+        first_src = ""
+        for fname, fstream in upload_items:
+            analysis, _ = ocr_service.analyze_upload(
+                db,
+                settings,
+                workspace_hash,
+                file_name=fname,
+                stream=fstream,
+                calculated_raw=None,
+                session_id=session.id,
+                mapping_profile_id=None,
+                language=language,
+                force=True,
+            )
+            attachment = db.get(Attachment, analysis.attachment_id)
+            cur_name = attachment.filename if attachment else (fname or "")
+            if not first_src and cur_name:
+                first_src = cur_name
+            cached_pages = getattr(analysis, "_extracted_pages", None)
+            if cached_pages is not None:
+                file_pages = list(cached_pages)
+            elif attachment is not None:
+                stored_path = resolve_stored_path(settings.uploads_dir, attachment.stored_path)
+                file_pages = extract_text(stored_path)
+            else:
+                file_pages = []
+            if file_pages:
+                total_pages += len(file_pages)
+                all_texts.extend(pg.text for pg in file_pages if pg.text.strip())
 
-    attachment = db.get(Attachment, analysis.attachment_id)
-    src_filename = attachment.filename if attachment else (file_name or "")
+        if all_texts:
+            combined_text = "\n".join(all_texts)
+            ext_data = _extract_form_specific_data(form_code, combined_text)
+            src_filename = f"{first_src or 'dokuman'} (+{len(upload_items) - 1} dosya)"
+            chosen_incoming = {
+                "form_code": spec.code,
+                "botas_code": spec.botas_code,
+                "form_title": spec.title,
+                "required": spec.required,
+                "status": "filled",
+                "source_filename": src_filename,
+                "pages": list(range(1, max(total_pages, len(upload_items)) + 1)),
+                "form_date": ext_data.get("form_date") or "",
+                "extracted_data": ext_data,
+                "warnings": [],
+            }
 
-    if chosen_incoming is None and attachment is not None:
-        stored_path = resolve_stored_path(settings.uploads_dir, attachment.stored_path)
-        pages = extract_text(stored_path)
-        combined_text = "\n".join(pg.text for pg in pages)
-        ext_data = _extract_form_specific_data(form_code, combined_text)
-        chosen_incoming = {
-            "form_code": spec.code,
-            "botas_code": spec.botas_code,
-            "form_title": spec.title,
-            "required": spec.required,
-            "status": "filled",
-            "source_filename": src_filename,
-            "pages": [pg.page_number for pg in pages],
-            "form_date": ext_data.get("form_date") or "",
-            "extracted_data": ext_data,
-            "warnings": [],
-        }
-
-    if chosen_incoming is None:
+    if chosen_incoming is None or analysis is None:
         raise AppError(
             "form_scan_empty",
             "Yuklenen dokumandan forma ait okunabilir veri cikarilamadi.",
@@ -4884,15 +5000,18 @@ def scan_single_form_upload(
 
     updated_codes: list[str] = []
     now = utcnow()
-    to_apply = [chosen_incoming] + [
-        ef
-        for ef in extra_forms
-        if (
-            ef.get("form_code") not in existing_rows
-            or existing_rows[ef["form_code"]].status == "empty"
-            or overwrite
-        )
-    ]
+    if norm_mode == "append":
+        to_apply = [chosen_incoming]
+    else:
+        to_apply = [chosen_incoming] + [
+            ef
+            for ef in extra_forms
+            if (
+                ef.get("form_code") not in existing_rows
+                or existing_rows[ef["form_code"]].status == "empty"
+                or overwrite
+            )
+        ]
 
     for incoming in to_apply:
         fcode = str(incoming["form_code"])
@@ -4913,22 +5032,51 @@ def scan_single_form_upload(
             )
             db.add(row)
             existing_rows[fcode] = row
-        elif row.status != "empty" and not overwrite and fcode == form_code:
+        elif (
+            row.status != "empty" and not overwrite and fcode == form_code and norm_mode != "append"
+        ):
             # Target form scan always updates when explicitly invoked for that form unless overwrite disabled
             continue
 
+        should_append = (
+            norm_mode == "append"
+            and fcode == form_code
+            and row.status != "empty"
+            and isinstance(row.extracted_data, dict)
+            and bool(row.extracted_data)
+        )
         row.status = str(incoming.get("status") or "filled")
         row.analysis_id = analysis.id
         row.attachment_id = analysis.attachment_id
-        row.source_filename = str(incoming.get("source_filename") or src_filename)
-        row.pages = list(incoming.get("pages") or [])
-        row.form_date = str(incoming.get("form_date") or "")
-        ext = reconcile_form_extracted_data(fcode, incoming.get("extracted_data") or {})
+        incoming_src = str(incoming.get("source_filename") or src_filename)
+        incoming_pages = list(incoming.get("pages") or [])
+        incoming_date = str(incoming.get("form_date") or "")
+        incoming_ext = incoming.get("extracted_data") or {}
+
+        if should_append:
+            prev_src = str(row.source_filename or "").strip()
+            if prev_src and incoming_src and incoming_src not in prev_src:
+                row.source_filename = f"{prev_src} + {incoming_src}"[:240]
+            else:
+                row.source_filename = (prev_src or incoming_src)[:240]
+            prev_pages = list(row.pages or [])
+            max_prev = max((int(p) for p in prev_pages if isinstance(p, int)), default=0)
+            row.pages = prev_pages + [
+                max_prev + idx + 1 for idx in range(max(len(incoming_pages), 1))
+            ]
+            row.form_date = str(row.form_date or incoming_date)
+            ext = merge_form_extracted_data(fcode, row.extracted_data, incoming_ext)
+        else:
+            row.source_filename = incoming_src[:240]
+            row.pages = incoming_pages
+            row.form_date = incoming_date
+            ext = reconcile_form_extracted_data(fcode, incoming_ext)
+
         row.extracted_data = json_safe(ext)
         flag_modified(row, "extracted_data")
         row.warnings = list(incoming.get("warnings") or [])
         row.revision = int(row.revision or 0) + 1
-        row.filled_at = now
+        row.filled_at = (row.filled_at or now) if should_append else now
         row.updated_at = now
         updated_codes.append(fcode)
 
@@ -4947,7 +5095,13 @@ def scan_single_form_upload(
         entity_id=existing_rows[form_code].id if form_code in existing_rows else session.id,
         session_id=session.id,
         workspace_hash=workspace_hash,
-        after={"form_code": form_code, "analysis_id": analysis.id, "updated_forms": updated_codes},
+        after={
+            "form_code": form_code,
+            "mode": norm_mode,
+            "file_count": len(upload_items),
+            "analysis_id": analysis.id,
+            "updated_forms": updated_codes,
+        },
     )
     db.commit()
     db.refresh(session)

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session as OrmSession
 
 from .. import schemas
 from ..core.config import Settings
-from ..core.errors import validation_error
+from ..core.errors import AppError, validation_error
 from ..core.timeutil import json_safe
 from ..db import get_db
 from ..services import audit
@@ -149,13 +149,36 @@ def update_session_form(
 def scan_single_form(
     session_id: str,
     form_code: str,
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(default=None),
+    files: list[UploadFile] | None = File(default=None),
     language: str | None = Form(default=None),
     overwrite: bool = Form(default=True),
+    mode: str = Form(default="replace"),
     db: OrmSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     workspace: Workspace = Depends(get_workspace),
 ) -> dict:
+    raw_uploads = list(files) if files else ([file] if file is not None else [])
+    if not raw_uploads:
+        raise AppError(
+            "missing_file",
+            "Taranacak en az bir dokuman secilmelidir.",
+            status_code=400,
+        )
+    if len(raw_uploads) > 20:
+        raise AppError(
+            "too_many_files",
+            "Tek seferde en fazla 20 sayfa/dosya yuklenebilir.",
+            status_code=422,
+        )
+    norm_mode = (mode or "replace").strip().lower()
+    if norm_mode not in {"replace", "append"}:
+        raise AppError(
+            "invalid_scan_mode",
+            "Gecersiz tarama modu; 'replace' veya 'append' olmalidir.",
+            status_code=422,
+        )
+
     session = session_service.get_session(db, session_id, workspace.hash)
     return json_safe(
         dossier_service.scan_single_form_upload(
@@ -164,10 +187,10 @@ def scan_single_form(
             workspace_hash=workspace.hash,
             session=session,
             form_code=form_code,
-            file_name=file.filename,
-            stream=file.file,
+            uploads=[(u.filename, u.file) for u in raw_uploads],
             language=language or None,
             overwrite=bool(overwrite),
+            mode=norm_mode,
         )
     )
 
@@ -197,9 +220,10 @@ def delete_session(
     hard: bool = Query(default=False),
     db: OrmSession = Depends(get_db),
     workspace: Workspace = Depends(get_workspace),
+    settings: Settings = Depends(get_settings),
 ) -> Response:
     session = session_service.get_session(db, session_id, workspace.hash, include_deleted=hard)
-    session_service.delete_session(db, session, hard=hard)
+    session_service.delete_session(db, session, hard=hard, uploads_dir=settings.uploads_dir)
     return Response(status_code=204)
 
 

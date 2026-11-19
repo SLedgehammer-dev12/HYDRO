@@ -175,10 +175,18 @@ class SessionUpdate(StrictModel):
     notes: str | None = None
 
 
+PROJECT_STATUS = Literal["active", "completed", "archived"]
+
+
 class ProjectCreate(StrictModel):
     name: str = Field(min_length=1, max_length=200)
     code: str | None = Field(default=None, max_length=64)
     client: str | None = Field(default=None, max_length=200)
+    contractor: str | None = Field(default=None, max_length=200)
+    supervisor: str | None = Field(default=None, max_length=200)
+    pipeline_length_m: float | None = Field(default=None, ge=0, le=5_000_000)
+    status: PROJECT_STATUS = "active"
+    defaults: dict[str, Any] = Field(default_factory=dict)
     description: str | None = None
 
 
@@ -186,6 +194,11 @@ class ProjectUpdate(StrictModel):
     name: str | None = Field(default=None, max_length=200)
     code: str | None = Field(default=None, max_length=64)
     client: str | None = Field(default=None, max_length=200)
+    contractor: str | None = Field(default=None, max_length=200)
+    supervisor: str | None = Field(default=None, max_length=200)
+    pipeline_length_m: float | None = Field(default=None, ge=0, le=5_000_000)
+    status: PROJECT_STATUS | None = None
+    defaults: dict[str, Any] | None = None
     description: str | None = None
 
 
@@ -194,10 +207,82 @@ class ProjectSummary(StrictModel):
     code: str = ""
     name: str
     client: str | None = None
+    contractor: str | None = None
+    supervisor: str | None = None
+    pipeline_length_m: float | None = None
+    status: PROJECT_STATUS = "active"
+    defaults: dict[str, Any] = Field(default_factory=dict)
     description: str | None = None
     section_count: int = 0
     created_at: str | None = None
     updated_at: str | None = None
+
+
+class ProjectExportRequest(StrictModel):
+    format: Literal["xlsx", "pdf", "csv", "json"] = "xlsx"
+
+
+class ProjectGenerateSectionsRequest(StrictModel):
+    total_length_m: float = Field(gt=0, le=500_000)
+    start_kp_m: float = Field(default=0.0, ge=0, le=2_000_000)
+    max_section_length_m: float = Field(default=12_000.0, ge=100, le=20_000)
+    respect_volume_limit: bool = True
+    section_prefix: str = Field(default="K-", min_length=1, max_length=16)
+    outside_diameter_mm: float | None = Field(default=None, gt=0, le=5000)
+    wall_thickness_mm: float | None = Field(default=None, gt=0, le=200)
+    material_grade: str | None = Field(default=None, max_length=160)
+    smys_mpa: float | None = Field(default=None, gt=0, le=2000)
+    design_pressure_bar: float | None = Field(default=None, gt=0, le=1000)
+    location_class: str | None = Field(default=None, max_length=120)
+    base_elevation_m: float = Field(default=200.0, ge=-500, le=8000)
+    elevation_amplitude_m: float = Field(default=85.0, ge=0, le=2000)
+    test_date: str | None = Field(default=None, max_length=40)
+    initialize_forms: bool = True
+
+
+class ProjectSyncFormsRequest(StrictModel):
+    overwrite_existing: bool = False
+    form_codes: list[str] | None = Field(default=None, max_length=20)
+
+
+class SampleProjectGenerateRequest(StrictModel):
+    scenario: Literal["passing", "mixed", "failing"] = "mixed"
+    section_count: int = Field(default=3, ge=1, le=6)
+    name: str | None = Field(default=None, max_length=200)
+    code: str | None = Field(default=None, max_length=64)
+    include_time_series: bool = True
+    include_forms: bool = True
+
+
+class ProjectCloneRequest(StrictModel):
+    name: str | None = Field(default=None, max_length=200)
+    code: str | None = Field(default=None, max_length=64)
+    mode: Literal["template", "full"] = "template"
+
+
+class WorkspaceClaimRequest(StrictModel):
+    source_workspace_hash: str = Field(min_length=8, max_length=64)
+    source_workspace_key: str | None = Field(default=None, min_length=1, max_length=256)
+
+
+class TrashRestoreRequest(StrictModel):
+    entity_type: Literal["project", "session"]
+    entity_id: str = Field(min_length=1, max_length=64)
+
+
+class DbBackupRequest(StrictModel):
+    reason: str = Field(default="manual", max_length=32)
+
+
+class DbRestoreRequest(StrictModel):
+    backup_filename: str = Field(min_length=1, max_length=180)
+
+
+class DbMaintenanceRequest(StrictModel):
+    checkpoint_wal: bool = True
+    vacuum: bool = False
+    clean_exports: bool = True
+    clean_orphan_uploads: bool = False
 
 
 class SectionProfilePointIn(StrictModel):
@@ -345,6 +430,9 @@ __all__ = [
     "CoefficientBRequest",
     "CoefficientCompareRequest",
     "CoefficientTableRequest",
+    "DbBackupRequest",
+    "DbMaintenanceRequest",
+    "DbRestoreRequest",
     "DraftSectionBatchCreate",
     "DraftSectionIn",
     "GeometryIn",
@@ -360,12 +448,17 @@ __all__ = [
     "PressureProfileRequest",
     "PressureVariationRequest",
     "PressurizationRequest",
+    "ProjectCloneRequest",
     "ProjectCreate",
+    "ProjectExportRequest",
+    "ProjectGenerateSectionsRequest",
     "ProjectSummary",
+    "ProjectSyncFormsRequest",
     "ProjectUpdate",
     "ReferenceCompareRequest",
     "ReportExportRequest",
     "ResultCreate",
+    "SampleProjectGenerateRequest",
     "SectionFormUpdateRequest",
     "SectionLandmarkIn",
     "SectionProfilePointIn",
@@ -376,5 +469,7 @@ __all__ = [
     "ThermalBalanceRecordIn",
     "ThermalBalanceRequest",
     "TimeSeriesCreate",
+    "TrashRestoreRequest",
     "WaterDensityRequest",
+    "WorkspaceClaimRequest",
 ]

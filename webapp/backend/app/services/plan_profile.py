@@ -1009,7 +1009,8 @@ def _extract_cad_plan_profile_page(
     by_y: dict[int, list[tuple[float, float, float]]] = defaultdict(list)
     for x, y, km_m in kp_ticks:
         by_y[round(y / 50.0) * 50].append((x, y, km_m))
-    kp_band = sorted(max(by_y.values(), key=len), key=lambda item: item[0])
+    kp_longest = max(by_y.values(), key=len)
+    kp_band = sorted(kp_longest, key=lambda item: item[0])
     if len(kp_band) < 4:
         return None
 
@@ -1049,9 +1050,10 @@ def _extract_cad_plan_profile_page(
     elev_axis_xs = [sum(xs) / len(xs) for xs in elev_x_counts.values() if len(xs) >= 5]
     if len(elev_ticks) >= 3:
         by_x: dict[int, list[tuple[float, float, float]]] = defaultdict(list)
-        for x, y, val in elev_ticks:
-            by_x[round(x / 100.0) * 100].append((x, y, val))
-        elev_band = sorted(max(by_x.values(), key=len), key=lambda item: item[1])
+        for ex_coord, ey_coord, eval_m in elev_ticks:
+            by_x[round(ex_coord / 100.0) * 100].append((ex_coord, ey_coord, eval_m))
+        elev_longest = max(by_x.values(), key=len)
+        elev_band = sorted(elev_longest, key=lambda item: item[1])
         if len(elev_band) >= 3 and abs(elev_band[-1][1] - elev_band[0][1]) > 1e-3:
             ey0, el0 = elev_band[0][1], elev_band[0][2]
             ey1, el1 = elev_band[-1][1], elev_band[-1][2]
@@ -1566,18 +1568,18 @@ def _extract_dxf_plan_profile(
         import ezdxf
     except ImportError as exc:
         raise AppError(
+            "cad_dependency_missing",
             "CAD (.dxf/.dwg) dosyalarını okumak için 'ezdxf' paketi gerekli.",
-            code="cad_dependency_missing",
-            status=503,
+            status_code=503,
         ) from exc
 
     try:
         doc = ezdxf.readfile(dxf_path)
     except Exception as exc:
         raise AppError(
+            "cad_parse_error",
             f"CAD dosyası okunamadı: {exc}",
-            code="cad_parse_error",
-            status=422,
+            status_code=422,
         ) from exc
 
     msp = doc.modelspace()
@@ -1591,7 +1593,7 @@ def _extract_dxf_plan_profile(
             if txt:
                 items.append((float(entity.dxf.insert.x), float(entity.dxf.insert.y), txt, layer))
         elif etype == "MTEXT":
-            txt = str(entity.plain_text() or "").replace("\xa0", " ").strip()
+            txt = str(getattr(entity, "plain_text")() or "").replace("\xa0", " ").strip()
             if txt:
                 items.append((float(entity.dxf.insert.x), float(entity.dxf.insert.y), txt, layer))
         elif etype == "INSERT":
@@ -1606,7 +1608,7 @@ def _extract_dxf_plan_profile(
                 dxf_vlines.append((0.5 * (x1 + x2), min(y1, y2), max(y1, y2)))
         elif etype == "LWPOLYLINE":
             try:
-                pts = list(entity.get_points("xy"))
+                pts = list(getattr(entity, "get_points")("xy"))
             except Exception:
                 pts = []
             for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
@@ -1673,7 +1675,8 @@ def _extract_dxf_plan_profile(
         by_y: dict[int, list[tuple[float, float, float]]] = defaultdict(list)
         for x, y, km_m in kp_candidates:
             by_y[round(y / 25.0) * 25].append((x, y, km_m))
-        kp_band = sorted(max(by_y.values(), key=len), key=lambda entry: entry[0])
+        kp_longest = max(by_y.values(), key=len)
+        kp_band = sorted(kp_longest, key=lambda entry: entry[0])
         kp_x_map = [(x, km_m) for x, _, km_m in kp_band]
         kp_band_y = statistics.median([y for _, y, _ in kp_band])
         sorted_stations = sorted({km_m for _, km_m in kp_x_map})
@@ -1770,20 +1773,20 @@ def _extract_dxf_plan_profile(
                 for idx_b, (bx, _by, sec_label) in enumerate(bolums):
                     left_divs = [dx for dx in dividers if dx < bx]
                     right_divs = [dx for dx in dividers if dx > bx]
-                    sx = left_divs[-1] if left_divs else None
-                    ex = right_divs[0] if right_divs else None
+                    cad_sx: float | None = left_divs[-1] if left_divs else None
+                    cad_ex: float | None = right_divs[0] if right_divs else None
                     if idx_b == 0:
                         s_m = min_kp_m
-                    elif sx is not None:
-                        s_m = round(max(min_kp_m, min(max_kp_m, _interp_dxf_kp(sx))), 0)
+                    elif cad_sx is not None:
+                        s_m = round(max(min_kp_m, min(max_kp_m, _interp_dxf_kp(cad_sx))), 0)
                     else:
                         valid_cad = False
                         break
 
                     if idx_b == len(bolums) - 1:
                         e_m = max_kp_m
-                    elif ex is not None:
-                        e_m = round(max(min_kp_m, min(max_kp_m, _interp_dxf_kp(ex))), 0)
+                    elif cad_ex is not None:
+                        e_m = round(max(min_kp_m, min(max_kp_m, _interp_dxf_kp(cad_ex))), 0)
                     else:
                         valid_cad = False
                         break
@@ -1859,6 +1862,34 @@ def _extract_dxf_plan_profile(
     return res
 
 
+def _validate_plan_profile_magic_bytes(ext: str, data: bytes) -> None:
+    """Validate uploaded file signature before invoking native/CAD/PDF parsers."""
+    head = data[:8192]
+    ok = False
+    if ext == ".pdf":
+        ok = b"%PDF-" in head[:1024]
+    elif ext == ".dwg":
+        ok = head[:6].startswith(b"AC10")
+    elif ext == ".dxf":
+        ok = b"SECTION" in head.upper() or head.startswith(b"AutoCAD Binary DXF")
+    elif ext == ".png":
+        ok = head.startswith(b"\x89PNG\r\n\x1a\n")
+    elif ext in {".jpg", ".jpeg"}:
+        ok = head.startswith(b"\xff\xd8\xff")
+    elif ext in {".tif", ".tiff"}:
+        ok = head.startswith((b"II*\x00", b"MM\x00*"))
+    elif ext == ".bmp":
+        ok = head.startswith(b"BM")
+    elif ext == ".webp":
+        ok = len(head) >= 12 and head[:4] == b"RIFF" and head[8:12] == b"WEBP"
+    if not ok:
+        raise AppError(
+            "invalid_file_signature",
+            f"Dosya içeriği {ext} başlığı ile uyuşmuyor.",
+            status_code=415,
+        )
+
+
 def scan_plan_profile_upload(
     *,
     file_name: str | None,
@@ -1866,31 +1897,54 @@ def scan_plan_profile_upload(
     max_section_length_m: float = 12_000.0,
     max_elevation_diff_m: float | None = None,
     language: str | None = None,
+    max_bytes: int | None = None,
 ) -> dict[str, Any]:
     """Yüklenen Plan-Profil PDF/CAD/görsel dosyasını okur ve taslak kesitleri üretir."""
     safe_name = os.path.basename(file_name or "plan_profile.pdf")
     ext = Path(safe_name).suffix.lower()
     if ext not in _SUPPORTED_PLAN_PROFILE_EXTENSIONS:
         raise AppError(
+            "unsupported_format",
             f"Desteklenmeyen dosya uzantısı: {ext or 'yok'}. PDF, DWG, DXF veya görsel yükleyin.",
-            code="unsupported_format",
-            status=415,
+            status_code=415,
         )
 
-    max_bytes = effective_max_file_size_bytes()
-    data = stream.read(max_bytes + 1)
-    if not data:
-        raise AppError("Yüklenen dosya boş.", code="empty_file", status=422)
-    if len(data) > max_bytes:
-        raise AppError(
-            "Dosya boyutu izin verilen sınırı aşıyor.",
-            code="file_too_large",
-            status=413,
-        )
+    env_limit = effective_max_file_size_bytes()
+    limit = env_limit if max_bytes is None else min(max_bytes, env_limit)
+    chunk_size = 1024 * 1024
+    header_buf = bytearray()
+    total_written = 0
+    tmp_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+            tmp_path = tmp.name
+            while True:
+                chunk = stream.read(chunk_size)
+                if not chunk:
+                    break
+                total_written += len(chunk)
+                if total_written > limit:
+                    raise AppError(
+                        "file_too_large",
+                        "Dosya boyutu izin verilen sınırı aşıyor.",
+                        status_code=413,
+                    )
+                if len(header_buf) < 8192:
+                    need = 8192 - len(header_buf)
+                    header_buf.extend(chunk[:need])
+                tmp.write(chunk)
 
-    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
-        tmp.write(data)
-        tmp_path = tmp.name
+        if total_written == 0:
+            raise AppError("empty_file", "Yüklenen dosya boş.", status_code=422)
+
+        _validate_plan_profile_magic_bytes(ext, bytes(header_buf))
+    except Exception:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        raise
 
     if ext in _SUPPORTED_CAD_EXTENSIONS:
         dxf_tmp_path: str | None = None
@@ -1899,9 +1953,9 @@ def scan_plan_profile_upload(
                 dwg2dxf = _find_dwg2dxf()
                 if not dwg2dxf:
                     raise AppError(
+                        "dwg_converter_missing",
                         "DWG dosyalarını okumak için LibreDWG (dwg2dxf) kurulu olmalıdır.",
-                        code="dwg_converter_missing",
-                        status=503,
+                        status_code=503,
                     )
                 with tempfile.NamedTemporaryFile(suffix=".dxf", delete=False) as dxf_out:
                     dxf_tmp_path = dxf_out.name
@@ -1917,9 +1971,9 @@ def scan_plan_profile_upload(
                     or os.path.getsize(dxf_tmp_path) == 0
                 ):
                     raise AppError(
+                        "dwg_convert_failed",
                         f"DWG dönüştürme başarısız: {proc.stderr.strip() or proc.stdout.strip() or 'bilinmeyen hata'}",
-                        code="dwg_convert_failed",
-                        status=422,
+                        status_code=422,
                     )
                 target_dxf = dxf_tmp_path
                 method = "dwg-libredwg-ezdxf"
@@ -1961,7 +2015,7 @@ def scan_plan_profile_upload(
         try:
             pages = extract_text(tmp_path)
         except ReportOcrError as exc:
-            raise AppError(str(exc), code=exc.code, status=422) from exc
+            raise AppError(exc.code, str(exc), status_code=422) from exc
 
         full_text = "\n".join(page.text for page in pages)
         text_parsed = parse_plan_profile_text(
@@ -2027,7 +2081,7 @@ def create_sections_from_drafts(
         if norm_no and norm_no not in existing_by_no:
             existing_by_no[norm_no] = sess
 
-    created_items: list[dict[str, Any]] = []
+    saved_sessions: list[HydroSession] = []
     updated_count = 0
 
     for idx, draft in enumerate(drafts, start=1):
@@ -2041,10 +2095,11 @@ def create_sections_from_drafts(
         end_kp = format_kp(end_m) if end_m is not None else str(draft.get("end_kp") or "").strip()
 
         if start_m is not None and end_m is not None and end_m <= start_m:
+            db.rollback()
             raise AppError(
+                "validation_error",
                 f"{sec_no}: Bitiş KP ({end_kp}), başlangıç KP ({start_kp}) değerinden büyük olmalıdır.",
-                code="validation_error",
-                status=422,
+                status_code=422,
             )
 
         norm_sec_key = dossier_service.normalize_section_no(sec_no) or sec_no.upper()
@@ -2192,7 +2247,16 @@ def create_sections_from_drafts(
                 **ex_prof,
                 **new_prof,
             }
-            merged_inputs["segments"] = []
+            existing_segments = list(merged_inputs.get("segments") or [])
+            existing_seg_total = sum(
+                float((seg or {}).get("length_m") or 0.0)
+                for seg in existing_segments
+                if isinstance(seg, dict)
+            )
+            if len(existing_segments) > 1 and abs(existing_seg_total - float(length_m)) <= 1.0:
+                merged_inputs["segments"] = existing_segments
+            else:
+                merged_inputs["segments"] = []
             merged_inputs["profile_points"] = raw_pts
             merged_inputs["landmarks"] = raw_lms
             if inputs.get("material_grade"):
@@ -2202,9 +2266,8 @@ def create_sections_from_drafts(
             existing.revision = int(existing.revision or 0) + 1
             existing.updated_at = utcnow()
             dossier_service.ensure_section_form_slots(db, existing, commit=False)
-            db.commit()
-            db.refresh(existing)
-            created_items.append(session_service.session_brief(existing))
+            db.flush()
+            saved_sessions.append(existing)
             updated_count += 1
         else:
             created = session_service.create_session(
@@ -2213,9 +2276,16 @@ def create_sections_from_drafts(
                 name=session_name,
                 project_id=project.id,
                 inputs=inputs,
+                commit=False,
             )
             existing_by_no[norm_sec_key] = created
-            created_items.append(session_service.session_brief(created))
+            saved_sessions.append(created)
+
+    db.commit()
+    created_items: list[dict[str, Any]] = []
+    for sess in saved_sessions:
+        db.refresh(sess)
+        created_items.append(session_service.session_brief(sess))
 
     return {
         "project_id": project.id,

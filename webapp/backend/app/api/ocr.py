@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile
 from sqlalchemy.orm import Session as OrmSession
 
 from .. import schemas
@@ -18,6 +18,7 @@ router = APIRouter(prefix="/ocr", tags=["ocr"])
 
 @router.post("/analyze", status_code=201)
 def analyze(
+    request: Request,
     response: Response,
     file: UploadFile = File(...),
     calculated: str | None = Form(default=None),
@@ -25,10 +26,32 @@ def analyze(
     mapping_profile_id: str | None = Form(default=None),
     language: str | None = Form(default=None),
     force: bool = Form(default=False),
+    async_mode: bool = Form(default=False),
     db: OrmSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     workspace: Workspace = Depends(get_workspace),
 ) -> dict:
+    prefer_async = "respond-async" in (request.headers.get("prefer") or "").lower()
+    if async_mode or prefer_async:
+        analysis, reused, estimated_wait_s = ocr_service.enqueue_upload(
+            db,
+            settings,
+            workspace.hash,
+            file_name=file.filename,
+            stream=file.file,
+            calculated_raw=calculated or None,
+            session_id=session_id or None,
+            mapping_profile_id=mapping_profile_id or None,
+            language=language or None,
+            force=bool(force),
+        )
+        response.status_code = 200 if reused else 202
+        payload = ocr_service.detail_payload(db, analysis)
+        payload["reused"] = reused
+        if estimated_wait_s is not None:
+            payload["estimated_wait_s"] = estimated_wait_s
+        return json_safe(payload)
+
     analysis, reused = ocr_service.analyze_upload(
         db,
         settings,

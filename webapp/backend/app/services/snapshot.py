@@ -153,6 +153,8 @@ def build_snapshot(inputs: dict[str, Any]) -> dict[str, Any]:
                     "b_micro_per_c",
                     "delta_t_c",
                     "actual_pressure_change_bar",
+                    "t_initial_c",
+                    "t_final_c",
                 ),
             ),
         },
@@ -403,11 +405,11 @@ def apply_snapshot(
 
     backend_option = snapshot.get("water_backend_option")
     if backend_option is not None and str(backend_option).strip():
-        key = resolve_backend_key(str(backend_option))
-        if key is None:
+        resolved_backend_key = resolve_backend_key(str(backend_option))
+        if resolved_backend_key is None:
             state.warnings.append("Su backend'i etiketi taninmadi; mevcut backend korundu.")
         else:
-            patch["water_backend"] = key
+            patch["water_backend"] = resolved_backend_key
             state.converted += 1
 
     for derived in DERIVED_FIELD_KEYS:

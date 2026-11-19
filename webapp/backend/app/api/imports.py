@@ -1,16 +1,18 @@
-"""Desktop snapshot import route."""
+"""Desktop snapshot and desktop SQLite database import routes."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session as OrmSession
 
+from ..core.config import Settings
 from ..core.timeutil import json_safe
 from ..db import get_db
+from ..services import project_archive as project_archive_service
 from ..services import sessions as session_service
 from ..services import snapshot as snapshot_service
-from .deps import Workspace, get_workspace
+from .deps import Workspace, get_settings, get_workspace
 
 router = APIRouter(prefix="/import", tags=["import"])
 
@@ -40,6 +42,28 @@ def import_desktop_snapshot(
             "session": session_service.serialize_session(session),
             "mapping": mapping,
         }
+    )
+
+
+@router.post("/desktop-db", status_code=201)
+async def import_desktop_db(
+    file: UploadFile = File(...),
+    project_name: str | None = Form(default=None),
+    project_code: str | None = Form(default=None),
+    db: OrmSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    workspace: Workspace = Depends(get_workspace),
+) -> dict:
+    db_bytes = await file.read()
+    return json_safe(
+        project_archive_service.import_desktop_db(
+            db,
+            settings,
+            workspace.hash,
+            db_bytes,
+            project_name=project_name,
+            project_code=project_code,
+        )
     )
 
 

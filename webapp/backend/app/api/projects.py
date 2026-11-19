@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session as OrmSession
 
 from .. import schemas
+from ..core.config import Settings
 from ..core.timeutil import json_safe
 from ..db import get_db
 from ..services import dossier as dossier_service
 from ..services import plan_profile as plan_profile_service
+from ..services import project_archive as project_archive_service
+from ..services import project_data as project_data_service
 from ..services import projects as project_service
 from ..services import scene as scene_service
-from .deps import Workspace, get_workspace
+from .deps import Workspace, get_settings, get_workspace
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -41,6 +45,50 @@ def create_project(
     project = project_service.create_project(db, workspace.hash, payload)
     response.headers["Location"] = f"/api/projects/{project.id}"
     return json_safe(project_service.serialize_project(project))
+
+
+@router.post("/generate-sample", status_code=201)
+def generate_sample_project(
+    payload: schemas.SampleProjectGenerateRequest,
+    db: OrmSession = Depends(get_db),
+    workspace: Workspace = Depends(get_workspace),
+) -> dict:
+    return json_safe(
+        project_data_service.generate_sample_project(
+            db,
+            workspace.hash,
+            scenario=payload.scenario,
+            section_count=payload.section_count,
+            name=payload.name,
+            code=payload.code,
+            include_time_series=payload.include_time_series,
+            include_forms=payload.include_forms,
+        )
+    )
+
+
+@router.post("/import-archive", status_code=201)
+async def import_project_archive(
+    file: UploadFile = File(...),
+    target_project_name: str | None = Form(default=None),
+    target_project_code: str | None = Form(default=None),
+    include_attachments: bool = Form(default=True),
+    db: OrmSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    workspace: Workspace = Depends(get_workspace),
+) -> dict:
+    archive_bytes = await file.read()
+    return json_safe(
+        project_archive_service.import_project_archive(
+            db,
+            settings,
+            workspace.hash,
+            archive_bytes,
+            target_project_name=target_project_name,
+            target_project_code=target_project_code,
+            include_attachments=include_attachments,
+        )
+    )
 
 
 @router.get("/{project_id}")
@@ -84,9 +132,10 @@ def delete_project(
     hard: bool = Query(default=False),
     db: OrmSession = Depends(get_db),
     workspace: Workspace = Depends(get_workspace),
+    settings: Settings = Depends(get_settings),
 ) -> Response:
     project = project_service.get_project(db, project_id, workspace.hash)
-    project_service.delete_project(db, project, hard=hard)
+    project_service.delete_project(db, project, hard=hard, uploads_dir=settings.uploads_dir)
     return Response(status_code=204)
 
 
@@ -98,6 +147,7 @@ def scan_plan_profile(
     language: str | None = Form(default=None),
     db: OrmSession = Depends(get_db),
     workspace: Workspace = Depends(get_workspace),
+    settings: Settings = Depends(get_settings),
 ) -> dict:
     payload = plan_profile_service.scan_plan_profile_upload(
         file_name=file.filename,
@@ -105,6 +155,7 @@ def scan_plan_profile(
         max_section_length_m=max_section_length_m,
         max_elevation_diff_m=max_elevation_diff_m,
         language=language,
+        max_bytes=settings.max_upload_bytes,
     )
     payload["similar_projects"] = dossier_service.find_similar_projects(
         db,
@@ -163,6 +214,106 @@ def create_sections_batch(
         drafts=[item.model_dump() for item in payload.sections],
     )
     return json_safe(result)
+
+
+@router.get("/{project_id}/dataset")
+def get_project_dataset(
+    project_id: str,
+    db: OrmSession = Depends(get_db),
+    workspace: Workspace = Depends(get_workspace),
+) -> dict:
+    project = project_service.get_project(db, project_id, workspace.hash)
+    return json_safe(project_data_service.build_project_dataset(db, project, workspace.hash))
+
+
+@router.post("/{project_id}/export")
+def export_project_dataset(
+    project_id: str,
+    payload: schemas.ProjectExportRequest,
+    db: OrmSession = Depends(get_db),
+    workspace: Workspace = Depends(get_workspace),
+    settings: Settings = Depends(get_settings),
+) -> FileResponse:
+    project = project_service.get_project(db, project_id, workspace.hash)
+    dataset = project_data_service.build_project_dataset(db, project, workspace.hash)
+    out_path, media_type, download_name = project_data_service.export_project_dataset(
+        settings, dataset, fmt=payload.format
+    )
+    return FileResponse(path=out_path, media_type=media_type, filename=download_name)
+
+
+@router.post("/{project_id}/generate-sections", status_code=201)
+def generate_project_sections(
+    project_id: str,
+    payload: schemas.ProjectGenerateSectionsRequest,
+    db: OrmSession = Depends(get_db),
+    workspace: Workspace = Depends(get_workspace),
+) -> dict:
+    project = project_service.get_project(db, project_id, workspace.hash)
+    return json_safe(
+        project_data_service.generate_project_sections(db, project, workspace.hash, payload)
+    )
+
+
+@router.post("/{project_id}/sync-forms")
+def sync_project_forms(
+    project_id: str,
+    payload: schemas.ProjectSyncFormsRequest,
+    db: OrmSession = Depends(get_db),
+    workspace: Workspace = Depends(get_workspace),
+) -> dict:
+    project = project_service.get_project(db, project_id, workspace.hash)
+    return json_safe(
+        project_data_service.sync_project_forms(
+            db,
+            project,
+            workspace.hash,
+            overwrite_existing=payload.overwrite_existing,
+            form_codes=payload.form_codes,
+        )
+    )
+
+
+@router.post("/{project_id}/clone", status_code=201)
+def clone_project(
+    project_id: str,
+    payload: schemas.ProjectCloneRequest,
+    db: OrmSession = Depends(get_db),
+    workspace: Workspace = Depends(get_workspace),
+) -> dict:
+    project = project_service.get_project(db, project_id, workspace.hash)
+    return json_safe(
+        project_data_service.clone_project(
+            db,
+            project,
+            workspace.hash,
+            name=payload.name,
+            code=payload.code,
+            mode=payload.mode,
+        )
+    )
+
+
+@router.get("/{project_id}/archive")
+def export_project_archive(
+    project_id: str,
+    include_attachments: bool = Query(default=True),
+    db: OrmSession = Depends(get_db),
+    workspace: Workspace = Depends(get_workspace),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    zip_bytes, download_name = project_archive_service.export_project_archive(
+        db,
+        settings,
+        workspace.hash,
+        project_id,
+        include_attachments=include_attachments,
+    )
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
+    )
 
 
 __all__ = ["router"]

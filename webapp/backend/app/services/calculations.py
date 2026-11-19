@@ -316,13 +316,13 @@ def evaluate_test(test_type: str, payload: dict[str, Any]) -> tuple[dict[str, An
         result["decision"] = decision
         return result, decision
     if test_type == "coefficient_b":
-        request = schemas.CoefficientBRequest.model_validate(payload)
+        request_b = schemas.CoefficientBRequest.model_validate(payload)
         result = coefficient_b(
-            source=request.source,
-            temperature_c=request.temperature_c,
-            pressure_bar=request.pressure_bar,
-            steel_alpha_micro_per_c=request.steel_alpha_micro_per_c,
-            steel_model=request.steel_model,
+            source=request_b.source,
+            temperature_c=request_b.temperature_c,
+            pressure_bar=request_b.pressure_bar,
+            steel_alpha_micro_per_c=request_b.steel_alpha_micro_per_c,
+            steel_model=request_b.steel_model,
         )
         decision = {
             "status": decisions.STATUS_PASS,
@@ -343,8 +343,8 @@ def evaluate_test(test_type: str, payload: dict[str, Any]) -> tuple[dict[str, An
         result = calculate_pressurization(schemas.PressurizationRequest.model_validate(payload))
         return result, result["decision"]
     if test_type == "thermal_balance":
-        request = schemas.ThermalBalanceRequest.model_validate(payload)
-        result = calculate_thermal_balance(request.records)
+        request_tb = schemas.ThermalBalanceRequest.model_validate(payload)
+        result = calculate_thermal_balance(request_tb.records)
         return result, result["decision"]
     raise AppError(
         "validation_error",

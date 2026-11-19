@@ -111,6 +111,12 @@ def health_payload(settings: Settings, *, instance_id: str | None = None) -> dic
     else:
         status = "ok"
 
+    security_warnings: list[str] = []
+    if settings.auth_mode == "none" and not settings.is_loopback_host:
+        security_warnings.append(
+            "Sunucu kimlik dogrulamasi olmadan 0.0.0.0/dis arayuze bagli; onunde yetkili reverse proxy calistirin."
+        )
+
     return {
         "status": status,
         "version": APP_VERSION,
@@ -128,6 +134,12 @@ def health_payload(settings: Settings, *, instance_id: str | None = None) -> dic
             "auth": settings.auth_mode,
             "ocr_enabled": settings.ocr_enabled,
             "workspace_header": WORKSPACE_HEADER,
+        },
+        "security": {
+            "auth_mode": settings.auth_mode,
+            "loopback_only": settings.is_loopback_host,
+            "workspace_claim_enabled": settings.allow_workspace_claim,
+            "warnings": security_warnings,
         },
     }
 

@@ -10,9 +10,11 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Iterator
 
-from sqlalchemy import Engine, create_engine, event, inspect, text
+from sqlalchemy import Engine, create_engine, event, func, inspect, select, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
+
+CURRENT_MIGRATION = "0002"
 
 _engine: Engine | None = None
 _session_factory: sessionmaker[Session] | None = None
@@ -32,6 +34,7 @@ def _install_sqlite_pragmas(engine: Engine, *, memory: bool) -> None:
     def _set_pragmas(dbapi_connection, _connection_record):  # noqa: ANN001
         cursor = dbapi_connection.cursor()
         try:
+            cursor.execute("PRAGMA busy_timeout=5000")
             cursor.execute("PRAGMA foreign_keys=ON")
             if not memory:
                 try:
@@ -39,7 +42,6 @@ def _install_sqlite_pragmas(engine: Engine, *, memory: bool) -> None:
                     cursor.execute("PRAGMA synchronous=NORMAL")
                 except Exception:
                     cursor.execute("PRAGMA journal_mode=DELETE")
-            cursor.execute("PRAGMA busy_timeout=5000")
         finally:
             cursor.close()
 
@@ -85,32 +87,68 @@ def get_sessionmaker() -> sessionmaker[Session]:
     return _session_factory
 
 
-def _apply_light_migrations() -> None:
-    """Add columns that ``create_all`` cannot add to existing tables."""
+def _ensure_column(
+    inspector,  # noqa: ANN001
+    table: str,
+    column_name: str,
+    ddl_fragment: str,
+) -> None:
+    columns = {column["name"] for column in inspector.get_columns(table)}
+    if column_name not in columns:
+        with get_engine().begin() as connection:
+            connection.execute(text(f'ALTER TABLE "{table}" ADD COLUMN {ddl_fragment}'))
+
+
+def _record_migration(version: str, description: str) -> None:
+    from .models import SchemaMigration, utcnow
+
+    factory = get_sessionmaker()
+    db = factory()
+    try:
+        if db.get(SchemaMigration, version) is None:
+            db.add(
+                SchemaMigration(
+                    version=version,
+                    description=description,
+                    applied_at=utcnow(),
+                )
+            )
+            db.commit()
+    finally:
+        db.close()
+
+
+def _apply_migrations() -> None:
+    """Apply additive idempotent migrations and record versions in ``schema_migrations``."""
 
     inspector = inspect(get_engine())
     table_names = set(inspector.get_table_names())
     if "projects" in table_names:
-        columns = {column["name"] for column in inspector.get_columns("projects")}
-        if "code" not in columns:
-            with get_engine().begin() as connection:
-                connection.execute(
-                    text('ALTER TABLE "projects" ADD COLUMN "code" VARCHAR(64) DEFAULT \'\'')
-                )
+        _ensure_column(inspector, "projects", "code", "\"code\" VARCHAR(64) DEFAULT ''")
     if "ocr_analyses" in table_names:
-        ocr_cols = {column["name"] for column in inspector.get_columns("ocr_analyses")}
-        if "dossier" not in ocr_cols:
-            with get_engine().begin() as connection:
-                connection.execute(text('ALTER TABLE "ocr_analyses" ADD COLUMN "dossier" JSON'))
+        _ensure_column(inspector, "ocr_analyses", "dossier", '"dossier" JSON')
+    _record_migration("0001", "Baseline schema with project code and OCR dossier")
+
+    inspector = inspect(get_engine())
+    if "projects" in set(inspector.get_table_names()):
+        _ensure_column(inspector, "projects", "contractor", '"contractor" VARCHAR(200)')
+        _ensure_column(inspector, "projects", "supervisor", '"supervisor" VARCHAR(200)')
+        _ensure_column(inspector, "projects", "pipeline_length_m", '"pipeline_length_m" FLOAT')
+        _ensure_column(inspector, "projects", "status", "\"status\" VARCHAR(24) DEFAULT 'active'")
+        _ensure_column(inspector, "projects", "defaults", '"defaults" JSON')
+        with get_engine().begin() as connection:
+            connection.execute(text("UPDATE projects SET status = 'active' WHERE status IS NULL"))
+            connection.execute(text("UPDATE projects SET defaults = '{}' WHERE defaults IS NULL"))
+    _record_migration("0002", "Project engineering metadata and defaults")
 
 
 def init_db() -> None:
-    """Create tables for MVP (no Alembic yet)."""
+    """Create tables and apply incremental additive migrations."""
 
     from . import models  # noqa: F401  (register mappers)
 
     models.Base.metadata.create_all(bind=get_engine())
-    _apply_light_migrations()
+    _apply_migrations()
 
 
 def dispose_database() -> None:
@@ -151,14 +189,24 @@ def session_scope() -> Iterator[Session]:
 
 
 def database_health() -> dict[str, object]:
+    from .models import SchemaMigration
+
     try:
         engine = get_engine()
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))
+        migration: str | None = CURRENT_MIGRATION
+        try:
+            with session_scope() as db:
+                latest = db.scalar(select(func.max(SchemaMigration.version)))
+                if latest:
+                    migration = str(latest)
+        except Exception:
+            migration = CURRENT_MIGRATION
         return {
             "ok": True,
             "dialect": engine.dialect.name,
-            "migration": "0001",
+            "migration": migration,
         }
     except Exception as exc:  # pragma: no cover - depends on environment
         return {
@@ -170,6 +218,7 @@ def database_health() -> dict[str, object]:
 
 
 __all__ = [
+    "CURRENT_MIGRATION",
     "configure_database",
     "database_health",
     "dispose_database",

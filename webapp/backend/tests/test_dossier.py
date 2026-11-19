@@ -1460,3 +1460,176 @@ def test_forms_catalog_structured_rows_inline_edit_and_single_form_scan(client, 
         250.0
     )
     assert len(untitled_body["form"]["extracted_data"]["rows"]) == 2
+
+
+def test_single_form_scan_multifile_and_append_mode(client, headers, tmp_path):
+    r_sess = client.post(
+        "/api/sessions",
+        json={"name": "Coklu Form Tarama Testi"},
+        headers=headers,
+    )
+    assert r_sess.status_code == 201, r_sess.text
+    sess_id = r_sess.json()["id"]
+
+    # 1) Multi-file scan (2 separate PDF files in one request): page 1 carries signatures,
+    #    page 2 carries continuation monitoring rows without signatures.
+    page1_pdf = _make_multipage_pdf(
+        tmp_path / "filling_page1.pdf",
+        [
+            [
+                "SU DOLUM RAPORU",
+                "Proje Adi : Coklu Sayfa Testi",
+                "Test Bolum No : Bolum 1",
+                "Tarih : 16.11.2026",
+                "22:00 10.0 10.0 180.0 11.0 4.0",
+                "23:00 10.0 10.0 190.0 11.2 4.1",
+                "Yuklenici Firma                BOTAS",
+                "Adi-Soyadi : Ali Yilmaz       Adi-Soyadi : Ayse Demir",
+            ]
+        ],
+    )
+    page2_pdf = _make_multipage_pdf(
+        tmp_path / "filling_page2.pdf",
+        [
+            [
+                "SU DOLUM RAPORU",
+                "Test Bolum No : Bolum 1",
+                "00:00 12.0 12.0 202.0 11.4 4.2",
+            ]
+        ],
+    )
+    r_multi = client.post(
+        f"/api/sessions/{sess_id}/forms/filling/scan",
+        files=[
+            ("files", (page1_pdf.name, page1_pdf.read_bytes(), "application/pdf")),
+            ("files", (page2_pdf.name, page2_pdf.read_bytes(), "application/pdf")),
+        ],
+        data={"overwrite": "true", "mode": "replace"},
+        headers=headers,
+    )
+    assert r_multi.status_code == 200, r_multi.text
+    multi_body = r_multi.json()
+    multi_ext = multi_body["form"]["extracted_data"]
+    assert multi_body["form"]["pages"] == [1, 2]
+    assert len(multi_ext["rows"]) == 3
+    assert multi_ext["filling"]["total_filled_m3"] == pytest.approx(202.0)
+    assert multi_ext["time_log"]["duration_hours"] == pytest.approx(2.0)
+    assert multi_ext["signatures"]["contractor_name"] == "Ali Yilmaz"
+    assert multi_ext["signatures"]["botas_name"] == "Ayse Demir"
+
+    # 2) Append mode (`mode="append"`): upload another continuation page with one overlapping
+    #    row (`00:00`) and one new row (`01:00`). Verify dedup + preserved signatures + stats.
+    page3_pdf = _make_multipage_pdf(
+        tmp_path / "filling_page3_continuation.pdf",
+        [
+            [
+                "00:00 12.0 12.0 202.0 11.4 4.2",
+                "01:00 15.0 15.0 217.0 11.6 4.4",
+            ]
+        ],
+    )
+    r_append = client.post(
+        f"/api/sessions/{sess_id}/forms/filling/scan",
+        files=[("files", (page3_pdf.name, page3_pdf.read_bytes(), "application/pdf"))],
+        data={"overwrite": "true", "mode": "append"},
+        headers=headers,
+    )
+    assert r_append.status_code == 200, r_append.text
+    app_body = r_append.json()
+    app_ext = app_body["form"]["extracted_data"]
+    assert app_body["form"]["pages"] == [1, 2, 3]
+    assert app_body["form"]["form_date"] == "16.11.2026"
+    assert [row["time_str"] for row in app_ext["rows"]] == ["22:00", "23:00", "00:00", "01:00"]
+    assert app_ext["filling"]["total_filled_m3"] == pytest.approx(217.0)
+    assert app_ext["time_log"]["duration_hours"] == pytest.approx(3.0)
+    assert app_ext["signatures"]["contractor_name"] == "Ali Yilmaz"
+    assert app_ext["signatures"]["botas_name"] == "Ayse Demir"
+
+
+def test_multipage_form_tables_not_truncated_and_filling_ignores_odometer():
+    from app.services.form_details import (
+        build_form_structured_payload,
+        reconcile_form_extracted_data,
+    )
+
+    # 1) Multi-page 011 (test_data) with footer on page 1 and continuation rows on page 2
+    td_text = "\n".join(
+        [
+            "HİDROSTATİK TEST VERİLERİ",
+            "TEST ÖLÇÜMLERİ",
+            "110.5 0.0 95.0 78.2 90.0 74.1",
+            "Müteahhit Adı-Soyadı : Ali Kaya",
+            "BOTAŞ Adı-Soyadı : Veli Demir",
+            "Sayfa 2/2 TEST ÖLÇÜMLERİ",
+            "142.0 5000.0 92.0 75.8 87.0 71.7",
+        ]
+    )
+    td_payload = build_form_structured_payload("test_data", td_text)
+    assert len(td_payload["test_data"]["test_measurements"]) == 2
+    assert td_payload["signatures"]["contractor_name"] == "Ali Kaya"
+    assert td_payload["signatures"]["botas_name"] == "Veli Demir"
+
+    # 2) Raw odometer reading in meter_reading_m3 (124500) must not override total_volume_m3 (250)
+    reconciled = reconcile_form_extracted_data(
+        "filling",
+        {
+            "rows": [
+                {
+                    "time_str": "08:00",
+                    "meter_reading_m3": 124500.0,
+                    "delta_volume_m3": 120.0,
+                    "total_volume_m3": 120.0,
+                    "water_inlet_temp_c": 12.0,
+                    "water_pressure_bar": 4.0,
+                },
+                {
+                    "time_str": "09:00",
+                    "meter_reading_m3": 124630.0,
+                    "delta_volume_m3": 130.0,
+                    "total_volume_m3": 250.0,
+                    "water_inlet_temp_c": 12.5,
+                    "water_pressure_bar": 4.5,
+                },
+            ]
+        },
+    )
+    assert reconciled["filling"]["total_filled_m3"] == pytest.approx(250.0)
+
+
+def test_plan_profile_invalid_signature_returns_415_not_500_typeerror(client, headers):
+    r = client.post(
+        "/api/projects/plan-profile/scan",
+        files={"file": ("sahte.pdf", b"NOT_A_REAL_PDF_BINARY", "application/pdf")},
+        headers=headers,
+    )
+    assert r.status_code == 415
+    assert r.json()["code"] == "invalid_file_signature"
+
+
+def test_inputs_report_metadata_persisted_and_exported_to_report_context(client, headers):
+    r_sess = client.post(
+        "/api/sessions",
+        json={
+            "name": "Rapor Meta Testi",
+            "inputs": {
+                "report": {
+                    "report_no": "RPR-2026-88",
+                    "operator": "Kaan Aksoy",
+                    "date": "2026-11-18",
+                    "section_id": "K-14",
+                }
+            },
+        },
+        headers=headers,
+    )
+    assert r_sess.status_code == 201, r_sess.text
+    sess_id = r_sess.json()["id"]
+    rep = r_sess.json()["inputs"]["report"]
+    assert rep["report_no"] == "RPR-2026-88"
+    assert rep["operator"] == "Kaan Aksoy"
+    assert rep["section_id"] == "K-14"
+
+    r_txt = client.get(f"/api/sessions/{sess_id}/export?format=txt", headers=headers)
+    assert r_txt.status_code == 200
+    assert "RPR-2026-88" in r_txt.text
+    assert "Kaan Aksoy" in r_txt.text

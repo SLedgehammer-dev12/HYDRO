@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import copy
 import json
-import os
 import threading
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, BinaryIO, Iterable
 
@@ -13,6 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session as OrmSession
 
 from hidrostatik_test.services.report_ocr import (
+    ERROR_CANCELLED,
     MAX_OCR_PAGES,
     MAX_PDF_PAGES,
     SUPPORTED_EXTENSIONS,
@@ -25,6 +27,7 @@ from hidrostatik_test.services.report_ocr import (
     pdf_rasterizer_status,
 )
 
+from .. import db as db_module
 from ..core.config import Settings
 from ..core.errors import AppError, not_found
 from ..core.timeutil import as_float, iso_z, json_safe, utcnow
@@ -37,12 +40,12 @@ from ..models import (
 from . import audit
 from . import dossier as dossier_service
 from . import sessions as session_service
+from .ocr_queue import OCR_QUEUE
 from .storage import StoredUpload, kind_for_extension, store_upload
 
 LOW_CONFIDENCE = 0.6
 CRITICAL_CONFIDENCE = 0.4
 AUTO_FILL = 0.85
-_OCR_LANG_LOCK = threading.Lock()
 
 _ERROR_STATUS = {
     "file_not_found": 404,
@@ -58,6 +61,8 @@ _ERROR_STATUS = {
     "ocr_unavailable": 503,
     "dependency_missing": 503,
     "ocr_timeout": 504,
+    "ocr_cancelled": 409,
+    "worker_interrupted": 503,
 }
 
 #: Canonical OCR field -> session input paths.
@@ -212,7 +217,10 @@ def status_payload(db: OrmSession, workspace_hash: str, *, refresh: bool = False
             "max_ocr_pages": MAX_OCR_PAGES,
             "supported_extensions": sorted(SUPPORTED_EXTENSIONS),
         },
-        "queue": {**_queue_counts(db, workspace_hash), "max_concurrency": 1},
+        "queue": {
+            **_queue_counts(db, workspace_hash),
+            "max_concurrency": OCR_QUEUE.max_concurrency,
+        },
         "thresholds": {
             "auto_fill": AUTO_FILL,
             "low_confidence": LOW_CONFIDENCE,
@@ -315,7 +323,18 @@ def _is_stale_analysis(existing: OcrAnalysis, file_path: Path, extension: str) -
     return False
 
 
-def analyze_upload(
+def _elapsed_seconds(started_at: datetime | None) -> int:
+    if started_at is None:
+        return 0
+    start = (
+        started_at.replace(tzinfo=timezone.utc)
+        if started_at.tzinfo is None
+        else started_at.astimezone(timezone.utc)
+    )
+    return max(0, int((utcnow() - start).total_seconds()))
+
+
+def _prepare_upload(
     db: OrmSession,
     settings: Settings,
     workspace_hash: str,
@@ -325,9 +344,14 @@ def analyze_upload(
     calculated_raw: str | None,
     session_id: str | None,
     mapping_profile_id: str | None,
-    language: str | None,
-    force: bool = False,
-) -> tuple[OcrAnalysis, bool]:
+    force: bool,
+) -> tuple[
+    OcrAnalysis,
+    bool,
+    StoredUpload | None,
+    dict[str, Any] | None,
+    OcrMappingProfile | None,
+]:
     if session_id:
         try:
             session_service.get_session(db, session_id, workspace_hash)
@@ -360,7 +384,7 @@ def analyze_upload(
     )
     if existing is not None and not _is_stale_analysis(existing, stored.path, stored.extension):
         stored.path.unlink(missing_ok=True)
-        return existing, True
+        return existing, True, None, calculated, profile
 
     attachment = Attachment(
         id=new_uuid(),
@@ -388,45 +412,17 @@ def analyze_upload(
     db.add(analysis)
     db.commit()
     db.refresh(analysis)
+    return analysis, False, stored, calculated, profile
 
-    analysis.status = "running"
-    analysis.started_at = utcnow()
-    db.commit()
 
-    with _OCR_LANG_LOCK:
-        previous_lang = os.environ.get("HYDRO_OCR_LANG")
-        if language:
-            os.environ["HYDRO_OCR_LANG"] = language
-        try:
-            result: OcrAnalysisResult = analyze_report(
-                stored.path, calculated, extra_aliases=_profile_aliases(profile)
-            )
-        except ReportOcrError as exc:
-            analysis.status = "failed"
-            analysis.error_code = exc.code
-            analysis.error_message = exc.message
-            analysis.finished_at = utcnow()
-            db.commit()
-            raise _http_error(exc, analysis_id=analysis.id) from exc
-        except Exception as exc:  # unexpected domain failure
-            analysis.status = "failed"
-            analysis.error_code = "internal_error"
-            analysis.error_message = "OCR analizi tamamlanamadi."
-            analysis.finished_at = utcnow()
-            db.commit()
-            raise AppError(
-                "internal_error",
-                "OCR analizi tamamlanamadi.",
-                status_code=500,
-                details={"analysis_id": analysis.id},
-            ) from exc
-        finally:
-            if language:
-                if previous_lang is None:
-                    os.environ.pop("HYDRO_OCR_LANG", None)
-                else:
-                    os.environ["HYDRO_OCR_LANG"] = previous_lang
-
+def _apply_success_result(
+    db: OrmSession,
+    analysis: OcrAnalysis,
+    *,
+    result: OcrAnalysisResult,
+    stored_filename: str,
+    workspace_hash: str,
+) -> dict[str, Any]:
     payload = json_safe(result.to_dict())
     analysis.status = "succeeded"
     analysis.source = result.source
@@ -440,7 +436,7 @@ def analyze_upload(
     analysis.dossier = json_safe(
         dossier_service.analyze_dossier_pages(
             result.pages,
-            source_filename=stored.filename,
+            source_filename=stored_filename,
             fallback_report=payload.get("report"),
         )
     )
@@ -454,13 +450,238 @@ def analyze_upload(
         action="ocr.analyze",
         entity_type="ocr_analysis",
         entity_id=analysis.id,
-        session_id=session_id,
+        session_id=analysis.session_id,
         workspace_hash=workspace_hash,
         after={"status": analysis.status, "source": analysis.source},
     )
     db.commit()
     db.refresh(analysis)
-    return analysis, False
+    setattr(
+        analysis, "_extracted_pages", list(result.pages)
+    )  # transient in-process reuse avoids double OCR
+    return payload
+
+
+def analyze_upload(
+    db: OrmSession,
+    settings: Settings,
+    workspace_hash: str,
+    *,
+    file_name: str | None,
+    stream: BinaryIO,
+    calculated_raw: str | None,
+    session_id: str | None,
+    mapping_profile_id: str | None,
+    language: str | None,
+    force: bool = False,
+) -> tuple[OcrAnalysis, bool]:
+    analysis, reused, stored, calculated, profile = _prepare_upload(
+        db,
+        settings,
+        workspace_hash,
+        file_name=file_name,
+        stream=stream,
+        calculated_raw=calculated_raw,
+        session_id=session_id,
+        mapping_profile_id=mapping_profile_id,
+        force=force,
+    )
+    if reused or stored is None:
+        return analysis, True
+
+    cancel_event = OCR_QUEUE.register_sync(analysis.id)
+    started = time.monotonic()
+    try:
+        analysis.status = "running"
+        analysis.started_at = utcnow()
+        db.commit()
+
+        try:
+            result: OcrAnalysisResult = analyze_report(
+                stored.path,
+                calculated,
+                extra_aliases=_profile_aliases(profile),
+                language=language,
+                cancel_event=cancel_event,
+                timeout_seconds=float(settings.ocr_timeout_s),
+            )
+        except ReportOcrError as exc:
+            if exc.code == ERROR_CANCELLED or cancel_event.is_set():
+                analysis.status = "cancelled"
+                analysis.error_code = None
+                analysis.error_message = None
+            else:
+                analysis.status = "failed"
+                analysis.error_code = exc.code
+                analysis.error_message = exc.message
+            analysis.finished_at = utcnow()
+            db.commit()
+            stored.path.unlink(missing_ok=True)
+            raise _http_error(exc, analysis_id=analysis.id) from exc
+        except Exception as exc:  # unexpected domain failure
+            analysis.status = "failed"
+            analysis.error_code = "internal_error"
+            analysis.error_message = "OCR analizi tamamlanamadi."
+            analysis.finished_at = utcnow()
+            db.commit()
+            stored.path.unlink(missing_ok=True)
+            raise AppError(
+                "internal_error",
+                "OCR analizi tamamlanamadi.",
+                status_code=500,
+                details={"analysis_id": analysis.id},
+            ) from exc
+
+        OCR_QUEUE.record_duration(time.monotonic() - started)
+        _apply_success_result(
+            db,
+            analysis,
+            result=result,
+            stored_filename=stored.filename,
+            workspace_hash=workspace_hash,
+        )
+        return analysis, False
+    finally:
+        OCR_QUEUE.unregister(analysis.id)
+
+
+def enqueue_upload(
+    db: OrmSession,
+    settings: Settings,
+    workspace_hash: str,
+    *,
+    file_name: str | None,
+    stream: BinaryIO,
+    calculated_raw: str | None,
+    session_id: str | None,
+    mapping_profile_id: str | None,
+    language: str | None,
+    force: bool = False,
+) -> tuple[OcrAnalysis, bool, int | None]:
+    """Persist an upload in ``queued`` state and schedule background OCR execution."""
+    analysis, reused, stored, calculated, profile = _prepare_upload(
+        db,
+        settings,
+        workspace_hash,
+        file_name=file_name,
+        stream=stream,
+        calculated_raw=calculated_raw,
+        session_id=session_id,
+        mapping_profile_id=mapping_profile_id,
+        force=force,
+    )
+    if reused or stored is None:
+        est: int | None = None
+        if analysis.status in {"queued", "running"}:
+            counts = _queue_counts(db, workspace_hash)
+            att = db.get(Attachment, analysis.attachment_id)
+            est = OCR_QUEUE.estimate_wait_seconds(
+                queued=counts["queued"],
+                running=counts["running"],
+                size_bytes=att.size_bytes if att is not None else 0,
+            )
+        return analysis, True, est
+
+    session_factory = db_module.get_sessionmaker()
+    analysis_id = analysis.id
+    stored_path = stored.path
+    stored_filename = stored.filename
+    aliases = _profile_aliases(profile)
+    timeout_s = float(settings.ocr_timeout_s)
+
+    counts = _queue_counts(db, workspace_hash)
+    est_wait = OCR_QUEUE.estimate_wait_seconds(
+        queued=max(0, counts["queued"] - 1),
+        running=counts["running"],
+        size_bytes=stored.size_bytes,
+    )
+
+    def _mark_cancelled_if_needed(wdb: OrmSession, row: OcrAnalysis) -> None:
+        row.status = "cancelled"
+        row.error_code = None
+        row.error_message = None
+        row.finished_at = row.finished_at or utcnow()
+        wdb.commit()
+
+    def _worker(cancel_event: threading.Event) -> None:
+        if cancel_event.is_set():
+            with session_factory() as wdb:
+                row = wdb.get(OcrAnalysis, analysis_id)
+                if row is not None and row.status != "cancelled":
+                    _mark_cancelled_if_needed(wdb, row)
+            stored_path.unlink(missing_ok=True)
+            return
+
+        with session_factory() as wdb:
+            row = wdb.get(OcrAnalysis, analysis_id)
+            if row is None or row.status == "cancelled" or cancel_event.is_set():
+                if row is not None and row.status != "cancelled":
+                    _mark_cancelled_if_needed(wdb, row)
+                stored_path.unlink(missing_ok=True)
+                return
+            row.status = "running"
+            row.started_at = utcnow()
+            wdb.commit()
+
+        started = time.monotonic()
+        result: OcrAnalysisResult | None = None
+        caught_ocr_err: ReportOcrError | None = None
+        caught_unexpected = False
+        try:
+            result = analyze_report(
+                stored_path,
+                calculated,
+                extra_aliases=aliases,
+                language=language,
+                cancel_event=cancel_event,
+                timeout_seconds=timeout_s,
+            )
+        except ReportOcrError as exc:
+            caught_ocr_err = exc
+        except Exception:  # unexpected domain failure
+            caught_unexpected = True
+
+        with session_factory() as wdb:
+            row = wdb.get(OcrAnalysis, analysis_id)
+            if row is None:
+                stored_path.unlink(missing_ok=True)
+                return
+            if (
+                cancel_event.is_set()
+                or row.status == "cancelled"
+                or (caught_ocr_err is not None and caught_ocr_err.code == ERROR_CANCELLED)
+            ):
+                _mark_cancelled_if_needed(wdb, row)
+                stored_path.unlink(missing_ok=True)
+                return
+            if caught_ocr_err is not None:
+                row.status = "failed"
+                row.error_code = caught_ocr_err.code
+                row.error_message = caught_ocr_err.message
+                row.finished_at = utcnow()
+                wdb.commit()
+                stored_path.unlink(missing_ok=True)
+                return
+            if caught_unexpected or result is None:
+                row.status = "failed"
+                row.error_code = "internal_error"
+                row.error_message = "OCR analizi tamamlanamadi."
+                row.finished_at = utcnow()
+                wdb.commit()
+                stored_path.unlink(missing_ok=True)
+                return
+
+            OCR_QUEUE.record_duration(time.monotonic() - started)
+            _apply_success_result(
+                wdb,
+                row,
+                result=result,
+                stored_filename=stored_filename,
+                workspace_hash=workspace_hash,
+            )
+
+    OCR_QUEUE.submit(analysis_id, _worker)
+    return analysis, False, est_wait
 
 
 def _lookup_field(report: Any, path: str) -> dict[str, Any] | None:
@@ -562,10 +783,16 @@ def detail_payload(db: OrmSession, analysis: OcrAnalysis) -> dict[str, Any]:
         base["used_ocr"] = analysis.source in {"ocr", "mixed"}
         base["dossier"] = dossier_service.build_dossier_view(db, analysis)
     elif analysis.status in {"queued", "running"}:
+        counts = _queue_counts(db, analysis.workspace_id_hash)
         base["progress"] = {
             "stage": "analyzing" if analysis.status == "running" else "queued",
-            "elapsed_s": 0,
+            "elapsed_s": _elapsed_seconds(analysis.started_at),
         }
+        base["estimated_wait_s"] = OCR_QUEUE.estimate_wait_seconds(
+            queued=counts["queued"],
+            running=counts["running"],
+            size_bytes=attachment.size_bytes if attachment is not None else 0,
+        )
     return base
 
 
@@ -639,6 +866,7 @@ def cancel_analysis(db: OrmSession, analysis: OcrAnalysis) -> dict[str, Any]:
             status_code=409,
             details={"status": analysis.status},
         )
+    OCR_QUEUE.cancel(analysis.id)
     analysis.status = "cancelled"
     analysis.finished_at = utcnow()
     audit.record(
@@ -1115,6 +1343,7 @@ __all__ = [
     "create_profile",
     "delete_profile",
     "detail_payload",
+    "enqueue_upload",
     "get_analysis",
     "get_profile",
     "list_analyses",

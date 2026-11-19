@@ -139,10 +139,17 @@ def get_web_runtime_context() -> dict[str, Any]:
     if frozen and plat.startswith("win"):
         install_dir = executable_path.parent
         is_inno_setup = (install_dir / "unins000.exe").is_file()
-        can_self_install = executable_path.suffix.lower() == ".exe" and os.access(
-            install_dir, os.W_OK
+        is_portable_onedir = (install_dir / "_internal").is_dir()
+        can_self_install = (
+            executable_path.suffix.lower() == ".exe"
+            and os.access(install_dir, os.W_OK)
+            and (is_inno_setup or is_portable_onedir)
         )
-        mode = "windows_setup" if is_inno_setup else "windows_portable"
+        mode = (
+            "windows_setup"
+            if is_inno_setup
+            else ("windows_portable" if is_portable_onedir else "download_only")
+        )
         return {
             "frozen": True,
             "platform": plat,
@@ -615,14 +622,25 @@ class WebUpdateManager:
         updates_dir.mkdir(parents=True, exist_ok=True)
         dest_path = updates_dir / asset.name
 
+        existing_thread: threading.Thread | None = None
         with self._lock:
+            if self._job.state in {"installing", "restarting"}:
+                raise UpdateError("Kurulum devam ederken yeni indirme baslatilamaz.")
+
             if (
                 self._job.state in {"downloading", "verifying"}
                 and self._download_thread is not None
                 and self._download_thread.is_alive()
             ):
-                return self._serialize_status_unlocked()
+                if not blocking:
+                    return self._serialize_status_unlocked()
+                existing_thread = self._download_thread
 
+        if existing_thread is not None:
+            existing_thread.join(timeout=max(timeout_seconds * 4, 120))
+            return self.get_status()
+
+        with self._lock:
             if (
                 self._job.state == "ready_to_install"
                 and self._job.asset_name == asset.name
@@ -651,8 +669,9 @@ class WebUpdateManager:
                 tmp_path.unlink(missing_ok=True)
 
                 def _on_progress(
-                    _dest: Path, downloaded: int, total: int, _speed: float, _eta: float
+                    destination: Path, downloaded: int, total: int, speed: float, eta: float
                 ) -> None:
+                    del destination, speed, eta
                     eff_total = total if total > 0 else asset.size
                     pct = round((downloaded / eff_total) * 100.0, 1) if eff_total > 0 else 0.0
                     with self._lock:
@@ -739,6 +758,8 @@ class WebUpdateManager:
             )
 
         with self._lock:
+            if self._job.state in {"installing", "restarting"}:
+                raise UpdateError("Guncelleme kurulumu zaten devam ediyor.")
             ready = (
                 self._job.state == "ready_to_install"
                 and self._job.verified_path
@@ -796,6 +817,11 @@ class WebUpdateManager:
                     log_path=log_path,
                 )
             elif verified_path.suffix.lower() == ".zip":
+                if not (install_dir / "_internal").is_dir():
+                    raise UpdateError(
+                        "Portable dizin yapisi (_internal) bulunamadigi icin otomatik klasor "
+                        "degisimi guvenlik nedeniyle durduruldu."
+                    )
                 extracted_dir = _safe_extract_web_zip(verified_path, working_root / "extract")
                 script_path = _write_windows_portable_script(
                     working_root=working_root,

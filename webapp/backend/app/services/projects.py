@@ -2,27 +2,79 @@
 
 from __future__ import annotations
 
+import math
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session as OrmSession
 
 from ..core.errors import not_found, validation_error
-from ..core.timeutil import iso_z, utcnow
-from ..models import HydroSession, Project, SectionForm, new_uuid
+from ..core.timeutil import as_float, iso_z, utcnow
+from ..models import Attachment, HydroSession, OcrAnalysis, Project, SectionForm, new_uuid
 from . import audit
+from .sessions import _unlink_stored_attachments
+
+_DEFAULT_STR_KEYS = (
+    "material_grade",
+    "location_class",
+    "pump_location",
+    "spec_code",
+    "size_option",
+    "schedule_option",
+)
+_DEFAULT_NUM_KEYS = (
+    "outside_diameter_mm",
+    "wall_thickness_mm",
+    "smys_mpa",
+    "design_pressure_bar",
+    "k_factor",
+    "steel_alpha_micro_per_c",
+)
+_VALID_PROJECT_STATUSES = {"active", "completed", "archived"}
 
 # ---------------------------------------------------------------------------
 # Serialisation
 # ---------------------------------------------------------------------------
 
 
+def normalize_project_defaults(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    cleaned: dict[str, Any] = {}
+    for key in _DEFAULT_STR_KEYS:
+        val = raw.get(key)
+        if val is not None:
+            text = str(val).strip()
+            if text:
+                cleaned[key] = text[:160]
+    for key in _DEFAULT_NUM_KEYS:
+        num = as_float(raw.get(key))
+        if num is not None and math.isfinite(num) and num > 0:
+            cleaned[key] = round(num, 4)
+    return cleaned
+
+
+def _clean_length(value: Any) -> float | None:
+    num = as_float(value)
+    if num is None or not math.isfinite(num) or num <= 0:
+        return None
+    return round(num, 2)
+
+
 def serialize_project(project: Project, section_count: int = 0) -> dict[str, Any]:
+    raw_status = (getattr(project, "status", None) or "active").strip().lower()
+    status = raw_status if raw_status in _VALID_PROJECT_STATUSES else "active"
     return {
         "id": project.id,
         "code": project.code or "",
         "name": project.name,
         "client": project.client,
+        "contractor": getattr(project, "contractor", None),
+        "supervisor": getattr(project, "supervisor", None),
+        "pipeline_length_m": getattr(project, "pipeline_length_m", None),
+        "status": status,
+        "defaults": normalize_project_defaults(getattr(project, "defaults", None)),
         "description": project.description,
         "section_count": int(section_count or 0),
         "created_at": iso_z(project.created_at),
@@ -134,6 +186,12 @@ def create_project(
         raise validation_error("Proje adi bos olamaz.", field="name")
     code = str(_payload_get(payload, "code") or "").strip()
     client = _clean_optional(_payload_get(payload, "client"))
+    contractor = _clean_optional(_payload_get(payload, "contractor"))
+    supervisor = _clean_optional(_payload_get(payload, "supervisor"))
+    pipeline_length_m = _clean_length(_payload_get(payload, "pipeline_length_m"))
+    raw_status = str(_payload_get(payload, "status") or "active").strip().lower()
+    status = raw_status if raw_status in _VALID_PROJECT_STATUSES else "active"
+    defaults = normalize_project_defaults(_payload_get(payload, "defaults"))
     description = _payload_get(payload, "description")
 
     project = Project(
@@ -142,6 +200,11 @@ def create_project(
         code=code,
         name=name,
         client=client,
+        contractor=contractor,
+        supervisor=supervisor,
+        pipeline_length_m=pipeline_length_m,
+        status=status,
+        defaults=defaults,
         description=None if description is None else str(description),
     )
     db.add(project)
@@ -152,7 +215,12 @@ def create_project(
         entity_type="project",
         entity_id=project.id,
         workspace_hash=workspace_hash,
-        after={"name": project.name, "code": project.code, "client": project.client},
+        after={
+            "name": project.name,
+            "code": project.code,
+            "client": project.client,
+            "contractor": project.contractor,
+        },
     )
     if commit:
         db.commit()
@@ -170,6 +238,11 @@ def update_project(
         "name": project.name,
         "code": project.code,
         "client": project.client,
+        "contractor": project.contractor,
+        "supervisor": project.supervisor,
+        "pipeline_length_m": project.pipeline_length_m,
+        "status": project.status,
+        "defaults": project.defaults or {},
         "description": project.description,
     }
 
@@ -182,6 +255,18 @@ def update_project(
         project.code = str(changes.get("code") or "").strip()
     if "client" in changes:
         project.client = _clean_optional(changes.get("client"))
+    if "contractor" in changes:
+        project.contractor = _clean_optional(changes.get("contractor"))
+    if "supervisor" in changes:
+        project.supervisor = _clean_optional(changes.get("supervisor"))
+    if "pipeline_length_m" in changes:
+        project.pipeline_length_m = _clean_length(changes.get("pipeline_length_m"))
+    if "status" in changes and changes.get("status") is not None:
+        raw_status = str(changes.get("status")).strip().lower()
+        if raw_status in _VALID_PROJECT_STATUSES:
+            project.status = raw_status
+    if "defaults" in changes and changes.get("defaults") is not None:
+        project.defaults = normalize_project_defaults(changes.get("defaults"))
     if "description" in changes:
         value = changes.get("description")
         project.description = None if value is None else str(value)
@@ -198,6 +283,10 @@ def update_project(
             "name": project.name,
             "code": project.code,
             "client": project.client,
+            "contractor": project.contractor,
+            "supervisor": project.supervisor,
+            "pipeline_length_m": project.pipeline_length_m,
+            "status": project.status,
             "description": project.description,
         },
     )
@@ -211,6 +300,7 @@ def delete_project(
     project: Project,
     *,
     hard: bool = False,
+    uploads_dir: Path | None = None,
 ) -> None:
     now = utcnow()
     sessions = (
@@ -218,7 +308,29 @@ def delete_project(
         .scalars()
         .all()
     )
+    stored_paths: list[str] = []
     if hard:
+        session_ids = [session.id for session in sessions]
+        if session_ids:
+            attachments = (
+                db.execute(select(Attachment).where(Attachment.session_id.in_(session_ids)))
+                .scalars()
+                .all()
+            )
+            attachment_ids = [att.id for att in attachments]
+            stored_paths = [att.stored_path for att in attachments if att.stored_path]
+            if attachment_ids:
+                analyses = (
+                    db.execute(
+                        select(OcrAnalysis).where(OcrAnalysis.attachment_id.in_(attachment_ids))
+                    )
+                    .scalars()
+                    .all()
+                )
+                for item in analyses:
+                    db.delete(item)
+                for att in attachments:
+                    db.delete(att)
         forms = (
             db.execute(select(SectionForm).where(SectionForm.project_id == project.id))
             .scalars()
@@ -248,6 +360,8 @@ def delete_project(
         after={"hard": hard, "deleted_sessions": len(sessions)},
     )
     db.commit()
+    if hard:
+        _unlink_stored_attachments(db, stored_paths, uploads_dir)
 
 
 __all__ = [
@@ -255,6 +369,7 @@ __all__ = [
     "delete_project",
     "get_project",
     "list_projects",
+    "normalize_project_defaults",
     "section_count",
     "serialize_project",
     "update_project",

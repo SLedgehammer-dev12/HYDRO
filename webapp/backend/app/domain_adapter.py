@@ -7,13 +7,13 @@ calls domain functions and serialises the result.
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Any, Iterable
+from typing import Any, Iterable, NoReturn
 
 from .core.errors import AppError, error_from_domain
 from .core.timeutil import json_safe
 
 
-def _raise(exc: BaseException, **kwargs: Any) -> None:
+def _raise(exc: BaseException, **kwargs: Any) -> NoReturn:
     raise error_from_domain(exc, **kwargs) from exc
 
 
