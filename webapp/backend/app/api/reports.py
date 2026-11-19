@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse
 
 from .. import schemas
 from ..core.config import Settings
 from ..core.errors import validation_error
+from ..core.rate_limit import enforce_rate_limit
 from ..services import reports as report_service
 from .deps import get_settings
 
@@ -16,9 +17,11 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 
 @router.post("/export")
 def export_report(
+    request: Request,
     payload: schemas.ReportExportRequest,
     settings: Settings = Depends(get_settings),
 ):
+    enforce_rate_limit(request, settings, bucket="report_export", limit=30)
     if payload.format not in report_service.FORMAT_ALIASES:
         raise validation_error(f"Desteklenmeyen rapor formati: {payload.format}", field="format")
     target = report_service.free_export(

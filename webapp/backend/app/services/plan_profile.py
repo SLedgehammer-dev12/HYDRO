@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import logging
 import math
 import os
 import re
@@ -33,6 +34,8 @@ from ..models import HydroSession
 from . import dossier as dossier_service
 from . import projects as project_service
 from . import sessions as session_service
+
+logger = logging.getLogger("hydro.web.plan_profile")
 
 # Chainage: "0+000", "12+345", "12+345,5"
 _CHAINAGE_RE = re.compile(r"\b(\d{1,3})\s*\+\s*(\d{3}(?:[.,]\d+)?)\b")
@@ -1970,9 +1973,15 @@ def scan_plan_profile_upload(
                     or not os.path.isfile(dxf_tmp_path)
                     or os.path.getsize(dxf_tmp_path) == 0
                 ):
+                    logger.warning(
+                        "dwg2dxf failed rc=%s stderr=%s stdout=%s",
+                        proc.returncode,
+                        proc.stderr.strip()[:500],
+                        proc.stdout.strip()[:500],
+                    )
                     raise AppError(
                         "dwg_convert_failed",
-                        f"DWG dönüştürme başarısız: {proc.stderr.strip() or proc.stdout.strip() or 'bilinmeyen hata'}",
+                        "DWG dosyasi DXF bicimine donusturulemedi. Dosyayi kontrol edip tekrar deneyin.",
                         status_code=422,
                     )
                 target_dxf = dxf_tmp_path

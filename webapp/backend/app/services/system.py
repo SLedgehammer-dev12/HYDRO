@@ -112,9 +112,13 @@ def health_payload(settings: Settings, *, instance_id: str | None = None) -> dic
         status = "ok"
 
     security_warnings: list[str] = []
-    if settings.auth_mode == "none" and not settings.is_loopback_host:
+    if not settings.has_enforced_auth and not settings.is_loopback_host:
         security_warnings.append(
-            "Sunucu kimlik dogrulamasi olmadan 0.0.0.0/dis arayuze bagli; onunde yetkili reverse proxy calistirin."
+            "Sunucu uygulama duzeyinde kimlik dogrulamasi olmadan 0.0.0.0/dis arayuze bagli; onunde yetkili reverse proxy calistirin."
+        )
+    if settings.auth_mode != "none" and not settings.has_enforced_auth:
+        security_warnings.append(
+            f"HYDRO_AUTH_MODE='{settings.auth_mode}' ayarli ancak uygulama katmaninda etkin kimlik dogrulama ara yazilimi henuz yoktur."
         )
 
     return {
@@ -137,6 +141,7 @@ def health_payload(settings: Settings, *, instance_id: str | None = None) -> dic
         },
         "security": {
             "auth_mode": settings.auth_mode,
+            "enforced_auth": settings.has_enforced_auth,
             "loopback_only": settings.is_loopback_host,
             "workspace_claim_enabled": settings.allow_workspace_claim,
             "warnings": security_warnings,

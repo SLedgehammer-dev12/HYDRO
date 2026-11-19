@@ -24,7 +24,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt requirements-ocr.txt requirements-web.txt ./
+COPY requirements.txt requirements-ocr.txt webapp/requirements-web.txt ./
 RUN pip install -r requirements.txt -r requirements-web.txt -r requirements-ocr.txt
 
 COPY hidrostatik_test ./hidrostatik_test
@@ -32,7 +32,7 @@ COPY webapp ./webapp
 COPY --from=frontend /app/webapp/frontend/dist ./webapp/frontend/dist
 
 RUN mkdir -p /data && useradd --create-home --uid 10001 hydro \
-    && chown -R hydro:hydro /data /app
+    && chown -R hydro:hydro /data
 USER hydro
 
 VOLUME ["/data"]

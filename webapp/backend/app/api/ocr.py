@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session as OrmSession
 
 from .. import schemas
 from ..core.config import Settings
+from ..core.rate_limit import enforce_rate_limit
 from ..core.timeutil import json_safe
 from ..db import get_db
 from ..services import dossier as dossier_service
@@ -31,6 +32,7 @@ def analyze(
     settings: Settings = Depends(get_settings),
     workspace: Workspace = Depends(get_workspace),
 ) -> dict:
+    enforce_rate_limit(request, settings, bucket="ocr_analyze", limit=30)
     prefer_async = "respond-async" in (request.headers.get("prefer") or "").lower()
     if async_mode or prefer_async:
         analysis, reused, estimated_wait_s = ocr_service.enqueue_upload(

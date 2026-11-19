@@ -11,6 +11,7 @@ import os
 import re
 import uuid
 from pathlib import Path
+from typing import Any
 
 WORKSPACE_HEADER = "X-Session-ID"
 DEFAULT_WORKSPACE = "anonymous"
@@ -133,6 +134,30 @@ def write_private_file(target: Path, chunks) -> int:
     return written
 
 
+async def read_upload_bounded(upload: Any, max_bytes: int, *, chunk_size: int = 65536) -> bytes:
+    """Stream-read an upload and abort early with ``413`` if it exceeds ``max_bytes``."""
+
+    from .errors import AppError
+
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await upload.read(chunk_size)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            limit_mb = max(1, max_bytes // (1024 * 1024))
+            raise AppError(
+                "file_too_large",
+                f"Yuklenen dosya izin verilen boyutu ({limit_mb} MB) asiyor.",
+                status_code=413,
+                details={"max_bytes": max_bytes},
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 __all__ = [
     "DEFAULT_WORKSPACE",
     "WORKSPACE_HEADER",
@@ -142,6 +167,7 @@ __all__ = [
     "hash_bytes",
     "new_stored_name",
     "normalize_workspace",
+    "read_upload_bounded",
     "safe_filename",
     "sniff_mime",
     "workspace_hash",

@@ -429,6 +429,8 @@ def create_db_backup(settings: Settings, *, reason: str = "manual") -> dict[str,
     tmp_path = bdir / f".tmp_{filename}"
 
     try:
+        fd = os.open(str(tmp_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        os.close(fd)
         src = sqlite3.connect(str(db_path), timeout=30.0)
         dst = sqlite3.connect(str(tmp_path), timeout=30.0)
         try:
@@ -442,10 +444,6 @@ def create_db_backup(settings: Settings, *, reason: str = "manual") -> dict[str,
         finally:
             dst.close()
             src.close()
-        try:
-            os.chmod(tmp_path, 0o600)
-        except OSError:
-            pass
         os.replace(tmp_path, target)
     finally:
         if tmp_path.exists():
@@ -701,7 +699,11 @@ def restore_trash_item(
         restored_sess.revision = int(restored_sess.revision or 1) + 1
         if restored_sess.project_id:
             parent = db.get(Project, restored_sess.project_id)
-            if parent is not None and parent.deleted_at is not None:
+            if (
+                parent is not None
+                and parent.workspace_id_hash == workspace_hash
+                and parent.deleted_at is not None
+            ):
                 parent.deleted_at = None
                 parent.updated_at = now
         audit.record(

@@ -13,8 +13,8 @@
 | Alan | Durum | Kanıt |
 | --- | --- | --- |
 | Masaüstü uygulaması | Çalışıyor, kararlı | 709 unittest PASS (`skipped=1`) |
-| Web backend (FastAPI) | Çalışıyor | 181 pytest PASS, 81 OpenAPI path / 94 operation, 46 dosyada `mypy` temiz |
-| Web frontend (React 19) | Çalışıyor | `npm run lint` (0 hata, `jsx-a11y`), `npm test` (18 Vitest), `npm run typecheck` + `npm run build` PASS, `verify-tabs.mjs` 12/12 PASS |
+| Web backend (FastAPI) | Çalışıyor | 191 pytest PASS, 81 OpenAPI path / 94 operation, 47 dosyada `mypy` temiz |
+| Web frontend (React 19) | Çalışıyor | `npm run lint` (0 hata, `jsx-a11y`), `npm test` (21 Vitest), `npm run typecheck` + `npm run build` + `check:bundle` PASS (`143,2 kB` gzip ilk yükleme JS), `verify-tabs.mjs` 12/12 PASS |
 | Program İkon & Marka Sistemi | Hazır | Boru kesiti + su dalgası + manometre ikonu (`tools/generate_icons.py`, `assets/icons/*`, `webapp/frontend/public/*`, `<HydroLogo />`, PyInstaller/Inno Setup/Tkinter) |
 | Web Güncelleme Yöneticisi | Çalışıyor | `/api/update/*`, SHA-256 + fail-closed Ed25519 `.sig` doğrulama, `UpdateManagerModal`, macOS `.dmg` / Win `.exe`/`.zip` kurulum |
 | BOTAŞ Test Bölümü Formları | Çalışıyor | Seçenek 1 sol menü (`015`..`023`, `KUR-001`, `KUR-002` + 5 ek), `SectionFormPage`, `rows`/`pig_runs`/`findings`, tekil OCR, `020`/`022` gömülü hesaplama ve `023` (`BOT-FRM-CDB-001-024`) Şartname 16–17 çift yönlü entegrasyonu |
@@ -27,7 +27,7 @@
 | OCR rapor kontrolü | Çalışıyor (Vision + Excel) | `ocrmac`, `.xlsx`/`.xls`, `commit-dossier` proje/bölüm kaydı, tekil onay/uygulama |
 | Docker / dağıtım | Hazır | `webapp/Dockerfile`, `docker-compose.yml`, `.github/workflows/release.yml` |
 
-**Durum:** MVP tamam. Kalan işler ağırlıklı olarak üretim sertleştirmesi (auth, migration, kod bölme) ve kurum onayı bekleyen veri işleri.
+**Durum:** MVP ve performans/güvenlik ön sertleştirmesi tamam. Kalan işler Alembic göçü, kurumsal Auth/OIDC/RBAC kararı ve kurum onayı bekleyen veri işleridir.
 
 ---
 
@@ -105,8 +105,8 @@ yeni proje/test bölümü açarak) kaydedilmesi, kümülatif hesaplama (`profile
 noktası değerlendirmesi ve canlı oturum hidrasyonu tamamlandı.
 
 Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen işlerdir:
-1. Alembic üretim migrasyonu ve Auth/OIDC.
-2. Frontend birim testleri (vitest).
+1. Alembic üretim migrasyonu (`migrations/`).
+2. Kurumsal Auth / OIDC + iki kişi onay politikası (kullanıcı mimari kararı bekliyor).
 3. Kurum onayı bekleyen resmi A/B ve form revizyonları.
 
 ---
@@ -122,17 +122,18 @@ Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen iş
 - [x] `.xlsx` / `.xls` test raporlarının doğrudan hücre tabanlı (`source="spreadsheet"`) okunması (`openpyxl` + `xlrd`, magic-byte/ZIP doğrulama).
 - [x] OCR Test Raporu Kontrolü kayıt & hesap hattı (`commit-dossier` liste sözleşmesi, mühendislik hesap paketi & boş `.xls` ayrımı, proje/KP kesit eşleme veya otomatik yeni proje + 11 zorunlu form slotu açma, `profile`/`air`/`pressure`/`pig` `TestResult` kaydı + canlı hidrasyon, tekil rapor onay/uygulama).
 - [x] OCR DB kuyruğu + worker + iptal (`ocr_queue.py` bounded executor, `async_mode`/`Prefer: respond-async` `202` + `estimated_wait_s`, `cancel_event`, `ocr_timeout_s`, parametrik `language`, başlangıç `worker_interrupted` toparlaması).
+- [x] Web güvenlik & dağıtım sertleştirmesi (geriye dönük uyumlu): fail-closed `HYDRO_AUTH_MODE` bağlanma kapısı + `desktop_launcher.py` `validate_bind_security`, harici `/theme-init.js` + CSP + `X-Content-Type-Options`/`X-Frame-Options`/`COOP`/`CORP`/`Cache-Control: no-store`, `Host` DNS-rebinding kapısı, `/api/update/*` yerel yönetici + same-origin/proxy başlık kapısı, akışlı dosya boyutu sınırı (`read_upload_bounded`), bellek-içi `RateLimiter` (`429 Retry-After`), maskelenmiş DB logları ve `Dockerfile`/`docker-compose.yml`/CI düzeltmeleri.
 - [ ] Alembic üretim migrasyonu (`create_all` + hafif kolon migrasyonu yerine).
 - [ ] Auth / OIDC + iki kişi onay kuralı (MVP'de anonim `X-Session-ID`).
 - [ ] Postgres runtime testi (kod uyumlu, `psycopg` kurulu değil).
-- [ ] Frontend birim testleri (vitest); şu an `verify-tabs.mjs` ile sekme regresyonu korunuyor.
+- [x] Frontend birim testleri, kod bölme & paket bütçesi (`21` Vitest testi, rota/Recharts/3D lazy-loading, Vite 8 Rolldown chunk bölmesi, `check:bundle` ≤ `200 kB` gzip kapısı, `GZipMiddleware` + HTML `no-cache` bfcache uyumu + `verify-tabs.mjs`).
 - [ ] 3D gerçek veri: `profile_points[]` / `equipment[]` girdileri (yoksa yaklaşık sahne + uyarı).
 
 ### 4.2 Domain / masaüstü (P1–P2, `tasks/todo.md`)
 
 - [x] 14.1–14.3 basınç–hacim izleme, `%0.2` ilave su durdurma mantığı ve 2 saatlik bekleme domain + API (`pressurization_monitor.py`); [x] Web UI paneli (Basınç Değişim sayfası, `OperationsPanel`); [x] oturum kaydı, özet ve TXT/PDF/XLSX rapor bağlantısı.
 - [ ] 12 ve 15 için zaman serili termal dengeleme / 24 saatlik test kayıt veri modeli.
-- [x] 16–17 basınç düşürme ve boşaltma kontrol listesi domain + API (`post_test_operations.py`); [x] Web UI paneli (`OperationsPanel`); [x] oturum kaydı ve rapor bağlantısı; [ ] BOT-FRM-CDB-001-024 formu bağlantısı.
+- [x] 16–17 basınç düşürme ve boşaltma kontrol listesi domain + API (`post_test_operations.py`); [x] Web UI paneli (`OperationsPanel`); [x] oturum kaydı ve rapor bağlantısı; [x] BOT-FRM-CDB-001-024 formu bağlantısı.
 - [ ] 21. bölümdeki saha formlarına uygun rapor çıktısı.
 - [ ] Segmentli geometri indirgemesi için kurum içi metod notu.
 - [ ] +2 °C dolum kısıtı için saha uyarı mantığı.
@@ -165,16 +166,16 @@ Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen iş
 
 ---
 
-## 6. Doğrulama (son çalıştırma: 2026-11-18)
+## 6. Doğrulama (son çalıştırma: 2026-11-19)
 
 ```bash
 # Lint & tip denetimi
-python3 -m ruff check .                                        # All checks passed
-python3 -m mypy hidrostatik_test/domain/                       # Success: no issues found (12 files)
-python3 -m mypy --ignore-missing-imports webapp/backend/app    # Success: no issues found (46 files)
+python3 -m ruff check . && python3 -m ruff format --check .     # PASS (141 dosya)
+python3 -m mypy hidrostatik_test/domain/                       # Success: no issues found (14 files)
+python3 -m mypy --ignore-missing-imports webapp/backend/app    # Success: no issues found (47 files)
 
 # Web backend
-python3 -m pytest webapp/backend/tests -q                      # 176 passed
+python3 -m pytest webapp/backend/tests -q                      # 191 passed
 
 # Masaüstü
 python3 -m unittest discover -s tests -p "test_*.py"           # 709 tests OK (skipped=1)
@@ -182,12 +183,12 @@ python3 -m unittest discover -s tests -p "test_*.py"           # 709 tests OK (s
 # Masaüstü paketli Web self-test
 python3 webapp/desktop_launcher.py --self-test                 # SELF_TEST_OK
 
-# Frontend derleme
-cd webapp/frontend && npm run typecheck && npm run build       # PASS
+# Frontend derleme, lint & test
+cd webapp/frontend && npm run lint && npm test && npm run typecheck && npm run build && npm run check:bundle
 
-# Sekme + BOTAŞ Form Ağacı & 020/022 Gömülü Hesaplama & Güncelleme Yöneticisi smoke (port 8099, izole DB)
+# Sekme + BOTAŞ Form Ağacı & 020/022/023 Gömülü Hesaplama & Güncelleme Yöneticisi smoke (port 8099, izole DB)
 cd webapp/frontend && HYDRO_APP_URL=http://127.0.0.1:8099 \
-  node scripts/verify-tabs.mjs                                 # 11/11 PASS
+  node scripts/verify-tabs.mjs                                 # 12/12 PASS
 ```
 
 Çalıştırma:

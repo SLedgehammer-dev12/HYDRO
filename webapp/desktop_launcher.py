@@ -455,7 +455,7 @@ def _run_controller_gui(args: argparse.Namespace) -> int:
     _bootstrap_paths()
 
     from app import db
-    from app.core.config import Settings
+    from app.core.config import Settings, validate_bind_security
     from app.main import create_app
 
     from hidrostatik_test import APP_VERSION
@@ -489,6 +489,10 @@ def _run_controller_gui(args: argparse.Namespace) -> int:
         frontend_dist=frontend_dist,
         log_level=(args.log_level or env_settings.log_level).upper(),
     )
+    bind_err = validate_bind_security(settings)
+    if bind_err is not None:
+        print(bind_err, file=sys.stderr)
+        return 2
     settings.ensure_directories()
 
     if settings.ocr_lang:

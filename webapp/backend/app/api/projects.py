@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session as OrmSession
 
 from .. import schemas
+from ..core import security
 from ..core.config import Settings
+from ..core.rate_limit import enforce_rate_limit
 from ..core.timeutil import json_safe
 from ..db import get_db
 from ..services import dossier as dossier_service
@@ -69,6 +71,7 @@ def generate_sample_project(
 
 @router.post("/import-archive", status_code=201)
 async def import_project_archive(
+    request: Request,
     file: UploadFile = File(...),
     target_project_name: str | None = Form(default=None),
     target_project_code: str | None = Form(default=None),
@@ -77,7 +80,8 @@ async def import_project_archive(
     settings: Settings = Depends(get_settings),
     workspace: Workspace = Depends(get_workspace),
 ) -> dict:
-    archive_bytes = await file.read()
+    enforce_rate_limit(request, settings, bucket="project_import", limit=30)
+    archive_bytes = await security.read_upload_bounded(file, settings.max_upload_bytes)
     return json_safe(
         project_archive_service.import_project_archive(
             db,
@@ -141,6 +145,7 @@ def delete_project(
 
 @router.post("/plan-profile/scan")
 def scan_plan_profile(
+    request: Request,
     file: UploadFile = File(...),
     max_section_length_m: float = Form(default=12_000.0),
     max_elevation_diff_m: float | None = Form(default=None),
@@ -149,6 +154,7 @@ def scan_plan_profile(
     workspace: Workspace = Depends(get_workspace),
     settings: Settings = Depends(get_settings),
 ) -> dict:
+    enforce_rate_limit(request, settings, bucket="plan_profile_scan", limit=30)
     payload = plan_profile_service.scan_plan_profile_upload(
         file_name=file.filename,
         stream=file.file,

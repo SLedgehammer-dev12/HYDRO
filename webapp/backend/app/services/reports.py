@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -23,6 +24,8 @@ from ..core.timeutil import as_float, fmt_number, iso_z, utcnow
 from ..desktop_labels import FIELD_CHECKS, KEY_TO_B_SOURCE_LABEL
 from ..models import HydroSession, TestResult
 from .snapshot import backend_label
+
+logger = logging.getLogger("hydro.web.reports")
 
 FORMAT_ALIASES = {"pdf": "pdf", "xlsx": "xlsx", "txt": "txt"}
 CONTENT_TYPES = {
@@ -352,11 +355,11 @@ def export_session(
     except AppError:
         raise
     except Exception as exc:
+        logger.exception("Report generation failed for session %s (%s)", session.id, fmt)
         raise AppError(
             "report_generation_failed",
             "Rapor olusturulamadi.",
             status_code=500,
-            details={"reason": str(exc)},
         ) from exc
     return target, context
 
@@ -418,11 +421,11 @@ def free_export(
     except AppError:
         raise
     except Exception as exc:
+        logger.exception("Ad-hoc report generation failed (%s)", fmt)
         raise AppError(
             "report_generation_failed",
             "Rapor olusturulamadi.",
             status_code=500,
-            details={"reason": str(exc)},
         ) from exc
     return target
 

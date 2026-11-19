@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, File, Form, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session as OrmSession
 
+from ..core import security
 from ..core.config import Settings
 from ..core.timeutil import json_safe
 from ..db import get_db
@@ -54,7 +55,7 @@ async def import_desktop_db(
     settings: Settings = Depends(get_settings),
     workspace: Workspace = Depends(get_workspace),
 ) -> dict:
-    db_bytes = await file.read()
+    db_bytes = await security.read_upload_bounded(file, settings.max_upload_bytes)
     return json_safe(
         project_archive_service.import_desktop_db(
             db,

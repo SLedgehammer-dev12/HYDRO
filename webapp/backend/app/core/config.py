@@ -80,6 +80,12 @@ _TRUE_VALUES = {"1", "true", "yes", "on"}
 _FALSE_VALUES = {"0", "false", "no", "off"}
 
 
+def _parse_csv(raw: str | None) -> tuple[str, ...]:
+    if not raw:
+        return ()
+    return tuple(item.strip() for item in raw.split(",") if item.strip())
+
+
 def _env(*names: str) -> str | None:
     for name in names:
         value = os.environ.get(name)
@@ -134,6 +140,8 @@ class Settings:
     allow_remote: bool = False
     allow_workspace_claim: bool = False
     local_admin_token: str = ""
+    trusted_hosts: tuple[str, ...] = ()
+    rate_limit_enabled: bool = True
     scene_vertical_exaggeration: float = 3.0
     log_level: str = "INFO"
     extra: dict[str, str] = field(default_factory=dict)
@@ -170,6 +178,11 @@ class Settings:
     def is_loopback_host(self) -> bool:
         return self.host.strip().lower() in {"127.0.0.1", "localhost", "::1"}
 
+    @property
+    def has_enforced_auth(self) -> bool:
+        # Application-level auth middleware is not implemented yet; arbitrary HYDRO_AUTH_MODE values must remain fail-closed.
+        return False
+
     @classmethod
     def from_env(cls) -> "Settings":
         data_dir = Path(_env("HYDRO_DATA_DIR") or _default_data_dir())
@@ -177,8 +190,8 @@ class Settings:
         database_url = _env(
             "HYDRO_DATABASE_URL", "HYDRO_DB_URL", "DATABASE_URL"
         ) or _default_database_url(data_dir.expanduser().resolve())
-        raw_origins = _env("HYDRO_CORS_ORIGINS") or ""
-        origins = tuple(item.strip() for item in raw_origins.split(",") if item.strip())
+        origins = _parse_csv(_env("HYDRO_CORS_ORIGINS"))
+        trusted_hosts = tuple(host.lower() for host in _parse_csv(_env("HYDRO_TRUSTED_HOSTS")))
         return cls(
             host=_env("HYDRO_HOST", "HYDRO_WEB_HOST") or "127.0.0.1",
             port=_env_int("HYDRO_PORT", _env_int("HYDRO_WEB_PORT", 8080)),
@@ -196,6 +209,8 @@ class Settings:
             allow_remote=_env_bool("HYDRO_ALLOW_REMOTE", False),
             allow_workspace_claim=_env_bool("HYDRO_ALLOW_WORKSPACE_CLAIM", False),
             local_admin_token=_env("HYDRO_LOCAL_ADMIN_TOKEN") or "",
+            trusted_hosts=trusted_hosts,
+            rate_limit_enabled=_env_bool("HYDRO_RATE_LIMIT_ENABLED", True),
             scene_vertical_exaggeration=float(_env("HYDRO_SCENE_VERTICAL_EXAGGERATION") or 3.0),
             log_level=_env("HYDRO_LOG_LEVEL") or "INFO",
         )
@@ -203,6 +218,33 @@ class Settings:
     def ensure_directories(self) -> None:
         for path in (self.data_dir, self.uploads_dir, self.exports_dir):
             path.mkdir(parents=True, exist_ok=True)
+
+
+def validate_bind_security(settings: Settings) -> str | None:
+    """Reject non-loopback binds without enforced app auth unless explicitly allowed."""
+
+    if (
+        not settings.is_loopback_host
+        and not settings.has_enforced_auth
+        and not settings.allow_remote
+    ):
+        return (
+            "HATA: Uygulama duzeyinde kimlik dogrulamasi etkin degilken 0.0.0.0 veya dis "
+            "arayuzlere baglanma guvenlik nedeniyle engellendi. Yalnizca yetkili reverse "
+            "proxy arkasinda calistiriyorsaniz HYDRO_ALLOW_REMOTE=1 ile acin."
+        )
+    return None
+
+
+def safe_database_url(database_url: str) -> str:
+    """Return a log-safe database URL with any embedded password redacted."""
+
+    try:
+        from sqlalchemy.engine.url import make_url
+
+        return make_url(database_url).render_as_string(hide_password=True)
+    except Exception:
+        return "<database_url>"
 
 
 def ensure_repo_on_path() -> None:
@@ -226,4 +268,6 @@ __all__ = [
     "_default_data_dir",
     "_default_frontend_dist",
     "ensure_repo_on_path",
+    "safe_database_url",
+    "validate_bind_security",
 ]

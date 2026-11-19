@@ -73,19 +73,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def validate_bind_security(settings) -> str | None:  # noqa: ANN001
     """Reject unauthenticated binding to non-loopback interfaces unless explicitly allowed."""
 
-    if not settings.is_loopback_host and settings.auth_mode == "none" and not settings.allow_remote:
-        return (
-            "HATA: Kimlik dogrulamasi olmadan 0.0.0.0 veya dis arayuzlere baglanma guvenlik "
-            "nedeniyle engellendi. Yalnizca reverse proxy / kimlik dogrulama arkasinda "
-            "calistiriyorsaniz HYDRO_ALLOW_REMOTE=1 ile acin."
-        )
-    return None
+    from app.core.config import validate_bind_security as _validate_bind_security
+
+    return _validate_bind_security(settings)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
 
-    from app.core.config import Settings
+    from app.core.config import Settings, safe_database_url
     from app.main import create_app
 
     settings = Settings.from_env()
@@ -123,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
     url = f"http://{url_host}:{settings.port}"
 
     print(f"HYDRO Web: {url}")
-    print(f"  db        : {settings.database_url}")
+    print(f"  db        : {safe_database_url(settings.database_url)}")
     print(f"  data      : {settings.data_dir}")
     print(
         "  frontend  : "

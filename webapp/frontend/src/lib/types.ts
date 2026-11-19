@@ -840,8 +840,8 @@ export interface UpdateManagerStatus {
     arch: string;
     install_mode: string;
     can_self_install: boolean;
-    executable_path: string;
-    install_dir: string;
+    executable_path?: string;
+    install_dir?: string;
     prefer_kind?: string;
   };
   checked: boolean;

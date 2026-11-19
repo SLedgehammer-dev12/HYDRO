@@ -9,18 +9,7 @@
     <link rel="icon" href="/favicon.ico" sizes="32x32" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
-    <script>
-      try {
-        var raw = localStorage.getItem("hydro-app-v1");
-        if (raw) {
-          var parsed = JSON.parse(raw);
-          var theme = parsed && parsed.state && parsed.state.theme;
-          if (theme === "light" || theme === "dark") {
-            document.documentElement.dataset.theme = theme;
-          }
-        }
-      } catch (e) {}
-    </script>
+    <script src="/theme-init.js"></script>
     <title>HYDRO | Hidrostatik Test Platformu</title>
   </head>
   <body>

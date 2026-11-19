@@ -128,10 +128,17 @@ def _safe_value(value: Any) -> Any:
 
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
-    async def _app_error_handler(request: Request, exc: AppError) -> JSONResponse:  # noqa: ARG001
+    async def _app_error_handler(request: Request, exc: AppError) -> JSONResponse:
+        headers: dict[str, str] | None = None
+        if exc.code == "rate_limited" and "retry_after_s" in exc.details:
+            try:
+                headers = {"Retry-After": str(max(1, int(exc.details["retry_after_s"])))}
+            except (TypeError, ValueError):
+                headers = {"Retry-After": "60"}
         return JSONResponse(
             status_code=exc.status_code,
             content=exc.envelope(getattr(request.state, "request_id", None)),
+            headers=headers,
         )
 
     @app.exception_handler(RequestValidationError)
