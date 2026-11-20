@@ -6,7 +6,7 @@ import copy
 from pathlib import Path
 from typing import Any, Iterable
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session as OrmSession
 
 from hidrostatik_test import APP_VERSION
@@ -946,41 +946,30 @@ def _ordered_records(
     return list(rows), int(total)
 
 
-def _domain_store(rows: Iterable[TimeSeriesRecord]) -> Any:
-    from hidrostatik_test.domain.time_series import TimeSeriesStore
-
-    payload = []
-    for row in rows:
-        timestamp = ensure_utc(row.timestamp) or utcnow()
-        payload.append(
-            {
-                "timestamp": timestamp.isoformat(),
-                "pressure_bar": row.pressure_bar,
-                "temperature_c": row.temperature_c,
-                "volume_m3": row.volume_m3,
-                "notes": row.notes,
-            }
-        )
-    return TimeSeriesStore.from_dict({"records": payload})
+def get_ordered_time_series(db: OrmSession, session: HydroSession) -> list[TimeSeriesRecord]:
+    rows, _ = _ordered_records(db, session)
+    return rows
 
 
 def time_series_summary(rows: Iterable[TimeSeriesRecord]) -> dict[str, Any]:
-    from .decisions import finite_or_none
+    from hidrostatik_test.domain.time_series import TimeSeriesRecord as DomainTimeSeriesRecord
+    from hidrostatik_test.domain.time_series import evaluate_time_series
 
-    ordered = list(rows)
-    store = _domain_store(ordered)
-    balanced, raw_diff = store.check_thermal_balance()
-    diff = finite_or_none(raw_diff)
-    return {
-        "record_count": len(ordered),
-        "duration_hours": store.get_duration_hours(),
-        "balanced": balanced,
-        "temp_diff_c": diff,
-        "average_temperature_last_4h_c": store.get_average_temperature(4.0),
-        "average_temperature_c": store.get_average_temperature(),
-        "first_timestamp": iso_z(ordered[0].timestamp) if ordered else None,
-        "last_timestamp": iso_z(ordered[-1].timestamp) if ordered else None,
-    }
+    from .calculations import format_time_series_evaluation
+
+    ordered = sorted(rows, key=lambda r: ensure_utc(r.timestamp) or utcnow())
+    domain_records = [
+        DomainTimeSeriesRecord(
+            timestamp=ensure_utc(row.timestamp) or utcnow(),
+            pressure_bar=float(row.pressure_bar),
+            temperature_c=float(row.temperature_c),
+            volume_m3=row.volume_m3,
+            notes=row.notes or "",
+        )
+        for row in ordered
+    ]
+    evaluation = evaluate_time_series(domain_records)
+    return format_time_series_evaluation(evaluation)
 
 
 def list_time_series(
@@ -1027,7 +1016,7 @@ def add_time_series(
         temperature_c=temperature_c,
         volume_m3=volume_m3,
         notes=notes or "",
-        source=source or "manual",
+        source=(source or "manual")[:16],
     )
     db.add(row)
     session.updated_at = utcnow()
@@ -1043,6 +1032,97 @@ def add_time_series(
     db.refresh(row)
     rows, _ = _ordered_records(db, session)
     return {"record": _record_payload(row), "summary": time_series_summary(rows)}
+
+
+def batch_add_time_series(
+    db: OrmSession,
+    session: HydroSession,
+    *,
+    records: Iterable[Any],
+    mode: str = "append",
+    default_source: str | None = None,
+    commit: bool = True,
+) -> dict[str, Any]:
+    if mode == "replace":
+        db.execute(delete(TimeSeriesRecord).where(TimeSeriesRecord.session_id == session.id))
+        db.flush()
+
+    now = utcnow()
+    new_rows: list[TimeSeriesRecord] = []
+    for item in records:
+        if isinstance(item, dict):
+            ts_raw = item.get("timestamp")
+            p_val = float(item["pressure_bar"])
+            t_val = float(item["temperature_c"])
+            v_val = item.get("volume_m3")
+            notes_val = str(item.get("notes") or "")
+            src_raw = default_source or str(item.get("source") or "manual")
+        else:
+            ts_raw = getattr(item, "timestamp", None)
+            p_val = float(item.pressure_bar)
+            t_val = float(item.temperature_c)
+            v_val = item.volume_m3
+            notes_val = str(getattr(item, "notes", "") or "")
+            src_raw = default_source or str(getattr(item, "source", "manual") or "manual")
+
+        row = TimeSeriesRecord(
+            id=new_uuid(),
+            session_id=session.id,
+            timestamp=ensure_utc(ts_raw) or now,
+            pressure_bar=p_val,
+            temperature_c=t_val,
+            volume_m3=v_val,
+            notes=notes_val,
+            source=(src_raw or "manual")[:16],
+        )
+        db.add(row)
+        new_rows.append(row)
+
+    session.updated_at = now
+    audit.record(
+        db,
+        action="time_series.batch",
+        entity_type="session",
+        entity_id=session.id,
+        session_id=session.id,
+        workspace_hash=session.workspace_id_hash,
+        after={"mode": mode, "inserted": len(new_rows)},
+    )
+    if commit:
+        db.commit()
+    else:
+        db.flush()
+
+    rows, _ = _ordered_records(db, session)
+    return {
+        "inserted": len(new_rows),
+        "total": len(rows),
+        "items": [_record_payload(row) for row in rows],
+        "summary": time_series_summary(rows),
+    }
+
+
+def clear_time_series(db: OrmSession, session: HydroSession) -> dict[str, Any]:
+    existing_count = (
+        db.scalar(
+            select(func.count(TimeSeriesRecord.id)).where(TimeSeriesRecord.session_id == session.id)
+        )
+        or 0
+    )
+    if existing_count:
+        db.execute(delete(TimeSeriesRecord).where(TimeSeriesRecord.session_id == session.id))
+    session.updated_at = utcnow()
+    audit.record(
+        db,
+        action="time_series.clear",
+        entity_type="session",
+        entity_id=session.id,
+        session_id=session.id,
+        workspace_hash=session.workspace_id_hash,
+        after={"deleted": int(existing_count)},
+    )
+    db.commit()
+    return {"deleted": int(existing_count), "summary": time_series_summary([])}
 
 
 def delete_time_series(db: OrmSession, session: HydroSession, record_id: str) -> None:
@@ -1215,6 +1295,8 @@ def session_summary(db: OrmSession, session: HydroSession) -> dict[str, Any]:
     coefficients = inputs.get("coefficients") or {}
 
     profile = profile_summary(inputs)
+    ts_rows = get_ordered_time_series(db, session)
+    ts_summary = time_series_summary(ts_rows)
 
     scene_info = None
     try:
@@ -1250,6 +1332,7 @@ def session_summary(db: OrmSession, session: HydroSession) -> dict[str, Any]:
         },
         "profile": profile,
         "scene": scene_info,
+        "time_series": ts_summary,
         "last_computed_at": iso_z(last),
     }
 
@@ -1354,12 +1437,15 @@ def stats(db: OrmSession, workspace_hash: str) -> dict[str, Any]:
 __all__ = [
     "ENGINE_VERSION",
     "add_time_series",
+    "batch_add_time_series",
+    "clear_time_series",
     "create_result",
     "create_session",
     "default_inputs",
     "delete_session",
     "delete_time_series",
     "duplicate_session",
+    "get_ordered_time_series",
     "get_session",
     "list_audit",
     "list_results",

@@ -1,29 +1,30 @@
 import { useId, useRef, useState, type KeyboardEvent } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Droplets, ListChecks, Timer, TrendingUp } from "lucide-react";
+import { Activity, Droplets, ListChecks, Timer, TrendingUp } from "lucide-react";
 import { SectionCard } from "../../components/ui/Card";
 import { Button } from "../../components/ui/Button";
 import { CheckboxRow, FieldGrid, NumberField, SelectField, TextField } from "../../components/ui/Field";
 import { DecisionCard } from "../../components/ui/DecisionCard";
 import { InlineNotice, OfflineNotice } from "../../components/ui/State";
-import { api, apiErrorMessage, extractRevisionConflict } from "../../lib/api";
-import { useSaveTestResult, useSessionForms } from "../../hooks/queries";
+import { api, apiErrorMessage } from "../../lib/api";
+import { useSessionForms } from "../../hooks/queries";
 import { num, parseNumber } from "../../lib/format";
 import { useAppStore } from "../../store/useAppStore";
+import { SaveResultButton } from "./SaveResultButton";
+import { TimeSeriesPanel } from "./TimeSeriesPanel";
 import type {
-  Decision,
   DepressurizationRequest,
   DischargeRequest,
   OperationCheckResponse,
   PressureHoldResponse,
   PressurizationRampResponse,
   SectionFormRecord,
-  TestType,
 } from "../../lib/types";
 
-export type OpTab = "ramp" | "hold" | "depressurize" | "discharge";
+export type OpTab = "timeseries" | "ramp" | "hold" | "depressurize" | "discharge";
 
 const TABS: Array<{ key: OpTab; label: string; icon: typeof Timer }> = [
+  { key: "timeseries", label: "Termal & 24s (12 / 15)", icon: Activity },
   { key: "ramp", label: "Basınçlandırma (14.1–14.2)", icon: TrendingUp },
   { key: "hold", label: "2 saatlik bekleme (14.3)", icon: Timer },
   { key: "depressurize", label: "Basınç düşürme (16)", icon: ListChecks },
@@ -75,56 +76,6 @@ function parseRows(text: string, columns: number): { rows: number[][]; error: st
     rows.push(values as number[]);
   }
   return { rows, error: null };
-}
-
-function SaveResultButton({
-  testType,
-  payload,
-  decision,
-}: {
-  testType: TestType;
-  payload: Record<string, unknown> | null;
-  decision: Decision | undefined;
-}) {
-  const save = useSaveTestResult();
-  const sessionId = useAppStore((state) => state.sessionId);
-  const pushToast = useAppStore((state) => state.pushToast);
-  const addHistory = useAppStore((state) => state.addHistory);
-  if (!payload || !decision) return null;
-  return (
-    <Button
-      loading={save.isPending}
-      disabled={!sessionId}
-      title={sessionId ? undefined : "Kaydetmek için aktif bir oturum gerekli"}
-      onClick={() =>
-        save.mutate(
-          { testType, payload },
-          {
-            onSuccess: (outcome) => {
-              if (outcome.saved) {
-                addHistory({
-                  testType,
-                  title: decision.title,
-                  status: decision.status,
-                  summary: decision.summary,
-                });
-                pushToast("success", "Sonuç oturuma kaydedildi", decision.title);
-              } else {
-                pushToast("warning", "Sonuç kaydedilemedi", "Sunucu bağlantısı veya oturum yok.");
-              }
-            },
-            onError: (error) => {
-              if (!extractRevisionConflict(error)) {
-                pushToast("error", "Kaydedilemedi", apiErrorMessage(error));
-              }
-            },
-          },
-        )
-      }
-    >
-      Oturuma kaydet
-    </Button>
-  );
 }
 
 function Findings({ result }: { result: OperationCheckResponse }) {
@@ -460,13 +411,15 @@ function DischargeSection({ online }: { online: boolean }) {
   );
 }
 
-/** Şartname 14–17 operasyon kontrolleri (sunucu karar metni gösterilir). */
+/** Şartname 12 & 14–17 zaman serisi ve operasyon kontrolleri (sunucu karar metni gösterilir). */
 export function OperationsPanel({
-  defaultTab = "ramp",
+  defaultTab = "timeseries",
   allowedTabs,
+  formContext,
 }: {
   defaultTab?: OpTab;
   allowedTabs?: OpTab[];
+  formContext?: "leak_stabilization" | "pressure_test";
 } = {}) {
   const backend = useAppStore((state) => state.backend);
   const online = backend === "online";
@@ -477,8 +430,15 @@ export function OperationsPanel({
     : TABS;
   const initialTab = visibleTabs.some((item) => item.key === defaultTab)
     ? defaultTab
-    : (visibleTabs[0]?.key ?? "ramp");
+    : (visibleTabs[0]?.key ?? "timeseries");
   const [tab, setTab] = useState<OpTab>(initialTab);
+
+  function selectTab(nextKey: OpTab, focus = false) {
+    setTab(nextKey);
+    const el = tabRefs.current[nextKey];
+    el?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    if (focus) el?.focus();
+  }
 
   function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
     let nextIndex: number | null = null;
@@ -491,21 +451,25 @@ export function OperationsPanel({
     event.preventDefault();
     const target = visibleTabs[nextIndex];
     if (!target) return;
-    setTab(target.key);
-    tabRefs.current[target.key]?.focus();
+    selectTab(target.key, true);
   }
+
+  const cardDescription =
+    tab === "timeseries" && visibleTabs.length === 1
+      ? "Şartname 12 termal dengeleme ve 15.1 24 saatlik test kaydı kontrolleri. Karar metinleri sunucudan gelir."
+      : "Şartname 12, 14.1–14.3, 15, 16 ve 17 kontrolleri. Karar metinleri sunucudan gelir.";
 
   return (
     <SectionCard
-      title="Basınçlandırma ve test sonrası operasyonlar"
-      description="Şartname 14.1–14.3, 16 ve 17 kontrolleri. Karar metinleri sunucudan gelir."
+      title="Zaman serisi ve operasyon kontrolleri"
+      description={cardDescription}
       icon={ListChecks}
     >
       <div className="space-y-3">
-        {!online ? (
+        {!online && tab !== "timeseries" ? (
           <OfflineNotice>Bu kontroller yalnızca sunucu bağlıyken değerlendirilir.</OfflineNotice>
         ) : null}
-        <div role="tablist" aria-label="Operasyon kontrolleri" className="flex flex-wrap gap-1.5">
+        <div role="tablist" aria-label="Operasyon kontrolleri" className="ops-tablist scroll-thin">
           {visibleTabs.map(({ key, label, icon: Icon }, index) => (
             <button
               key={key}
@@ -516,10 +480,9 @@ export function OperationsPanel({
               type="button"
               role="tab"
               aria-selected={tab === key}
-              aria-controls={`${tabsId}-panel-${key}`}
               tabIndex={tab === key ? 0 : -1}
-              className={tab === key ? "btn btn-primary" : "btn btn-ghost"}
-              onClick={() => setTab(key)}
+              className={`ops-tab ${tab === key ? "btn btn-primary" : "btn btn-ghost"}`}
+              onClick={() => selectTab(key)}
               onKeyDown={(event) => handleTabKeyDown(event, index)}
             >
               <Icon size={13} aria-hidden /> {label}
@@ -531,6 +494,7 @@ export function OperationsPanel({
           id={`${tabsId}-panel-${tab}`}
           aria-labelledby={`${tabsId}-tab-${tab}`}
         >
+          {tab === "timeseries" ? <TimeSeriesPanel online={online} formContext={formContext} /> : null}
           {tab === "ramp" ? <RampSection online={online} /> : null}
           {tab === "hold" ? <HoldSection online={online} /> : null}
           {tab === "depressurize" ? <DepressurizeSection online={online} /> : null}

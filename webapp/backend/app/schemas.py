@@ -7,10 +7,11 @@ for the same inputs the desktop application rejects.
 
 from __future__ import annotations
 
+import math
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 B_SOURCE = Literal["institutional", "gail", "auto"]
 STEEL_MODEL = Literal["volumetric", "linear", "volumetric_temperature"]
@@ -190,12 +191,23 @@ class DischargeRequest(StrictModel):
     duration_min: float | None = None
 
 
-class ThermalBalanceRecordIn(StrictModel):
+class _TimeSeriesRecordBase(StrictModel):
     timestamp: datetime | None = None
     pressure_bar: float
     temperature_c: float
     volume_m3: float | None = None
-    notes: str = ""
+    notes: str = Field(default="", max_length=500)
+
+    @field_validator("pressure_bar", "temperature_c", "volume_m3")
+    @classmethod
+    def _validate_finite_numbers(cls, value: float | None) -> float | None:
+        if value is not None and not math.isfinite(value):
+            raise ValueError("Sonlu bir sayisal deger olmalidir.")
+        return value
+
+
+class ThermalBalanceRecordIn(_TimeSeriesRecordBase):
+    pass
 
 
 class ThermalBalanceRequest(StrictModel):
@@ -402,13 +414,21 @@ class ResultCreate(StrictModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
-class TimeSeriesCreate(StrictModel):
-    timestamp: datetime | None = None
-    pressure_bar: float
-    temperature_c: float
-    volume_m3: float | None = None
-    notes: str = ""
-    source: str = "manual"
+class TimeSeriesCreate(_TimeSeriesRecordBase):
+    source: str = Field(default="manual", min_length=1, max_length=16)
+
+
+class TimeSeriesBatchCreate(StrictModel):
+    records: list[TimeSeriesCreate] = Field(min_length=1, max_length=1000)
+    mode: Literal["append", "replace"] = "append"
+    source: str | None = Field(default=None, min_length=1, max_length=16)
+
+
+class TimeSeriesSyncFormRequest(StrictModel):
+    form_code: Literal["leak_stabilization", "pressure_test"]
+    direction: Literal["from_form", "to_form"] = "from_form"
+    mode: Literal["append", "replace"] = "replace"
+    base_date: str | None = Field(default=None, max_length=32)
 
 
 class SnapshotApply(StrictModel):

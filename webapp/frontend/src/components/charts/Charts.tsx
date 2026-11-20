@@ -464,3 +464,96 @@ export function TrendChart({
     </div>
   );
 }
+
+export function TimeSeriesChart({
+  records,
+  height = 210,
+  className,
+}: {
+  records: Array<{ timestamp: string; pressure_bar: number; temperature_c: number }>;
+  height?: number;
+  className?: string;
+}) {
+  const ordered = [...records]
+    .filter((r) => Number.isFinite(r.pressure_bar) && Number.isFinite(r.temperature_c))
+    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+    .map((r) => {
+      const dt = new Date(r.timestamp);
+      const label = Number.isNaN(dt.getTime())
+        ? r.timestamp
+        : `${String(dt.getUTCDate()).padStart(2, "0")}.${String(dt.getUTCMonth() + 1).padStart(2, "0")} ${String(dt.getUTCHours()).padStart(2, "0")}:${String(dt.getUTCMinutes()).padStart(2, "0")}`;
+      return {
+        label,
+        pressure: r.pressure_bar,
+        temperature: r.temperature_c,
+      };
+    });
+
+  if (ordered.length < 2) {
+    return (
+      <div className={className} style={{ height }}>
+        <div className="grid h-full place-items-center rounded-xl border border-dashed border-[var(--border)] px-4 text-center text-[11.5px] text-[var(--text-faint)]">
+          Zaman serisi grafiği için en az 2 kayıt ekleyin (Bölüm 12 &amp; 15)
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={className} style={{ height }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <ComposedChart data={ordered} margin={{ top: 10, right: 12, left: -16, bottom: 0 }}>
+          <CartesianGrid stroke="var(--grid-line)" vertical={false} />
+          <XAxis
+            dataKey="label"
+            tick={{ fontSize: 9.5, fill: "var(--text-faint)" }}
+            axisLine={{ stroke: "var(--border)" }}
+            tickLine={false}
+            interval="preserveStartEnd"
+          />
+          <YAxis
+            yAxisId="left"
+            tick={{ fontSize: 9.5, fill: "var(--text-faint)" }}
+            axisLine={false}
+            tickLine={false}
+            width={46}
+            unit=" bar"
+          />
+          <YAxis
+            yAxisId="right"
+            orientation="right"
+            tick={{ fontSize: 9.5, fill: "var(--text-faint)" }}
+            axisLine={false}
+            tickLine={false}
+            width={40}
+            unit=" °C"
+          />
+          <Tooltip content={<ChartTooltip formatter={(value) => num(value, 2)} />} />
+          <Line
+            yAxisId="left"
+            type="monotone"
+            dataKey="pressure"
+            name="Basınç (bar)"
+            stroke="var(--chart-1)"
+            strokeWidth={2}
+            dot={ordered.length <= 36 ? { r: 2.5 } : false}
+            connectNulls
+            isAnimationActive={false}
+          />
+          <Line
+            yAxisId="right"
+            type="monotone"
+            dataKey="temperature"
+            name="Sıcaklık (°C)"
+            stroke="var(--chart-3)"
+            strokeWidth={1.8}
+            strokeDasharray="4 3"
+            dot={ordered.length <= 36 ? { r: 2 } : false}
+            connectNulls
+            isAnimationActive={false}
+          />
+        </ComposedChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}

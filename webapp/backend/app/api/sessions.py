@@ -337,6 +337,25 @@ def add_time_series(
     )
 
 
+@router.post("/{session_id}/time-series/batch", status_code=201)
+def batch_add_time_series(
+    session_id: str,
+    payload: schemas.TimeSeriesBatchCreate,
+    db: OrmSession = Depends(get_db),
+    workspace: Workspace = Depends(get_workspace),
+) -> dict:
+    session = session_service.get_session(db, session_id, workspace.hash)
+    return json_safe(
+        session_service.batch_add_time_series(
+            db,
+            session,
+            records=payload.records,
+            mode=payload.mode,
+            default_source=payload.source,
+        )
+    )
+
+
 @router.get("/{session_id}/time-series/summary")
 def time_series_summary(
     session_id: str,
@@ -344,8 +363,38 @@ def time_series_summary(
     workspace: Workspace = Depends(get_workspace),
 ) -> dict:
     session = session_service.get_session(db, session_id, workspace.hash)
-    rows, _ = session_service._ordered_records(db, session)
+    rows = session_service.get_ordered_time_series(db, session)
     return json_safe(session_service.time_series_summary(rows))
+
+
+@router.post("/{session_id}/time-series/sync-form")
+def sync_time_series_form(
+    session_id: str,
+    payload: schemas.TimeSeriesSyncFormRequest,
+    db: OrmSession = Depends(get_db),
+    workspace: Workspace = Depends(get_workspace),
+) -> dict:
+    session = session_service.get_session(db, session_id, workspace.hash)
+    return json_safe(
+        dossier_service.sync_time_series_with_form(
+            db,
+            session,
+            form_code=payload.form_code,
+            direction=payload.direction,
+            mode=payload.mode,
+            base_date=payload.base_date,
+        )
+    )
+
+
+@router.delete("/{session_id}/time-series")
+def clear_time_series(
+    session_id: str,
+    db: OrmSession = Depends(get_db),
+    workspace: Workspace = Depends(get_workspace),
+) -> dict:
+    session = session_service.get_session(db, session_id, workspace.hash)
+    return json_safe(session_service.clear_time_series(db, session))
 
 
 @router.delete("/{session_id}/time-series/{record_id}", status_code=204)
@@ -432,8 +481,9 @@ def export_session(
         .scalars()
         .all()
     )
+    ts_rows = session_service.get_ordered_time_series(db, session)
     if fmt == "txt" and preview:
-        context = report_service.build_context(session, result_rows)
+        context = report_service.build_context(session, result_rows, time_series_rows=ts_rows)
         content = report_service.build_report_text(context, session)
         audit.record(
             db,
@@ -446,7 +496,9 @@ def export_session(
         )
         db.commit()
         return {"format": "txt", "content": content}
-    target, _context = report_service.export_session(settings, session, result_rows, fmt=fmt)
+    target, _context = report_service.export_session(
+        settings, session, result_rows, fmt=fmt, time_series_rows=ts_rows
+    )
     audit.record(
         db,
         action="report.export",

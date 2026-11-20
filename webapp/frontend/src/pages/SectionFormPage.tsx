@@ -450,7 +450,7 @@ export function SectionFormPage() {
         </div>
       </div>
 
-      {/* 020, 022 & 023 İçin Detay Hesaplama Geçiş Bandı */}
+      {/* 018, 020, 021, 022 & 023 İçin Detay Hesaplama Geçiş Bandı */}
       {spec.hasDetailCalc ? (
         <div className="rounded-xl border border-[var(--primary-border)] bg-[color-mix(in_srgb,var(--primary-soft)_55%,var(--surface))] px-4 py-2.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -461,7 +461,9 @@ export function SectionFormPage() {
                   ? "Bu form Hava İçerik Testi hesap motoruyla doğrudan bağlantılıdır."
                   : spec.hasDetailCalc === "pressure"
                     ? "Bu form Basınç Değişim Testi hesap motoruyla doğrudan bağlantılıdır."
-                    : "Bu form Şartname 16–17 Basınç Düşürme ve Boşaltma kontrolleriyle doğrudan bağlantılıdır (BOT-FRM-İNB-001-023 / BOT-FRM-CDB-001-024)."}
+                    : spec.hasDetailCalc === "timeseries"
+                      ? "Bu form Şartname 12 Termal Dengeleme & 15.1 24 Saatlik Zaman Serisi analiziyle doğrudan bağlantılıdır."
+                      : "Bu form Şartname 16–17 Basınç Düşürme ve Boşaltma kontrolleriyle doğrudan bağlantılıdır (BOT-FRM-İNB-001-023 / BOT-FRM-CDB-001-024)."}
               </span>
             </div>
             <Button
@@ -476,7 +478,9 @@ export function SectionFormPage() {
                   ? "Detay Hesaplamaları Göster (Hava İçerik Testi)"
                   : spec.hasDetailCalc === "pressure"
                     ? "Detay Hesaplamaları Göster (Basınç Değişim Testi)"
-                    : "Detay Hesaplamaları Göster (Basınç Düşürme & Boşaltma)"}
+                    : spec.hasDetailCalc === "timeseries"
+                      ? "Termal Denge & 24s Zaman Serisini Göster"
+                      : "Detay Hesaplamaları Göster (Basınç Düşürme & Boşaltma)"}
             </Button>
           </div>
         </div>
@@ -496,13 +500,19 @@ export function SectionFormPage() {
         </InlineNotice>
       ) : null}
 
-      {/* 020 / 022 / 023 Detay Hesaplama Paneli */}
+      {/* 018 / 020 / 021 / 022 / 023 Detay Hesaplama Paneli */}
       {spec.hasDetailCalc && showDetailCalc ? (
         <div className="rounded-2xl border border-[var(--primary-border)] bg-[var(--surface)] p-4">
           {spec.hasDetailCalc === "air" ? (
             <AirPage embedded />
           ) : spec.hasDetailCalc === "pressure" ? (
             <PressurePage embedded />
+          ) : spec.hasDetailCalc === "timeseries" ? (
+            <OperationsPanel
+              defaultTab="timeseries"
+              allowedTabs={["timeseries"]}
+              formContext={spec.code === "leak_stabilization" ? "leak_stabilization" : "pressure_test"}
+            />
           ) : (
             <OperationsPanel defaultTab="discharge" allowedTabs={["depressurize", "discharge"]} />
           )}

@@ -103,6 +103,7 @@ def build_context(
     results: Iterable[TestResult],
     *,
     include_backend_comparison: bool = False,
+    time_series_rows: Iterable[Any] | None = None,
 ) -> dict[str, Any]:
     inputs = session.inputs or {}
     latest = _latest_by_type(results)
@@ -206,6 +207,33 @@ def build_context(
     add_test("depressurization", "Basinc Dusurme")
     add_test("discharge", "Bosaltma")
 
+    ts_summary: dict[str, Any] | None = None
+    ts_row_list = list(time_series_rows) if time_series_rows is not None else []
+    if ts_row_list:
+        from .sessions import time_series_summary
+
+        ts_summary = time_series_summary(ts_row_list)
+        rec_dec = ts_summary.get("recording_decision") or {}
+        test_results["Zaman Serisi Kayit Sayisi"] = str(ts_summary.get("record_count", 0))
+        test_results["Zaman Serisi Sure (sa)"] = (
+            fmt_number(as_float(ts_summary.get("duration_hours")), 2) or "-"
+        )
+        pa_ts = as_float(ts_summary.get("pressure_change_pa_bar"))
+        if pa_ts is not None:
+            test_results["Zaman Serisi Basinc Pa (bar)"] = (
+                f"{fmt_number(pa_ts, 3)} "
+                f"(Pilk={fmt_number(as_float(ts_summary.get('initial_pressure_bar')), 2)} -> "
+                f"Pson={fmt_number(as_float(ts_summary.get('final_pressure_bar')), 2)})"
+            )
+        dt_ts = as_float(ts_summary.get("temperature_change_dt_c"))
+        if dt_ts is not None:
+            test_results["Zaman Serisi Sicaklik dT (°C)"] = (
+                f"{fmt_number(dt_ts, 3)} "
+                f"(Tilk={fmt_number(as_float(ts_summary.get('initial_temperature_c')), 2)} -> "
+                f"Tson={fmt_number(as_float(ts_summary.get('final_temperature_c')), 2)})"
+            )
+        test_results["24 Saatlik Kayit Kontrolu (15.1)"] = str(rec_dec.get("status", "BEKLIYOR"))
+
     checks = inputs.get("checks") or {}
     checklist = [
         {
@@ -228,6 +256,7 @@ def build_context(
         "fill_temperature_eval": fill_eval,
         "backend_comparison": backend_cmp,
         "backend_comparison_error": backend_cmp_error,
+        "time_series_summary": ts_summary,
     }
 
 
@@ -376,6 +405,33 @@ def build_report_text(context: dict[str, Any], session: HydroSession) -> str:
     else:
         lines.append("Kaydedilecek sonuc yok.")
 
+    ts_summary = context.get("time_series_summary")
+    if isinstance(ts_summary, dict) and int(ts_summary.get("record_count") or 0) > 0:
+        tb_dec = ts_summary.get("decision") or {}
+        rec_dec = ts_summary.get("recording_decision") or {}
+        lines.extend(
+            [
+                "",
+                "Zaman Serisi Izleme (Bolum 12 & 15)",
+                f"Kayit sayisi: {ts_summary.get('record_count', 0)} | "
+                f"Ilk-son zaman: {ts_summary.get('first_timestamp') or '-'} -> "
+                f"{ts_summary.get('last_timestamp') or '-'}",
+                f"Sure: {fmt_number(as_float(ts_summary.get('duration_hours')), 2) or '-'} sa | "
+                f"En uzun okuma araligi: {fmt_number(as_float(ts_summary.get('max_gap_hours')), 2) or '-'} sa",
+                f"Basinc: Pilk={fmt_number(as_float(ts_summary.get('initial_pressure_bar')), 2) or '-'} bar -> "
+                f"Pson={fmt_number(as_float(ts_summary.get('final_pressure_bar')), 2) or '-'} bar | "
+                f"Pa={fmt_number(as_float(ts_summary.get('pressure_change_pa_bar')), 3) or '-'} bar",
+                f"Sicaklik: Tilk={fmt_number(as_float(ts_summary.get('initial_temperature_c')), 2) or '-'} °C -> "
+                f"Tson={fmt_number(as_float(ts_summary.get('final_temperature_c')), 2) or '-'} °C | "
+                f"dT={fmt_number(as_float(ts_summary.get('temperature_change_dt_c')), 3) or '-'} °C",
+                f"4 saatlik blok ortalamalari: onceki={fmt_number(as_float(ts_summary.get('previous_4h_avg_c')), 3) or '-'} °C, "
+                f"son={fmt_number(as_float(ts_summary.get('average_temperature_last_4h_c')), 3) or '-'} °C, "
+                f"|dT_4h|={fmt_number(as_float(ts_summary.get('temp_diff_c')), 3) or '-'} °C",
+                f"Termal denge karari (12): {tb_dec.get('status', 'BEKLIYOR')} - {tb_dec.get('summary', '')}",
+                f"24 saatlik kayit karari (15.1): {rec_dec.get('status', 'BEKLIYOR')} - {rec_dec.get('summary', '')}",
+            ]
+        )
+
     backend_cmp = context.get("backend_comparison")
     if isinstance(backend_cmp, dict) and backend_cmp.get("items"):
         items = backend_cmp["items"]
@@ -483,8 +539,14 @@ def export_session(
     results: Iterable[TestResult],
     *,
     fmt: str,
+    time_series_rows: Iterable[Any] | None = None,
 ) -> tuple[Path, dict[str, Any]]:
-    context = build_context(session, results, include_backend_comparison=(fmt == "txt"))
+    context = build_context(
+        session,
+        results,
+        include_backend_comparison=(fmt == "txt"),
+        time_series_rows=time_series_rows,
+    )
     text = build_report_text(context, session) if fmt == "txt" else None
     target = _target_path(settings, session.id, fmt)
     try:

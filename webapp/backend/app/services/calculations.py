@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..core.errors import AppError, error_from_domain
-from ..core.timeutil import iso_z, utcnow
+from ..core.timeutil import ensure_utc, iso_z, utcnow
 from ..domain_adapter import (
     build_geometry,
     build_pipe_model,
@@ -329,49 +329,85 @@ def calculate_discharge(request: Any) -> dict[str, Any]:
 def _thermal_reason(duration_hours: float, temp_diff: float | None) -> str:
     from hidrostatik_test.domain.time_series import THERMAL_BALANCE_MIN_HOURS
 
-    if duration_hours < THERMAL_BALANCE_MIN_HOURS:
+    if duration_hours < THERMAL_BALANCE_MIN_HOURS - 1e-9:
         return "Termal denge icin en az 24 saat veri gerekir."
     if temp_diff is None:
         return "Son 4 saat ile onceki 4 saat karsilastirmasi icin yeterli kayit yok."
     return ""
 
 
-def calculate_thermal_balance(records: list[Any]) -> dict[str, Any]:
-    from hidrostatik_test.domain.time_series import TimeSeriesStore
-
-    payload = []
-    for record in records:
-        timestamp = getattr(record, "timestamp", None) or utcnow()
-        payload.append(
-            {
-                "timestamp": iso_z(timestamp),
-                "pressure_bar": float(record.pressure_bar),
-                "temperature_c": float(record.temperature_c),
-                "volume_m3": record.volume_m3,
-                "notes": getattr(record, "notes", "") or "",
-            }
-        )
-    store = TimeSeriesStore.from_dict({"records": payload})
-    duration = store.get_duration_hours()
-    balanced, temp_diff_raw = store.check_thermal_balance()
-    temp_diff = decisions.finite_or_none(temp_diff_raw)
-    average_last_4h = store.get_average_temperature(4.0)
-    reason = _thermal_reason(duration, temp_diff)
+def format_time_series_evaluation(ev: Any) -> dict[str, Any]:
+    """Shape a ``TimeSeriesEvaluation`` into the unified Section 12 & 15 API summary."""
+    temp_diff = decisions.finite_or_none(ev.thermal_temp_diff_c)
+    reason = _thermal_reason(ev.duration_hours, temp_diff)
     decision = decisions.thermal_decision(
-        duration_hours=duration,
-        balanced=balanced,
+        duration_hours=ev.duration_hours,
+        balanced=ev.thermal_balanced,
         temp_diff_c=temp_diff,
         reason=reason,
     )
+    recording_decision = decisions.twenty_four_hour_recording_decision(
+        record_count=ev.record_count,
+        duration_hours=ev.duration_hours,
+        max_gap_hours=decisions.finite_or_none(ev.max_gap_hours),
+        duration_ok=ev.recording_duration_ok,
+        interval_ok=ev.recording_interval_ok,
+        passed=ev.recording_passed,
+    )
     return {
-        "record_count": len(store.records),
-        "duration_hours": duration,
-        "balanced": balanced,
+        "record_count": ev.record_count,
+        "duration_hours": ev.duration_hours,
+        "balanced": ev.thermal_balanced,
+        "thermal_duration_ok": ev.thermal_duration_ok,
         "temp_diff_c": temp_diff,
         "reason": reason or None,
-        "average_temperature_last_4h_c": average_last_4h,
+        "average_temperature_last_4h_c": ev.recent_4h_avg_c,
+        "previous_4h_avg_c": ev.previous_4h_avg_c,
+        "average_temperature_c": ev.average_temperature_c,
+        "first_timestamp": iso_z(ev.first_timestamp) if ev.first_timestamp else None,
+        "last_timestamp": iso_z(ev.last_timestamp) if ev.last_timestamp else None,
+        "max_gap_hours": decisions.finite_or_none(ev.max_gap_hours),
+        "recording_duration_ok": ev.recording_duration_ok,
+        "recording_interval_ok": ev.recording_interval_ok,
+        "recording_passed": ev.recording_passed,
+        "initial_pressure_bar": ev.initial_pressure_bar,
+        "final_pressure_bar": ev.final_pressure_bar,
+        "pressure_change_pa_bar": ev.pressure_change_pa_bar,
+        "min_pressure_bar": ev.min_pressure_bar,
+        "max_pressure_bar": ev.max_pressure_bar,
+        "initial_temperature_c": ev.initial_temperature_c,
+        "final_temperature_c": ev.final_temperature_c,
+        "temperature_change_dt_c": ev.temperature_change_dt_c,
+        "min_temperature_c": ev.min_temperature_c,
+        "max_temperature_c": ev.max_temperature_c,
+        "initial_volume_m3": ev.initial_volume_m3,
+        "final_volume_m3": ev.final_volume_m3,
+        "volume_delta_m3": ev.volume_delta_m3,
         "decision": decision,
+        "recording_decision": recording_decision,
     }
+
+
+def calculate_thermal_balance(records: list[Any]) -> dict[str, Any]:
+    from hidrostatik_test.domain.time_series import TimeSeriesRecord, evaluate_time_series
+
+    domain_records: list[TimeSeriesRecord] = []
+    try:
+        for record in records:
+            timestamp = ensure_utc(getattr(record, "timestamp", None)) or utcnow()
+            domain_records.append(
+                TimeSeriesRecord(
+                    timestamp=timestamp,
+                    pressure_bar=float(record.pressure_bar),
+                    temperature_c=float(record.temperature_c),
+                    volume_m3=record.volume_m3,
+                    notes=getattr(record, "notes", "") or "",
+                )
+            )
+        evaluation = evaluate_time_series(domain_records)
+    except Exception as exc:
+        _reraise(exc)
+    return format_time_series_evaluation(evaluation)
 
 
 def calculate_water_density(temperature_c: float, pressure_bar: float) -> dict[str, Any]:
@@ -490,5 +526,6 @@ __all__ = [
     "calculate_thermal_balance",
     "calculate_water_density",
     "evaluate_test",
+    "format_time_series_evaluation",
     "resolve_pig_limit",
 ]

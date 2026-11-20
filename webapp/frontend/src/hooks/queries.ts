@@ -2047,3 +2047,125 @@ export function useRunDbMaintenance() {
     },
   });
 }
+
+export function useTimeSeries(sessionId: string | null) {
+  const backend = useAppStore((state) => state.backend);
+  const ready = useAppStore((state) => state.sessionApiReady);
+  return useQuery<import("../lib/types").ListResponse<import("../lib/types").TimeSeriesRecordItem>>({
+    queryKey: ["timeSeries", sessionId],
+    enabled: backend === "online" && ready !== false && Boolean(sessionId),
+    queryFn: ({ signal }) => api.timeSeries(sessionId as string, { limit: 1000 }, signal),
+    staleTime: 10_000,
+    retry: false,
+  });
+}
+
+export function useTimeSeriesSummary(sessionId: string | null) {
+  const backend = useAppStore((state) => state.backend);
+  const ready = useAppStore((state) => state.sessionApiReady);
+  return useQuery<import("../lib/types").TimeSeriesSummary>({
+    queryKey: ["timeSeriesSummary", sessionId],
+    enabled: backend === "online" && ready !== false && Boolean(sessionId),
+    queryFn: ({ signal }) => api.timeSeriesSummary(sessionId as string, signal),
+    staleTime: 10_000,
+    retry: false,
+  });
+}
+
+export function useAddTimeSeries(sessionId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation<
+    import("../lib/types").TimeSeriesAddResponse,
+    Error,
+    import("../lib/types").TimeSeriesRecordInput
+  >({
+    mutationFn: (record) => api.addTimeSeries(sessionId as string, record),
+    onSuccess: (data) => {
+      queryClient.setQueryData(["timeSeriesSummary", sessionId], data.summary);
+      void queryClient.invalidateQueries({ queryKey: ["timeSeries", sessionId] });
+      void queryClient.invalidateQueries({ queryKey: ["timeSeriesSummary", sessionId] });
+      void queryClient.invalidateQueries({ queryKey: ["session-summary", sessionId] });
+    },
+  });
+}
+
+export function useBatchTimeSeries(sessionId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation<
+    import("../lib/types").TimeSeriesBatchResponse,
+    Error,
+    {
+      records: import("../lib/types").TimeSeriesRecordInput[];
+      mode?: "append" | "replace";
+      source?: string | null;
+    }
+  >({
+    mutationFn: (body) => api.batchTimeSeries(sessionId as string, body),
+    onSuccess: (data) => {
+      queryClient.setQueryData(["timeSeriesSummary", sessionId], data.summary);
+      void queryClient.invalidateQueries({ queryKey: ["timeSeries", sessionId] });
+      void queryClient.invalidateQueries({ queryKey: ["timeSeriesSummary", sessionId] });
+      void queryClient.invalidateQueries({ queryKey: ["session-summary", sessionId] });
+    },
+  });
+}
+
+export function useDeleteTimeSeries(sessionId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: (recordId) => api.deleteTimeSeries(sessionId as string, recordId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["timeSeries", sessionId] });
+      void queryClient.invalidateQueries({ queryKey: ["timeSeriesSummary", sessionId] });
+      void queryClient.invalidateQueries({ queryKey: ["session-summary", sessionId] });
+    },
+  });
+}
+
+export function useClearTimeSeries(sessionId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation<import("../lib/types").TimeSeriesClearResponse, Error, void>({
+    mutationFn: () => api.clearTimeSeries(sessionId as string),
+    onSuccess: (data) => {
+      queryClient.setQueryData(["timeSeriesSummary", sessionId], data.summary);
+      void queryClient.invalidateQueries({ queryKey: ["timeSeries", sessionId] });
+      void queryClient.invalidateQueries({ queryKey: ["timeSeriesSummary", sessionId] });
+      void queryClient.invalidateQueries({ queryKey: ["session-summary", sessionId] });
+    },
+  });
+}
+
+export function useSyncTimeSeriesForm(sessionId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation<
+    import("../lib/types").TimeSeriesSyncFormResponse,
+    Error,
+    {
+      form_code: "leak_stabilization" | "pressure_test";
+      direction: "from_form" | "to_form";
+      mode?: "append" | "replace";
+      base_date?: string | null;
+    }
+  >({
+    mutationFn: (body) => api.syncTimeSeriesForm(sessionId as string, body),
+    onSuccess: (data) => {
+      queryClient.setQueryData(["timeSeriesSummary", sessionId], data.summary);
+      void queryClient.invalidateQueries({ queryKey: ["timeSeries", sessionId] });
+      void queryClient.invalidateQueries({ queryKey: ["timeSeriesSummary", sessionId] });
+      void queryClient.invalidateQueries({ queryKey: ["sessionForms", sessionId] });
+      void queryClient.invalidateQueries({ queryKey: ["session", sessionId] });
+      void queryClient.invalidateQueries({ queryKey: ["session-summary", sessionId] });
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+  });
+}
+
+export function useThermalBalance() {
+  return useMutation<
+    import("../lib/types").ThermalBalanceResponse,
+    Error,
+    import("../lib/types").TimeSeriesRecordInput[]
+  >({
+    mutationFn: (records) => api.thermalBalance(records),
+  });
+}

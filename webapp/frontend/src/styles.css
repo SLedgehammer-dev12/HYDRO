@@ -724,6 +724,31 @@ pre {
   color: var(--text);
 }
 
+.ops-tablist {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: inline proximity;
+  gap: 6px;
+  padding-block-end: 4px;
+}
+
+.ops-tab {
+  position: relative;
+  flex: none;
+  scroll-snap-align: start;
+  white-space: nowrap;
+}
+
+.ops-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  inset: auto 10px 0;
+  border-block-end: 2px solid currentColor;
+  pointer-events: none;
+}
+
 .seg-btn[aria-pressed="true"] {
   background: var(--primary-soft);
   border-color: color-mix(in srgb, var(--primary) 38%, transparent);
@@ -748,6 +773,11 @@ pre {
 .table-wrap:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
+}
+
+.table-sticky table.data {
+  border-collapse: separate;
+  border-spacing: 0;
 }
 
 .table-sticky thead th {

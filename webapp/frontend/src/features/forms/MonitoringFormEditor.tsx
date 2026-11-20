@@ -265,7 +265,15 @@ export function MonitoringFormEditor({
                 ? `${num(mon.p_start_bar, 2)} → ${num(mon.p_end_bar as number, 2)} Bar`
                 : "—"}
             </Badge>
-            <Badge tone="neutral">
+            <Badge
+              tone={
+                typeof mon.last_4h_delta_c === "number"
+                  ? mon.last_4h_delta_c <= 0.5
+                    ? "pass"
+                    : "fail"
+                  : "neutral"
+              }
+            >
               Son 4s ΔT:{" "}
               {typeof mon.last_4h_delta_c === "number"
                 ? `${num(mon.last_4h_delta_c, 3)} °C`

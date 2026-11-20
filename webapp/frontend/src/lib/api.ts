@@ -481,6 +481,95 @@ export const api = {
       signal,
     }),
 
+  thermalBalance: (records: import("./types").TimeSeriesRecordInput[], signal?: AbortSignal) =>
+    apiFetch<import("./types").ThermalBalanceResponse>("/calculations/thermal-balance", {
+      method: "POST",
+      body: { records },
+      signal,
+    }),
+
+  timeSeries: (
+    sessionId: string,
+    params?: { limit?: number; offset?: number; from?: string; to?: string },
+    signal?: AbortSignal,
+  ) => {
+    const query = new URLSearchParams();
+    if (params?.limit !== undefined) query.set("limit", String(params.limit));
+    if (params?.offset !== undefined) query.set("offset", String(params.offset));
+    if (params?.from) query.set("from", params.from);
+    if (params?.to) query.set("to", params.to);
+    const qs = query.toString();
+    return apiFetch<ListResponse<import("./types").TimeSeriesRecordItem>>(
+      `/sessions/${sessionId}/time-series${qs ? `?${qs}` : ""}`,
+      { signal },
+    );
+  },
+
+  timeSeriesSummary: (sessionId: string, signal?: AbortSignal) =>
+    apiFetch<import("./types").TimeSeriesSummary>(`/sessions/${sessionId}/time-series/summary`, {
+      signal,
+    }),
+
+  addTimeSeries: (
+    sessionId: string,
+    body: import("./types").TimeSeriesRecordInput,
+    signal?: AbortSignal,
+  ) =>
+    apiFetch<import("./types").TimeSeriesAddResponse>(`/sessions/${sessionId}/time-series`, {
+      method: "POST",
+      body,
+      signal,
+    }),
+
+  batchTimeSeries: (
+    sessionId: string,
+    body: {
+      records: import("./types").TimeSeriesRecordInput[];
+      mode?: "append" | "replace";
+      source?: string | null;
+    },
+    signal?: AbortSignal,
+  ) =>
+    apiFetch<import("./types").TimeSeriesBatchResponse>(
+      `/sessions/${sessionId}/time-series/batch`,
+      {
+        method: "POST",
+        body,
+        signal,
+      },
+    ),
+
+  deleteTimeSeries: (sessionId: string, recordId: string, signal?: AbortSignal) =>
+    apiFetch<void>(`/sessions/${sessionId}/time-series/${recordId}`, {
+      method: "DELETE",
+      signal,
+    }),
+
+  clearTimeSeries: (sessionId: string, signal?: AbortSignal) =>
+    apiFetch<import("./types").TimeSeriesClearResponse>(`/sessions/${sessionId}/time-series`, {
+      method: "DELETE",
+      signal,
+    }),
+
+  syncTimeSeriesForm: (
+    sessionId: string,
+    body: {
+      form_code: "leak_stabilization" | "pressure_test";
+      direction: "from_form" | "to_form";
+      mode?: "append" | "replace";
+      base_date?: string | null;
+    },
+    signal?: AbortSignal,
+  ) =>
+    apiFetch<import("./types").TimeSeriesSyncFormResponse>(
+      `/sessions/${sessionId}/time-series/sync-form`,
+      {
+        method: "POST",
+        body,
+        signal,
+      },
+    ),
+
   waterDensity: (body: { temperature_c: number; pressure_bar: number }, signal?: AbortSignal) =>
     apiFetch<{ density_kg_per_m3: number; temperature_c: number; pressure_bar: number }>(
       "/calculations/water-density",

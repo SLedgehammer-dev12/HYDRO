@@ -16,17 +16,17 @@ export interface BotasFormNavItem {
   shortTitle: string;
   required: boolean;
   order: number;
-  hasDetailCalc?: "air" | "pressure" | "dewatering";
+  hasDetailCalc?: "air" | "pressure" | "dewatering" | "timeseries";
 }
 
 export const BOTAS_FORM_NAV_ITEMS: BotasFormNavItem[] = [
   { code: "test_data", shortCode: "015", botasCode: "BOT-FRM-İNB-001-015_1", title: "Hidrostatik Test Verileri", shortTitle: "Hidrostatik Test Verileri", required: true, order: 1 },
   { code: "cleaning", shortCode: "016", botasCode: "BOT-FRM-İNB-001-016", title: "Temizlik Kabul Raporu", shortTitle: "Temizlik Kabul Raporu", required: true, order: 2 },
   { code: "filling", shortCode: "017", botasCode: "BOT-FRM-İNB-001-017", title: "Su Dolum Raporu", shortTitle: "Su Dolum Raporu", required: true, order: 3 },
-  { code: "leak_stabilization", shortCode: "018", botasCode: "BOT-FRM-İNB-001-018", title: "Dengeleme İçin Kaçak Test Raporu", shortTitle: "Dengeleme Kaçak Testi", required: true, order: 4 },
+  { code: "leak_stabilization", shortCode: "018", botasCode: "BOT-FRM-İNB-001-018", title: "Dengeleme İçin Kaçak Test Raporu", shortTitle: "Dengeleme Kaçak Testi", required: true, order: 4, hasDetailCalc: "timeseries" },
   { code: "strength", shortCode: "019", botasCode: "BOT-FRM-İNB-001-019", title: "Mukavemet Test Raporu", shortTitle: "Mukavemet Test Raporu", required: true, order: 5 },
   { code: "air_acceptance", shortCode: "020", botasCode: "BOT-FRM-İNB-001-020", title: "Hava İçerik Testi Kabul Raporu", shortTitle: "Hava İçerik Kabul", required: true, order: 6, hasDetailCalc: "air" },
-  { code: "pressure_test", shortCode: "021", botasCode: "BOT-FRM-İNB-001-021", title: "Basınç Testi Raporu", shortTitle: "Basınç Testi (24 Sa)", required: true, order: 7 },
+  { code: "pressure_test", shortCode: "021", botasCode: "BOT-FRM-İNB-001-021", title: "Basınç Testi Raporu", shortTitle: "Basınç Testi (24 Sa)", required: true, order: 7, hasDetailCalc: "timeseries" },
   { code: "pressure_acceptance", shortCode: "022", botasCode: "BOT-FRM-İNB-001-022", title: "Basınç Testi Kabul Raporu", shortTitle: "Basınç Testi Kabul", required: true, order: 8, hasDetailCalc: "pressure" },
   { code: "dewatering", shortCode: "023", botasCode: "BOT-FRM-İNB-001-023", title: "Boşaltma Kabul Raporu", shortTitle: "Boşaltma Kabul Raporu", required: true, order: 9, hasDetailCalc: "dewatering" },
   { code: "pre_drying", shortCode: "KUR-001", botasCode: "BOT-FRM-KUR-001", title: "Ön Kurutma Kabul Raporu", shortTitle: "Ön Kurutma Raporu", required: true, order: 10 },

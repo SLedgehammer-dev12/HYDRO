@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import tempfile
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from math import isclose
 from pathlib import Path
 
+from hidrostatik_test.domain.hydrotest_core import ValidationError
 from hidrostatik_test.domain.time_series import (
     THERMAL_BALANCE_THRESHOLD_C,
     TimeSeriesRecord,
     TimeSeriesStore,
+    evaluate_time_series,
 )
 
 
@@ -341,6 +343,101 @@ class TimeSeriesTests(unittest.TestCase):
         balanced, diff = self.store.check_thermal_balance()
         self.assertTrue(balanced)
         self.assertAlmostEqual(diff, 0.0, places=4)
+
+
+class TimeSeriesEvaluationTests(unittest.TestCase):
+    def test_24h_hourly_evaluation_metrics_and_pass(self) -> None:
+        start = datetime(2026, 11, 14, 8, 0, tzinfo=timezone.utc)
+        records = [
+            TimeSeriesRecord(
+                timestamp=start + timedelta(hours=h),
+                pressure_bar=85.0 - h * 0.01,
+                temperature_c=14.0 + (0.2 if h >= 20 else 0.0),
+                volume_m3=100.0 + h * 0.1,
+            )
+            for h in range(25)
+        ]
+        ev = evaluate_time_series(records)
+        self.assertEqual(ev.record_count, 25)
+        self.assertAlmostEqual(ev.duration_hours, 24.0, places=6)
+        self.assertTrue(ev.thermal_duration_ok)
+        self.assertTrue(ev.thermal_balanced)
+        self.assertAlmostEqual(ev.recent_4h_avg_c or 0.0, 14.2, places=6)
+        self.assertAlmostEqual(ev.previous_4h_avg_c or 0.0, 14.0, places=6)
+        self.assertAlmostEqual(ev.thermal_temp_diff_c or 0.0, 0.2, places=6)
+        self.assertTrue(ev.recording_duration_ok)
+        self.assertTrue(ev.recording_interval_ok)
+        self.assertTrue(ev.recording_passed)
+        self.assertAlmostEqual(ev.max_gap_hours or 0.0, 1.0, places=6)
+        self.assertAlmostEqual(ev.pressure_change_pa_bar or 0.0, 0.24, places=6)
+        self.assertAlmostEqual(ev.temperature_change_dt_c or 0.0, -0.2, places=6)
+        self.assertAlmostEqual(ev.volume_delta_m3 or 0.0, 2.4, places=6)
+
+    def test_short_duration_and_interval_gap_fail_recording(self) -> None:
+        start = datetime(2026, 11, 14, 8, 0, tzinfo=timezone.utc)
+        short = [
+            TimeSeriesRecord(timestamp=start, pressure_bar=80.0, temperature_c=15.0),
+            TimeSeriesRecord(
+                timestamp=start + timedelta(hours=20), pressure_bar=80.0, temperature_c=15.0
+            ),
+        ]
+        short_ev = evaluate_time_series(short)
+        self.assertFalse(short_ev.thermal_duration_ok)
+        self.assertIsNone(short_ev.thermal_temp_diff_c)
+        self.assertFalse(short_ev.recording_duration_ok)
+        self.assertFalse(short_ev.recording_interval_ok)
+        self.assertFalse(short_ev.recording_passed)
+
+        gapped = [
+            TimeSeriesRecord(timestamp=start, pressure_bar=80.0, temperature_c=15.0),
+            TimeSeriesRecord(
+                timestamp=start + timedelta(hours=3.5), pressure_bar=80.0, temperature_c=15.0
+            ),
+            TimeSeriesRecord(
+                timestamp=start + timedelta(hours=20.0), pressure_bar=80.0, temperature_c=15.0
+            ),
+            TimeSeriesRecord(
+                timestamp=start + timedelta(hours=24.0), pressure_bar=80.0, temperature_c=15.0
+            ),
+        ]
+        gapped_ev = evaluate_time_series(gapped)
+        self.assertTrue(gapped_ev.recording_duration_ok)
+        self.assertFalse(gapped_ev.recording_interval_ok)
+        self.assertFalse(gapped_ev.recording_passed)
+        self.assertGreater(gapped_ev.max_gap_hours or 0.0, 3.0)
+
+    def test_unsorted_mixed_naive_utc_zero_and_negative_deltas(self) -> None:
+        t0 = datetime(2026, 11, 14, 0, 0, tzinfo=timezone.utc)
+        store = TimeSeriesStore()
+        store.add_record(81.5, -1.5, timestamp=t0 + timedelta(hours=24))
+        store.add_record(80.0, 0.0, timestamp=t0.replace(tzinfo=None))
+        store.add_record(80.5, 0.0, timestamp=t0 + timedelta(hours=18))
+        store.add_record(81.0, -1.2, timestamp=t0 + timedelta(hours=21))
+
+        ev = store.evaluate()
+        self.assertAlmostEqual(ev.initial_pressure_bar or 0.0, 80.0, places=6)
+        self.assertAlmostEqual(ev.final_pressure_bar or 0.0, 81.5, places=6)
+        self.assertAlmostEqual(ev.pressure_change_pa_bar or 0.0, -1.5, places=6)
+        self.assertIsNotNone(ev.initial_temperature_c)
+        assert ev.initial_temperature_c is not None
+        self.assertAlmostEqual(ev.initial_temperature_c, 0.0, places=6)
+        self.assertAlmostEqual(ev.final_temperature_c or 0.0, -1.5, places=6)
+        self.assertAlmostEqual(ev.temperature_change_dt_c or 0.0, 1.5, places=6)
+
+    def test_non_finite_and_bool_rejected(self) -> None:
+        now = datetime(2026, 11, 14, 0, 0, tzinfo=timezone.utc)
+        with self.assertRaises(ValidationError):
+            TimeSeriesRecord(timestamp=now, pressure_bar=float("nan"), temperature_c=15.0)
+        with self.assertRaises(ValidationError):
+            TimeSeriesRecord(timestamp=now, pressure_bar=80.0, temperature_c=float("inf"))
+        with self.assertRaises(ValidationError):
+            TimeSeriesRecord(
+                timestamp=now,
+                pressure_bar=True,  # type: ignore[arg-type]
+                temperature_c=15.0,
+            )
+        with self.assertRaises(ValidationError):
+            TimeSeriesStore().evaluate(min_hours=0.0)
 
 
 if __name__ == "__main__":

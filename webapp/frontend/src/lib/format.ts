@@ -239,3 +239,8 @@ export function formatCoefficientState(state: string | null | undefined): string
       return "BEKLİYOR";
   }
 }
+
+export function round(value: number, digits = 6): number {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}

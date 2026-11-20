@@ -22,6 +22,8 @@ from hidrostatik_test.domain.pressurization_monitor import (
     MAX_RAMP_RATE_BAR_PER_MIN,
 )
 from hidrostatik_test.domain.time_series import (
+    TEST_RECORDING_MAX_GAP_HOURS,
+    TEST_RECORDING_MIN_HOURS,
     THERMAL_BALANCE_MIN_HOURS,
     THERMAL_BALANCE_THRESHOLD_C,
 )
@@ -54,6 +56,10 @@ DEPRESSURIZATION_RULE = (
 DISCHARGE_RULE = "bosaltma pigi; hidrolik yuk onlemi; onaylar; cevre onlemleri; 17.6 raporu"
 THERMAL_RULE = (
     f"sure >= {THERMAL_BALANCE_MIN_HOURS:.0f} h ve |dT_4h| <= {THERMAL_BALANCE_THRESHOLD_C} °C"
+)
+TEST_RECORDING_RULE = (
+    f"sure >= {TEST_RECORDING_MIN_HOURS:.0f} h ve "
+    f"maks okuma araligi <= {TEST_RECORDING_MAX_GAP_HOURS:g} h (Sartname 15.1)"
 )
 PIG_RULE = "hiz <= limit"
 
@@ -277,6 +283,44 @@ def thermal_decision(
     return _decision(status, "Termal Denge", summary, THERMAL_RULE, margin)
 
 
+def twenty_four_hour_recording_decision(
+    *,
+    record_count: int,
+    duration_hours: float,
+    max_gap_hours: float | None,
+    duration_ok: bool,
+    interval_ok: bool,
+    passed: bool,
+) -> dict[str, Any]:
+    if record_count < 2:
+        return _decision(
+            STATUS_PENDING,
+            "24 Saatlik Test Kaydi (15.1)",
+            "24 saatlik test kaydi icin en az 2 zaman serisi okumasi gerekir.",
+            TEST_RECORDING_RULE,
+            None,
+        )
+    status = STATUS_PASS if passed else STATUS_FAIL
+    margin = duration_hours - TEST_RECORDING_MIN_HOURS
+    gap_text = (
+        f"{max_gap_hours:.2f} sa ({max_gap_hours * 60.0:.0f} dk)"
+        if max_gap_hours is not None
+        else "-"
+    )
+    notes: list[str] = []
+    if not duration_ok:
+        notes.append(f"sure {TEST_RECORDING_MIN_HOURS:.0f} sa altinda")
+    if not interval_ok:
+        notes.append(f"okuma araligi {TEST_RECORDING_MAX_GAP_HOURS:g} sa sinirini asiyor")
+    note_suffix = f" Eksik/ihlal: {', '.join(notes)}." if notes else ""
+    summary = (
+        f"{record_count} okuma, toplam sure = {duration_hours:.2f} saat, "
+        f"en uzun okuma araligi = {gap_text}.{note_suffix} "
+        f"Kural: {TEST_RECORDING_RULE}."
+    )
+    return _decision(status, "24 Saatlik Test Kaydi (15.1)", summary, TEST_RECORDING_RULE, margin)
+
+
 def pending_decision(title: str, rule: str) -> dict[str, Any]:
     return _decision(
         STATUS_PENDING,
@@ -306,6 +350,7 @@ __all__ = [
     "STATUS_PENDING",
     "STATUS_STALE",
     "STATUS_UNKNOWN",
+    "TEST_RECORDING_RULE",
     "THERMAL_RULE",
     "RAMP_RULE",
     "HOLD_RULE",
@@ -323,4 +368,5 @@ __all__ = [
     "pressurization_decision",
     "profile_decision",
     "thermal_decision",
+    "twenty_four_hour_recording_decision",
 ]

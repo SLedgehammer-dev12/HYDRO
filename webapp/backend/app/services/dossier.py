@@ -59,7 +59,10 @@ from .form_details import (
     evaluate_all_form_findings,
     evaluate_dewatering_operations,
     merge_form_extracted_data,
+    monitoring_rows_to_time_series,
+    parse_base_date,
     reconcile_form_extracted_data,
+    time_series_to_monitoring_rows,
 )
 
 logger = logging.getLogger(__name__)
@@ -5372,6 +5375,176 @@ def scan_single_form_upload(
     }
 
 
+def sync_time_series_with_form(
+    db: OrmSession,
+    session: HydroSession,
+    *,
+    form_code: str,
+    direction: str,
+    mode: str = "replace",
+    base_date: str | None = None,
+) -> dict[str, Any]:
+    """Synchronize hourly monitoring rows between Form 018/021 and ``time_series``."""
+    if form_code not in {"leak_stabilization", "pressure_test"}:
+        raise AppError(
+            "validation_error",
+            "Zaman serisi senkronizasyonu yalnizca Form 018 veya Form 021 ile yapilabilir.",
+            status_code=422,
+            details={"form_code": form_code},
+        )
+    if direction not in {"from_form", "to_form"}:
+        raise AppError(
+            "validation_error",
+            "Gecersiz senkronizasyon yonu.",
+            status_code=422,
+            details={"direction": direction},
+        )
+
+    spec = FORM_SPEC_BY_CODE[form_code]
+    short_code = spec.botas_code.rsplit("-", 1)[-1]
+    row = db.execute(
+        select(SectionForm).where(
+            SectionForm.session_id == session.id, SectionForm.form_code == form_code
+        )
+    ).scalar_one_or_none()
+
+    if direction == "from_form":
+        ext = (row.extracted_data or {}) if row is not None else {}
+        form_rows = ext.get("rows") if isinstance(ext, dict) else None
+        if row is None or not isinstance(form_rows, list) or not form_rows:
+            raise AppError(
+                "form_rows_empty",
+                f"Form {short_code} icinde saatlik izleme satiri bulunamadi.",
+                status_code=422,
+                details={"form_code": form_code},
+            )
+        inputs = session.inputs or {}
+        resolved_date = (
+            parse_base_date(base_date)
+            or parse_base_date(row.form_date)
+            or parse_base_date((ext.get("header") or {}).get("date"))
+            or parse_base_date((inputs.get("report") or {}).get("date"))
+            or parse_base_date((inputs.get("section_meta") or {}).get("test_date"))
+            or utcnow().date()
+        )
+        parsed_records, skipped = monitoring_rows_to_time_series(
+            form_rows,
+            default_date=resolved_date,
+            note_prefix=f"Form {short_code}",
+        )
+        if not parsed_records:
+            raise AppError(
+                "form_rows_invalid",
+                f"Form {short_code} satirlarindan gecerli zaman, basinc ve sicaklik okumasi cikarilamadi.",
+                status_code=422,
+                details={"form_code": form_code, "skipped_rows": skipped},
+            )
+        source_tag = f"form_{short_code}"
+        batch = session_service.batch_add_time_series(
+            db,
+            session,
+            records=parsed_records,
+            mode=mode,
+            default_source=source_tag,
+            commit=True,
+        )
+        return {
+            "direction": "from_form",
+            "form_code": form_code,
+            "synced_count": len(parsed_records),
+            "skipped_rows": skipped,
+            "items": batch["items"],
+            "summary": batch["summary"],
+        }
+
+    # direction == "to_form"
+    ts_rows = session_service.get_ordered_time_series(db, session)
+    if not ts_rows:
+        raise AppError(
+            "time_series_empty",
+            "Forma aktarilacak zaman serisi kaydi bulunamadi.",
+            status_code=422,
+            details={"form_code": form_code},
+        )
+    ensure_section_form_slots(db, session, commit=False)
+    if row is None:
+        row = db.execute(
+            select(SectionForm).where(
+                SectionForm.session_id == session.id, SectionForm.form_code == form_code
+            )
+        ).scalar_one_or_none()
+    now = utcnow()
+    if row is None:
+        row = SectionForm(
+            id=new_uuid(),
+            workspace_id_hash=session.workspace_id_hash,
+            project_id=session.project_id,
+            session_id=session.id,
+            form_code=spec.code,
+            botas_code=spec.botas_code,
+            form_title=spec.title,
+            required=spec.required,
+            status="filled",
+            revision=0,
+            filled_at=now,
+        )
+        db.add(row)
+        db.flush()
+
+    ts_summary = session_service.time_series_summary(ts_rows)
+    ext = copy.deepcopy(row.extracted_data or {}) if isinstance(row.extracted_data, dict) else {}
+    ext["rows"] = time_series_to_monitoring_rows(ts_rows)
+    raw_mon = ext.get("monitoring")
+    prev_mon: dict[str, Any] = raw_mon if isinstance(raw_mon, dict) else {}
+    mon_patch: dict[str, Any] = dict(prev_mon)
+    if ts_summary.get("pressure_change_pa_bar") is not None:
+        mon_patch["pa_reported_bar"] = round(float(ts_summary["pressure_change_pa_bar"]), 3)
+    if ts_summary.get("temperature_change_dt_c") is not None:
+        mon_patch["delta_t_reported_c"] = round(float(ts_summary["temperature_change_dt_c"]), 3)
+    ext["monitoring"] = mon_patch
+
+    reconciled = reconcile_form_extracted_data(form_code, ext)
+    row.extracted_data = json_safe(reconciled)
+    flag_modified(row, "extracted_data")
+    if row.status == "empty":
+        row.status = "filled"
+    row.filled_at = row.filled_at or now
+    first_ts = ts_summary.get("first_timestamp")
+    if not str(row.form_date or "").strip() and isinstance(first_ts, str) and len(first_ts) >= 10:
+        row.form_date = first_ts[:10]
+    row.revision = int(row.revision or 0) + 1
+    row.updated_at = now
+    db.flush()
+
+    _cumulative_recompute_section(
+        db,
+        session,
+        header_hint={},
+        overwrite_values=False,
+        prefer_header_hint=False,
+        bump_revision=False,
+    )
+    audit.record(
+        db,
+        action="time_series.sync_to_form",
+        entity_type="section_form",
+        entity_id=row.id,
+        session_id=session.id,
+        workspace_hash=session.workspace_id_hash,
+        after={"form_code": form_code, "synced_count": len(ext["rows"])},
+    )
+    db.commit()
+    db.refresh(row)
+
+    return {
+        "direction": "to_form",
+        "form_code": form_code,
+        "synced_count": len(ext["rows"]),
+        "skipped_rows": 0,
+        "summary": ts_summary,
+    }
+
+
 __all__ = [
     "BOTAS_FORM_CATALOG",
     "FORM_SPEC_BY_CODE",
@@ -5394,5 +5567,6 @@ __all__ = [
     "normalize_section_no",
     "scan_single_form_upload",
     "sync_operation_result_to_dewatering_form",
+    "sync_time_series_with_form",
     "update_session_form",
 ]

@@ -13,6 +13,9 @@ const LazyUtilizationChart = lazy(() =>
 const LazyTrendChart = lazy(() =>
   import("./Charts").then((m) => ({ default: m.TrendChart })),
 );
+const LazyTimeSeriesChart = lazy(() =>
+  import("./Charts").then((m) => ({ default: m.TimeSeriesChart })),
+);
 
 function ChartSkeleton({ height, className }: { height: number; className?: string }) {
   return (
@@ -60,6 +63,17 @@ export function TrendChart(props: ComponentProps<typeof ChartsModule.TrendChart>
   return (
     <Suspense fallback={<ChartSkeleton height={props.height ?? 180} className={props.className} />}>
       <LazyTrendChart {...props} />
+    </Suspense>
+  );
+}
+
+/** Lazy-loaded wrapper around TimeSeriesChart keeping Recharts out of the initial chunk. */
+export function TimeSeriesChart(
+  props: ComponentProps<typeof ChartsModule.TimeSeriesChart>,
+) {
+  return (
+    <Suspense fallback={<ChartSkeleton height={props.height ?? 210} className={props.className} />}>
+      <LazyTimeSeriesChart {...props} />
     </Suspense>
   );
 }

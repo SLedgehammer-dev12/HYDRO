@@ -1447,3 +1447,87 @@ export interface DbMaintenanceResponse {
   removed_orphan_files: number;
   reclaimed_upload_bytes: number;
 }
+
+/* ------------------------------------------------------------------ */
+/* Zaman Serisi (Şartname Bölüm 12 & 15)                               */
+/* ------------------------------------------------------------------ */
+
+export interface TimeSeriesRecordInput {
+  timestamp?: string | null;
+  pressure_bar: number;
+  temperature_c: number;
+  volume_m3?: number | null;
+  notes?: string;
+  source?: string;
+}
+
+export interface TimeSeriesRecordItem {
+  id: string;
+  timestamp: string;
+  pressure_bar: number;
+  temperature_c: number;
+  volume_m3: number | null;
+  notes: string;
+  source: string;
+}
+
+export interface TimeSeriesSummary {
+  record_count: number;
+  duration_hours: number;
+  balanced: boolean;
+  thermal_duration_ok: boolean;
+  temp_diff_c: number | null;
+  reason?: string | null;
+  average_temperature_last_4h_c: number | null;
+  previous_4h_avg_c: number | null;
+  average_temperature_c: number | null;
+  first_timestamp: string | null;
+  last_timestamp: string | null;
+  max_gap_hours: number | null;
+  recording_duration_ok: boolean;
+  recording_interval_ok: boolean;
+  recording_passed: boolean;
+  initial_pressure_bar: number | null;
+  final_pressure_bar: number | null;
+  pressure_change_pa_bar: number | null;
+  min_pressure_bar: number | null;
+  max_pressure_bar: number | null;
+  initial_temperature_c: number | null;
+  final_temperature_c: number | null;
+  temperature_change_dt_c: number | null;
+  min_temperature_c: number | null;
+  max_temperature_c: number | null;
+  initial_volume_m3: number | null;
+  final_volume_m3: number | null;
+  volume_delta_m3: number | null;
+  decision: Decision;
+  recording_decision: Decision;
+}
+
+export type ThermalBalanceResponse = TimeSeriesSummary;
+
+export interface TimeSeriesAddResponse {
+  record: TimeSeriesRecordItem;
+  summary: TimeSeriesSummary;
+}
+
+export interface TimeSeriesBatchResponse {
+  inserted: number;
+  total: number;
+  items: TimeSeriesRecordItem[];
+  summary: TimeSeriesSummary;
+}
+
+export interface TimeSeriesClearResponse {
+  deleted: number;
+  summary: TimeSeriesSummary;
+}
+
+export interface TimeSeriesSyncFormResponse {
+  direction: "from_form" | "to_form";
+  form_code: "leak_stabilization" | "pressure_test";
+  synced_count: number;
+  skipped_rows: number;
+  items?: TimeSeriesRecordItem[];
+  summary: TimeSeriesSummary;
+}

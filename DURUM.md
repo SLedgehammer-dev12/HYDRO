@@ -12,9 +12,9 @@
 
 | Alan | Durum | Kanıt |
 | --- | --- | --- |
-| Masaüstü uygulaması | Çalışıyor, kararlı | 715 unittest PASS (`skipped=1`) |
-| Web backend (FastAPI) | Çalışıyor | 224 pytest PASS (Alembic `0003`), 81 OpenAPI path / 94 operation, 48 dosyada `mypy` temiz |
-| Web frontend (React 19) | Çalışıyor | `npm run lint` (0 hata, `jsx-a11y`), `npm test` (45 Vitest / 13 dosya), `npm run typecheck` + `npm run build` + `check:bundle` PASS (`146,3 kB` gzip ilk yükleme JS), `verify-tabs.mjs` 12/12 PASS |
+| Masaüstü uygulaması | Çalışıyor, kararlı | 719 unittest PASS (`skipped=1`) |
+| Web backend (FastAPI) | Çalışıyor | 226 pytest PASS (Alembic `0003`), 87 OpenAPI path / 101 operation, 48 dosyada `mypy` temiz |
+| Web frontend (React 19) | Çalışıyor | `npm run lint` (0 hata, `jsx-a11y`), `npm test` (50 Vitest / 15 dosya), `npm run typecheck` + `npm run build` + `check:bundle` PASS (`146,8 kB` gzip ilk yükleme JS), `verify-tabs.mjs` 12/12 PASS |
 | Program İkon & Marka Sistemi | Hazır | Boru kesiti + su dalgası + manometre ikonu (`tools/generate_icons.py`, `assets/icons/*`, `webapp/frontend/public/*`, `<HydroLogo />`, PyInstaller/Inno Setup/Tkinter) |
 | Web Güncelleme Yöneticisi | Çalışıyor | `/api/update/*`, SHA-256 + fail-closed Ed25519 `.sig` doğrulama, `UpdateManagerModal`, macOS `.dmg` / Win `.exe`/`.zip` kurulum |
 | BOTAŞ Test Bölümü Formları | Çalışıyor | Seçenek 1 sol menü (`015`..`023`, `KUR-001`, `KUR-002` + 5 ek), `SectionFormPage`, `rows`/`pig_runs`/`findings`, tekil OCR, `020`/`022` gömülü hesaplama ve `023` (`BOT-FRM-CDB-001-024`) Şartname 16–17 çift yönlü entegrasyonu |
@@ -27,7 +27,7 @@
 | OCR rapor kontrolü | Çalışıyor (Vision + Excel) | `ocrmac`, `.xlsx`/`.xls`, `commit-dossier` proje/bölüm kaydı, tekil onay/uygulama |
 | Docker / dağıtım | Hazır | `webapp/Dockerfile`, `docker-compose.yml`, `.github/workflows/release.yml` |
 
-**Durum:** MVP, performans/güvenlik ön sertleştirmesi, Alembic şema göçü (`0003`), 3D gerçek kot profili/saha ekipmanı (`profile_points[]`/`equipment[]`), Şartname 10.1 `+2 °C` / negatif `B`/`beta_water` / `water_backend` karşılaştırma + rapor kimliği iyileştirmeleri, masaüstü JSON snapshot içe aktarma UI'sı ve `409 revision_conflict` yerel/sunucu fark çözümleme modalı tamam. Kalan işler kurumsal Auth/OIDC/RBAC kararı, `psycopg` Postgres runtime testi, Bölüm 12/15 zaman serisi termal dengeleme UI ve kurum onayı bekleyen veri işleridir.
+**Durum:** MVP, performans/güvenlik ön sertleştirmesi, Alembic şema göçü (`0003`), 3D gerçek kot profili/saha ekipmanı (`profile_points[]`/`equipment[]`), Şartname 10.1 `+2 °C` / negatif `B`/`beta_water` / `water_backend` karşılaştırma + rapor kimliği iyileştirmeleri, masaüstü JSON snapshot içe aktarma UI'sı + `409 revision_conflict` fark çözümleme modalı ve Şartname Bölüm 12 & 15 zaman serili termal dengeleme / 24 saatlik test kayıt modeli + Form `018`/`021` çift yönlü senkronizasyonu + Web UI (`TimeSeriesPanel`, `TimeSeriesChart`) tamam. Kalan işler kurumsal Auth/OIDC/RBAC kararı, `psycopg` Postgres runtime testi ve kurum onayı bekleyen veri/saha formu işleridir.
 
 ---
 
@@ -132,7 +132,7 @@ Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen iş
 ### 4.2 Domain / masaüstü (P1–P2, `tasks/todo.md`)
 
 - [x] 14.1–14.3 basınç–hacim izleme, `%0.2` ilave su durdurma mantığı ve 2 saatlik bekleme domain + API (`pressurization_monitor.py`); [x] Web UI paneli (Basınç Değişim sayfası, `OperationsPanel`); [x] oturum kaydı, özet ve TXT/PDF/XLSX rapor bağlantısı.
-- [ ] 12 ve 15 için zaman serili termal dengeleme / 24 saatlik test kayıt veri modeli.
+- [x] 12 ve 15 için zaman serili termal dengeleme / 24 saatlik test kayıt veri modeli (`TimeSeriesEvaluation`, `evaluate_time_series`, batch/clear/sync-form API, `TimeSeriesPanel` + `TimeSeriesChart`, Form `018`/`021` çift yönlü senkronizasyon ve TXT/PDF/XLSX rapor özeti).
 - [x] 16–17 basınç düşürme ve boşaltma kontrol listesi domain + API (`post_test_operations.py`); [x] Web UI paneli (`OperationsPanel`); [x] oturum kaydı ve rapor bağlantısı; [x] BOT-FRM-CDB-001-024 formu bağlantısı.
 - [ ] 21. bölümdeki saha formlarına uygun rapor çıktısı.
 - [ ] Segmentli geometri indirgemesi için kurum içi metod notu.
@@ -170,21 +170,21 @@ Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen iş
 
 ```bash
 # Lint & tip denetimi
-python3 -m ruff check . && python3 -m ruff format --check .     # PASS (146 dosya)
+python3 -m ruff check . && python3 -m ruff format --check .     # PASS (147 dosya)
 python3 -m mypy hidrostatik_test/domain/                       # Success: no issues found (14 files)
 python3 -m mypy --ignore-missing-imports webapp/backend/app    # Success: no issues found (48 files)
 
 # Web backend (Alembic + API + domain parity)
-python3 -m pytest webapp/backend/tests -q                      # 224 passed
+python3 -m pytest webapp/backend/tests -q                      # 226 passed
 
 # Masaüstü
-python3 -m unittest discover -s tests -p "test_*.py"           # 715 tests OK (skipped=1)
+python3 -m unittest discover -s tests -p "test_*.py"           # 719 tests OK (skipped=1)
 
 # Masaüstü paketli Web self-test
 python3 webapp/desktop_launcher.py --self-test                 # SELF_TEST_OK
 
 # Frontend derleme, lint & test
-cd webapp/frontend && npm run lint && npm test && npm run typecheck && npm run build && npm run check:bundle  # PASS (45 Vitest, 146,3 kB gzip)
+cd webapp/frontend && npm run lint && npm test && npm run typecheck && npm run build && npm run check:bundle  # PASS (50 Vitest, 146,8 kB gzip)
 
 # Sekme + BOTAŞ Form Ağacı & 020/022/023 Gömülü Hesaplama & Güncelleme Yöneticisi smoke (port 8099, izole DB)
 cd webapp/frontend && HYDRO_APP_URL=http://127.0.0.1:8099 \
@@ -206,7 +206,7 @@ docker compose -f webapp/docker-compose.yml up --build
 - `@react-three/drei` `Html` React 19 üretim derlemesinde `removeChild` hatası veriyor;
   yerine `SceneHtml` + `SceneLabels` DOM katmanı kullanılıyor. Geri dönülmemeli.
 - Demo proje ID'leri (`demo-*`) backend'e gönderilmez; `App.tsx` ve mutation hook'ları filtreler.
-- İlk yükleme frontend JS paketi rota/Recharts/three.js kod bölme ve lazy-loading ile 146,3 kB gzip altındadır (`npm run check:bundle` ≤ 200 kB bütçe kapısı).
+- İlk yükleme frontend JS paketi rota/Recharts/three.js kod bölme ve lazy-loading ile 146,8 kB gzip altındadır (`npm run check:bundle` ≤ 200 kB bütçe kapısı).
 - `implementation_status.md` içindeki test sayıları bu dosyayla hizalandı.
 - Plan-Profil tarama motoru PDF metin katmanı veya Tesseract/macOS Vision varsa çalışır;
   hiçbiri yoksa yanıt `ocr.available=false` döner.

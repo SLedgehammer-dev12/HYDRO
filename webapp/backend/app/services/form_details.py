@@ -6,6 +6,7 @@ import copy
 import json
 import re
 import statistics
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Sequence
 
 from hidrostatik_test.domain import (
@@ -13,7 +14,9 @@ from hidrostatik_test.domain import (
     MAX_TEST_SECTION_VOLUME_M3,
     PRESSURE_VARIATION_ACCEPTANCE_BAR,
     ValidationError,
+    evaluate_time_series,
 )
+from hidrostatik_test.domain import TimeSeriesRecord as DomainTimeSeriesRecord
 from hidrostatik_test.domain.operations import get_pig_speed_limit
 from hidrostatik_test.domain.post_test_operations import (
     DepressurizationInputs,
@@ -22,6 +25,8 @@ from hidrostatik_test.domain.post_test_operations import (
     evaluate_discharge,
 )
 from hidrostatik_test.services.report_ocr import parse_number
+
+from ..core.timeutil import ensure_utc, iso_z
 
 MAX_TABLE_ROWS = 300
 DEFAULT_TARGET_DEW_POINT_C = -20.0
@@ -670,6 +675,157 @@ def build_form_structured_payload(
     return out
 
 
+def _try_parse_iso_utc(raw: Any) -> datetime | None:
+    if not isinstance(raw, str):
+        return None
+    text = raw.strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _monitoring_row_pipe_temp(row: dict[str, Any]) -> float | None:
+    avg_p = _finite(row.get("avg_pipe_c"))
+    if avg_p is not None:
+        return avg_p
+    pipes = [
+        v
+        for k in ("pipe_1_c", "pipe_2_c", "pipe_3_c", "pipe_4_c")
+        if (v := _finite(row.get(k))) is not None
+    ]
+    if pipes:
+        return sum(pipes) / len(pipes)
+    return None
+
+
+def _monitoring_row_temperature(row: dict[str, Any]) -> float | None:
+    pipe_temp = _monitoring_row_pipe_temp(row)
+    if pipe_temp is not None:
+        return pipe_temp
+    avg_soil = _finite(row.get("avg_soil_c"))
+    if avg_soil is not None:
+        return avg_soil
+    soils = [
+        v
+        for k in ("soil_1_c", "soil_2_c", "soil_3_c", "soil_4_c")
+        if (v := _finite(row.get(k))) is not None
+    ]
+    if soils:
+        return sum(soils) / len(soils)
+    return _finite(row.get("ambient_temp_c"))
+
+
+def parse_base_date(raw: Any) -> date | None:
+    if not isinstance(raw, str):
+        return None
+    text = raw.strip()
+    if not text:
+        return None
+    iso_head = text[:10]
+    try:
+        return date.fromisoformat(iso_head)
+    except ValueError:
+        pass
+    m = re.match(r"^\s*(\d{1,2})[./-](\d{1,2})[./-](\d{4})\b", text)
+    if not m:
+        return None
+    day_val, month_val, year_val = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    try:
+        return date(year_val, month_val, day_val)
+    except ValueError:
+        return None
+
+
+def monitoring_rows_to_time_series(
+    rows: Sequence[dict[str, Any]],
+    *,
+    default_date: date,
+    note_prefix: str = "",
+) -> tuple[list[dict[str, Any]], int]:
+    """Convert Form 018/021 monitoring rows into UTC time-series record payloads."""
+    out: list[dict[str, Any]] = []
+    skipped = 0
+    day_offset = 0
+    prev_abs_min: float | None = None
+
+    for row in rows[:MAX_TABLE_ROWS]:
+        if not isinstance(row, dict):
+            skipped += 1
+            continue
+        p_val = _finite(row.get("pressure_bar"))
+        t_val = _monitoring_row_temperature(row)
+        if p_val is None or t_val is None:
+            skipped += 1
+            continue
+
+        row_ts = _try_parse_iso_utc(row.get("timestamp"))
+        if row_ts is None:
+            hhmm_min = _parse_hhmm_to_min(str(row.get("time_str") or ""))
+            if hhmm_min is None:
+                skipped += 1
+                continue
+            if prev_abs_min is not None and (hhmm_min + day_offset * 1440.0) < prev_abs_min - 30.0:
+                day_offset += 1
+            prev_abs_min = hhmm_min + day_offset * 1440.0
+            row_ts = datetime(
+                default_date.year,
+                default_date.month,
+                default_date.day,
+                tzinfo=timezone.utc,
+            ) + timedelta(minutes=prev_abs_min)
+
+        note_parts: list[str] = [note_prefix] if note_prefix else []
+        amb = _finite(row.get("ambient_temp_c"))
+        if amb is not None:
+            note_parts.append(f"Cevre {amb:.1f} °C")
+        out.append(
+            {
+                "timestamp": row_ts,
+                "pressure_bar": p_val,
+                "temperature_c": t_val,
+                "volume_m3": None,
+                "notes": "; ".join(note_parts),
+            }
+        )
+    return out, skipped
+
+
+def time_series_to_monitoring_rows(records: Sequence[Any]) -> list[dict[str, Any]]:
+    """Convert persisted ``TimeSeriesRecord`` rows into Form 018/021 monitoring table rows."""
+    out: list[dict[str, Any]] = []
+    for rec in list(records)[:MAX_TABLE_ROWS]:
+        ts = ensure_utc(getattr(rec, "timestamp", None))
+        if ts is None:
+            continue
+        p_val = _finite(getattr(rec, "pressure_bar", None))
+        t_val = _finite(getattr(rec, "temperature_c", None))
+        if p_val is None or t_val is None:
+            continue
+        out.append(
+            {
+                "timestamp": iso_z(ts),
+                "time_str": ts.strftime("%H:%M"),
+                "pressure_bar": round(p_val, 3),
+                "ambient_temp_c": None,
+                "soil_1_c": None,
+                "pipe_1_c": round(t_val, 3),
+                "soil_2_c": None,
+                "pipe_2_c": None,
+                "avg_soil_c": None,
+                "avg_pipe_c": round(t_val, 3),
+            }
+        )
+    return out
+
+
 def _compute_time_stats(times: Sequence[str]) -> dict[str, Any]:
     abs_mins: list[tuple[str, float]] = []
     day_offset = 0.0
@@ -767,6 +923,7 @@ def reconcile_form_extracted_data(form_code: str, raw_data: dict[str, Any]) -> d
             press = [p for r in rows if (p := _finite(r.get("pressure_bar"))) is not None]
             mon_temps: list[float] = []
             pipe_avgs: list[float] = []
+            ts_domain_rows: list[DomainTimeSeriesRecord] = []
             probe_pairs = 0
             for r in rows:
                 s1, p1 = _finite(r.get("soil_1_c")), _finite(r.get("pipe_1_c"))
@@ -776,17 +933,23 @@ def reconcile_form_extracted_data(form_code: str, raw_data: dict[str, Any]) -> d
                     val = _finite(r.get(k))
                     if val is not None:
                         mon_temps.append(val)
-                avg_p = _finite(r.get("avg_pipe_c"))
-                if avg_p is not None:
-                    pipe_avgs.append(avg_p)
-                else:
-                    pipes = [
-                        v
-                        for k in ("pipe_1_c", "pipe_2_c", "pipe_3_c", "pipe_4_c")
-                        if (v := _finite(r.get(k))) is not None
-                    ]
-                    if pipes:
-                        pipe_avgs.append(sum(pipes) / len(pipes))
+                row_pipe = _monitoring_row_pipe_temp(r)
+                if row_pipe is not None:
+                    pipe_avgs.append(row_pipe)
+                row_ts = _try_parse_iso_utc(r.get("timestamp"))
+                row_p = _finite(r.get("pressure_bar"))
+                row_t = row_pipe if row_pipe is not None else _monitoring_row_temperature(r)
+                if row_ts is not None and row_p is not None and row_t is not None:
+                    try:
+                        ts_domain_rows.append(
+                            DomainTimeSeriesRecord(
+                                timestamp=row_ts,
+                                pressure_bar=row_p,
+                                temperature_c=row_t,
+                            )
+                        )
+                    except ValidationError:
+                        pass
             last_4h: float | None = None
             if len(pipe_avgs) >= 2:
                 if len(pipe_avgs) >= 8:
@@ -795,6 +958,15 @@ def reconcile_form_extracted_data(form_code: str, raw_data: dict[str, Any]) -> d
                     last_4h = round(abs(last4 - prev4), 3)
                 else:
                     last_4h = round(abs(pipe_avgs[-1] - pipe_avgs[0]), 3)
+
+            if len(ts_domain_rows) >= 2:
+                ts_eval = evaluate_time_series(ts_domain_rows)
+                data["time_log"]["duration_hours"] = round(ts_eval.duration_hours, 2)
+                if ts_eval.max_gap_hours is not None:
+                    data["time_log"]["max_gap_min"] = round(ts_eval.max_gap_hours * 60.0, 2)
+                if ts_eval.thermal_temp_diff_c is not None:
+                    last_4h = round(ts_eval.thermal_temp_diff_c, 3)
+
             raw_prev_mon = data.get("monitoring")
             prev_mon: dict[str, Any] = raw_prev_mon if isinstance(raw_prev_mon, dict) else {}
             data["monitoring"] = {
@@ -1572,5 +1744,8 @@ __all__ = [
     "evaluate_all_form_findings",
     "evaluate_dewatering_operations",
     "extract_common_header_extras",
+    "monitoring_rows_to_time_series",
+    "parse_base_date",
     "reconcile_form_extracted_data",
+    "time_series_to_monitoring_rows",
 ]
