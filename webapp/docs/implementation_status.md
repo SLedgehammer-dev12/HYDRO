@@ -9,7 +9,7 @@ Dal: `main` (`v1.9.1`)
 
 | Alan | Durum | Kanit |
 | --- | --- | --- |
-| Backend API | Calisiyor | 81 OpenAPI path (94 operation), 223 pytest (Alembic `0003`), 48 backend dosyada `mypy` temiz |
+| Backend API | Calisiyor | 81 OpenAPI path (94 operation), 224 pytest (Alembic `0003`), 48 backend dosyada `mypy` temiz |
 | Frontend kabuk | Calisiyor | 9 sekme (Projeler & Kesitler, birlesik Geometri & Saha, son sekmede birlesik Katsayilar & Detay), responsive, tema |
 | Hesaplamalar | Parity | A/B, hava, basinc, profil, pig, pressurization, termal denge |
 | Proje & Kesit DB | Calisiyor | `projects` + `sessions.project_id` + `inputs.section_meta`, kesit siralama/acma/kopyalama/silme |
@@ -23,9 +23,9 @@ Dal: `main` (`v1.9.1`)
 ## Dogrulama
 
 ```bash
-python3 -m pytest webapp/backend/tests -q          # 223 passed
+python3 -m pytest webapp/backend/tests -q          # 224 passed
 python3 -m unittest discover -s tests -p "test_*.py"  # 715 tests OK (skipped=1)
-cd webapp/frontend && npm run lint && npm test && npm run typecheck && npm run build && npm run check:bundle  # PASS (41 Vitest / 13 dosya, 147,7 kB gzip)
+cd webapp/frontend && npm run lint && npm test && npm run typecheck && npm run build && npm run check:bundle  # PASS (45 Vitest / 13 dosya, 146,3 kB gzip)
 cd webapp/frontend && HYDRO_APP_URL=http://127.0.0.1:8099 node scripts/verify-tabs.mjs  # 12/12 PASS (önceki canlı kontrol)
 ```
 
@@ -80,7 +80,7 @@ docker compose -f webapp/docker-compose.yml up --build
 3. **Alembic uretim gocu (tamamlandi):** `webapp/backend/migrations/` (`0002` → `0003`), `migrations_runner.py`, eski `0001`/`0002` koprusu, SQLite FK / Postgres advisory lock korumasi ve asamali geri alinabilir yedek geri yukleme tamamlandi.
 4. **Auth/OIDC ve iki-kisi kurali:** MVP'de yok (kurumsal mimari karar bekleniyor).
 5. **Postgres:** kod uyumlu, `psycopg` kurulu degil; canli Postgres runtime testi yapilmadi.
-6. **Frontend kod bolme & birim testleri (tamamlandi):** rota/Recharts/three.js lazy-loading + `check:bundle` (`147,7 kB` gzip ilk yukleme JS) ve 41 Vitest bilesen/birim testi (13 dosya) aktif.
+6. **Frontend kod bolme & birim testleri (tamamlandi):** rota/Recharts/three.js lazy-loading + `check:bundle` (`146,3 kB` gzip ilk yukleme JS) ve 45 Vitest bilesen/birim testi (13 dosya) aktif.
 7. **3D gercek veri (tamamlandi):** `profile_points[]` ve `equipment[]` girdileri (`SiteSurveyPanel.tsx`, `buildSceneData()`, `build_scene()`, `build_project_scene()`), yoksa acik yaklasik sahne uyarilari gosterilir.
 8. **Muhendislik guvenlik uyarilari, `water_backend` & rapor kimligi uyumu (tamamlandi):** `evaluate_fill_temperature` (`+2 °C` Madde 10.1 uyarisi), `negative_b = b < 0` duzeltmesi ve `0–4 °C` negatif `beta_water`/`B` UI uyarilari, ayri `inputs.water_backend` secicisi + TXT/CSV backend karsilastirma raporu, `t_initial`/`t_final` ve OCR `report_meta` -> `report` tam uyumu tamamlandi.
 9. **Masaüstü JSON snapshot içe aktarma & eşzamanlı düzenleme 409 diff (tamamlandi):** `POST /api/import/desktop-snapshot` (`project_id`, audit & mapping özetleri) UI bağlantısı (`ProjectImportModal` + `ReportsPage`) ve `PUT /sessions/{id}`, `POST /snapshot`, `POST /results` için `If-Match` / `409 revision_conflict` (`details.current` + `details.diff`) ile satır bazlı Sunucu/Yerel birleştirme modalı (`RevisionConflictModal`) eklendi.

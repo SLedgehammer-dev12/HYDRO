@@ -490,7 +490,16 @@ def _strip_segment_ids(items: list[Any]) -> list[Any]:
     cleaned: list[Any] = []
     for item in items:
         if isinstance(item, dict):
-            cleaned.append({k: v for k, v in item.items() if k != "id"})
+            cleaned.append(
+                {
+                    "outside_diameter_mm": item.get("outside_diameter_mm"),
+                    "wall_thickness_mm": item.get("wall_thickness_mm"),
+                    "length_m": item.get("length_m"),
+                    "nps_label": item.get("nps_label") or "",
+                    "schedule_label": item.get("schedule_label") or "",
+                    "start_station_m": item.get("start_station_m"),
+                }
+            )
         else:
             cleaned.append(item)
     return cleaned
@@ -588,6 +597,7 @@ def update_session(
     changes: dict[str, Any],
     expected_revision: int | None = None,
     replace_inputs: bool = False,
+    commit: bool = True,
 ) -> HydroSession:
     if expected_revision is not None and expected_revision != session.revision:
         raise AppError(
@@ -643,8 +653,11 @@ def update_session(
         before=before,
         after={"name": session.name, "status": session.status, "revision": session.revision},
     )
-    db.commit()
-    db.refresh(session)
+    if commit:
+        db.commit()
+        db.refresh(session)
+    else:
+        db.flush()
     return session
 
 

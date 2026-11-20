@@ -19,17 +19,18 @@ import { Button, IconButton } from "../components/ui/Button";
 import { TextField } from "../components/ui/Field";
 import { InlineNotice, EmptyState } from "../components/ui/State";
 import {
+  hydrateSessionResults,
   useImportDesktopSnapshot,
   useMeta,
   useSafeSwitchSession,
   useSessions,
 } from "../hooks/queries";
 import { useAppStore } from "../store/useAppStore";
-import { api, apiErrorMessage } from "../lib/api";
+import { api, apiErrorMessage, extractRevisionConflict } from "../lib/api";
+import { applyOfflineSnapshot } from "../lib/normalize";
 import { buildReportText, buildSnapshot, downloadJson, downloadText, reportFileName } from "../lib/report";
 import { dateOnly, fmt, nowIso, num, relativeTime } from "../lib/format";
 import { CHECK_DEFINITIONS } from "../lib/constants";
-import { extractRevisionConflict } from "../lib/sessionDiff";
 import type { SnapshotMapping } from "../lib/types";
 
 type Format = "pdf" | "xlsx" | "txt";
@@ -50,12 +51,14 @@ export function ReportsPage() {
   const applySessionInputs = useAppStore((state) => state.applySessionInputs);
   const setSessionMeta = useAppStore((state) => state.setSessionMeta);
   const markSaved = useAppStore((state) => state.markSaved);
+  const markDirty = useAppStore((state) => state.markDirty);
   const setRevisionConflict = useAppStore((state) => state.setRevisionConflict);
   const pushToast = useAppStore((state) => state.pushToast);
 
   const sessionId = useAppStore((state) => state.sessionId);
   const projectId = useAppStore((state) => state.projectId);
   const backend = useAppStore((state) => state.backend);
+  const sessionApiReady = useAppStore((state) => state.sessionApiReady);
   const revision = useAppStore((state) => state.revision);
   const currentName = useAppStore((state) => state.sessionName);
   const sessionStatus = useAppStore((state) => state.sessionStatus);
@@ -201,7 +204,7 @@ export function ReportsPage() {
         return;
       }
       parsedSnapshot = parsed as Record<string, unknown>;
-      if (backend === "online" && sessionId) {
+      if (backend === "online" && sessionApiReady !== false && sessionId) {
         const response = await api.snapshotUpload(sessionId, parsedSnapshot, revision, snapshotMode);
         applySessionInputs(response.inputs);
         setSessionMeta({
@@ -213,8 +216,10 @@ export function ReportsPage() {
         markSaved(response.revision);
         setRevisionConflict(null);
         queryClient.setQueryData(["session", response.id], response);
+        void queryClient.invalidateQueries({ queryKey: ["results", response.id] });
         void queryClient.invalidateQueries({ queryKey: ["sessions"] });
         void queryClient.invalidateQueries({ queryKey: ["project-scene"] });
+        void hydrateSessionResults(response.id);
         if (response.mapping) {
           setLastMapping({ action: "upload", name: response.name, mapping: response.mapping });
         }
@@ -224,8 +229,17 @@ export function ReportsPage() {
           `${response.mapping?.converted ?? 0} alan dönüştürüldü, ${response.mapping?.skipped.length ?? 0} alan atlandı.`,
         );
       } else {
-        applySessionInputs(parsedSnapshot);
-        pushToast("success", "Snapshot yerel olarak yüklendi", "Backend yok; girdiler tarayıcı oturumuna uygulandı.");
+        const offlineResult = applyOfflineSnapshot(inputs, parsedSnapshot, snapshotMode);
+        applySessionInputs(offlineResult.inputs);
+        markDirty();
+        setLastMapping({ action: "upload", name: currentName, mapping: offlineResult.mapping });
+        pushToast(
+          "success",
+          "Snapshot yerel olarak yüklendi",
+          backend === "online" && sessionApiReady !== false
+            ? "Aktif sunucu oturumu seçili değil; girdiler yerel taslağa uygulandı."
+            : "Sunucu bağlantısı yok; girdiler tarayıcı oturumuna uygulandı.",
+        );
       }
     } catch (error) {
       const conflict = extractRevisionConflict(error);
@@ -235,6 +249,7 @@ export function ReportsPage() {
           localRevision: revision,
           localName: currentName,
           localStatus: sessionStatus,
+          localProjectId: projectId && !projectId.startsWith("demo-") ? projectId : null,
           localInputs: inputs,
           serverSession: conflict.serverSession,
           serverDiff: conflict.serverDiff,
@@ -501,8 +516,10 @@ export function ReportsPage() {
               </div>
             ) : null}
             <InlineNotice tone="info" title="Masaüstü uyumu">
-              Snapshot `schema_version: 1` biçimindedir; mevcut kesite birleştirebilir veya{" "}
-              `POST /api/import/desktop-snapshot` ile doğrudan yeni kesit oluşturabilirsiniz.
+              Snapshot <code className="font-mono text-[10.5px]">schema_version: 1</code> biçimindedir;
+              mevcut kesite birleştirebilir veya{" "}
+              <code className="font-mono text-[10.5px]">POST /api/import/desktop-snapshot</code> ile
+              doğrudan yeni kesit oluşturabilirsiniz.
             </InlineNotice>
           </SectionCard>
         </div>

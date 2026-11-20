@@ -778,3 +778,129 @@ def test_optimistic_concurrency_409_diff_across_put_snapshot_and_results(client)
     assert ok_res.status_code == 201
     assert ok_res.headers["ETag"] == '"3"'
     assert ok_res.json()["session_revision"] == 3
+
+
+def test_snapshot_merge_ambient_diff_bool_segments_and_invalid_fields(client):
+    # Project with defaults inherited by desktop snapshot import
+    proj = client.post(
+        "/api/projects",
+        json={
+            "name": "Varsayilanli Proje",
+            "defaults": {"smys_mpa": 485.0, "material_grade": "API 5L X70"},
+        },
+    ).json()
+
+    imported = client.post(
+        "/api/import/desktop-snapshot",
+        json={
+            "name": "   ",
+            "project_id": proj["id"],
+            "snapshot": {
+                "schema_version": 1,
+                "air": {"temperature_c": True},
+                "pressure": {"derive_delta_t": "maybe"},
+                "geometry": {"outside_diameter_mm": "406.4", "wall_thickness_mm": "8.74"},
+                "geometry_segments": [
+                    {
+                        "outside_diameter_mm": "406.4",
+                        "wall_thickness_mm": "8.74",
+                        "length_m": "",
+                    },
+                    {
+                        "outside_diameter_mm": "406.4",
+                        "wall_thickness_mm": "8.74",
+                        "length_m": "5000",
+                    },
+                ],
+                "field": {"ambient_temperature_c": "4.0"},
+            },
+        },
+    )
+    assert imported.status_code == 201, imported.text
+    imp_body = imported.json()
+    assert imp_body["session"]["inputs"]["section_profile"]["smys_mpa"] == 485.0
+    assert imp_body["session"]["inputs"]["material_grade"] == "API 5L X70"
+    assert imp_body["session"]["inputs"]["air"]["ambient_temperature_c"] == 4.0
+    assert imp_body["session"]["inputs"]["field"]["ambient_temperature_c"] == 4.0
+    # geometry (2) + valid segment (3) + field.ambient (1) = 6 (dropped partial segment NOT counted)
+    assert imp_body["mapping"]["converted"] == 6
+    assert "air.temperature_c" in imp_body["mapping"]["invalid_fields"]
+    assert "pressure.derive_delta_t" in imp_body["mapping"]["invalid_fields"]
+    assert "geometry_segments[0].length_m" in imp_body["mapping"]["invalid_fields"]
+
+    # Whitespace-only project_id becomes None -> standalone session without 404
+    standalone = client.post(
+        "/api/import/desktop-snapshot",
+        json={"project_id": "   ", "snapshot": {"schema_version": 1}},
+    )
+    assert standalone.status_code == 201
+    assert standalone.json()["session"]["project_id"] is None
+
+    # Merge snapshot updating ONLY field.ambient_temperature_c must update both mirrors & keep location_class
+    sess_id = imp_body["session"]["id"]
+    rev1 = imp_body["session"]["revision"]
+    merged = client.post(
+        f"/api/sessions/{sess_id}/snapshot",
+        json={
+            "mode": "merge",
+            "snapshot": {
+                "schema_version": 1,
+                "location_class": "",
+                "field": {"ambient_temperature_c": "1.2"},
+            },
+        },
+        headers={"If-Match": f'"{rev1}"'},
+    )
+    assert merged.status_code == 200, merged.text
+    merged_sess = merged.json()["session"]
+    assert merged_sess["inputs"]["field"]["ambient_temperature_c"] == 1.2
+    assert merged_sess["inputs"]["air"]["ambient_temperature_c"] == 1.2
+    assert merged_sess["inputs"]["location_class"].startswith("Class 1")
+
+    # Single-transaction audit record exists
+    audits = client.get(
+        f"/api/sessions/{sess_id}/audit", params={"action": "snapshot.apply"}
+    ).json()
+    assert audits["total"] == 1
+
+    # Conflict PUT changing nothing on segments (start_station_m omitted vs None) produces NO segments diff
+    stale_put = client.put(
+        f"/api/sessions/{sess_id}",
+        json={
+            "inputs": {
+                "field": {"ambient_temperature_c": "0"},
+                "segments": [
+                    {
+                        "outside_diameter_mm": 406.4,
+                        "wall_thickness_mm": 8.74,
+                        "length_m": 5000.0,
+                        "nps_label": "-",
+                        "schedule_label": "Elle giris",
+                        "start_station_m": None,
+                    }
+                ],
+            }
+        },
+        headers={"If-Match": f'"{rev1}"'},
+    )
+    assert stale_put.status_code == 409
+    diff_map = {e["path"]: e for e in stale_put.json()["details"]["diff"]}
+    assert "segments" not in diff_map
+    assert diff_map["field.ambient_temperature_c"] == {
+        "path": "field.ambient_temperature_c",
+        "incoming": 0.0,
+        "server": 1.2,
+    }
+
+    # Mode=replace 409 diff
+    stale_replace = client.post(
+        f"/api/sessions/{sess_id}/snapshot",
+        json={
+            "mode": "replace",
+            "snapshot": {"schema_version": 1, "material_grade": "API 5L X60"},
+        },
+        headers={"If-Match": f'"{rev1}"'},
+    )
+    assert stale_replace.status_code == 409
+    rep_map = {e["path"]: e for e in stale_replace.json()["details"]["diff"]}
+    assert rep_map["material_grade"]["incoming"] == "API 5L X60"

@@ -80,6 +80,68 @@ export class ApiError extends Error {
   }
 }
 
+export interface ServerConflictDiffEntry {
+  path: string;
+  incoming: unknown;
+  server: unknown;
+}
+
+export interface ExtractedRevisionConflict {
+  serverSession: Session;
+  expectedRevision: number | null;
+  currentRevision: number;
+  serverDiff: ServerConflictDiffEntry[];
+}
+
+export function extractRevisionConflict(error: unknown): ExtractedRevisionConflict | null {
+  if (!(error instanceof ApiError)) return null;
+  if (error.status !== 409 || error.code !== "revision_conflict") return null;
+
+  const rawCurrent = error.details.current;
+  if (typeof rawCurrent !== "object" || rawCurrent === null || Array.isArray(rawCurrent)) {
+    return null;
+  }
+  const currentRecord = rawCurrent as Record<string, unknown>;
+  if (
+    typeof currentRecord.id !== "string" ||
+    typeof currentRecord.revision !== "number" ||
+    !Number.isFinite(currentRecord.revision)
+  ) {
+    return null;
+  }
+
+  const expectedRaw = error.details.expected_revision;
+  const expectedRevision =
+    typeof expectedRaw === "number" && Number.isFinite(expectedRaw) ? expectedRaw : null;
+
+  const serverDiff: ServerConflictDiffEntry[] = [];
+  if (Array.isArray(error.details.diff)) {
+    for (const item of error.details.diff) {
+      if (
+        typeof item === "object" &&
+        item !== null &&
+        !Array.isArray(item) &&
+        typeof (item as Record<string, unknown>).path === "string" &&
+        ((item as Record<string, unknown>).path as string).trim().length > 0
+      ) {
+        const entry = item as Record<string, unknown>;
+        serverDiff.push({
+          path: entry.path as string,
+          incoming: entry.incoming,
+          server: entry.server,
+        });
+      }
+    }
+  }
+
+  return {
+    serverSession: rawCurrent as unknown as Session,
+    expectedRevision,
+    currentRevision: currentRecord.revision,
+    serverDiff,
+  };
+}
+
 function uuid(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();

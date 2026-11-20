@@ -253,7 +253,11 @@ export function normalizeInputs(raw: unknown): AppInputs {
     ...base,
     water_backend: migratedWaterBackend,
     section_meta: {
-      section_no: asString(sectionMeta.section_no, base.section_meta.section_no),
+      section_no:
+        asString(sectionMeta.section_no).trim() ||
+        asString(rawReport.section_id).trim() ||
+        asString(rawReportMeta.section_id).trim() ||
+        base.section_meta.section_no,
       description: asString(sectionMeta.description, base.section_meta.description),
       location: rawLocation || formatKpLocation(startKp, endKp),
       start_kp: startKp,
@@ -420,5 +424,98 @@ export function toApiInputs(inputs: AppInputs): Record<string, unknown> {
       schedule_label: segment.schedule_label || null,
       start_station_m: segment.start_station_m ?? null,
     })),
+  };
+}
+
+function mergeDefinedValues(
+  base: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...base };
+  for (const [key, val] of Object.entries(patch)) {
+    if (val === undefined || val === null) continue;
+    if (typeof val === "string" && val.trim() === "") continue;
+    if (isRecord(val) && isRecord(next[key])) {
+      next[key] = mergeDefinedValues(next[key], val);
+    } else {
+      next[key] = val;
+    }
+  }
+  return next;
+}
+
+export function applyOfflineSnapshot(
+  currentInputs: AppInputs,
+  snapshotObj: Record<string, unknown>,
+  mode: "merge" | "replace" = "replace",
+): {
+  inputs: AppInputs;
+  mapping: {
+    converted: number;
+    skipped: string[];
+    invalid_fields: string[];
+    warnings: string[];
+  };
+} {
+  const schemaVer = snapshotObj.schema_version ?? 1;
+  if (schemaVer !== 1 && schemaVer !== "1") {
+    throw new Error(`Desteklenmeyen snapshot schema_version: ${String(schemaVer)}`);
+  }
+
+  const sanitizedSnapshot: Record<string, unknown> = { ...snapshotObj };
+  const skipped: string[] = [];
+  if (isRecord(sanitizedSnapshot.field)) {
+    const cleanField = { ...sanitizedSnapshot.field };
+    for (const derived of ["pig_speed_m_per_s", "pig_speed_km_per_h"]) {
+      if (derived in cleanField) {
+        skipped.push(`field.${derived}`);
+        delete cleanField[derived];
+      }
+    }
+    sanitizedSnapshot.field = cleanField;
+  }
+
+  const countConverted = (obj: Record<string, unknown>): number => {
+    let total = 0;
+    for (const [key, val] of Object.entries(obj)) {
+      if (key === "schema_version" || key === "saved_at_utc" || key === "app_version") continue;
+      if (val === null || val === undefined) continue;
+      if (typeof val === "string" && val.trim() === "") continue;
+      if (Array.isArray(val)) {
+        total += val.length;
+      } else if (isRecord(val)) {
+        total += countConverted(val);
+      } else {
+        total += 1;
+      }
+    }
+    return total;
+  };
+
+  let nextInputs: AppInputs;
+  if (mode === "replace") {
+    nextInputs = normalizeInputs(sanitizedSnapshot);
+  } else {
+    const patchNormalized = normalizeInputs(sanitizedSnapshot);
+    const mergedRaw = mergeDefinedValues(
+      currentInputs as unknown as Record<string, unknown>,
+      sanitizedSnapshot,
+    );
+    nextInputs = normalizeInputs({
+      ...mergedRaw,
+      water_backend: sanitizedSnapshot.water_backend_option || sanitizedSnapshot.water_backend
+        ? patchNormalized.water_backend
+        : currentInputs.water_backend,
+    });
+  }
+
+  return {
+    inputs: nextInputs,
+    mapping: {
+      converted: countConverted(sanitizedSnapshot),
+      skipped,
+      invalid_fields: [],
+      warnings: ["Çevrimdışı modda yerel oturum olarak uygulandı; sunucu kaydı yapılmadı."],
+    },
   };
 }

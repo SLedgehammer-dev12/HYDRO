@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, isRecoverableError } from "../lib/api";
+import { api, extractRevisionConflict, isRecoverableError } from "../lib/api";
 import {
   DEMO_GRADES,
   DEMO_META,
@@ -75,8 +75,8 @@ import type {
 } from "../lib/types";
 import { BOTAS_FORM_NAV_ITEMS, CHECK_DEFINITIONS } from "../lib/constants";
 import { nowIso } from "../lib/format";
-import { normalizeInputs, toApiInputs } from "../lib/normalize";
-import { extractRevisionConflict } from "../lib/sessionDiff";
+import { applyOfflineSnapshot, toApiInputs } from "../lib/normalize";
+import type { AppInputs } from "../lib/types";
 
 export interface Resolved<T> {
   data: T;
@@ -501,6 +501,7 @@ export function useDeleteSection() {
       const store = useAppStore.getState();
       if (store.sessionId === id) {
         store.setSessionMeta({ id: null, name: "Yeni oturum", status: "draft", revision: 0 });
+        store.setRevisionConflict(null);
       }
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
       void queryClient.invalidateQueries({ queryKey: ["projects"] });
@@ -935,10 +936,39 @@ function demoResultRecords(): TestResultRecord[] {
   }));
 }
 
+interface InFlightSessionSnapshot {
+  sessionId: string | null;
+  revision: number;
+  name: string;
+  status: SessionStatus;
+  projectId: string | null;
+  rawInputs: AppInputs;
+  serializedInputs: string;
+}
+
+const inFlightSaveSnapshots = new WeakMap<object, InFlightSessionSnapshot>();
+
 export interface SaveSessionResult {
   demo: boolean;
   session?: Session;
   revision?: number;
+  snapshot?: InFlightSessionSnapshot;
+}
+
+function captureSessionSnapshot(nameOverride?: string): InFlightSessionSnapshot {
+  const state = useAppStore.getState();
+  const realProjectId =
+    state.projectId && !state.projectId.startsWith("demo-") ? state.projectId : null;
+  const rawInputs = JSON.parse(JSON.stringify(state.inputs)) as AppInputs;
+  return {
+    sessionId: state.sessionId,
+    revision: state.revision,
+    name: (nameOverride && nameOverride.trim()) || state.sessionName,
+    status: state.sessionStatus,
+    projectId: realProjectId,
+    rawInputs,
+    serializedInputs: JSON.stringify(state.inputs),
+  };
 }
 
 export function useSaveSession() {
@@ -946,44 +976,68 @@ export function useSaveSession() {
   return useMutation<SaveSessionResult, Error, { name?: string } | void>({
     mutationFn: async (arg) => {
       const state = useAppStore.getState();
-      const name = (arg && arg.name) || state.sessionName;
+      const snapshot = captureSessionSnapshot(arg ? arg.name : undefined);
       if (state.backend !== "online" || state.sessionApiReady === false) {
         await sleep(420);
-        return { demo: true, revision: state.revision };
+        return { demo: true, revision: snapshot.revision, snapshot };
       }
-      const realProjectId =
-        state.projectId && !state.projectId.startsWith("demo-") ? state.projectId : null;
-      if (!state.sessionId) {
-        const created = await api.createSession({
-          name,
-          project_id: realProjectId,
-          inputs: toApiInputs(state.inputs),
-        });
-        return { demo: false, session: created, revision: created.revision };
+      try {
+        if (!snapshot.sessionId) {
+          const created = await api.createSession({
+            name: snapshot.name,
+            project_id: snapshot.projectId,
+            inputs: toApiInputs(snapshot.rawInputs),
+          });
+          return { demo: false, session: created, revision: created.revision, snapshot };
+        }
+        const updated = await api.updateSession(
+          snapshot.sessionId,
+          {
+            name: snapshot.name,
+            status: snapshot.status,
+            project_id: snapshot.projectId,
+            inputs: toApiInputs(snapshot.rawInputs),
+          },
+          snapshot.revision,
+        );
+        return { demo: false, session: updated, revision: updated.revision, snapshot };
+      } catch (err) {
+        if (typeof err === "object" && err !== null) {
+          inFlightSaveSnapshots.set(err, snapshot);
+        }
+        throw err;
       }
-      const updated = await api.updateSession(
-        state.sessionId,
-        {
-          name,
-          status: state.sessionStatus,
-          project_id: realProjectId,
-          inputs: toApiInputs(state.inputs),
-        },
-        state.revision,
-      );
-      return { demo: false, session: updated, revision: updated.revision };
     },
     onSuccess: (result) => {
       const store = useAppStore.getState();
-      if (result.session) {
+      const attempt = result.snapshot;
+      const sameActiveSession =
+        !attempt ||
+        attempt.sessionId === null ||
+        store.sessionId === null ||
+        store.sessionId === attempt.sessionId;
+      if (result.session && sameActiveSession) {
+        const currentSerialized = JSON.stringify(store.inputs);
+        const unchangedDuringFlight =
+          attempt !== undefined &&
+          currentSerialized === attempt.serializedInputs &&
+          store.sessionName === attempt.name;
         store.setSessionMeta({
           id: result.session.id,
-          name: result.session.name,
+          name: unchangedDuringFlight ? result.session.name : store.sessionName,
           revision: result.session.revision,
           status: result.session.status,
         });
+        if (unchangedDuringFlight) {
+          store.markSaved(result.session.revision);
+        }
+        queryClient.setQueryData(["session", result.session.id], result.session);
+      } else if (result.demo && sameActiveSession) {
+        const currentSerialized = JSON.stringify(store.inputs);
+        if (!attempt || currentSerialized === attempt.serializedInputs) {
+          store.markSaved(result.revision);
+        }
       }
-      store.markSaved(result.revision);
       store.pushToast(
         "success",
         result.demo ? "Tarayıcı oturumuna kaydedildi" : "Oturum kaydedildi",
@@ -997,14 +1051,29 @@ export function useSaveSession() {
     },
     onError: (error, arg) => {
       const store = useAppStore.getState();
+      const attempt =
+        typeof error === "object" && error !== null
+          ? inFlightSaveSnapshots.get(error)
+          : undefined;
       const conflict = extractRevisionConflict(error);
-      if (conflict && store.sessionId) {
+      const targetSessionId = attempt?.sessionId ?? store.sessionId;
+      if (
+        conflict &&
+        targetSessionId &&
+        (!attempt || store.sessionId === attempt.sessionId)
+      ) {
         store.setRevisionConflict({
-          sessionId: store.sessionId,
-          localRevision: store.revision,
-          localName: (arg && arg.name) || store.sessionName,
-          localStatus: store.sessionStatus,
-          localInputs: store.inputs,
+          sessionId: targetSessionId,
+          localRevision: attempt?.revision ?? store.revision,
+          localName: attempt?.name ?? ((arg && arg.name) || store.sessionName),
+          localStatus: attempt?.status ?? store.sessionStatus,
+          localProjectId:
+            attempt !== undefined
+              ? attempt.projectId
+              : store.projectId && !store.projectId.startsWith("demo-")
+                ? store.projectId
+                : null,
+          localInputs: attempt?.rawInputs ?? store.inputs,
           serverSession: conflict.serverSession,
           serverDiff: conflict.serverDiff,
           sourceAction: "save_session",
@@ -1101,7 +1170,7 @@ export function useDeleteSession() {
 export function useSaveTestResult() {
   const queryClient = useQueryClient();
   return useMutation<
-    { saved: boolean; demo: boolean },
+    { saved: boolean; demo: boolean; sessionId?: string },
     Error,
     { testType: TestType; payload: Record<string, unknown>; status?: SessionStatus }
   >({
@@ -1110,27 +1179,56 @@ export function useSaveTestResult() {
       if (!state.sessionId || state.backend !== "online" || state.sessionApiReady === false) {
         return { saved: false, demo: true };
       }
-      await api.saveResult(state.sessionId, { test_type: testType, payload }, state.revision);
-      return { saved: true, demo: false };
+      const snapshot = captureSessionSnapshot();
+      try {
+        await api.saveResult(state.sessionId, { test_type: testType, payload }, snapshot.revision);
+        return { saved: true, demo: false, sessionId: state.sessionId };
+      } catch (err) {
+        if (typeof err === "object" && err !== null) {
+          inFlightSaveSnapshots.set(err, snapshot);
+        }
+        throw err;
+      }
     },
     onSuccess: (outcome) => {
       if (!outcome.saved) return;
-      const sid = useAppStore.getState().sessionId;
+      const store = useAppStore.getState();
+      const sid = outcome.sessionId ?? store.sessionId;
       if (sid) {
+        if (store.sessionId === sid && store.sessionStatus === "draft") {
+          store.setSessionMeta({ status: "active" });
+        }
+        void queryClient.invalidateQueries({ queryKey: ["results", sid] });
         void queryClient.invalidateQueries({ queryKey: ["session-forms", sid] });
+        void queryClient.invalidateQueries({ queryKey: ["session", sid] });
       }
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
     },
     onError: (error, vars) => {
       const store = useAppStore.getState();
+      const attempt =
+        typeof error === "object" && error !== null
+          ? inFlightSaveSnapshots.get(error)
+          : undefined;
       const conflict = extractRevisionConflict(error);
-      if (conflict && store.sessionId) {
+      const targetSessionId = attempt?.sessionId ?? store.sessionId;
+      if (
+        conflict &&
+        targetSessionId &&
+        (!attempt || store.sessionId === attempt.sessionId)
+      ) {
         store.setRevisionConflict({
-          sessionId: store.sessionId,
-          localRevision: store.revision,
-          localName: store.sessionName,
-          localStatus: store.sessionStatus,
-          localInputs: store.inputs,
+          sessionId: targetSessionId,
+          localRevision: attempt?.revision ?? store.revision,
+          localName: attempt?.name ?? store.sessionName,
+          localStatus: attempt?.status ?? store.sessionStatus,
+          localProjectId:
+            attempt !== undefined
+              ? attempt.projectId
+              : store.projectId && !store.projectId.startsWith("demo-")
+                ? store.projectId
+                : null,
+          localInputs: attempt?.rawInputs ?? store.inputs,
           serverSession: conflict.serverSession,
           serverDiff: conflict.serverDiff,
           sourceAction: "save_result",
@@ -1165,6 +1263,40 @@ export interface DesktopSnapshotImportVars {
   openAfterImport?: boolean;
 }
 
+export function activateImportedSession(
+  queryClient: ReturnType<typeof useQueryClient>,
+  outcome: DesktopSnapshotImportOutcome,
+): void {
+  const store = useAppStore.getState();
+  store.applySessionInputs(outcome.session.inputs);
+  store.setSessionMeta({
+    id: outcome.demo ? null : outcome.session.id,
+    name: outcome.session.name,
+    status: outcome.session.status,
+    revision: outcome.session.revision,
+  });
+  store.markSaved(outcome.session.revision);
+  store.setRevisionConflict(null);
+  if (!outcome.demo) {
+    queryClient.setQueryData(["session", outcome.session.id], outcome.session);
+    void queryClient.invalidateQueries({ queryKey: ["session-forms", outcome.session.id] });
+    void queryClient.invalidateQueries({ queryKey: ["results", outcome.session.id] });
+    void hydrateSessionResults(outcome.session.id);
+  }
+  if (outcome.session.project_id) {
+    const matchedProject = queryClient
+      .getQueryData<Project[]>(["projects"])
+      ?.find((p) => p.id === outcome.session.project_id);
+    if (matchedProject) {
+      store.setProject(matchedProject);
+    } else {
+      store.setProject({ id: outcome.session.project_id, name: "" });
+    }
+  } else {
+    store.setProject(null);
+  }
+}
+
 export function useImportDesktopSnapshot() {
   const queryClient = useQueryClient();
   return useMutation<DesktopSnapshotImportOutcome, Error, DesktopSnapshotImportVars>({
@@ -1193,7 +1325,7 @@ export function useImportDesktopSnapshot() {
 
       if (state.backend !== "online" || state.sessionApiReady === false) {
         await sleep(240);
-        const normalized = normalizeInputs(snapshotObj);
+        const offlineResult = applyOfflineSnapshot(state.inputs, snapshotObj, "replace");
         const session: Session = {
           ...createDemoSession(),
           id: `demo-snapshot-${Date.now().toString(36)}`,
@@ -1201,17 +1333,12 @@ export function useImportDesktopSnapshot() {
           name: vars.name?.trim() || "Masaüstü JSON İçe Aktarımı",
           status: "draft",
           revision: 1,
-          inputs: normalized as unknown as Record<string, unknown>,
+          inputs: offlineResult.inputs as unknown as Record<string, unknown>,
         };
         return {
           session,
           demo: true,
-          mapping: {
-            converted: Object.keys(snapshotObj).length,
-            skipped: [],
-            invalid_fields: [],
-            warnings: ["Çevrimdışı modda yerel oturum olarak açıldı; sunucu kaydı yapılmadı."],
-          },
+          mapping: offlineResult.mapping,
         };
       }
 
@@ -1230,27 +1357,7 @@ export function useImportDesktopSnapshot() {
       void queryClient.invalidateQueries({ queryKey: ["db-stats"] });
 
       if (vars.openAfterImport !== false) {
-        store.applySessionInputs(outcome.session.inputs);
-        store.setSessionMeta({
-          id: outcome.demo ? null : outcome.session.id,
-          name: outcome.session.name,
-          status: outcome.session.status,
-          revision: outcome.session.revision,
-        });
-        store.markSaved(outcome.session.revision);
-        store.setRevisionConflict(null);
-        if (!outcome.demo) {
-          queryClient.setQueryData(["session", outcome.session.id], outcome.session);
-          void hydrateSessionResults(outcome.session.id);
-        }
-        if (outcome.session.project_id) {
-          const matchedProject = queryClient
-            .getQueryData<Project[]>(["projects"])
-            ?.find((p) => p.id === outcome.session.project_id);
-          if (matchedProject) {
-            store.setProject(matchedProject);
-          }
-        }
+        activateImportedSession(queryClient, outcome);
       }
 
       const warnCount =

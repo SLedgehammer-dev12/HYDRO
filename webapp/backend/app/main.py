@@ -230,7 +230,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "If-Match",
                 "Idempotency-Key",
             ],
-            expose_headers=[REQUEST_ID_HEADER, SESSION_HEADER, "ETag", "X-Total-Count"],
+            expose_headers=[REQUEST_ID_HEADER, SESSION_HEADER, "ETag", "Location", "X-Total-Count"],
         )
 
     register_exception_handlers(app)

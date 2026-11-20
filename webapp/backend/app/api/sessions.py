@@ -502,6 +502,7 @@ def apply_snapshot(
         changes={"inputs": new_inputs},
         expected_revision=expected,
         replace_inputs=payload.mode == "replace",
+        commit=False,
     )
     audit.record(
         db,
@@ -513,6 +514,7 @@ def apply_snapshot(
         after={"mode": payload.mode, "mapping": mapping},
     )
     db.commit()
+    db.refresh(session)
     _etag(response, session.revision)
     session_payload = json_safe(session_service.serialize_session(session))
     return {

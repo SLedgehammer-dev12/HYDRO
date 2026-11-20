@@ -300,6 +300,7 @@ export function buildSnapshot(
       actual_pressure_change_bar: str(inputs.pressure.actual_pressure_change_bar),
       t_initial_c: str(inputs.pressure.t_initial_c),
       t_final_c: str(inputs.pressure.t_final_c),
+      derive_delta_t: inputs.pressure.derive_delta_t,
     },
     field: {
       ambient_temperature_c: str(inputs.field.ambient_temperature_c ?? inputs.air.ambient_temperature_c),

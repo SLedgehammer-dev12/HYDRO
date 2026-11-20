@@ -6,7 +6,7 @@ import { Button } from "../../components/ui/Button";
 import { CheckboxRow, FieldGrid, NumberField, SelectField, TextField } from "../../components/ui/Field";
 import { DecisionCard } from "../../components/ui/DecisionCard";
 import { InlineNotice, OfflineNotice } from "../../components/ui/State";
-import { api, apiErrorMessage } from "../../lib/api";
+import { api, apiErrorMessage, extractRevisionConflict } from "../../lib/api";
 import { useSaveTestResult, useSessionForms } from "../../hooks/queries";
 import { num, parseNumber } from "../../lib/format";
 import { useAppStore } from "../../store/useAppStore";
@@ -113,7 +113,11 @@ function SaveResultButton({
                 pushToast("warning", "Sonuç kaydedilemedi", "Sunucu bağlantısı veya oturum yok.");
               }
             },
-            onError: (error) => pushToast("error", "Kaydedilemedi", apiErrorMessage(error)),
+            onError: (error) => {
+              if (!extractRevisionConflict(error)) {
+                pushToast("error", "Kaydedilemedi", apiErrorMessage(error));
+              }
+            },
           },
         )
       }

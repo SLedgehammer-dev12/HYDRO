@@ -1,4 +1,8 @@
-import { ApiError } from "./api";
+import {
+  extractRevisionConflict,
+  type ExtractedRevisionConflict,
+  type ServerConflictDiffEntry,
+} from "./api";
 import { CHECK_DEFINITIONS, STEEL_MODEL_OPTIONS } from "./constants";
 import { num } from "./format";
 import { normalizeInputs } from "./normalize";
@@ -13,13 +17,10 @@ import type {
   TestType,
 } from "./types";
 
-export type ConflictSourceAction = "save_session" | "snapshot_upload" | "save_result";
+export { extractRevisionConflict };
+export type { ExtractedRevisionConflict, ServerConflictDiffEntry };
 
-export interface ServerConflictDiffEntry {
-  path: string;
-  incoming: unknown;
-  server: unknown;
-}
+export type ConflictSourceAction = "save_session" | "snapshot_upload" | "save_result";
 
 export interface SessionDiffItem {
   path: string;
@@ -36,6 +37,7 @@ export interface RevisionConflictState {
   localRevision: number;
   localName: string;
   localStatus: SessionStatus;
+  localProjectId: string | null;
   localInputs: AppInputs;
   serverSession: Session;
   serverDiff: ServerConflictDiffEntry[];
@@ -52,50 +54,8 @@ export interface RevisionConflictState {
   };
 }
 
-export interface ExtractedRevisionConflict {
-  serverSession: Session;
-  expectedRevision: number | null;
-  currentRevision: number;
-  serverDiff: ServerConflictDiffEntry[];
-}
-
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-export function extractRevisionConflict(error: unknown): ExtractedRevisionConflict | null {
-  if (!(error instanceof ApiError)) return null;
-  if (error.status !== 409 || error.code !== "revision_conflict") return null;
-
-  const rawCurrent = error.details.current;
-  if (!isPlainRecord(rawCurrent)) return null;
-  if (typeof rawCurrent.id !== "string" || typeof rawCurrent.revision !== "number" || !Number.isFinite(rawCurrent.revision)) {
-    return null;
-  }
-
-  const expectedRaw = error.details.expected_revision;
-  const expectedRevision =
-    typeof expectedRaw === "number" && Number.isFinite(expectedRaw) ? expectedRaw : null;
-
-  const serverDiff: ServerConflictDiffEntry[] = [];
-  if (Array.isArray(error.details.diff)) {
-    for (const item of error.details.diff) {
-      if (isPlainRecord(item) && typeof item.path === "string" && item.path.trim().length > 0) {
-        serverDiff.push({
-          path: item.path,
-          incoming: item.incoming,
-          server: item.server,
-        });
-      }
-    }
-  }
-
-  return {
-    serverSession: rawCurrent as unknown as Session,
-    expectedRevision,
-    currentRevision: rawCurrent.revision,
-    serverDiff,
-  };
 }
 
 const SECTION_GROUP_LABELS: Record<string, string> = {
@@ -285,9 +245,14 @@ export function formatDiffValue(path: string, value: unknown): string {
 function stripSegmentIds(items: unknown[]): unknown[] {
   return items.map((item) => {
     if (!isPlainRecord(item)) return item;
-    const copy = { ...item };
-    delete copy.id;
-    return copy;
+    return {
+      outside_diameter_mm: item.outside_diameter_mm ?? null,
+      wall_thickness_mm: item.wall_thickness_mm ?? null,
+      length_m: item.length_m ?? null,
+      nps_label: typeof item.nps_label === "string" ? item.nps_label : "",
+      schedule_label: typeof item.schedule_label === "string" ? item.schedule_label : "",
+      start_station_m: item.start_station_m ?? null,
+    };
   });
 }
 
@@ -347,8 +312,17 @@ function makeDiffItem(path: string, localValue: unknown, serverValue: unknown): 
   };
 }
 
+function normalizeRealProjectId(projectId: string | null | undefined): string | null {
+  return projectId && !projectId.startsWith("demo-") ? projectId : null;
+}
+
 export function computeSessionDiff(
-  local: { name: string; status: SessionStatus; inputs: AppInputs },
+  local: {
+    name: string;
+    status: SessionStatus;
+    projectId?: string | null;
+    inputs: AppInputs;
+  },
   serverSession: Session,
 ): SessionDiffItem[] {
   const diff: SessionDiffItem[] = [];
@@ -360,6 +334,13 @@ export function computeSessionDiff(
   }
   if (local.status !== serverSession.status) {
     diff.push(makeDiffItem("status", local.status, serverSession.status));
+  }
+  if (local.projectId !== undefined) {
+    const normLocalProject = normalizeRealProjectId(local.projectId);
+    const normServerProject = serverSession.project_id ?? null;
+    if (normLocalProject !== normServerProject) {
+      diff.push(makeDiffItem("project_id", normLocalProject, normServerProject));
+    }
   }
 
   for (const key of SCALAR_TOP_KEYS) {
@@ -402,12 +383,23 @@ function cloneInputs(inputs: AppInputs): AppInputs {
 }
 
 export function applyDiffResolutions(
-  local: { name: string; status: SessionStatus; inputs: AppInputs },
+  local: {
+    name: string;
+    status: SessionStatus;
+    projectId?: string | null;
+    inputs: AppInputs;
+  },
   serverSession: Session,
   choices: Record<string, "local" | "server">,
-): { name: string; status: SessionStatus; inputs: AppInputs } {
+): {
+  name: string;
+  status: SessionStatus;
+  projectId: string | null;
+  inputs: AppInputs;
+} {
   let nextName = serverSession.name;
   let nextStatus: SessionStatus = serverSession.status;
+  let nextProjectId: string | null = serverSession.project_id ?? null;
   const nextInputs = cloneInputs(normalizeInputs(serverSession.inputs));
   const localNormalized = cloneInputs(local.inputs);
 
@@ -420,6 +412,10 @@ export function applyDiffResolutions(
     }
     if (path === "status") {
       nextStatus = local.status;
+      continue;
+    }
+    if (path === "project_id") {
+      nextProjectId = normalizeRealProjectId(local.projectId);
       continue;
     }
     if (
@@ -472,6 +468,7 @@ export function applyDiffResolutions(
   return {
     name: nextName,
     status: nextStatus,
+    projectId: nextProjectId,
     inputs: nextInputs,
   };
 }

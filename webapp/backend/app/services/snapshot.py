@@ -173,6 +173,7 @@ def build_snapshot(inputs: dict[str, Any]) -> dict[str, Any]:
                     "t_final_c",
                 ),
             ),
+            "derive_delta_t": bool(pressure.get("derive_delta_t", False)),
         },
         "field": {
             **_string_map(field, NUMERIC_SECTIONS["field"]),
@@ -220,6 +221,9 @@ class _ApplyState:
     def number(self, raw: Any, field: str, *, required_key: bool = True) -> float | None:
         if raw is None or (isinstance(raw, str) and not raw.strip()):
             return None
+        if isinstance(raw, bool):
+            self.invalid_fields.append(field)
+            return None
         value = as_float(raw)
         if value is None:
             self.invalid_fields.append(field)
@@ -242,12 +246,29 @@ class _ApplyState:
     def boolean(self, raw: Any, field: str) -> bool | None:
         if raw is None:
             return None
-        self.converted += 1
         if isinstance(raw, bool):
+            self.converted += 1
             return raw
+        if isinstance(raw, (int, float)):
+            if raw in (0, 1):
+                self.converted += 1
+                return bool(raw)
+            self.invalid_fields.append(field)
+            return None
         if isinstance(raw, str):
-            return raw.strip().lower() in {"1", "true", "yes", "on", "evet"}
-        return bool(raw)
+            text = raw.strip().lower()
+            if not text:
+                return None
+            if text in {"1", "true", "yes", "on", "evet"}:
+                self.converted += 1
+                return True
+            if text in {"0", "false", "no", "off", "hayir", "hayır"}:
+                self.converted += 1
+                return False
+            self.invalid_fields.append(field)
+            return None
+        self.invalid_fields.append(field)
+        return None
 
 
 def _prune_none(value: Any) -> Any:
@@ -333,15 +354,17 @@ def apply_snapshot(
             converted_section = {}
             for key in ("size_option", "schedule_option"):
                 if key in raw_section:
-                    converted_section[key] = (
-                        state.text(raw_section.get(key), f"{section}.{key}") or ""
-                    )
+                    text_val = state.text(raw_section.get(key), f"{section}.{key}")
+                    if text_val is not None:
+                        converted_section[key] = text_val
             if converted_section:
                 patch[section] = converted_section
 
     for key in ("material_grade", "location_class", "pump_location"):
         if key in snapshot:
-            patch[key] = state.text(snapshot.get(key), key) or ""
+            text_val = state.text(snapshot.get(key), key)
+            if text_val is not None:
+                patch[key] = text_val
 
     active_tab = state.text(snapshot.get("active_tab"), "active_tab")
     if active_tab:
@@ -379,8 +402,9 @@ def apply_snapshot(
                 state.warnings.append(
                     "B kaynagi etiketi taninmadi; mod ve referans tablosundan turetildi."
                 )
+            else:
+                state.converted += 1
             modes_patch["pressure_b_source"] = mapped_source
-            state.converted += 1
 
         raw_model = raw_modes.get("steel_model")
         if raw_model is not None and str(raw_model).strip():
@@ -420,22 +444,29 @@ def apply_snapshot(
             if not isinstance(item, dict):
                 state.invalid_fields.append(f"geometry_segments[{index}]")
                 continue
-            od = state.number(
-                item.get("outside_diameter_mm"),
-                f"geometry_segments[{index}].outside_diameter_mm",
-            )
-            wt = state.number(
-                item.get("wall_thickness_mm"),
-                f"geometry_segments[{index}].wall_thickness_mm",
-            )
-            length = state.number(item.get("length_m"), f"geometry_segments[{index}].length_m")
-            if od is None or wt is None or length is None:
+            parsed_dims: dict[str, float] = {}
+            for dim_key in ("outside_diameter_mm", "wall_thickness_mm", "length_m"):
+                raw_dim = item.get(dim_key)
+                if (
+                    raw_dim is None
+                    or (isinstance(raw_dim, str) and not raw_dim.strip())
+                    or isinstance(raw_dim, bool)
+                ):
+                    state.invalid_fields.append(f"geometry_segments[{index}].{dim_key}")
+                    continue
+                dim_val = as_float(raw_dim)
+                if dim_val is None or not math.isfinite(dim_val):
+                    state.invalid_fields.append(f"geometry_segments[{index}].{dim_key}")
+                    continue
+                parsed_dims[dim_key] = dim_val
+            if len(parsed_dims) < 3:
                 continue
+            state.converted += 3
             segments.append(
                 {
-                    "outside_diameter_mm": od,
-                    "wall_thickness_mm": wt,
-                    "length_m": length,
+                    "outside_diameter_mm": parsed_dims["outside_diameter_mm"],
+                    "wall_thickness_mm": parsed_dims["wall_thickness_mm"],
+                    "length_m": parsed_dims["length_m"],
                     "nps_label": str(item.get("nps_label") or "-"),
                     "schedule_label": str(item.get("schedule_label") or "Elle giris"),
                 }
@@ -464,10 +495,15 @@ def apply_snapshot(
         if report_patch:
             patch["report"] = report_patch
             section_id = report_patch.get("section_id")
-            if section_id and not (
-                isinstance(patch.get("section_meta"), dict)
-                and patch["section_meta"].get("section_no")
-            ):
+            patch_sec_meta = patch.get("section_meta")
+            existing_sec_meta = inputs.get("section_meta") if mode != "replace" else None
+            has_patch_section_no = isinstance(patch_sec_meta, dict) and bool(
+                str(patch_sec_meta.get("section_no") or "").strip()
+            )
+            has_existing_section_no = isinstance(existing_sec_meta, dict) and bool(
+                str(existing_sec_meta.get("section_no") or "").strip()
+            )
+            if section_id and not has_patch_section_no and not has_existing_section_no:
                 patch.setdefault("section_meta", {})["section_no"] = section_id
 
     backend_option = snapshot.get("water_backend_option")
@@ -480,6 +516,23 @@ def apply_snapshot(
         else:
             patch["water_backend"] = resolved_backend_key
             state.converted += 1
+
+    # Sync canonical ambient_temperature_c between field and air inside patch
+    # before deep_merge so existing air values never override a new field update.
+    patch_air = patch.get("air")
+    patch_field = patch.get("field")
+    has_patch_air_amb = (
+        isinstance(patch_air, dict) and patch_air.get("ambient_temperature_c") is not None
+    )
+    has_patch_fld_amb = (
+        isinstance(patch_field, dict) and patch_field.get("ambient_temperature_c") is not None
+    )
+    if has_patch_fld_amb and not has_patch_air_amb:
+        assert isinstance(patch_field, dict)
+        patch.setdefault("air", {})["ambient_temperature_c"] = patch_field["ambient_temperature_c"]
+    elif has_patch_air_amb and not has_patch_fld_amb:
+        assert isinstance(patch_air, dict)
+        patch.setdefault("field", {})["ambient_temperature_c"] = patch_air["ambient_temperature_c"]
 
     for derived in DERIVED_FIELD_KEYS:
         raw_field = snapshot.get("field")

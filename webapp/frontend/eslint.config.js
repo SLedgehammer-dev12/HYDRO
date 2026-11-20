@@ -28,6 +28,7 @@ export default tseslint.config(
       "jsx-a11y/no-noninteractive-element-interactions": "error",
       "jsx-a11y/alt-text": "error",
       "jsx-a11y/anchor-is-valid": "error",
+      "jsx-a11y/no-noninteractive-tabindex": ["error", { roles: ["tabpanel", "region"] }],
       "@typescript-eslint/no-unused-vars": [
         "error",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },

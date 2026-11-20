@@ -130,6 +130,7 @@ describe("RevisionConflictModal & Desktop JSON Snapshot Import", () => {
       localRevision: 1,
       localName: "Sunucu Kesit rev.3",
       localStatus: "active",
+      localProjectId: "proj-1",
       localInputs: useAppStore.getState().inputs,
       serverSession: srvRev3,
       serverDiff: [],
@@ -239,5 +240,137 @@ describe("RevisionConflictModal & Desktop JSON Snapshot Import", () => {
 
     await user.click(screen.getByRole("button", { name: "Tamam / Oturuma geç" }));
     expect(onSessionImported).toHaveBeenCalledWith(importedSession);
+  });
+
+  it("handles snapshot_upload conflict strictly from serverDiff without leaking local edits", async () => {
+    const user = userEvent.setup();
+    const srvRev3 = makeServerSession(3, 14_000, 19);
+
+    // Unrelated local edits must NOT appear for snapshot_upload
+    useAppStore.getState().setRevisionConflict({
+      sessionId: "sess-409",
+      localRevision: 1,
+      localName: "Farkli Yerel",
+      localStatus: "active",
+      localProjectId: "proj-1",
+      localInputs: useAppStore.getState().inputs,
+      serverSession: srvRev3,
+      serverDiff: [{ path: "geometry.length_m", incoming: 21_000, server: 14_000 }],
+      sourceAction: "snapshot_upload",
+      detectedAt: "2026-11-20T08:20:00Z",
+      pendingSnapshot: { snapshot: { schema_version: 1, geometry: { length_m: "21000" } }, mode: "merge" },
+    });
+
+    const snapSpy = vi.spyOn(api, "snapshotUpload").mockResolvedValueOnce({
+      ...srvRev3,
+      revision: 4,
+      mapping: { converted: 1, skipped: [], invalid_fields: [], warnings: [] },
+    });
+    vi.spyOn(api, "results").mockResolvedValue({ items: [], total: 0, limit: 20, offset: 0 });
+
+    renderWithQuery(<RevisionConflictModal />);
+    expect(screen.getByText("Hat uzunluğu L (m)")).toBeInTheDocument();
+    expect(screen.queryByText("Hava testi su sıcaklığı (°C)")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Snapshot'ı rev\.3 üzerine uygula/ }));
+    await waitFor(() => expect(useAppStore.getState().revisionConflict).toBeNull());
+    expect(snapSpy).toHaveBeenCalledWith(
+      "sess-409",
+      { schema_version: 1, geometry: { length_m: "21000" } },
+      3,
+      "merge",
+    );
+  });
+
+  it("promotes save_result merge state cleanly when secondary saveResult hits 409", async () => {
+    const user = userEvent.setup();
+    const srvRev3 = makeServerSession(3, 14_000, 19);
+    const srvRev4 = makeServerSession(4, 16_000, 24);
+    srvRev4.name = "Sunucu Kesit rev.3";
+    const srvRev5 = makeServerSession(5, 16_000, 24);
+    srvRev5.name = "Sunucu Kesit rev.3";
+
+    useAppStore.getState().setRevisionConflict({
+      sessionId: "sess-409",
+      localRevision: 1,
+      localName: "Sunucu Kesit rev.3",
+      localStatus: "active",
+      localProjectId: "proj-1",
+      localInputs: useAppStore.getState().inputs,
+      serverSession: srvRev3,
+      serverDiff: [],
+      sourceAction: "save_result",
+      detectedAt: "2026-11-20T08:25:00Z",
+      pendingResult: { testType: "air", payload: { ok: true } },
+    });
+
+    vi.spyOn(api, "updateSession").mockResolvedValueOnce(srvRev4);
+    vi.spyOn(api, "results").mockResolvedValue({ items: [], total: 0, limit: 20, offset: 0 });
+    const saveResultSpy = vi
+      .spyOn(api, "saveResult")
+      .mockRejectedValueOnce(
+        new ApiError(409, "revision_conflict", "Çakışma", {
+          expected_revision: 4,
+          current_revision: 5,
+          current: srvRev5,
+          diff: [],
+        }),
+      )
+      .mockResolvedValueOnce({
+        id: "res-1",
+        test_type: "air",
+        decision: { status: "BASARILI", title: "Uygun", summary: "Tamam", rule: "NGTL" },
+        session_revision: 5,
+      });
+
+    renderWithQuery(<RevisionConflictModal />);
+    await user.click(screen.getByRole("button", { name: /Yerel değişiklikleri rev\.3 üzerine yaz/ }));
+
+    expect(
+      await screen.findByText(/Sunucuda daha yeni bir revizyon \(rev\.5\) tespit edildi/),
+    ).toBeInTheDocument();
+    expect(useAppStore.getState().revisionConflict?.localRevision).toBe(4);
+    expect(useAppStore.getState().revisionConflict?.serverSession.revision).toBe(5);
+
+    await user.click(screen.getByRole("button", { name: /Sonucu rev\.5 ile kaydet/ }));
+    await waitFor(() => expect(useAppStore.getState().revisionConflict).toBeNull());
+    expect(saveResultSpy).toHaveBeenCalledTimes(2);
+    expect(saveResultSpy.mock.calls[1][2]).toBe(5);
+  });
+
+  it("clears projectId when importing standalone desktop JSON without a project", async () => {
+    const user = userEvent.setup();
+    const standalone = makeServerSession(1, 3000, 15);
+    standalone.id = "sess-standalone";
+    standalone.project_id = null;
+    standalone.name = "Bağımsız Kesit";
+
+    vi.spyOn(api, "importSnapshot").mockResolvedValueOnce({
+      session: standalone,
+      mapping: { converted: 3, skipped: [], invalid_fields: [], warnings: [] },
+    });
+    vi.spyOn(api, "results").mockResolvedValue({ items: [], total: 0, limit: 20, offset: 0 });
+
+    renderWithQuery(
+      <ProjectImportModal
+        open
+        onClose={vi.fn()}
+        projects={[]}
+        selectedProjectId={null}
+      />,
+    );
+
+    await user.click(screen.getByRole("tab", { name: /Masaüstü JSON Snapshot/ }));
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const jsonFile = new File(
+      [JSON.stringify({ schema_version: 1, geometry: { length_m: "3000" } })],
+      "standalone.json",
+      { type: "application/json" },
+    );
+    await user.upload(fileInput, jsonFile);
+    await user.click(screen.getByRole("button", { name: "İçe Aktar" }));
+
+    await waitFor(() => expect(useAppStore.getState().sessionId).toBe("sess-standalone"));
+    expect(useAppStore.getState().projectId).toBeNull();
   });
 });

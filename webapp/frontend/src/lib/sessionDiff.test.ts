@@ -7,6 +7,7 @@ import {
   computeSessionDiff,
   extractRevisionConflict,
   formatDiffValue,
+  valuesEqual,
 } from "./sessionDiff";
 import type { Session } from "./types";
 
@@ -73,12 +74,19 @@ describe("sessionDiff helpers", () => {
     });
 
     const items = computeSessionDiff(
-      { name: "Kesit K-01 Revize", status: "active", inputs: localInputs },
+      {
+        name: "Kesit K-01 Revize",
+        status: "active",
+        projectId: "proj-local-2",
+        inputs: localInputs,
+      },
       serverSession,
     );
 
     const byPath = Object.fromEntries(items.map((item) => [item.path, item]));
     expect(byPath.name.localDisplay).toBe("Kesit K-01 Revize");
+    expect(byPath.project_id.localValue).toBe("proj-local-2");
+    expect(byPath.project_id.serverValue).toBe("proj-1");
     expect(byPath["geometry.length_m"].localDisplay).toBe("0");
     expect(byPath["geometry.length_m"].serverDisplay).toBe("—");
     expect(byPath["checks.air_content_limit"].localDisplay).toBe("Evet");
@@ -87,6 +95,56 @@ describe("sessionDiff helpers", () => {
     // Canonical ambient temperature deduplication: air.ambient_temperature_c is omitted
     expect(byPath["air.ambient_temperature_c"]).toBeUndefined();
     expect(byPath.segments).toBeUndefined();
+
+    // Normalized segment start_station_m: undefined vs null on server produces zero diff
+    serverInputs.segments = serverInputs.segments.map((seg) => ({
+      ...seg,
+      start_station_m: null,
+    }));
+    localInputs.segments = localInputs.segments.map((seg) => ({
+      ...seg,
+      start_station_m: undefined as unknown as number | null,
+    }));
+    const noSegDiff = computeSessionDiff(
+      { name: "Kesit K-01 Revize", status: "active", inputs: localInputs },
+      makeServerSession({ inputs: serverInputs as unknown as Record<string, unknown> }),
+    );
+    expect(noSegDiff.find((item) => item.path === "segments")).toBeUndefined();
+  });
+
+  it("distinguishes bool vs numeric 0/1, formats array sections, and resolves project_id", () => {
+    expect(valuesEqual(false, 0)).toBe(false);
+    expect(valuesEqual(true, 1)).toBe(false);
+    expect(valuesEqual(0, "")).toBe(false);
+    expect(valuesEqual(0, 0)).toBe(true);
+
+    const serverInputs = createDefaultInputs();
+    const localInputs = createDefaultInputs();
+    localInputs.profile_points = [{ station_m: 0, elevation_m: 100 }];
+    localInputs.equipment = [
+      { id: "eq-1", type: "valve", label: "Vana", station_m: 10, elevation_m: 100, status: "pass" },
+    ];
+    const serverSession = makeServerSession({
+      project_id: "proj-srv",
+      inputs: serverInputs as unknown as Record<string, unknown>,
+    });
+
+    const items = computeSessionDiff(
+      { name: "Kesit K-01", status: "active", projectId: null, inputs: localInputs },
+      serverSession,
+    );
+    const byPath = Object.fromEntries(items.map((item) => [item.path, item]));
+    expect(byPath.profile_points.localDisplay).toBe("1 kot noktası");
+    expect(byPath.equipment.localDisplay).toBe("1 ekipman");
+    expect(byPath.project_id.localValue).toBeNull();
+
+    const keepServerProject = applyDiffResolutions(
+      { name: "Kesit K-01", status: "active", projectId: null, inputs: localInputs },
+      serverSession,
+      { project_id: "server", profile_points: "local" },
+    );
+    expect(keepServerProject.projectId).toBe("proj-srv");
+    expect(keepServerProject.inputs.profile_points).toHaveLength(1);
   });
 
   it("applies selective per-row local/server choices and syncs ambient temperature", () => {

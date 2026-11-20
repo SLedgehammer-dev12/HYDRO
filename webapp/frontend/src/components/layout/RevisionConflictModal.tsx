@@ -2,16 +2,17 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Check, GitCompareArrows, RefreshCw } from "lucide-react";
 import { hydrateSessionResults } from "../../hooks/queries";
-import { api, apiErrorMessage } from "../../lib/api";
+import { api, apiErrorMessage, extractRevisionConflict } from "../../lib/api";
 import { dateTime, nowIso } from "../../lib/format";
-import { toApiInputs } from "../../lib/normalize";
+import { normalizeInputs, toApiInputs } from "../../lib/normalize";
 import {
   applyDiffResolutions,
   buildDiffFromServerEntries,
   computeSessionDiff,
-  extractRevisionConflict,
+  type RevisionConflictState,
   type SessionDiffItem,
 } from "../../lib/sessionDiff";
+import type { Project } from "../../lib/types";
 import { useAppStore } from "../../store/useAppStore";
 import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
@@ -23,9 +24,9 @@ export function RevisionConflictModal() {
   const setRevisionConflict = useAppStore((s) => s.setRevisionConflict);
   const applySessionInputs = useAppStore((s) => s.applySessionInputs);
   const setSessionMeta = useAppStore((s) => s.setSessionMeta);
+  const setProject = useAppStore((s) => s.setProject);
   const markSaved = useAppStore((s) => s.markSaved);
   const pushToast = useAppStore((s) => s.pushToast);
-  const projectId = useAppStore((s) => s.projectId);
 
   const queryClient = useQueryClient();
   const safeBtnRef = useRef<HTMLButtonElement>(null);
@@ -38,14 +39,13 @@ export function RevisionConflictModal() {
   const diffItems = useMemo<SessionDiffItem[]>(() => {
     if (!conflict) return [];
     if (conflict.sourceAction === "snapshot_upload") {
-      if (conflict.serverDiff.length > 0) {
-        return buildDiffFromServerEntries(conflict.serverDiff);
-      }
+      return buildDiffFromServerEntries(conflict.serverDiff);
     }
     const localDiff = computeSessionDiff(
       {
         name: conflict.localName,
         status: conflict.localStatus,
+        projectId: conflict.localProjectId,
         inputs: conflict.localInputs,
       },
       conflict.serverSession,
@@ -77,8 +77,11 @@ export function RevisionConflictModal() {
       }
       return nextChoices;
     });
-    const frame = requestAnimationFrame(() => safeBtnRef.current?.focus());
-    return () => cancelAnimationFrame(frame);
+    if (!sameSessionRefresh) {
+      const frame = requestAnimationFrame(() => safeBtnRef.current?.focus());
+      return () => cancelAnimationFrame(frame);
+    }
+    return undefined;
   }, [conflictKey, conflict, diffItems]);
 
   if (!conflict) return null;
@@ -90,6 +93,17 @@ export function RevisionConflictModal() {
   const serverChoiceCount = diffItems.length - localChoiceCount;
   const allServerSelected = diffItems.length > 0 && localChoiceCount === 0;
   const allLocalSelected = diffItems.length > 0 && serverChoiceCount === 0;
+
+  function syncProjectMeta(nextProjectId: string | null) {
+    if (!nextProjectId) {
+      setProject(null);
+      return;
+    }
+    const matched = queryClient
+      .getQueryData<Project[]>(["projects"])
+      ?.find((item) => item.id === nextProjectId);
+    setProject(matched ?? { id: nextProjectId, name: "" });
+  }
 
   function setAllChoices(target: "local" | "server") {
     const next: Record<string, "local" | "server"> = {};
@@ -113,6 +127,7 @@ export function RevisionConflictModal() {
       status: srv.status,
       revision: srv.revision,
     });
+    syncProjectMeta(srv.project_id);
     markSaved(srv.revision);
     setRevisionConflict(null);
     queryClient.setQueryData(["session", srv.id], srv);
@@ -129,16 +144,17 @@ export function RevisionConflictModal() {
   async function resolveWithServerRevision() {
     if (!conflict || busy) return;
     setBusy(true);
+    let activeConflict: RevisionConflictState = conflict;
 
     try {
-      const serverRev = conflict.serverSession.revision;
+      const serverRev = activeConflict.serverSession.revision;
 
-      if (conflict.sourceAction === "snapshot_upload" && conflict.pendingSnapshot) {
+      if (activeConflict.sourceAction === "snapshot_upload" && activeConflict.pendingSnapshot) {
         const updated = await api.snapshotUpload(
-          conflict.sessionId,
-          conflict.pendingSnapshot.snapshot,
+          activeConflict.sessionId,
+          activeConflict.pendingSnapshot.snapshot,
           serverRev,
-          conflict.pendingSnapshot.mode,
+          activeConflict.pendingSnapshot.mode,
         );
         applySessionInputs(updated.inputs);
         setSessionMeta({
@@ -147,11 +163,14 @@ export function RevisionConflictModal() {
           status: updated.status,
           revision: updated.revision,
         });
+        syncProjectMeta(updated.project_id);
         markSaved(updated.revision);
         setRevisionConflict(null);
         queryClient.setQueryData(["session", updated.id], updated);
+        void queryClient.invalidateQueries({ queryKey: ["results", updated.id] });
         void queryClient.invalidateQueries({ queryKey: ["sessions"] });
         void queryClient.invalidateQueries({ queryKey: ["project-scene"] });
+        void hydrateSessionResults(updated.id);
         pushToast(
           "success",
           "Snapshot güncellenen revizyon üzerine uygulandı",
@@ -161,64 +180,66 @@ export function RevisionConflictModal() {
       }
 
       if (
-        conflict.sourceAction === "save_result" &&
-        conflict.pendingResult &&
+        activeConflict.sourceAction === "save_result" &&
+        activeConflict.pendingResult &&
         diffItems.length === 0
       ) {
         const savedResult = await api.saveResult(
-          conflict.sessionId,
+          activeConflict.sessionId,
           {
-            test_type: conflict.pendingResult.testType,
-            payload: conflict.pendingResult.payload,
+            test_type: activeConflict.pendingResult.testType,
+            payload: activeConflict.pendingResult.payload,
           },
           serverRev,
         );
-        const srv = conflict.serverSession;
+        const srv = activeConflict.serverSession;
+        const effectiveRev = savedResult.session_revision || srv.revision;
         applySessionInputs(srv.inputs);
         setSessionMeta({
           id: srv.id,
           name: srv.name,
-          status: srv.status,
-          revision: savedResult.session_revision || srv.revision,
+          status: srv.status === "draft" ? "active" : srv.status,
+          revision: effectiveRev,
         });
-        markSaved(savedResult.session_revision || srv.revision);
+        syncProjectMeta(srv.project_id);
+        markSaved(effectiveRev);
         setRevisionConflict(null);
+        void queryClient.invalidateQueries({ queryKey: ["results", srv.id] });
         void queryClient.invalidateQueries({ queryKey: ["session-forms", srv.id] });
         void queryClient.invalidateQueries({ queryKey: ["sessions"] });
         void queryClient.invalidateQueries({ queryKey: ["session", srv.id] });
+        void hydrateSessionResults(srv.id);
         pushToast(
           "success",
           "Test sonucu güncel revizyona kaydedildi",
-          `${srv.name} · Revizyon ${savedResult.session_revision || srv.revision}`,
+          `${srv.name} · Revizyon ${effectiveRev}`,
         );
         return;
       }
 
       const merged = applyDiffResolutions(
         {
-          name: conflict.localName,
-          status: conflict.localStatus,
-          inputs: conflict.localInputs,
+          name: activeConflict.localName,
+          status: activeConflict.localStatus,
+          projectId: activeConflict.localProjectId,
+          inputs: activeConflict.localInputs,
         },
-        conflict.serverSession,
+        activeConflict.serverSession,
         choices,
       );
-      const realProjectId =
-        projectId && !projectId.startsWith("demo-")
-          ? projectId
-          : conflict.serverSession.project_id;
 
       const updated = await api.updateSession(
-        conflict.sessionId,
+        activeConflict.sessionId,
         {
           name: merged.name,
           status: merged.status,
-          project_id: realProjectId,
+          project_id: merged.projectId,
           inputs: toApiInputs(merged.inputs),
         },
         serverRev,
       );
 
+      const nextInputs = normalizeInputs(updated.inputs);
       applySessionInputs(updated.inputs);
       setSessionMeta({
         id: updated.id,
@@ -226,22 +247,41 @@ export function RevisionConflictModal() {
         status: updated.status,
         revision: updated.revision,
       });
+      syncProjectMeta(updated.project_id);
       markSaved(updated.revision);
       queryClient.setQueryData(["session", updated.id], updated);
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
       void queryClient.invalidateQueries({ queryKey: ["project-scene"] });
+      void queryClient.invalidateQueries({ queryKey: ["results", updated.id] });
 
-      if (conflict.sourceAction === "save_result" && conflict.pendingResult) {
+      // Promote activeConflict before any follow-up saveResult so a secondary failure never retains pre-merge state
+      activeConflict = {
+        ...activeConflict,
+        localRevision: updated.revision,
+        localName: updated.name,
+        localStatus: updated.status,
+        localProjectId: updated.project_id,
+        localInputs: nextInputs,
+        serverSession: updated,
+        serverDiff: [],
+      };
+
+      if (activeConflict.sourceAction === "save_result" && activeConflict.pendingResult) {
         if (allLocalSelected) {
           await api.saveResult(
             updated.id,
             {
-              test_type: conflict.pendingResult.testType,
-              payload: conflict.pendingResult.payload,
+              test_type: activeConflict.pendingResult.testType,
+              payload: activeConflict.pendingResult.payload,
             },
             updated.revision,
           );
+          if (updated.status === "draft") {
+            setSessionMeta({ status: "active" });
+          }
           void queryClient.invalidateQueries({ queryKey: ["session-forms", updated.id] });
+          void queryClient.invalidateQueries({ queryKey: ["session", updated.id] });
+          void hydrateSessionResults(updated.id);
           setRevisionConflict(null);
           pushToast(
             "success",
@@ -249,6 +289,7 @@ export function RevisionConflictModal() {
             `Revizyon ${updated.revision} · ${new Date().toLocaleTimeString("tr-TR")}`,
           );
         } else {
+          void hydrateSessionResults(updated.id);
           setRevisionConflict(null);
           pushToast(
             "warning",
@@ -259,6 +300,7 @@ export function RevisionConflictModal() {
         return;
       }
 
+      void hydrateSessionResults(updated.id);
       setRevisionConflict(null);
       pushToast(
         "success",
@@ -271,13 +313,16 @@ export function RevisionConflictModal() {
       const newer = extractRevisionConflict(error);
       if (newer) {
         setRevisionConflict({
-          ...conflict,
+          ...activeConflict,
           serverSession: newer.serverSession,
           serverDiff: newer.serverDiff,
           detectedAt: nowIso(),
           refreshWarning: `Sunucuda daha yeni bir revizyon (rev.${newer.currentRevision}) tespit edildi; fark tablosu güncellendi.`,
         });
         return;
+      }
+      if (activeConflict !== conflict) {
+        setRevisionConflict(activeConflict);
       }
       pushToast("error", "Çakışma çözülemedi", apiErrorMessage(error));
     } finally {
@@ -387,6 +432,7 @@ export function RevisionConflictModal() {
           </InlineNotice>
         ) : (
           <div
+            tabIndex={0}
             role="region"
             aria-labelledby={captionId}
             className="table-wrap table-sticky diff-table-wrap scroll-thin max-h-[340px] overflow-auto"

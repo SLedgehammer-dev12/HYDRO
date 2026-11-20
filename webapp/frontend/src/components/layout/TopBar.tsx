@@ -99,6 +99,7 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
     if (!item) return;
     if (backend !== "online" || item.id.startsWith("demo-") || sessionApiReady === false) {
       setSessionMeta({ name: item.name, revision: item.revision, status: item.status });
+      setRevisionConflict(null);
       pushToast(
         "info",
         "Yerel Test Bölümü görünümü",
