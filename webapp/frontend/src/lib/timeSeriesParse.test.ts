@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { formatTsShort, parseTimeSeriesPaste } from "./timeSeriesParse";
+import {
+  formatTsShort,
+  parseTimeSeriesPaste,
+  parseUtcDateTimeInputValue,
+  toUtcDateTimeInputValue,
+} from "./timeSeriesParse";
 
 describe("parseTimeSeriesPaste", () => {
   it("parses ISO timestamps, Turkish decimals, optional volume, notes and skips header row", () => {
@@ -44,7 +49,21 @@ describe("parseTimeSeriesPaste", () => {
     expect(formatTsShort(tr.records[0].timestamp)).toBe("14.11 08:30");
   });
 
-  it("returns explicit Turkish line error for malformed timestamp or missing column", () => {
+  it("parses comma CSV, negative temps, note length limit, and UTC datetime-local helpers", () => {
+    const longNote = "n".repeat(600);
+    const csvRes = parseTimeSeriesPaste(`2026-11-14T08:00Z,80.2,-2.5,12.3,${longNote}`);
+    expect(csvRes.error).toBeNull();
+    expect(csvRes.records[0].pressure_bar).toBe(80.2);
+    expect(csvRes.records[0].temperature_c).toBe(-2.5);
+    expect(csvRes.records[0].notes?.length).toBe(500);
+
+    const utcStr = toUtcDateTimeInputValue(new Date("2026-11-14T08:30:00Z"));
+    expect(utcStr).toBe("2026-11-14T08:30");
+    expect(parseUtcDateTimeInputValue(utcStr)).toBe("2026-11-14T08:30:00.000Z");
+    expect(parseUtcDateTimeInputValue("2026-02-31T08:30")).toBeNull();
+  });
+
+  it("returns explicit Turkish line error for malformed timestamp, invalid volume, or missing column", () => {
     const badTs = parseTimeSeriesPaste("xx:yy\t80\t15");
     expect(badTs.error).toContain("1. satırda zaman formatı tanınmadı");
 
@@ -53,5 +72,8 @@ describe("parseTimeSeriesPaste", () => {
 
     const badNum = parseTimeSeriesPaste("08:00\tabc\t15");
     expect(badNum.error).toContain("1. satırda basınç");
+
+    const badVol = parseTimeSeriesPaste("08:00\t80\t15\txyz");
+    expect(badVol.error).toContain("1. satırda hacim değeri geçersiz");
   });
 });

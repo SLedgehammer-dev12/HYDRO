@@ -78,17 +78,19 @@ class TimeSeriesRecord:
 
         volume_val = data.get("volume_m3")
         volume_m3 = None
-        if volume_val is not None and not isinstance(volume_val, bool):
+        if isinstance(volume_val, bool):
+            raise ValidationError("volume_m3 boolean olamaz.")
+        if isinstance(volume_val, (int, float)):
+            volume_m3 = _validate_finite("volume_m3", float(volume_val))
+        elif volume_val is not None:
             val_str = str(volume_val).strip()
             if val_str and val_str.lower() != "none":
                 try:
                     parsed_vol = float(val_str)
-                    if math.isfinite(parsed_vol):
-                        volume_m3 = parsed_vol
                 except ValueError:
-                    pass
-        elif isinstance(volume_val, bool):
-            raise ValidationError("volume_m3 boolean olamaz.")
+                    parsed_vol = None
+                if parsed_vol is not None:
+                    volume_m3 = _validate_finite("volume_m3", parsed_vol)
 
         raw_p = data.get("pressure_bar", 0.0)
         raw_t = data.get("temperature_c", 0.0)

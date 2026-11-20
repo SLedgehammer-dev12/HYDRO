@@ -198,6 +198,13 @@ class _TimeSeriesRecordBase(StrictModel):
     volume_m3: float | None = None
     notes: str = Field(default="", max_length=500)
 
+    @field_validator("pressure_bar", "temperature_c", "volume_m3", mode="before")
+    @classmethod
+    def _reject_bool_numbers(cls, value: Any) -> Any:
+        if isinstance(value, bool):
+            raise ValueError("Sayisal alan boolean olamaz.")
+        return value
+
     @field_validator("pressure_bar", "temperature_c", "volume_m3")
     @classmethod
     def _validate_finite_numbers(cls, value: float | None) -> float | None:

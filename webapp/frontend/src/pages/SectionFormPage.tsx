@@ -79,6 +79,7 @@ export function SectionFormPage() {
   const sessionName = useAppStore((state) => state.sessionName);
   const projectName = useAppStore((state) => state.projectName);
   const backend = useAppStore((state) => state.backend);
+  const isDemoOrOffline = backend !== "online" || !sessionId || sessionId.startsWith("demo-");
   const activeFormCode = useAppStore((state) => state.activeFormCode);
   const openForm = useAppStore((state) => state.openForm);
   const setTab = useAppStore((state) => state.setTab);
@@ -167,17 +168,17 @@ export function SectionFormPage() {
       }
       if (e.altKey && e.key === "ArrowLeft") {
         e.preventDefault();
-        if (dirty) setPendingNavCode(prevSpec.code);
+        if (dirty && !isDemoOrOffline) setPendingNavCode(prevSpec.code);
         else openForm(prevSpec.code);
       } else if (e.altKey && e.key === "ArrowRight") {
         e.preventDefault();
-        if (dirty) setPendingNavCode(nextSpec.code);
+        if (dirty && !isDemoOrOffline) setPendingNavCode(nextSpec.code);
         else openForm(nextSpec.code);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openForm, prevSpec.code, nextSpec.code, dirty]);
+  }, [openForm, prevSpec.code, nextSpec.code, dirty, isDemoOrOffline]);
 
   const issueForms = useMemo(
     () => (payload?.forms ?? []).filter((f) => f.form_code !== spec.code && (f.status === "failed" || f.status === "warning")),
@@ -196,7 +197,6 @@ export function SectionFormPage() {
     cp.source_forms.includes(spec.code),
   );
   const stMeta = statusMeta(formRecord?.status ?? "empty");
-  const isDemoOrOffline = backend !== "online" || !sessionId || sessionId.startsWith("demo-");
 
   function setHeaderField(key: string, value: unknown) {
     setDraftData((prev) => ({
@@ -512,6 +512,7 @@ export function SectionFormPage() {
               defaultTab="timeseries"
               allowedTabs={["timeseries"]}
               formContext={spec.code === "leak_stabilization" ? "leak_stabilization" : "pressure_test"}
+              formDirty={dirty}
             />
           ) : (
             <OperationsPanel defaultTab="discharge" allowedTabs={["depressurize", "discharge"]} />

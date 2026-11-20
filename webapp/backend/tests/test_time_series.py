@@ -164,3 +164,115 @@ def test_sync_form_018_and_021_bidirectional_and_reports(client):
     xlsx_res = client.get(f"/api/sessions/{sid}/export?format=xlsx")
     assert xlsx_res.status_code == 200
     assert xlsx_res.content[:2] == b"PK"
+
+
+def test_bool_rejection_revision_bump_pt_vs_022_match_and_error_paths(client):
+    proj = client.post("/api/projects", json={"name": "TS Audit Project", "code": "PRJ-AUD"}).json()
+    session = create_session(client, name="K-AUD", project_id=proj["id"], inputs=full_inputs())
+    sid = session["id"]
+    rev_initial = session["revision"]
+
+    # Reject JSON boolean values on single & batch creation
+    bad_bool = client.post(
+        f"/api/sessions/{sid}/time-series",
+        json={"pressure_bar": True, "temperature_c": 15.0},
+    )
+    assert bad_bool.status_code == 422
+
+    # Empty to_form returns 422
+    empty_sync = client.post(
+        f"/api/sessions/{sid}/time-series/sync-form",
+        json={"form_code": "pressure_test", "direction": "to_form"},
+    )
+    assert empty_sync.status_code == 422
+
+    # Over-16 char source in batch returns 422
+    long_source = client.post(
+        f"/api/sessions/{sid}/time-series/batch",
+        json={"records": _hourly_records(2), "source": "x" * 20},
+    )
+    assert long_source.status_code == 422
+
+    # Insert 25 hourly cooling records with Pa = Pilk - Pson = +0.24 bar (85.00 -> 84.76)
+    res = client.post(
+        f"/api/sessions/{sid}/time-series/batch",
+        json={"records": _hourly_records(24, p0=85.0, t0=16.0), "mode": "replace"},
+    )
+    assert res.status_code == 201
+
+    # Also save Form 022 matching Pa = +0.24 bar and push time_series -> Form 021
+    client.put(
+        f"/api/sessions/{sid}/forms/pressure_acceptance",
+        json={
+            "extracted_data": {
+                "pressure_acceptance": {
+                    "pa_bar": 0.24,
+                    "delta_t_c": -0.25,
+                    "pt_bar": 0.2,
+                }
+            }
+        },
+    )
+    rev_before_sync = client.get(f"/api/sessions/{sid}").json()["revision"]
+    pushed = client.post(
+        f"/api/sessions/{sid}/time-series/sync-form",
+        json={"form_code": "pressure_test", "direction": "to_form"},
+    )
+    assert pushed.status_code == 200, pushed.text
+    pushed_body = pushed.json()
+    assert pushed_body["skipped_rows"] == 0
+    assert pushed_body["session"]["revision"] == rev_before_sync + 1
+    assert pushed_body["session"]["revision"] > rev_initial
+
+    # Form 021 pt_vs_022 cross-check must PASS (Pilk - Pson = +0.24 matches Form 022 PA = +0.24)
+    forms = client.get(f"/api/sessions/{sid}/forms").json()
+    pt_form = next(f for f in forms["forms"] if f["form_code"] == "pressure_test")
+    pt_findings = pt_form.get("findings") or pt_form["extracted_data"]["findings"]
+    pt_vs_022 = next(f for f in pt_findings if f["code"] == "pt_vs_022")
+    assert pt_vs_022["status"] == "passed"
+
+    # Editing time_str with timestamp=None (as MonitoringFormEditor does) recomputes without stale ISO override
+    edited_rows = list(pt_form["extracted_data"]["rows"])
+    edited_rows[-1] = {**edited_rows[-1], "time_str": "06:00", "timestamp": None}
+    upd_after_edit = client.put(
+        f"/api/sessions/{sid}/forms/pressure_test",
+        json={"extracted_data": {**pt_form["extracted_data"], "rows": edited_rows}},
+    )
+    assert upd_after_edit.status_code == 200
+    assert upd_after_edit.json()["form"]["extracted_data"]["time_log"]["last_time"] == "06:00"
+
+    # Build context for PDF/XLSX includes live Section 12 decision + |dT_4h|
+    from app import db as app_db
+    from app.models import HydroSession
+    from app.services import reports as report_service
+    from app.services import sessions as session_service
+
+    with app_db.session_scope() as db_sess:
+        orm_sess = db_sess.get(HydroSession, sid)
+        assert orm_sess is not None
+        ts_rows = session_service.get_ordered_time_series(db_sess, orm_sess)
+        ctx = report_service.build_context(orm_sess, [], time_series_rows=ts_rows)
+        assert ctx["test_results"]["Termal Denge Karari (12)"] == "BASARILI"
+        assert "Son 4s Sicaklik Farki |dT_4h| (°C)" in ctx["test_results"]
+
+    # Over-300 rows -> to_form reports skipped_rows truncation cleanly
+    many_records = [
+        {
+            "timestamp": f"2026-11-{14 + (i // 288):02d}T{(i * 5 // 60) % 24:02d}:{(i * 5) % 60:02d}:00Z",
+            "pressure_bar": 80.0,
+            "temperature_c": 15.0,
+        }
+        for i in range(305)
+    ]
+    b305 = client.post(
+        f"/api/sessions/{sid}/time-series/batch",
+        json={"records": many_records, "mode": "replace"},
+    )
+    assert b305.status_code == 201
+    pushed305 = client.post(
+        f"/api/sessions/{sid}/time-series/sync-form",
+        json={"form_code": "leak_stabilization", "direction": "to_form"},
+    )
+    assert pushed305.status_code == 200
+    assert pushed305.json()["synced_count"] == 300
+    assert pushed305.json()["skipped_rows"] == 5

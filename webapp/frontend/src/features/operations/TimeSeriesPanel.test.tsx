@@ -3,9 +3,15 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useSessionForms } from "../../hooks/queries";
 import { api } from "../../lib/api";
 import { createDefaultInputs } from "../../lib/mock";
-import type { TimeSeriesRecordItem, TimeSeriesSummary } from "../../lib/types";
+import type {
+  SectionFormRecord,
+  SessionFormsResponse,
+  TimeSeriesRecordItem,
+  TimeSeriesSummary,
+} from "../../lib/types";
 import { useAppStore } from "../../store/useAppStore";
 import { OperationsPanel } from "./OperationsPanel";
 
@@ -91,6 +97,57 @@ const SAMPLE_ITEMS: TimeSeriesRecordItem[] = [
   },
 ];
 
+function makeFormsPayload(formStatus: SectionFormRecord["status"]): SessionFormsResponse {
+  return {
+    session_id: "sess-1",
+    project_id: "proj-1",
+    section_no: "K-01",
+    session_name: "K-01",
+    merged_header: {},
+    calculations: {},
+    summary: {
+      required_total: 11,
+      filled_required: formStatus === "empty" ? 0 : 1,
+      missing_required: formStatus === "empty" ? 11 : 10,
+      missing_titles: [],
+      supplementary_filled: 0,
+      failed_forms: [],
+      warning_forms: [],
+      passed_forms_count: formStatus === "passed" ? 1 : 0,
+      warning_forms_count: 0,
+      complete: false,
+    },
+    forms: [
+      {
+        id: "f-018",
+        form_code: "leak_stabilization",
+        botas_code: "BOT-FRM-İNB-001-018",
+        form_title: "Dengeleme İçin Kaçak Test Raporu",
+        required: true,
+        order: 4,
+        status: formStatus,
+        analysis_id: null,
+        source_filename: "",
+        pages: [1],
+        form_date: "2026-11-14",
+        extracted_data: { rows: [] },
+        warnings: [],
+        revision: formStatus === "empty" ? 1 : 2,
+        filled_at: null,
+        updated_at: null,
+      },
+    ],
+    missing_required_forms: [],
+    checkpoints: [],
+  };
+}
+
+function SessionFormsProbe() {
+  const query = useSessionForms("sess-1");
+  const status = query.data?.forms[0]?.status ?? "loading";
+  return <div data-testid="forms-status-probe">{status}</div>;
+}
+
 describe("TimeSeriesPanel and OperationsPanel", () => {
   beforeEach(() => {
     useAppStore.setState({
@@ -107,7 +164,7 @@ describe("TimeSeriesPanel and OperationsPanel", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders Section 12 & 15 summary, supports arrow-key tabs, and validates/adds a reading", async () => {
+  it("renders Section 12 & 15 summary, enforces strict UTC add timestamp, supports arrow-key tabs", async () => {
     const user = userEvent.setup();
     vi.spyOn(api, "timeSeries").mockResolvedValue({
       items: SAMPLE_ITEMS,
@@ -146,10 +203,18 @@ describe("TimeSeriesPanel and OperationsPanel", () => {
     expect(screen.getByText("Basınç gerekli.")).toBeInTheDocument();
     expect(addSpy).not.toHaveBeenCalled();
 
+    fireEvent.change(screen.getByLabelText(/Zaman \(UTC\)/), {
+      target: { value: "2026-11-15T09:00" },
+    });
     fireEvent.change(screen.getByLabelText(/Basınç \(bar\)/), { target: { value: "84,7" } });
     fireEvent.change(screen.getByLabelText(/Sıcaklık \(°C\)/), { target: { value: "15,25" } });
     await user.click(submitBtn);
-    await waitFor(() => expect(addSpy).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(addSpy).toHaveBeenCalledWith(
+        "sess-1",
+        expect.objectContaining({ timestamp: "2026-11-15T09:00:00.000Z" }),
+      ),
+    );
 
     const firstTab = screen.getByRole("tab", { name: /Termal & 24s/ });
     firstTab.focus();
@@ -158,7 +223,7 @@ describe("TimeSeriesPanel and OperationsPanel", () => {
     expect(secondTab).toHaveAttribute("aria-selected", "true");
   });
 
-  it("imports bulk paste rows, applies Tilk/Tson/Pa to pressure store, and syncs Form 018", async () => {
+  it("imports bulk paste rows, invalidates session-forms cache on sync, and warns on dirty form", async () => {
     const user = userEvent.setup();
     vi.spyOn(api, "timeSeries").mockResolvedValue({
       items: SAMPLE_ITEMS,
@@ -167,6 +232,9 @@ describe("TimeSeriesPanel and OperationsPanel", () => {
       offset: 0,
     });
     vi.spyOn(api, "timeSeriesSummary").mockResolvedValue(makeSummary());
+    vi.spyOn(api, "sessionForms")
+      .mockResolvedValueOnce(makeFormsPayload("empty"))
+      .mockResolvedValueOnce(makeFormsPayload("passed"));
     const batchSpy = vi.spyOn(api, "batchTimeSeries").mockResolvedValue({
       inserted: 1,
       total: 1,
@@ -174,15 +242,21 @@ describe("TimeSeriesPanel and OperationsPanel", () => {
       summary: makeSummary(),
     });
     const syncSpy = vi.spyOn(api, "syncTimeSeriesForm").mockResolvedValue({
-      direction: "from_form",
+      direction: "to_form",
       form_code: "leak_stabilization",
-      synced_count: 25,
+      synced_count: 2,
       skipped_rows: 0,
       summary: makeSummary(),
     });
 
-    renderWithQuery(<OperationsPanel />);
+    renderWithQuery(
+      <>
+        <SessionFormsProbe />
+        <OperationsPanel formDirty />
+      </>,
+    );
     await screen.findByText(/Termal Denge \(Bölüm 12\)/);
+    await waitFor(() => expect(screen.getByTestId("forms-status-probe")).toHaveTextContent("empty"));
 
     await user.click(screen.getByRole("button", { name: /Toplu yapıştır/ }));
     fireEvent.change(screen.getByLabelText(/Toplu okuma satırları/), {
@@ -207,12 +281,48 @@ describe("TimeSeriesPanel and OperationsPanel", () => {
     expect(pr.actual_pressure_change_bar).toBe(0.24);
     expect(pr.derive_delta_t).toBe(true);
 
-    await user.click(screen.getByRole("button", { name: /Form 018'den çek/ }));
+    // Writing to form while formDirty prompts confirmation before calling API
+    await user.click(screen.getByRole("button", { name: /Form 018'e yaz/ }));
+    expect(syncSpy).not.toHaveBeenCalled();
+    expect(screen.getByText(/Formda kaydedilmemiş değişiklikler var/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Evet, form satırlarını güncelle/ }));
     await waitFor(() =>
       expect(syncSpy).toHaveBeenCalledWith(
         "sess-1",
-        expect.objectContaining({ form_code: "leak_stabilization", direction: "from_form" }),
+        expect.objectContaining({ form_code: "leak_stabilization", direction: "to_form" }),
       ),
     );
+    // Proves ["session-forms", "sess-1"] cache was invalidated & refetched
+    await waitFor(() =>
+      expect(screen.getByTestId("forms-status-probe")).toHaveTextContent("passed"),
+    );
+  });
+
+  it("evaluates ad-hoc records upon offline-to-online recovery and supports clear-all flow", async () => {
+    const user = userEvent.setup();
+    useAppStore.setState({ backend: "demo", sessionId: null });
+    const thermalSpy = vi.spyOn(api, "thermalBalance").mockResolvedValue(makeSummary());
+
+    const view = renderWithQuery(<OperationsPanel />);
+    fireEvent.change(screen.getByLabelText(/Basınç \(bar\)/), { target: { value: "85" } });
+    fireEvent.change(screen.getByLabelText(/Sıcaklık \(°C\)/), { target: { value: "15" } });
+    await user.click(screen.getByRole("button", { name: /Okuma ekle/i }));
+    expect(thermalSpy).not.toHaveBeenCalled();
+
+    // Recover online connectivity -> ad-hoc evaluation triggers automatically
+    useAppStore.setState({ backend: "online" });
+    view.rerender(
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <OperationsPanel />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(thermalSpy).toHaveBeenCalledTimes(1));
+
+    // Inline two-step clear confirmation
+    await user.click(screen.getByRole("button", { name: /Tümünü temizle/ }));
+    await user.click(screen.getByRole("button", { name: /Tümünü silmeyi onayla/ }));
+    expect(screen.getByText("Yerel okumalar temizlendi.")).toBeInTheDocument();
   });
 });

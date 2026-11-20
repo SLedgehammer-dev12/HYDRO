@@ -213,11 +213,16 @@ def build_context(
         from .sessions import time_series_summary
 
         ts_summary = time_series_summary(ts_row_list)
+        tb_dec = ts_summary.get("decision") or {}
         rec_dec = ts_summary.get("recording_decision") or {}
         test_results["Zaman Serisi Kayit Sayisi"] = str(ts_summary.get("record_count", 0))
         test_results["Zaman Serisi Sure (sa)"] = (
             fmt_number(as_float(ts_summary.get("duration_hours")), 2) or "-"
         )
+        test_results["Termal Denge Karari (12)"] = str(tb_dec.get("status", "BEKLIYOR"))
+        dt4 = as_float(ts_summary.get("temp_diff_c"))
+        if dt4 is not None:
+            test_results["Son 4s Sicaklik Farki |dT_4h| (°C)"] = fmt_number(dt4, 3) or "-"
         pa_ts = as_float(ts_summary.get("pressure_change_pa_bar"))
         if pa_ts is not None:
             test_results["Zaman Serisi Basinc Pa (bar)"] = (

@@ -416,10 +416,12 @@ export function OperationsPanel({
   defaultTab = "timeseries",
   allowedTabs,
   formContext,
+  formDirty = false,
 }: {
   defaultTab?: OpTab;
   allowedTabs?: OpTab[];
   formContext?: "leak_stabilization" | "pressure_test";
+  formDirty?: boolean;
 } = {}) {
   const backend = useAppStore((state) => state.backend);
   const online = backend === "online";
@@ -494,7 +496,9 @@ export function OperationsPanel({
           id={`${tabsId}-panel-${tab}`}
           aria-labelledby={`${tabsId}-tab-${tab}`}
         >
-          {tab === "timeseries" ? <TimeSeriesPanel online={online} formContext={formContext} /> : null}
+          {tab === "timeseries" ? (
+            <TimeSeriesPanel online={online} formContext={formContext} formDirty={formDirty} />
+          ) : null}
           {tab === "ramp" ? <RampSection online={online} /> : null}
           {tab === "hold" ? <HoldSection online={online} /> : null}
           {tab === "depressurize" ? <DepressurizeSection online={online} /> : null}

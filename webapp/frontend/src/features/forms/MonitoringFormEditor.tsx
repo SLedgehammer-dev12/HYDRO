@@ -310,24 +310,26 @@ export function MonitoringFormEditor({
         />
 
         <div
+          tabIndex={0}
           role="region"
           aria-label="Saatlik Basınç ve Sıcaklık İzleme Tablosu"
           onPaste={onPasteMonitoring}
           className="table-wrap table-sticky max-h-[360px] overflow-auto scroll-thin"
         >
           <table className="data">
+            <caption className="sr-only">Saatlik Basınç ve Sıcaklık İzleme Tablosu</caption>
             <thead>
               <tr>
-                <th className="sticky-col">Zaman</th>
-                <th className="num">Basınç (Bar)</th>
-                <th className="num">Çevre (°C)</th>
-                <th className="num">Toprak 1 (°C)</th>
-                <th className="num">Boru 1 (°C)</th>
-                <th className="num">Toprak 2 (°C)</th>
-                <th className="num">Boru 2 (°C)</th>
-                <th className="num">Ort. Toprak</th>
-                <th className="num">Ort. Boru</th>
-                <th className="num">Sil</th>
+                <th scope="col" className="sticky-col">Zaman</th>
+                <th scope="col" className="num">Basınç (Bar)</th>
+                <th scope="col" className="num">Çevre (°C)</th>
+                <th scope="col" className="num">Toprak 1 (°C)</th>
+                <th scope="col" className="num">Boru 1 (°C)</th>
+                <th scope="col" className="num">Toprak 2 (°C)</th>
+                <th scope="col" className="num">Boru 2 (°C)</th>
+                <th scope="col" className="num">Ort. Toprak</th>
+                <th scope="col" className="num">Ort. Boru</th>
+                <th scope="col" className="num">Sil</th>
               </tr>
             </thead>
             <tbody>
@@ -344,7 +346,7 @@ export function MonitoringFormEditor({
                     <td className="sticky-col">
                       <CellInput
                         value={strVal(row, "time_str")}
-                        onChange={(v) => updateRow("rows", idx, { time_str: v })}
+                        onChange={(v) => updateRow("rows", idx, { time_str: v, timestamp: null })}
                         ariaLabel={`Saat ${idx + 1}`}
                         align="left"
                         className="w-16"

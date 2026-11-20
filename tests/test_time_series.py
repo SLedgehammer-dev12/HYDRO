@@ -437,7 +437,57 @@ class TimeSeriesEvaluationTests(unittest.TestCase):
                 temperature_c=15.0,
             )
         with self.assertRaises(ValidationError):
+            TimeSeriesRecord.from_dict(
+                {
+                    "timestamp": "2026-11-14T00:00:00Z",
+                    "pressure_bar": 80.0,
+                    "temperature_c": 15.0,
+                    "volume_m3": float("nan"),
+                }
+            )
+        with self.assertRaises(ValidationError):
             TimeSeriesStore().evaluate(min_hours=0.0)
+
+    def test_empty_previous_4h_window_and_exact_2h_gap_boundary(self) -> None:
+        t0 = datetime(2026, 11, 14, 0, 0, tzinfo=timezone.utc)
+        # Duration >24h, only [0h] and [22h, 24h] -> [16h, 20h) previous window empty
+        ev_missing_prev = evaluate_time_series(
+            [
+                TimeSeriesRecord(timestamp=t0, pressure_bar=80.0, temperature_c=15.0),
+                TimeSeriesRecord(
+                    timestamp=t0 + timedelta(hours=22), pressure_bar=80.0, temperature_c=15.0
+                ),
+                TimeSeriesRecord(
+                    timestamp=t0 + timedelta(hours=24), pressure_bar=80.0, temperature_c=15.0
+                ),
+            ]
+        )
+        self.assertTrue(ev_missing_prev.thermal_duration_ok)
+        self.assertIsNone(ev_missing_prev.previous_4h_avg_c)
+        self.assertIsNone(ev_missing_prev.thermal_temp_diff_c)
+        self.assertFalse(ev_missing_prev.thermal_balanced)
+
+        # Exact 2.0h step passes Section 15.1 interval check; 2.05h step fails
+        exact_2h = [
+            TimeSeriesRecord(
+                timestamp=t0 + timedelta(hours=h), pressure_bar=80.0, temperature_c=15.0
+            )
+            for h in range(0, 25, 2)
+        ]
+        ev_2h = evaluate_time_series(exact_2h)
+        self.assertTrue(ev_2h.recording_interval_ok)
+        self.assertTrue(ev_2h.recording_passed)
+
+        over_2h = exact_2h[:-1] + [
+            TimeSeriesRecord(
+                timestamp=t0 + timedelta(hours=24, minutes=3),
+                pressure_bar=80.0,
+                temperature_c=15.0,
+            )
+        ]
+        ev_over = evaluate_time_series(over_2h)
+        self.assertFalse(ev_over.recording_interval_ok)
+        self.assertFalse(ev_over.recording_passed)
 
 
 if __name__ == "__main__":

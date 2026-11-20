@@ -1,4 +1,4 @@
-import { useId, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   Activity,
   ArrowDownToLine,
@@ -28,7 +28,8 @@ import { num, parseNumber, round } from "../../lib/format";
 import {
   formatTsShort,
   parseTimeSeriesPaste,
-  toLocalDateTimeInputValue,
+  parseUtcDateTimeInputValue,
+  toUtcDateTimeInputValue,
 } from "../../lib/timeSeriesParse";
 import type {
   ThermalBalanceResponse,
@@ -42,6 +43,7 @@ import { SaveResultButton } from "./SaveResultButton";
 export interface TimeSeriesPanelProps {
   online: boolean;
   formContext?: "leak_stabilization" | "pressure_test";
+  formDirty?: boolean;
 }
 
 interface FieldErrors {
@@ -53,8 +55,7 @@ interface FieldErrors {
 
 function validateTimestampInput(raw: string): string | undefined {
   if (!raw.trim()) return "Zaman damgası gerekli.";
-  const parsed = new Date(raw);
-  if (Number.isNaN(parsed.getTime())) return "Geçerli bir tarih ve saat girin.";
+  if (parseUtcDateTimeInputValue(raw) === null) return "Geçerli bir tarih ve saat girin (UTC).";
   return undefined;
 }
 
@@ -74,7 +75,7 @@ function validateFiniteInput(
   return { value: parsed };
 }
 
-export function TimeSeriesPanel({ online, formContext }: TimeSeriesPanelProps) {
+export function TimeSeriesPanel({ online, formContext, formDirty = false }: TimeSeriesPanelProps) {
   const uid = useId();
   const addHeadingId = `${uid}-add-heading`;
   const tsId = `${uid}-ts`;
@@ -98,6 +99,7 @@ export function TimeSeriesPanel({ online, formContext }: TimeSeriesPanelProps) {
 
   const sessionId = useAppStore((state) => state.sessionId);
   const sessionApiReady = useAppStore((state) => state.sessionApiReady);
+  const sectionTestDate = useAppStore((state) => state.inputs.section_meta?.test_date);
   const patchInputs = useAppStore((state) => state.patchInputs);
   const pushToast = useAppStore((state) => state.pushToast);
 
@@ -109,12 +111,15 @@ export function TimeSeriesPanel({ online, formContext }: TimeSeriesPanelProps) {
   const deleteMutation = useDeleteTimeSeries(sessionId);
   const clearMutation = useClearTimeSeries(sessionId);
   const syncFormMutation = useSyncTimeSeriesForm(sessionId);
-  const thermalMutation = useThermalBalance();
+  const {
+    mutate: mutateThermal,
+    reset: resetThermal,
+  } = useThermalBalance();
 
   const [localRecords, setLocalRecords] = useState<TimeSeriesRecordItem[]>([]);
   const [adHocSummary, setAdHocSummary] = useState<ThermalBalanceResponse | null>(null);
 
-  const [timestampInput, setTimestampInput] = useState<string>(() => toLocalDateTimeInputValue());
+  const [timestampInput, setTimestampInput] = useState<string>(() => toUtcDateTimeInputValue());
   const [pressureInput, setPressureInput] = useState<string>("");
   const [tempInput, setTempInput] = useState<string>("");
   const [volumeInput, setVolumeInput] = useState<string>("");
@@ -127,6 +132,49 @@ export function TimeSeriesPanel({ online, formContext }: TimeSeriesPanelProps) {
   const [pasteMode, setPasteMode] = useState<"append" | "replace">("append");
   const [pasteError, setPasteError] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState<boolean>(false);
+  const [pendingOverwriteForm, setPendingOverwriteForm] = useState<
+    "leak_stabilization" | "pressure_test" | null
+  >(null);
+
+  const lastEvaluatedKeyRef = useRef<string>("");
+
+  useEffect(() => {
+    setConfirmClear(false);
+    setPendingOverwriteForm(null);
+    setFieldErrors({});
+    setFormStatus("");
+    setPasteError(null);
+    setShowPaste(false);
+    setPasteText("");
+    setLocalRecords([]);
+    setAdHocSummary(null);
+    setTimestampInput(toUtcDateTimeInputValue());
+    lastEvaluatedKeyRef.current = "";
+    resetThermal();
+  }, [sessionId, resetThermal]);
+
+  useEffect(() => {
+    if (persistedMode || !online || localRecords.length === 0) {
+      lastEvaluatedKeyRef.current = "";
+      return;
+    }
+    const key = JSON.stringify(
+      localRecords.map((r) => [r.timestamp, r.pressure_bar, r.temperature_c, r.volume_m3]),
+    );
+    if (lastEvaluatedKeyRef.current === key) return;
+    lastEvaluatedKeyRef.current = key;
+    const payload: TimeSeriesRecordInput[] = localRecords.map((row) => ({
+      timestamp: row.timestamp,
+      pressure_bar: row.pressure_bar,
+      temperature_c: row.temperature_c,
+      volume_m3: row.volume_m3,
+      notes: row.notes,
+    }));
+    mutateThermal(payload, {
+      onSuccess: (res) => setAdHocSummary(res),
+      onError: (err) => pushToast("error", "Termal denge hesaplanamadı", apiErrorMessage(err)),
+    });
+  }, [persistedMode, online, localRecords, mutateThermal, pushToast]);
 
   const records = useMemo(() => {
     const raw = persistedMode ? (listQuery.data?.items ?? []) : localRecords;
@@ -157,26 +205,6 @@ export function TimeSeriesPanel({ online, formContext }: TimeSeriesPanelProps) {
     summary.initial_temperature_c !== null &&
     summary.final_temperature_c !== null &&
     summary.pressure_change_pa_bar !== null;
-
-  function evaluateAdHoc(next: TimeSeriesRecordItem[]) {
-    if (next.length === 0) {
-      setAdHocSummary(null);
-      thermalMutation.reset();
-      return;
-    }
-    if (!online) return;
-    const payload: TimeSeriesRecordInput[] = next.map((row) => ({
-      timestamp: row.timestamp,
-      pressure_bar: row.pressure_bar,
-      temperature_c: row.temperature_c,
-      volume_m3: row.volume_m3,
-      notes: row.notes,
-    }));
-    thermalMutation.mutate(payload, {
-      onSuccess: (res) => setAdHocSummary(res),
-      onError: (err) => pushToast("error", "Termal denge hesaplanamadı", apiErrorMessage(err)),
-    });
-  }
 
   function handleAddSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -213,7 +241,12 @@ export function TimeSeriesPanel({ online, formContext }: TimeSeriesPanelProps) {
       return;
     }
 
-    const isoTs = new Date(timestampInput).toISOString();
+    const isoTs = parseUtcDateTimeInputValue(timestampInput);
+    if (!isoTs) {
+      tsInputRef.current?.focus();
+      setFormStatus("Okuma eklenemedi: Geçerli bir tarih ve saat girin (UTC).");
+      return;
+    }
     const recordInput: TimeSeriesRecordInput = {
       timestamp: isoTs,
       pressure_bar: pCheck.value,
@@ -256,11 +289,10 @@ export function TimeSeriesPanel({ online, formContext }: TimeSeriesPanelProps) {
     setNotesInput("");
     setConfirmClear(false);
     setFormStatus(`Okuma listeye eklendi (${formatTsShort(nextItem.timestamp)}).`);
-    evaluateAdHoc(nextList);
   }
 
   function handleApplyPaste() {
-    const parsed = parseTimeSeriesPaste(pasteText);
+    const parsed = parseTimeSeriesPaste(pasteText, sectionTestDate || undefined);
     if (parsed.error) {
       setPasteError(parsed.error);
       return;
@@ -305,7 +337,6 @@ export function TimeSeriesPanel({ online, formContext }: TimeSeriesPanelProps) {
     setShowPaste(false);
     setConfirmClear(false);
     setFormStatus(`${newItems.length} okuma içe aktarıldı.`);
-    evaluateAdHoc(nextList);
   }
 
   function handleDeleteRow(row: TimeSeriesRecordItem) {
@@ -318,7 +349,10 @@ export function TimeSeriesPanel({ online, formContext }: TimeSeriesPanelProps) {
     }
     const nextList = localRecords.filter((item) => item.id !== row.id);
     setLocalRecords(nextList);
-    evaluateAdHoc(nextList);
+    if (nextList.length === 0) {
+      setAdHocSummary(null);
+      resetThermal();
+    }
   }
 
   function handleClearAll() {
@@ -335,7 +369,7 @@ export function TimeSeriesPanel({ online, formContext }: TimeSeriesPanelProps) {
     }
     setLocalRecords([]);
     setAdHocSummary(null);
-    thermalMutation.reset();
+    resetThermal();
     setConfirmClear(false);
     setFormStatus("Yerel okumalar temizlendi.");
   }
@@ -372,20 +406,36 @@ export function TimeSeriesPanel({ online, formContext }: TimeSeriesPanelProps) {
   function handleSyncForm(
     formCode: "leak_stabilization" | "pressure_test",
     direction: "from_form" | "to_form",
+    confirmedOverwrite = false,
   ) {
+    if (direction === "to_form" && formDirty && !confirmedOverwrite) {
+      setPendingOverwriteForm(formCode);
+      return;
+    }
+    setPendingOverwriteForm(null);
     const label = formCode === "leak_stabilization" ? "Form 018" : "Form 021";
     syncFormMutation.mutate(
       { form_code: formCode, direction, mode: "replace" },
       {
         onSuccess: (res) => {
-          const skipText = res.skipped_rows > 0 ? ` (${res.skipped_rows} eksik satır atlandı)` : "";
-          pushToast(
-            "success",
-            `${label} senkronizasyonu tamamlandı`,
-            direction === "from_form"
-              ? `${res.synced_count} okuma zaman serisine alındı${skipText}.`
-              : `${res.synced_count} okuma ${label} satırlarına yazıldı ve kontroller güncellendi.`,
-          );
+          if (direction === "from_form") {
+            const skipText = res.skipped_rows > 0 ? ` (${res.skipped_rows} eksik satır atlandı)` : "";
+            pushToast(
+              "success",
+              `${label} senkronizasyonu tamamlandı`,
+              `${res.synced_count} okuma zaman serisine alındı${skipText}.`,
+            );
+          } else {
+            const truncText =
+              res.skipped_rows > 0
+                ? ` (${res.skipped_rows} okuma 300 satır form sınırı nedeniyle atlandı)`
+                : "";
+            pushToast(
+              res.skipped_rows > 0 ? "warning" : "success",
+              `${label} senkronizasyonu tamamlandı`,
+              `${res.synced_count} okuma ${label} satırlarına yazıldı ve kontroller güncellendi${truncText}.`,
+            );
+          }
         },
         onError: (err) => {
           pushToast("error", `${label} senkronizasyonu başarısız`, apiErrorMessage(err));
@@ -408,6 +458,10 @@ export function TimeSeriesPanel({ online, formContext }: TimeSeriesPanelProps) {
           { code: "pressure_test", shortLabel: "Form 021" },
         ];
 
+  const listTruncated = Boolean(
+    persistedMode && listQuery.data && listQuery.data.total > records.length,
+  );
+
   return (
     <div className="space-y-4">
       {!online ? (
@@ -415,6 +469,41 @@ export function TimeSeriesPanel({ online, formContext }: TimeSeriesPanelProps) {
           Resmî Şartname Bölüm 12 (termal dengeleme) ve Bölüm 15.1 (24 saatlik test kaydı) kararları
           yalnızca sunucu bağlıyken hesaplanır.
         </OfflineNotice>
+      ) : null}
+
+      {persistedMode && (listQuery.isError || summaryQuery.isError) ? (
+        <InlineNotice tone="danger" title="Zaman serisi verisi yüklenemedi">
+          {apiErrorMessage((listQuery.error ?? summaryQuery.error) as Error)}
+        </InlineNotice>
+      ) : null}
+
+      {listTruncated ? (
+        <InlineNotice tone="warning" title="Tablo görüntüleme sınırı (1000 kayıt)">
+          Sunucuda toplam {listQuery.data?.total} kayıt bulunuyor; tabloda ve grafikte ilk 1000 kayıt
+          gösteriliyor. Özet KPI’lar tüm kayıtlar üzerinden hesaplanır.
+        </InlineNotice>
+      ) : null}
+
+      {pendingOverwriteForm ? (
+        <InlineNotice tone="warning" title="Formda kaydedilmemiş değişiklikler var">
+          <span>
+            {pendingOverwriteForm === "leak_stabilization" ? "Form 018" : "Form 021"} üzerinde
+            kaydedilmemiş taslak değişiklikler zaman serisinden gelen satırlarla değiştirilecek.
+          </span>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={syncFormMutation.isPending}
+              onClick={() => handleSyncForm(pendingOverwriteForm, "to_form", true)}
+            >
+              Evet, form satırlarını güncelle
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setPendingOverwriteForm(null)}>
+              Vazgeç
+            </Button>
+          </div>
+        </InlineNotice>
       ) : null}
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
@@ -594,7 +683,7 @@ export function TimeSeriesPanel({ online, formContext }: TimeSeriesPanelProps) {
         <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-5">
           <div className="flex flex-col gap-1">
             <label htmlFor={tsId} className="text-[11px] font-medium text-[var(--text-soft)]">
-              Zaman <span aria-hidden="true">*</span>
+              Zaman (UTC) <span aria-hidden="true">*</span>
             </label>
             <input
               ref={tsInputRef}
@@ -617,7 +706,7 @@ export function TimeSeriesPanel({ online, formContext }: TimeSeriesPanelProps) {
                   timestamp: validateTimestampInput(timestampInput),
                 }))
               }
-              className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 font-mono text-[12px] text-[var(--text)]"
+              className="input font-mono text-[12px]"
             />
             {fieldErrors.timestamp ? (
               <p id={tsErrId} className="text-[11px] text-[var(--danger)]">
@@ -654,7 +743,7 @@ export function TimeSeriesPanel({ online, formContext }: TimeSeriesPanelProps) {
                   pressure: validateFiniteInput(pressureInput, "Basınç", true).error,
                 }))
               }
-              className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 font-mono text-[12px] text-[var(--text)]"
+              className="input font-mono text-[12px]"
             />
             {fieldErrors.pressure ? (
               <p id={pErrId} className="text-[11px] text-[var(--danger)]">
@@ -691,7 +780,7 @@ export function TimeSeriesPanel({ online, formContext }: TimeSeriesPanelProps) {
                   temperature: validateFiniteInput(tempInput, "Sıcaklık", true).error,
                 }))
               }
-              className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 font-mono text-[12px] text-[var(--text)]"
+              className="input font-mono text-[12px]"
             />
             {fieldErrors.temperature ? (
               <p id={tErrId} className="text-[11px] text-[var(--danger)]">
@@ -727,7 +816,7 @@ export function TimeSeriesPanel({ online, formContext }: TimeSeriesPanelProps) {
                   volume: validateFiniteInput(volumeInput, "Hacim", false).error,
                 }))
               }
-              className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 font-mono text-[12px] text-[var(--text)]"
+              className="input font-mono text-[12px]"
             />
             {fieldErrors.volume ? (
               <p id={vErrId} className="text-[11px] text-[var(--danger)]">
@@ -748,7 +837,7 @@ export function TimeSeriesPanel({ online, formContext }: TimeSeriesPanelProps) {
               value={notesInput}
               placeholder="Ölçüm notu"
               onChange={(e) => setNotesInput(e.target.value)}
-              className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-[12px] text-[var(--text)]"
+              className="input text-[12px]"
             />
           </div>
         </div>

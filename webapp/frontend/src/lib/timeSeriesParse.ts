@@ -199,7 +199,32 @@ export function formatTsShort(iso: string | null | undefined): string {
   return `${dd}.${mm} ${hh}:${mi}`;
 }
 
-export function toLocalDateTimeInputValue(date: Date = new Date()): string {
+export function toUtcDateTimeInputValue(date: Date = new Date()): string {
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}T${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
+}
+
+export function parseUtcDateTimeInputValue(raw: string): string | null {
+  const text = raw.trim();
+  const m = text.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const hh = Number(m[4]);
+  const mm = Number(m[5]);
+  const ss = Number(m[6] ?? "0");
+  if (month < 1 || month > 12 || day < 1 || day > 31 || hh > 23 || mm > 59 || ss > 59) {
+    return null;
+  }
+  const dt = new Date(Date.UTC(year, month - 1, day, hh, mm, ss));
+  if (
+    Number.isNaN(dt.getTime()) ||
+    dt.getUTCFullYear() !== year ||
+    dt.getUTCMonth() !== month - 1 ||
+    dt.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return dt.toISOString();
 }

@@ -2149,10 +2149,24 @@ export function useSyncTimeSeriesForm(sessionId: string | null) {
   >({
     mutationFn: (body) => api.syncTimeSeriesForm(sessionId as string, body),
     onSuccess: (data) => {
+      const store = useAppStore.getState();
       queryClient.setQueryData(["timeSeriesSummary", sessionId], data.summary);
+      if (data.session) {
+        queryClient.setQueryData(["session", data.session.id], data.session);
+        if (!store.dirty) {
+          store.applySessionInputs(data.session.inputs);
+          store.setSessionMeta({
+            id: data.session.id,
+            name: data.session.name,
+            revision: data.session.revision,
+            status: data.session.status,
+          });
+          store.markSaved(data.session.revision);
+        }
+      }
       void queryClient.invalidateQueries({ queryKey: ["timeSeries", sessionId] });
       void queryClient.invalidateQueries({ queryKey: ["timeSeriesSummary", sessionId] });
-      void queryClient.invalidateQueries({ queryKey: ["sessionForms", sessionId] });
+      void queryClient.invalidateQueries({ queryKey: ["session-forms", sessionId] });
       void queryClient.invalidateQueries({ queryKey: ["session", sessionId] });
       void queryClient.invalidateQueries({ queryKey: ["session-summary", sessionId] });
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });

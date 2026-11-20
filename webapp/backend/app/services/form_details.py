@@ -734,6 +734,13 @@ def parse_base_date(raw: Any) -> date | None:
         return date.fromisoformat(iso_head)
     except ValueError:
         pass
+    m_ymd = re.match(r"^\s*(\d{4})[./-](\d{1,2})[./-](\d{1,2})\b", text)
+    if m_ymd:
+        year_val, month_val, day_val = int(m_ymd.group(1)), int(m_ymd.group(2)), int(m_ymd.group(3))
+        try:
+            return date(year_val, month_val, day_val)
+        except ValueError:
+            pass
     m = re.match(r"^\s*(\d{1,2})[./-](\d{1,2})[./-](\d{4})\b", text)
     if not m:
         return None
@@ -924,6 +931,7 @@ def reconcile_form_extracted_data(form_code: str, raw_data: dict[str, Any]) -> d
             mon_temps: list[float] = []
             pipe_avgs: list[float] = []
             ts_domain_rows: list[DomainTimeSeriesRecord] = []
+            has_untimed_with_time_str = False
             probe_pairs = 0
             for r in rows:
                 s1, p1 = _finite(r.get("soil_1_c")), _finite(r.get("pipe_1_c"))
@@ -950,6 +958,10 @@ def reconcile_form_extracted_data(form_code: str, raw_data: dict[str, Any]) -> d
                         )
                     except ValidationError:
                         pass
+                elif (
+                    row_ts is None and _parse_hhmm_to_min(str(r.get("time_str") or "")) is not None
+                ):
+                    has_untimed_with_time_str = True
             last_4h: float | None = None
             if len(pipe_avgs) >= 2:
                 if len(pipe_avgs) >= 8:
@@ -959,8 +971,20 @@ def reconcile_form_extracted_data(form_code: str, raw_data: dict[str, Any]) -> d
                 else:
                     last_4h = round(abs(pipe_avgs[-1] - pipe_avgs[0]), 3)
 
-            if len(ts_domain_rows) >= 2:
+            if len(ts_domain_rows) >= 2 and not has_untimed_with_time_str:
                 ts_eval = evaluate_time_series(ts_domain_rows)
+                data["time_log"]["row_count"] = max(
+                    int(data["time_log"].get("row_count") or 0),
+                    ts_eval.record_count,
+                )
+                if ts_eval.first_timestamp is not None and not data["time_log"].get("first_time"):
+                    first_utc = ensure_utc(ts_eval.first_timestamp)
+                    if first_utc is not None:
+                        data["time_log"]["first_time"] = first_utc.strftime("%H:%M")
+                if ts_eval.last_timestamp is not None and not data["time_log"].get("last_time"):
+                    last_utc = ensure_utc(ts_eval.last_timestamp)
+                    if last_utc is not None:
+                        data["time_log"]["last_time"] = last_utc.strftime("%H:%M")
                 data["time_log"]["duration_hours"] = round(ts_eval.duration_hours, 2)
                 if ts_eval.max_gap_hours is not None:
                     data["time_log"]["max_gap_min"] = round(ts_eval.max_gap_hours * 60.0, 2)
@@ -1471,7 +1495,7 @@ def evaluate_all_form_findings(
             p0, p1 = _finite(mon.get("p_start_bar")), _finite(mon.get("p_end_bar"))
             pa_022 = _finite(pres_calc.get("pa_bar"))
             if p0 is not None and p1 is not None and pa_022 is not None:
-                obs_pa = p1 - p0
+                obs_pa = p0 - p1
                 ok_pa = abs(obs_pa - pa_022) <= 0.15
                 items.append(
                     _mk_finding(

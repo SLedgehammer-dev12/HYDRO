@@ -1530,4 +1530,5 @@ export interface TimeSeriesSyncFormResponse {
   skipped_rows: number;
   items?: TimeSeriesRecordItem[];
   summary: TimeSeriesSummary;
+  session?: Session;
 }

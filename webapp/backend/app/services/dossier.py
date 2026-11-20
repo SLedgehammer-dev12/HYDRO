@@ -5493,7 +5493,9 @@ def sync_time_series_with_form(
 
     ts_summary = session_service.time_series_summary(ts_rows)
     ext = copy.deepcopy(row.extracted_data or {}) if isinstance(row.extracted_data, dict) else {}
-    ext["rows"] = time_series_to_monitoring_rows(ts_rows)
+    mapped_rows = time_series_to_monitoring_rows(ts_rows)
+    truncated_rows = max(0, len(ts_rows) - len(mapped_rows))
+    ext["rows"] = mapped_rows
     raw_mon = ext.get("monitoring")
     prev_mon: dict[str, Any] = raw_mon if isinstance(raw_mon, dict) else {}
     mon_patch: dict[str, Any] = dict(prev_mon)
@@ -5522,7 +5524,7 @@ def sync_time_series_with_form(
         header_hint={},
         overwrite_values=False,
         prefer_header_hint=False,
-        bump_revision=False,
+        bump_revision=True,
     )
     audit.record(
         db,
@@ -5531,17 +5533,23 @@ def sync_time_series_with_form(
         entity_id=row.id,
         session_id=session.id,
         workspace_hash=session.workspace_id_hash,
-        after={"form_code": form_code, "synced_count": len(ext["rows"])},
+        after={
+            "form_code": form_code,
+            "synced_count": len(mapped_rows),
+            "truncated_rows": truncated_rows,
+        },
     )
     db.commit()
     db.refresh(row)
+    db.refresh(session)
 
     return {
         "direction": "to_form",
         "form_code": form_code,
-        "synced_count": len(ext["rows"]),
-        "skipped_rows": 0,
+        "synced_count": len(mapped_rows),
+        "skipped_rows": truncated_rows,
         "summary": ts_summary,
+        "session": session_service.serialize_session(session),
     }
 
 

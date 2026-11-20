@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import math
 import os
 import posixpath
 import sqlite3
@@ -551,18 +552,35 @@ def import_project_archive(
                         continue
                     p_bar = item.get("pressure_bar")
                     t_c = item.get("temperature_c")
-                    if p_bar is None or t_c is None:
+                    v_m3 = item.get("volume_m3")
+                    if (
+                        p_bar is None
+                        or t_c is None
+                        or isinstance(p_bar, bool)
+                        or isinstance(t_c, bool)
+                        or isinstance(v_m3, bool)
+                    ):
+                        continue
+                    try:
+                        p_val = float(p_bar)
+                        t_val = float(t_c)
+                        v_val = float(v_m3) if v_m3 is not None else None
+                    except (TypeError, ValueError):
+                        continue
+                    if (
+                        not math.isfinite(p_val)
+                        or not math.isfinite(t_val)
+                        or (v_val is not None and not math.isfinite(v_val))
+                    ):
                         continue
                     db.add(
                         TimeSeriesRecord(
                             id=new_uuid(),
                             session_id=sess.id,
                             timestamp=ts_dt,
-                            pressure_bar=float(p_bar),
-                            temperature_c=float(t_c),
-                            volume_m3=float(item["volume_m3"])
-                            if item.get("volume_m3") is not None
-                            else None,
+                            pressure_bar=p_val,
+                            temperature_c=t_val,
+                            volume_m3=v_val,
                             notes=str(item.get("notes") or ""),
                             source=str(item.get("source") or "archive")[:16],
                         )
@@ -892,14 +910,29 @@ def import_desktop_db(
 
         for trow in ts_by_sid.get(old_sid, []):
             ts_dt = _parse_iso_dt(trow["timestamp"]) or utcnow()
+            raw_p, raw_t, raw_v = trow["pressure_bar"], trow["temperature_c"], trow["volume_m3"]
+            if isinstance(raw_p, bool) or isinstance(raw_t, bool) or isinstance(raw_v, bool):
+                continue
+            try:
+                p_val = float(raw_p if raw_p is not None else 0.0)
+                t_val = float(raw_t if raw_t is not None else 0.0)
+                v_val = float(raw_v) if raw_v is not None else None
+            except (TypeError, ValueError):
+                continue
+            if (
+                not math.isfinite(p_val)
+                or not math.isfinite(t_val)
+                or (v_val is not None and not math.isfinite(v_val))
+            ):
+                continue
             db.add(
                 TimeSeriesRecord(
                     id=new_uuid(),
                     session_id=sess.id,
                     timestamp=ts_dt,
-                    pressure_bar=float(trow["pressure_bar"] or 0.0),
-                    temperature_c=float(trow["temperature_c"] or 0.0),
-                    volume_m3=float(trow["volume_m3"]) if trow["volume_m3"] is not None else None,
+                    pressure_bar=p_val,
+                    temperature_c=t_val,
+                    volume_m3=v_val,
                     notes=str(trow["notes"] or ""),
                     source="desktop_db",
                 )

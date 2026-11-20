@@ -1519,7 +1519,7 @@ def generate_sample_project(
         for h in range(25):
             ts = base_ts + timedelta(hours=h)
             t_pipe = round(t_init - (t_init - t_final) * (h / 24.0), 2)
-            p_cur = round(test_p_bar + (pa_val * (h / 24.0)), 3)
+            p_cur = round(test_p_bar - (pa_val * (h / 24.0)), 3)
             mon_rows.append(
                 {
                     "time_str": f"{(8 + h) % 24:02d}:00",

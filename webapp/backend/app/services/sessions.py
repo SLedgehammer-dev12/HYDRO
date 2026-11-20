@@ -13,7 +13,7 @@ from hidrostatik_test import APP_VERSION
 from hidrostatik_test.data import BOTAS_REFERENCE_OPTION_LABEL
 from hidrostatik_test.domain import DEFAULT_STEEL_MODEL
 
-from ..core.errors import AppError, not_found
+from ..core.errors import AppError, error_from_domain, not_found
 from ..core.timeutil import (
     as_float,
     deep_merge,
@@ -997,6 +997,37 @@ def list_time_series(
     }
 
 
+def _validate_time_series_values(
+    timestamp: Any,
+    pressure_bar: Any,
+    temperature_c: Any,
+    volume_m3: Any,
+    notes: str,
+) -> Any:
+    from hidrostatik_test.domain.time_series import TimeSeriesRecord as DomainTimeSeriesRecord
+
+    if (
+        isinstance(pressure_bar, bool)
+        or isinstance(temperature_c, bool)
+        or isinstance(volume_m3, bool)
+    ):
+        raise AppError(
+            "validation_error",
+            "Zaman serisi sayisal alanlari boolean olamaz.",
+            status_code=422,
+        )
+    try:
+        return DomainTimeSeriesRecord(
+            timestamp=ensure_utc(timestamp) or utcnow(),
+            pressure_bar=float(pressure_bar),
+            temperature_c=float(temperature_c),
+            volume_m3=float(volume_m3) if volume_m3 is not None else None,
+            notes=notes or "",
+        )
+    except Exception as exc:
+        raise error_from_domain(exc) from exc
+
+
 def add_time_series(
     db: OrmSession,
     session: HydroSession,
@@ -1008,14 +1039,17 @@ def add_time_series(
     notes: str = "",
     source: str = "manual",
 ) -> dict[str, Any]:
+    validated = _validate_time_series_values(
+        timestamp, pressure_bar, temperature_c, volume_m3, notes
+    )
     row = TimeSeriesRecord(
         id=new_uuid(),
         session_id=session.id,
-        timestamp=ensure_utc(timestamp) or utcnow(),
-        pressure_bar=pressure_bar,
-        temperature_c=temperature_c,
-        volume_m3=volume_m3,
-        notes=notes or "",
+        timestamp=validated.timestamp,
+        pressure_bar=validated.pressure_bar,
+        temperature_c=validated.temperature_c,
+        volume_m3=validated.volume_m3,
+        notes=validated.notes,
         source=(source or "manual")[:16],
     )
     db.add(row)
@@ -1043,37 +1077,48 @@ def batch_add_time_series(
     default_source: str | None = None,
     commit: bool = True,
 ) -> dict[str, Any]:
-    if mode == "replace":
-        db.execute(delete(TimeSeriesRecord).where(TimeSeriesRecord.session_id == session.id))
-        db.flush()
-
     now = utcnow()
-    new_rows: list[TimeSeriesRecord] = []
+    validated_entries: list[tuple[Any, str]] = []
     for item in records:
         if isinstance(item, dict):
             ts_raw = item.get("timestamp")
-            p_val = float(item["pressure_bar"])
-            t_val = float(item["temperature_c"])
-            v_val = item.get("volume_m3")
+            p_raw = item.get("pressure_bar")
+            t_raw = item.get("temperature_c")
+            v_raw = item.get("volume_m3")
             notes_val = str(item.get("notes") or "")
             src_raw = default_source or str(item.get("source") or "manual")
         else:
             ts_raw = getattr(item, "timestamp", None)
-            p_val = float(item.pressure_bar)
-            t_val = float(item.temperature_c)
-            v_val = item.volume_m3
+            p_raw = item.pressure_bar
+            t_raw = item.temperature_c
+            v_raw = item.volume_m3
             notes_val = str(getattr(item, "notes", "") or "")
             src_raw = default_source or str(getattr(item, "source", "manual") or "manual")
 
+        validated = _validate_time_series_values(
+            ensure_utc(ts_raw) or now,
+            p_raw,
+            t_raw,
+            v_raw,
+            notes_val,
+        )
+        validated_entries.append((validated, (src_raw or "manual")[:16]))
+
+    if mode == "replace":
+        db.execute(delete(TimeSeriesRecord).where(TimeSeriesRecord.session_id == session.id))
+        db.flush()
+
+    new_rows: list[TimeSeriesRecord] = []
+    for validated, src in validated_entries:
         row = TimeSeriesRecord(
             id=new_uuid(),
             session_id=session.id,
-            timestamp=ensure_utc(ts_raw) or now,
-            pressure_bar=p_val,
-            temperature_c=t_val,
-            volume_m3=v_val,
-            notes=notes_val,
-            source=(src_raw or "manual")[:16],
+            timestamp=validated.timestamp,
+            pressure_bar=validated.pressure_bar,
+            temperature_c=validated.temperature_c,
+            volume_m3=validated.volume_m3,
+            notes=validated.notes,
+            source=src,
         )
         db.add(row)
         new_rows.append(row)
