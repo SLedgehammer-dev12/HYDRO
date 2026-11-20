@@ -66,6 +66,7 @@ import type {
   SessionFormsResponse,
   SessionListItem,
   SessionStatus,
+  SnapshotMapping,
   SpecResponse,
   TablePointResponse,
   TestResultRecord,
@@ -73,7 +74,9 @@ import type {
   UpdateManagerStatus,
 } from "../lib/types";
 import { BOTAS_FORM_NAV_ITEMS, CHECK_DEFINITIONS } from "../lib/constants";
-import { toApiInputs } from "../lib/normalize";
+import { nowIso } from "../lib/format";
+import { normalizeInputs, toApiInputs } from "../lib/normalize";
+import { extractRevisionConflict } from "../lib/sessionDiff";
 
 export interface Resolved<T> {
   data: T;
@@ -842,6 +845,7 @@ export function useOpenSession() {
         revision: session.revision,
       });
       store.markSaved(session.revision);
+      store.setRevisionConflict(null);
       queryClient.setQueryData(["session", session.id], session);
       void queryClient.invalidateQueries({ queryKey: ["results", session.id] });
       void hydrateSessionResults(session.id, seq);
@@ -991,10 +995,29 @@ export function useSaveSession() {
       void queryClient.invalidateQueries({ queryKey: ["session"] });
       void queryClient.invalidateQueries({ queryKey: ["project-scene"] });
     },
-    onError: (error) => {
-      useAppStore
-        .getState()
-        .pushToast("error", "Oturum kaydedilemedi", error.message);
+    onError: (error, arg) => {
+      const store = useAppStore.getState();
+      const conflict = extractRevisionConflict(error);
+      if (conflict && store.sessionId) {
+        store.setRevisionConflict({
+          sessionId: store.sessionId,
+          localRevision: store.revision,
+          localName: (arg && arg.name) || store.sessionName,
+          localStatus: store.sessionStatus,
+          localInputs: store.inputs,
+          serverSession: conflict.serverSession,
+          serverDiff: conflict.serverDiff,
+          sourceAction: "save_session",
+          detectedAt: nowIso(),
+        });
+        store.pushToast(
+          "warning",
+          "Revizyon çakışması (HTTP 409)",
+          `Sunucuda revizyon ${conflict.currentRevision} bulundu; fark çözümleme penceresi açıldı.`,
+        );
+        return;
+      }
+      store.pushToast("error", "Oturum kaydedilemedi", error.message);
     },
   });
 }
@@ -1097,6 +1120,156 @@ export function useSaveTestResult() {
         void queryClient.invalidateQueries({ queryKey: ["session-forms", sid] });
       }
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+    onError: (error, vars) => {
+      const store = useAppStore.getState();
+      const conflict = extractRevisionConflict(error);
+      if (conflict && store.sessionId) {
+        store.setRevisionConflict({
+          sessionId: store.sessionId,
+          localRevision: store.revision,
+          localName: store.sessionName,
+          localStatus: store.sessionStatus,
+          localInputs: store.inputs,
+          serverSession: conflict.serverSession,
+          serverDiff: conflict.serverDiff,
+          sourceAction: "save_result",
+          detectedAt: nowIso(),
+          pendingResult: { testType: vars.testType, payload: vars.payload },
+        });
+        store.pushToast(
+          "warning",
+          "Revizyon çakışması (HTTP 409)",
+          "Sonuç kaydedilmeden önce sunucu sürümü güncellenmiş; çözümleme penceresi açıldı.",
+        );
+        return;
+      }
+      if (!isRecoverableError(error)) {
+        store.pushToast("error", "Test sonucu kaydedilemedi", error.message);
+      }
+    },
+  });
+}
+
+export interface DesktopSnapshotImportOutcome {
+  session: Session;
+  mapping: SnapshotMapping;
+  demo: boolean;
+}
+
+export interface DesktopSnapshotImportVars {
+  file?: File;
+  snapshot?: Record<string, unknown>;
+  name?: string;
+  projectId?: string | null;
+  openAfterImport?: boolean;
+}
+
+export function useImportDesktopSnapshot() {
+  const queryClient = useQueryClient();
+  return useMutation<DesktopSnapshotImportOutcome, Error, DesktopSnapshotImportVars>({
+    mutationFn: async (vars) => {
+      let snapshotObj = vars.snapshot;
+      if (!snapshotObj) {
+        if (!vars.file) {
+          throw new Error("Masaüstü JSON snapshot dosyası seçilmedi.");
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(await vars.file.text());
+        } catch {
+          throw new Error("Seçilen dosya geçerli bir JSON dosyası değil.");
+        }
+        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+          throw new Error("Masaüstü JSON snapshot kök değeri bir JSON nesnesi olmalıdır.");
+        }
+        snapshotObj = parsed as Record<string, unknown>;
+      }
+
+      const state = useAppStore.getState();
+      const rawProjectId = vars.projectId === undefined ? state.projectId : vars.projectId;
+      const realProjectId =
+        rawProjectId && !rawProjectId.startsWith("demo-") ? rawProjectId : null;
+
+      if (state.backend !== "online" || state.sessionApiReady === false) {
+        await sleep(240);
+        const normalized = normalizeInputs(snapshotObj);
+        const session: Session = {
+          ...createDemoSession(),
+          id: `demo-snapshot-${Date.now().toString(36)}`,
+          project_id: realProjectId,
+          name: vars.name?.trim() || "Masaüstü JSON İçe Aktarımı",
+          status: "draft",
+          revision: 1,
+          inputs: normalized as unknown as Record<string, unknown>,
+        };
+        return {
+          session,
+          demo: true,
+          mapping: {
+            converted: Object.keys(snapshotObj).length,
+            skipped: [],
+            invalid_fields: [],
+            warnings: ["Çevrimdışı modda yerel oturum olarak açıldı; sunucu kaydı yapılmadı."],
+          },
+        };
+      }
+
+      const response = await api.importSnapshot({
+        name: vars.name?.trim() || undefined,
+        project_id: realProjectId,
+        snapshot: snapshotObj,
+      });
+      return { ...response, demo: false };
+    },
+    onSuccess: (outcome, vars) => {
+      const store = useAppStore.getState();
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      void queryClient.invalidateQueries({ queryKey: ["projects"] });
+      void queryClient.invalidateQueries({ queryKey: ["project-scene"] });
+      void queryClient.invalidateQueries({ queryKey: ["db-stats"] });
+
+      if (vars.openAfterImport !== false) {
+        store.applySessionInputs(outcome.session.inputs);
+        store.setSessionMeta({
+          id: outcome.demo ? null : outcome.session.id,
+          name: outcome.session.name,
+          status: outcome.session.status,
+          revision: outcome.session.revision,
+        });
+        store.markSaved(outcome.session.revision);
+        store.setRevisionConflict(null);
+        if (!outcome.demo) {
+          queryClient.setQueryData(["session", outcome.session.id], outcome.session);
+          void hydrateSessionResults(outcome.session.id);
+        }
+        if (outcome.session.project_id) {
+          const matchedProject = queryClient
+            .getQueryData<Project[]>(["projects"])
+            ?.find((p) => p.id === outcome.session.project_id);
+          if (matchedProject) {
+            store.setProject(matchedProject);
+          }
+        }
+      }
+
+      const warnCount =
+        outcome.mapping.warnings.length + outcome.mapping.invalid_fields.length;
+      const summaryParts = [
+        `${outcome.mapping.converted} alan dönüştürüldü`,
+        outcome.mapping.skipped.length > 0
+          ? `${outcome.mapping.skipped.length} türetilen alan atlandı`
+          : null,
+        warnCount > 0 ? `${warnCount} uyarı/geçersiz alan` : null,
+      ].filter(Boolean);
+      store.pushToast(
+        warnCount > 0 ? "warning" : "success",
+        "Masaüstü JSON'dan yeni kesit oluşturuldu",
+        `${outcome.session.name} · ${summaryParts.join(" · ")}`,
+      );
+    },
+    onError: (error) => {
+      useAppStore.getState().pushToast("error", "Masaüstü JSON içe aktarılamadı", error.message);
     },
   });
 }

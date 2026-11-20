@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session as OrmSession
 
@@ -11,6 +11,7 @@ from ..core.config import Settings
 from ..core.rate_limit import enforce_rate_limit
 from ..core.timeutil import json_safe
 from ..db import get_db
+from ..services import audit
 from ..services import project_archive as project_archive_service
 from ..services import sessions as session_service
 from ..services import snapshot as snapshot_service
@@ -23,22 +24,42 @@ class DesktopSnapshotImport(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     name: str | None = Field(default=None, max_length=200)
+    project_id: str | None = Field(default=None, max_length=64)
     snapshot: dict
 
 
 @router.post("/desktop-snapshot", status_code=201)
 def import_desktop_snapshot(
     payload: DesktopSnapshotImport,
+    request: Request,
+    response: Response,
     db: OrmSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
     workspace: Workspace = Depends(get_workspace),
 ) -> dict:
+    enforce_rate_limit(request, settings, bucket="desktop_snapshot_import", limit=60)
     new_inputs, mapping = snapshot_service.apply_snapshot({}, payload.snapshot, mode="replace")
     session = session_service.create_session(
         db,
         workspace_hash=workspace.hash,
         name=payload.name,
-        inputs=session_service.normalize_inputs(new_inputs),
+        project_id=payload.project_id,
+        inputs=new_inputs,
+        commit=False,
     )
+    audit.record(
+        db,
+        action="snapshot.import",
+        entity_type="session",
+        entity_id=session.id,
+        session_id=session.id,
+        workspace_hash=workspace.hash,
+        after={"mapping": mapping, "project_id": payload.project_id},
+    )
+    db.commit()
+    db.refresh(session)
+    response.headers["Location"] = f"/api/sessions/{session.id}"
+    response.headers["ETag"] = f'"{session.revision}"'
     return json_safe(
         {
             "session": session_service.serialize_session(session),

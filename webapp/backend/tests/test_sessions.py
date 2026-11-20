@@ -610,3 +610,171 @@ def test_ambient_temperature_symmetric_patch_clear_and_backend_case_insensitive(
     assert p3.status_code == 200, p3.text
     assert p3.json()["inputs"]["air"]["ambient_temperature_c"] is None
     assert p3.json()["inputs"]["field"]["ambient_temperature_c"] is None
+
+
+def test_import_desktop_snapshot_with_project_and_mapping(client):
+    project_res = client.post("/api/projects", json={"name": "Snapshot Projesi", "code": "SNP-01"})
+    assert project_res.status_code == 201, project_res.text
+    project_id = project_res.json()["id"]
+
+    response = client.post(
+        "/api/import/desktop-snapshot",
+        json={
+            "name": "Kesit JSON",
+            "project_id": project_id,
+            "snapshot": {
+                "schema_version": 1,
+                "water_backend_option": "Table Interpolation v1",
+                "geometry": {
+                    "outside_diameter_mm": "406.4",
+                    "wall_thickness_mm": "8.74",
+                    "length_m": "12000",
+                },
+                "pressure": {"derive_delta_t": True, "t_initial_c": "22", "t_final_c": "20"},
+                "report": {
+                    "report_no": "RPT-42",
+                    "operator": "Muhendis",
+                    "date": "2026-11-20",
+                    "section_id": "K-09",
+                },
+                "field": {"pig_speed_m_per_s": "1.5"},
+            },
+        },
+    )
+    assert response.status_code == 201, response.text
+    sess = response.json()["session"]
+    mapping = response.json()["mapping"]
+
+    assert response.headers["Location"] == f"/api/sessions/{sess['id']}"
+    assert response.headers["ETag"] == f'"{sess["revision"]}"'
+    assert sess["project_id"] == project_id
+    assert sess["inputs"]["water_backend"] == "table_v1"
+    assert sess["inputs"]["pressure"]["derive_delta_t"] is True
+    assert sess["inputs"]["report"] == {
+        "report_no": "RPT-42",
+        "operator": "Muhendis",
+        "date": "2026-11-20",
+        "section_id": "K-09",
+    }
+    assert sess["inputs"]["section_meta"]["section_no"] == "K-09"
+    # 1 water_backend + 3 geometry + 3 pressure (derive_delta_t, t_initial, t_final) + 4 report = 11 (no double-count)
+    assert mapping["converted"] == 11
+    assert mapping["skipped"] == ["field.pig_speed_m_per_s"]
+    assert mapping["invalid_fields"] == []
+
+    # Project association must initialize BOTAŞ form slots and audit trail
+    forms = client.get(f"/api/sessions/{sess['id']}/forms")
+    assert forms.status_code == 200
+    assert len(forms.json()["forms"]) >= 11
+
+    audit_items = client.get(f"/api/sessions/{sess['id']}/audit").json()["items"]
+    assert any(item["action"] == "snapshot.import" for item in audit_items)
+
+    missing_proj = client.post(
+        "/api/import/desktop-snapshot",
+        json={"project_id": "does-not-exist", "snapshot": {"schema_version": 1}},
+    )
+    assert missing_proj.status_code == 404
+
+    other_ws = client.post(
+        "/api/import/desktop-snapshot",
+        headers={"X-Session-ID": "other-workspace"},
+        json={"project_id": project_id, "snapshot": {"schema_version": 1}},
+    )
+    assert other_ws.status_code == 404
+
+
+def test_optimistic_concurrency_409_diff_across_put_snapshot_and_results(client):
+    session = create_session(client, name="Eszamanli Kesit", inputs=full_inputs())
+    rev1 = session["revision"]
+
+    # Client A updates to rev2
+    client_a = client.put(
+        f"/api/sessions/{session['id']}",
+        json={
+            "name": "Eszamanli Kesit A",
+            "inputs": {
+                "geometry": {"length_m": 15000.0},
+                "air": {"actual_added_water_m3": 0.009},
+            },
+        },
+        headers={"If-Match": f'"{rev1}"'},
+    )
+    assert client_a.status_code == 200
+    rev2 = client_a.json()["revision"]
+    assert rev2 == 2
+
+    # Client B sends stale PUT with If-Match: "1" changing length_m and checks.air_content_limit
+    client_b = client.put(
+        f"/api/sessions/{session['id']}",
+        json={
+            "inputs": {
+                "geometry": {"length_m": 18000.0},
+                "checks": {"air_content_limit": True},
+            }
+        },
+        headers={"If-Match": f'"{rev1}"'},
+    )
+    assert client_b.status_code == 409
+    err_b = client_b.json()
+    assert err_b["code"] == "revision_conflict"
+    assert err_b["details"]["expected_revision"] == 1
+    assert err_b["details"]["current_revision"] == 2
+    assert err_b["details"]["current"]["name"] == "Eszamanli Kesit A"
+    diff_by_path = {entry["path"]: entry for entry in err_b["details"]["diff"]}
+    assert diff_by_path["geometry.length_m"] == {
+        "path": "geometry.length_m",
+        "incoming": 18000.0,
+        "server": 15000.0,
+    }
+    assert diff_by_path["checks.air_content_limit"] == {
+        "path": "checks.air_content_limit",
+        "incoming": True,
+        "server": False,
+    }
+    assert "air.actual_added_water_m3" not in diff_by_path
+
+    # Stale snapshot upload also yields 409 + diff
+    stale_snap = client.post(
+        f"/api/sessions/{session['id']}/snapshot",
+        json={
+            "mode": "merge",
+            "snapshot": {"schema_version": 1, "geometry": {"length_m": "20000"}},
+        },
+        headers={"If-Match": f'"{rev1}"'},
+    )
+    assert stale_snap.status_code == 409
+    snap_diff = {e["path"]: e for e in stale_snap.json()["details"]["diff"]}
+    assert snap_diff["geometry.length_m"]["incoming"] == 20000.0
+    assert snap_diff["geometry.length_m"]["server"] == 15000.0
+
+    # Retry snapshot upload with rev2 succeeds
+    ok_snap = client.post(
+        f"/api/sessions/{session['id']}/snapshot",
+        json={
+            "mode": "merge",
+            "snapshot": {"schema_version": 1, "geometry": {"length_m": "20000"}},
+        },
+        headers={"If-Match": f'"{rev2}"'},
+    )
+    assert ok_snap.status_code == 200
+    rev3 = ok_snap.json()["revision"]
+    assert rev3 == 3
+
+    # Stale result creation yields 409, and valid rev3 succeeds without bumping revision
+    stale_res = client.post(
+        f"/api/sessions/{session['id']}/results",
+        json={"test_type": "air", "payload": air_payload()},
+        headers={"If-Match": f'"{rev2}"'},
+    )
+    assert stale_res.status_code == 409
+    assert stale_res.json()["details"]["current_revision"] == 3
+
+    ok_res = client.post(
+        f"/api/sessions/{session['id']}/results",
+        json={"test_type": "air", "payload": air_payload()},
+        headers={"If-Match": f'"{rev3}"'},
+    )
+    assert ok_res.status_code == 201
+    assert ok_res.headers["ETag"] == '"3"'
+    assert ok_res.json()["session_revision"] == 3

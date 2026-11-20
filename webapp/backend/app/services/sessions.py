@@ -431,6 +431,156 @@ def list_sessions(
     }
 
 
+_CONFLICT_SCALAR_KEYS = (
+    "water_backend",
+    "material_grade",
+    "location_class",
+    "pump_location",
+    "active_tab",
+)
+
+_CONFLICT_DICT_SECTIONS = (
+    "section_meta",
+    "geometry",
+    "geometry_catalog",
+    "section_profile",
+    "air",
+    "pressure",
+    "field",
+    "helper",
+    "modes",
+    "checks",
+    "report",
+)
+
+_CONFLICT_LIST_SECTIONS = (
+    "segments",
+    "profile_points",
+    "landmarks",
+    "equipment",
+)
+
+
+def _prepare_updated_inputs(
+    current_inputs: dict[str, Any],
+    raw_patch: dict[str, Any],
+    *,
+    replace_inputs: bool = False,
+) -> dict[str, Any]:
+    if replace_inputs:
+        return normalize_inputs(raw_patch)
+    patch = dict(raw_patch)
+    patch_air = patch.get("air")
+    patch_field = patch.get("field")
+    if isinstance(patch_air, dict) and "ambient_temperature_c" in patch_air:
+        if not (isinstance(patch_field, dict) and "ambient_temperature_c" in patch_field):
+            patch["field"] = {
+                **(dict(patch_field) if isinstance(patch_field, dict) else {}),
+                "ambient_temperature_c": patch_air["ambient_temperature_c"],
+            }
+    elif isinstance(patch_field, dict) and "ambient_temperature_c" in patch_field:
+        patch["air"] = {
+            **(dict(patch_air) if isinstance(patch_air, dict) else {}),
+            "ambient_temperature_c": patch_field["ambient_temperature_c"],
+        }
+    return normalize_inputs(deep_merge(current_inputs or {}, patch))
+
+
+def _strip_segment_ids(items: list[Any]) -> list[Any]:
+    cleaned: list[Any] = []
+    for item in items:
+        if isinstance(item, dict):
+            cleaned.append({k: v for k, v in item.items() if k != "id"})
+        else:
+            cleaned.append(item)
+    return cleaned
+
+
+def _values_equal(a: Any, b: Any) -> bool:
+    if isinstance(a, bool) or isinstance(b, bool):
+        return type(a) is type(b) and a == b
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return float(a) == float(b)
+    if isinstance(a, list) and isinstance(b, list):
+        if len(a) != len(b):
+            return False
+        return all(_values_equal(x, y) for x, y in zip(a, b, strict=True))
+    if isinstance(a, dict) and isinstance(b, dict):
+        if set(a.keys()) != set(b.keys()):
+            return False
+        return all(_values_equal(a[k], b[k]) for k in a)
+    return bool(a == b)
+
+
+def _build_conflict_diff(
+    session: HydroSession,
+    changes: dict[str, Any],
+    *,
+    replace_inputs: bool = False,
+) -> list[dict[str, Any]]:
+    diff: list[dict[str, Any]] = []
+    if "name" in changes and changes["name"] is not None:
+        incoming_name = str(changes["name"]).strip() or session.name
+        if incoming_name != session.name:
+            diff.append({"path": "name", "incoming": incoming_name, "server": session.name})
+    if "status" in changes and changes["status"] is not None:
+        incoming_status = str(changes["status"])
+        if incoming_status != session.status:
+            diff.append({"path": "status", "incoming": incoming_status, "server": session.status})
+    if "project_id" in changes and changes["project_id"] != session.project_id:
+        diff.append(
+            {
+                "path": "project_id",
+                "incoming": changes["project_id"],
+                "server": session.project_id,
+            }
+        )
+    if "notes" in changes and changes["notes"] is not None:
+        incoming_notes = str(changes["notes"])
+        server_notes = session.notes or ""
+        if incoming_notes != server_notes:
+            diff.append({"path": "notes", "incoming": incoming_notes, "server": server_notes})
+
+    raw_patch = changes.get("inputs")
+    if isinstance(raw_patch, dict):
+        server_inputs = normalize_inputs(session.inputs or {})
+        incoming_inputs = _prepare_updated_inputs(
+            session.inputs or {},
+            raw_patch,
+            replace_inputs=replace_inputs,
+        )
+        for key in _CONFLICT_SCALAR_KEYS:
+            inc_val = incoming_inputs.get(key)
+            srv_val = server_inputs.get(key)
+            if not _values_equal(inc_val, srv_val):
+                diff.append({"path": key, "incoming": inc_val, "server": srv_val})
+        for section in _CONFLICT_DICT_SECTIONS:
+            raw_inc_sec = incoming_inputs.get(section)
+            raw_srv_sec = server_inputs.get(section)
+            inc_sec: dict[str, Any] = raw_inc_sec if isinstance(raw_inc_sec, dict) else {}
+            srv_sec: dict[str, Any] = raw_srv_sec if isinstance(raw_srv_sec, dict) else {}
+            all_keys = list(dict.fromkeys([*srv_sec.keys(), *inc_sec.keys()]))
+            for field_key in all_keys:
+                if section == "air" and field_key == "ambient_temperature_c":
+                    continue
+                inc_val = inc_sec.get(field_key)
+                srv_val = srv_sec.get(field_key)
+                if not _values_equal(inc_val, srv_val):
+                    diff.append(
+                        {"path": f"{section}.{field_key}", "incoming": inc_val, "server": srv_val}
+                    )
+        for section in _CONFLICT_LIST_SECTIONS:
+            raw_inc_list = incoming_inputs.get(section)
+            raw_srv_list = server_inputs.get(section)
+            inc_list: list[Any] = raw_inc_list if isinstance(raw_inc_list, list) else []
+            srv_list: list[Any] = raw_srv_list if isinstance(raw_srv_list, list) else []
+            cmp_inc = _strip_segment_ids(inc_list) if section == "segments" else inc_list
+            cmp_srv = _strip_segment_ids(srv_list) if section == "segments" else srv_list
+            if not _values_equal(cmp_inc, cmp_srv):
+                diff.append({"path": section, "incoming": inc_list, "server": srv_list})
+    return diff
+
+
 def update_session(
     db: OrmSession,
     session: HydroSession,
@@ -444,7 +594,14 @@ def update_session(
             "revision_conflict",
             "Oturum baska bir istemci tarafindan guncellendi.",
             status_code=409,
-            details={"current": json_safe(serialize_session(session))},
+            details={
+                "expected_revision": expected_revision,
+                "current_revision": session.revision,
+                "current": json_safe(serialize_session(session)),
+                "diff": json_safe(
+                    _build_conflict_diff(session, changes, replace_inputs=replace_inputs)
+                ),
+            },
         )
 
     before = {
@@ -466,24 +623,11 @@ def update_session(
         raw_patch = changes["inputs"]
         if not isinstance(raw_patch, dict):
             raise AppError("validation_error", "inputs bir nesne olmalidir.", status_code=422)
-        if replace_inputs:
-            session.inputs = normalize_inputs(raw_patch)
-        else:
-            patch = dict(raw_patch)
-            patch_air = patch.get("air")
-            patch_field = patch.get("field")
-            if isinstance(patch_air, dict) and "ambient_temperature_c" in patch_air:
-                if not (isinstance(patch_field, dict) and "ambient_temperature_c" in patch_field):
-                    patch["field"] = {
-                        **(dict(patch_field) if isinstance(patch_field, dict) else {}),
-                        "ambient_temperature_c": patch_air["ambient_temperature_c"],
-                    }
-            elif isinstance(patch_field, dict) and "ambient_temperature_c" in patch_field:
-                patch["air"] = {
-                    **(dict(patch_air) if isinstance(patch_air, dict) else {}),
-                    "ambient_temperature_c": patch_field["ambient_temperature_c"],
-                }
-            session.inputs = normalize_inputs(deep_merge(session.inputs or {}, patch))
+        session.inputs = _prepare_updated_inputs(
+            session.inputs or {},
+            raw_patch,
+            replace_inputs=replace_inputs,
+        )
     if "wizard_state" in changes:
         session.wizard_state = changes["wizard_state"]
 
@@ -667,8 +811,21 @@ def create_result(
     *,
     test_type: str,
     payload: dict[str, Any],
+    expected_revision: int | None = None,
     commit: bool = True,
 ) -> dict[str, Any]:
+    if expected_revision is not None and expected_revision != session.revision:
+        raise AppError(
+            "revision_conflict",
+            "Oturum baska bir istemci tarafindan guncellendi.",
+            status_code=409,
+            details={
+                "expected_revision": expected_revision,
+                "current_revision": session.revision,
+                "current": json_safe(serialize_session(session)),
+                "diff": [],
+            },
+        )
     from .calculations import evaluate_test
 
     result, decision = evaluate_test(test_type, payload)

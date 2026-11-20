@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
   ClipboardCopy,
@@ -17,12 +18,19 @@ import { Badge } from "../components/ui/Badge";
 import { Button, IconButton } from "../components/ui/Button";
 import { TextField } from "../components/ui/Field";
 import { InlineNotice, EmptyState } from "../components/ui/State";
-import { useMeta, useSafeSwitchSession, useSessions } from "../hooks/queries";
+import {
+  useImportDesktopSnapshot,
+  useMeta,
+  useSafeSwitchSession,
+  useSessions,
+} from "../hooks/queries";
 import { useAppStore } from "../store/useAppStore";
 import { api, apiErrorMessage } from "../lib/api";
 import { buildReportText, buildSnapshot, downloadJson, downloadText, reportFileName } from "../lib/report";
-import { dateOnly, fmt, num, relativeTime } from "../lib/format";
+import { dateOnly, fmt, nowIso, num, relativeTime } from "../lib/format";
 import { CHECK_DEFINITIONS } from "../lib/constants";
+import { extractRevisionConflict } from "../lib/sessionDiff";
+import type { SnapshotMapping } from "../lib/types";
 
 type Format = "pdf" | "xlsx" | "txt";
 
@@ -41,21 +49,34 @@ export function ReportsPage() {
   const setTab = useAppStore((state) => state.setTab);
   const applySessionInputs = useAppStore((state) => state.applySessionInputs);
   const setSessionMeta = useAppStore((state) => state.setSessionMeta);
+  const markSaved = useAppStore((state) => state.markSaved);
+  const setRevisionConflict = useAppStore((state) => state.setRevisionConflict);
   const pushToast = useAppStore((state) => state.pushToast);
 
   const sessionId = useAppStore((state) => state.sessionId);
+  const projectId = useAppStore((state) => state.projectId);
   const backend = useAppStore((state) => state.backend);
   const revision = useAppStore((state) => state.revision);
   const currentName = useAppStore((state) => state.sessionName);
+  const sessionStatus = useAppStore((state) => state.sessionStatus);
 
+  const queryClient = useQueryClient();
   const { data: meta } = useMeta();
   const { data: sessions } = useSessions();
   const safeSwitchSession = useSafeSwitchSession();
+  const importDesktopSnapshot = useImportDesktopSnapshot();
 
   const [generatedAt, setGeneratedAt] = useState(() => new Date());
   const [busy, setBusy] = useState<Format | null>(null);
   const [snapshotBusy, setSnapshotBusy] = useState(false);
+  const [snapshotMode, setSnapshotMode] = useState<"merge" | "replace">("merge");
+  const [lastMapping, setLastMapping] = useState<{
+    action: "upload" | "import";
+    name: string;
+    mapping: SnapshotMapping;
+  } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const newImportRef = useRef<HTMLInputElement>(null);
   const isOffline = backend !== "online";
 
   const history = useAppStore((state) => state.history);
@@ -171,23 +192,63 @@ export function ReportsPage() {
 
   async function uploadSnapshot(file: File) {
     setSnapshotBusy(true);
+    let parsedSnapshot: Record<string, unknown> | null = null;
     try {
       const text = await file.text();
-      const snapshot = JSON.parse(text) as Record<string, unknown>;
+      const parsed: unknown = JSON.parse(text);
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        pushToast("error", "Snapshot yüklenemedi", "Dosya kök değeri geçerli bir JSON nesnesi değil.");
+        return;
+      }
+      parsedSnapshot = parsed as Record<string, unknown>;
       if (backend === "online" && sessionId) {
-        const response = await api.snapshotUpload(sessionId, snapshot, revision);
+        const response = await api.snapshotUpload(sessionId, parsedSnapshot, revision, snapshotMode);
         applySessionInputs(response.inputs);
-        setSessionMeta({ revision: response.revision });
+        setSessionMeta({
+          id: response.id,
+          name: response.name,
+          status: response.status,
+          revision: response.revision,
+        });
+        markSaved(response.revision);
+        setRevisionConflict(null);
+        queryClient.setQueryData(["session", response.id], response);
+        void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+        void queryClient.invalidateQueries({ queryKey: ["project-scene"] });
+        if (response.mapping) {
+          setLastMapping({ action: "upload", name: response.name, mapping: response.mapping });
+        }
         pushToast(
           "success",
-          "Snapshot uygulandı",
+          "Snapshot mevcut kesite uygulandı",
           `${response.mapping?.converted ?? 0} alan dönüştürüldü, ${response.mapping?.skipped.length ?? 0} alan atlandı.`,
         );
       } else {
-        applySessionInputs(snapshot);
+        applySessionInputs(parsedSnapshot);
         pushToast("success", "Snapshot yerel olarak yüklendi", "Backend yok; girdiler tarayıcı oturumuna uygulandı.");
       }
     } catch (error) {
+      const conflict = extractRevisionConflict(error);
+      if (conflict && sessionId && parsedSnapshot) {
+        setRevisionConflict({
+          sessionId,
+          localRevision: revision,
+          localName: currentName,
+          localStatus: sessionStatus,
+          localInputs: inputs,
+          serverSession: conflict.serverSession,
+          serverDiff: conflict.serverDiff,
+          sourceAction: "snapshot_upload",
+          detectedAt: nowIso(),
+          pendingSnapshot: { snapshot: parsedSnapshot, mode: snapshotMode },
+        });
+        pushToast(
+          "warning",
+          "Revizyon çakışması (HTTP 409)",
+          `Sunucuda revizyon ${conflict.currentRevision} bulundu; fark penceresi açıldı.`,
+        );
+        return;
+      }
       pushToast(
         "error",
         "Snapshot yüklenemedi",
@@ -197,6 +258,26 @@ export function ReportsPage() {
       setSnapshotBusy(false);
       if (fileRef.current) fileRef.current.value = "";
     }
+  }
+
+  function importSnapshotAsNewSession(file: File) {
+    const cleanName = file.name.replace(/\.json$/i, "").trim() || undefined;
+    importDesktopSnapshot.mutate(
+      {
+        file,
+        name: cleanName,
+        projectId,
+        openAfterImport: true,
+      },
+      {
+        onSuccess: (res) => {
+          setLastMapping({ action: "import", name: res.session.name, mapping: res.mapping });
+        },
+        onSettled: () => {
+          if (newImportRef.current) newImportRef.current.value = "";
+        },
+      },
+    );
   }
 
   return (
@@ -318,37 +399,110 @@ export function ReportsPage() {
                 );
               })}
             </div>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <Button
-                size="sm"
-                icon={<Download size={12} />}
-                loading={snapshotBusy}
-                onClick={() => void downloadSnapshot()}
-              >
-                Snapshot indir
-              </Button>
-              <Button
-                size="sm"
-                icon={<Upload size={12} />}
-                onClick={() => fileRef.current?.click()}
-              >
-                Snapshot yükle
-              </Button>
+            <div className="mt-3 space-y-2">
+              <div className="seg-control" role="group" aria-label="Snapshot uygulama modu">
+                <button
+                  type="button"
+                  className="seg-btn"
+                  aria-pressed={snapshotMode === "merge"}
+                  onClick={() => setSnapshotMode("merge")}
+                >
+                  Birleştir (merge)
+                </button>
+                <button
+                  type="button"
+                  className="seg-btn"
+                  aria-pressed={snapshotMode === "replace"}
+                  onClick={() => setSnapshotMode("replace")}
+                >
+                  Üzerine yaz (replace)
+                </button>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <Button
+                  size="sm"
+                  icon={<Download size={12} />}
+                  loading={snapshotBusy}
+                  onClick={() => void downloadSnapshot()}
+                >
+                  Snapshot indir
+                </Button>
+                <Button
+                  size="sm"
+                  icon={<Upload size={12} />}
+                  loading={snapshotBusy}
+                  onClick={() => fileRef.current?.click()}
+                >
+                  Mevcut kesite uygula
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon={<FileJson size={12} />}
+                  loading={importDesktopSnapshot.isPending}
+                  onClick={() => newImportRef.current?.click()}
+                >
+                  JSON&apos;dan yeni kesit aç
+                </Button>
+              </div>
               <input
                 ref={fileRef}
                 type="file"
                 accept="application/json,.json"
                 className="hidden"
-                aria-label="Snapshot JSON dosyası"
+                aria-label="Mevcut kesite snapshot JSON dosyası"
                 onChange={(event) => {
                   const file = event.target.files?.[0];
                   if (file) void uploadSnapshot(file);
                 }}
               />
+              <input
+                ref={newImportRef}
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                aria-label="Yeni kesit için masaüstü JSON snapshot dosyası"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) importSnapshotAsNewSession(file);
+                }}
+              />
             </div>
+            {lastMapping ? (
+              <div className="mt-3">
+                <InlineNotice
+                  tone={
+                    lastMapping.mapping.warnings.length > 0 ||
+                    lastMapping.mapping.invalid_fields.length > 0
+                      ? "warning"
+                      : "info"
+                  }
+                  title={
+                    lastMapping.action === "import"
+                      ? `Yeni kesit açıldı: ${lastMapping.name}`
+                      : `Snapshot uygulandı: ${lastMapping.name}`
+                  }
+                >
+                  <div className="space-y-1 text-[11px]">
+                    <p>
+                      <strong>{lastMapping.mapping.converted}</strong> alan dönüştürüldü
+                      {lastMapping.mapping.skipped.length > 0
+                        ? ` · Atlanan: ${lastMapping.mapping.skipped.join(", ")}`
+                        : ""}
+                    </p>
+                    {lastMapping.mapping.invalid_fields.length > 0 ? (
+                      <p>Geçersiz alanlar: {lastMapping.mapping.invalid_fields.join(", ")}</p>
+                    ) : null}
+                    {lastMapping.mapping.warnings.length > 0 ? (
+                      <p>{lastMapping.mapping.warnings.join(" · ")}</p>
+                    ) : null}
+                  </div>
+                </InlineNotice>
+              </div>
+            ) : null}
             <InlineNotice tone="info" title="Masaüstü uyumu">
-              Snapshot `schema_version: 1` biçimindedir; sayısal alanlar string taşır ve masaüstü
-              uygulamasına içe aktarılabilir.
+              Snapshot `schema_version: 1` biçimindedir; mevcut kesite birleştirebilir veya{" "}
+              `POST /api/import/desktop-snapshot` ile doğrudan yeni kesit oluşturabilirsiniz.
             </InlineNotice>
           </SectionCard>
         </div>

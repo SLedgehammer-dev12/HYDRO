@@ -630,7 +630,7 @@ export const api = {
     }),
 
   importSnapshot: (
-    body: { name?: string; snapshot: Record<string, unknown> },
+    body: { name?: string; project_id?: string | null; snapshot: Record<string, unknown> },
     signal?: AbortSignal,
   ) =>
     apiFetch<{ session: Session; mapping: SnapshotMapping }>("/import/desktop-snapshot", {

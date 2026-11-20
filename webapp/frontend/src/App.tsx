@@ -55,6 +55,11 @@ const UpdateManagerModal = lazy(() =>
     default: module.UpdateManagerModal,
   })),
 );
+const RevisionConflictModal = lazy(() =>
+  import("./components/layout/RevisionConflictModal").then((module) => ({
+    default: module.RevisionConflictModal,
+  })),
+);
 
 const SKELETON_CARDS = ["kpi-1", "kpi-2", "kpi-3", "kpi-4"] as const;
 
@@ -104,6 +109,7 @@ export default function App() {
   const theme = useAppStore((state) => state.theme);
   const rightPanelOpen = useAppStore((state) => state.rightPanelOpen);
   const updateModalOpen = useAppStore((state) => state.updateModalOpen);
+  const revisionConflict = useAppStore((state) => state.revisionConflict);
   const backend = useAppStore((state) => state.backend);
   const sessionId = useAppStore((state) => state.sessionId);
   const applySessionInputs = useAppStore((state) => state.applySessionInputs);
@@ -354,6 +360,11 @@ export default function App() {
       {updateModalOpen ? (
         <Suspense fallback={null}>
           <UpdateManagerModal />
+        </Suspense>
+      ) : null}
+      {revisionConflict ? (
+        <Suspense fallback={null}>
+          <RevisionConflictModal />
         </Suspense>
       ) : null}
       <ToastHost />

@@ -56,6 +56,8 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
   const setTab = useAppStore((state) => state.setTab);
   const setSessionMeta = useAppStore((state) => state.setSessionMeta);
   const setSessionName = useAppStore((state) => state.setSessionName);
+  const markSaved = useAppStore((state) => state.markSaved);
+  const setRevisionConflict = useAppStore((state) => state.setRevisionConflict);
   const applySessionInputs = useAppStore((state) => state.applySessionInputs);
   const resetSession = useAppStore((state) => state.resetSession);
   const setUpdateModalOpen = useAppStore((state) => state.setUpdateModalOpen);
@@ -116,6 +118,8 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
         revision: session.revision,
         status: session.status,
       });
+      markSaved(session.revision);
+      setRevisionConflict(null);
       const project = projects?.find((item) => item.id === session.project_id);
       if (project) setProject(project);
       else if (session.project_id) setProject({ id: session.project_id, name: "" });

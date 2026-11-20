@@ -1397,9 +1397,17 @@ export function ProjectsPage() {
       <ProjectImportModal
         open={importModalOpen}
         onClose={() => setImportModalOpen(false)}
+        projects={projects}
+        selectedProjectId={selected?.id ?? null}
         onImported={(imported) => {
           setSelectedId(imported.id);
           setProject(imported);
+        }}
+        onSessionImported={(session) => {
+          if (session.project_id) {
+            setSelectedId(session.project_id);
+          }
+          setTab("geometry");
         }}
       />
     </div>

@@ -269,15 +269,22 @@ def list_results(
 def create_result(
     session_id: str,
     payload: schemas.ResultCreate,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
     db: OrmSession = Depends(get_db),
     workspace: Workspace = Depends(get_workspace),
 ) -> dict:
     session = session_service.get_session(db, session_id, workspace.hash)
-    return json_safe(
-        session_service.create_result(
-            db, session, test_type=payload.test_type, payload=payload.payload
-        )
+    expected = parse_if_match(if_match)
+    created = session_service.create_result(
+        db,
+        session,
+        test_type=payload.test_type,
+        payload=payload.payload,
+        expected_revision=expected,
     )
+    _etag(response, session.revision)
+    return json_safe(created)
 
 
 # ---------------------------------------------------------------------------

@@ -301,6 +301,32 @@ def apply_snapshot(
         if converted_section:
             patch[section] = converted_section
 
+    raw_pressure = snapshot.get("pressure")
+    if isinstance(raw_pressure, dict) and "derive_delta_t" in raw_pressure:
+        derive_val = state.boolean(raw_pressure.get("derive_delta_t"), "pressure.derive_delta_t")
+        if derive_val is not None:
+            patch.setdefault("pressure", {})["derive_delta_t"] = derive_val
+
+    raw_section_meta = snapshot.get("section_meta")
+    if isinstance(raw_section_meta, dict):
+        sec_meta_patch: dict[str, str] = {}
+        for key in (
+            "section_no",
+            "description",
+            "location",
+            "start_kp",
+            "end_kp",
+            "test_date",
+            "test_type",
+            "notes",
+        ):
+            if key in raw_section_meta:
+                val_text = state.text(raw_section_meta.get(key), f"section_meta.{key}")
+                if val_text is not None:
+                    sec_meta_patch[key] = val_text
+        if sec_meta_patch:
+            patch["section_meta"] = sec_meta_patch
+
     for section in ("geometry_catalog",):
         raw_section = snapshot.get(section)
         if isinstance(raw_section, dict):
@@ -435,12 +461,18 @@ def apply_snapshot(
             text = state.text(val, f"report.{key}")
             if text is not None:
                 report_patch[key] = text
-                if text:
-                    state.converted += 1
         if report_patch:
             patch["report"] = report_patch
+            section_id = report_patch.get("section_id")
+            if section_id and not (
+                isinstance(patch.get("section_meta"), dict)
+                and patch["section_meta"].get("section_no")
+            ):
+                patch.setdefault("section_meta", {})["section_no"] = section_id
 
     backend_option = snapshot.get("water_backend_option")
+    if backend_option is None or not str(backend_option).strip():
+        backend_option = snapshot.get("water_backend")
     if backend_option is not None and str(backend_option).strip():
         resolved_backend_key = resolve_backend_key(str(backend_option))
         if resolved_backend_key is None:

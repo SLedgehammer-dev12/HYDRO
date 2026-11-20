@@ -22,6 +22,7 @@ import {
 } from "../lib/mock";
 import { normalizeInputs } from "../lib/normalize";
 import { nowIso } from "../lib/format";
+import type { RevisionConflictState } from "../lib/sessionDiff";
 
 export const PERSIST_KEY = "hydro-app-v1";
 
@@ -43,6 +44,7 @@ export interface AppStore {
   tab: TabKey;
   activeFormCode: BotasFormCode;
   updateModalOpen: boolean;
+  revisionConflict: RevisionConflictState | null;
   pendingScrollTarget: string | null;
   sessionId: string | null;
   sessionName: string;
@@ -77,6 +79,7 @@ export interface AppStore {
   setActiveFormCode: (code: BotasFormCode) => void;
   openForm: (code: BotasFormCode) => void;
   setUpdateModalOpen: (open: boolean) => void;
+  setRevisionConflict: (conflict: RevisionConflictState | null) => void;
   setPendingScrollTarget: (target: string | null) => void;
   setSessionMeta: (meta: {
     id?: string | null;
@@ -130,6 +133,7 @@ export const useAppStore = create<AppStore>()(
       tab: "dashboard",
       activeFormCode: "test_data",
       updateModalOpen: false,
+      revisionConflict: null,
       pendingScrollTarget: null,
       sessionId: null,
       sessionName: "Bölüm 12–13 · Doğu Hattı",
@@ -163,6 +167,7 @@ export const useAppStore = create<AppStore>()(
       setActiveFormCode: (activeFormCode) => set({ activeFormCode }),
       openForm: (activeFormCode) => set({ tab: "forms", activeFormCode }),
       setUpdateModalOpen: (updateModalOpen) => set({ updateModalOpen }),
+      setRevisionConflict: (revisionConflict) => set({ revisionConflict }),
       setPendingScrollTarget: (pendingScrollTarget) => set({ pendingScrollTarget }),
 
       setSessionMeta: (meta) =>
@@ -364,6 +369,7 @@ export const useAppStore = create<AppStore>()(
           sessionStatus: "draft",
           revision: 0,
           dirty: false,
+          revisionConflict: null,
           exports: [],
         });
       },
@@ -382,6 +388,7 @@ export const useAppStore = create<AppStore>()(
           sessionStatus: "draft",
           revision: 0,
           dirty: false,
+          revisionConflict: null,
           projectId: null,
           projectName: "",
           projectCode: "",
