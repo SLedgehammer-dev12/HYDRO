@@ -589,6 +589,22 @@ function isPositive(value: number | null | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
+export function resolveEffectiveSmys(
+  inputs: AppInputs,
+  sections: GeometryIn["sections"] = sectionsFromInputs(inputs),
+): number | null {
+  if (isPositive(inputs.section_profile.smys_mpa)) {
+    return inputs.section_profile.smys_mpa;
+  }
+  const segSmysValues = sections
+    .map((s) => s.smys_mpa)
+    .filter((v): v is number => isPositive(v));
+  if (sections.length > 0 && segSmysValues.length === sections.length) {
+    return Math.min(...segSmysValues);
+  }
+  return null;
+}
+
 export function computeGeometry(sections: GeometryIn["sections"]): GeometryResponse {
   const results = sections.map((section, index) => {
     const ri = section.outside_diameter_mm / 2 - section.wall_thickness_mm;
@@ -1113,9 +1129,10 @@ export function buildDemoResults(inputs: AppInputs): ResultBundle {
         })
       : undefined;
 
+  const effectiveSmys = resolveEffectiveSmys(inputs, sections);
   const profile =
     inputs.section_profile.design_pressure_bar &&
-    inputs.section_profile.smys_mpa &&
+    effectiveSmys !== null &&
     inputs.section_profile.highest_elevation_m !== null &&
     inputs.section_profile.lowest_elevation_m !== null &&
     inputs.section_profile.start_elevation_m !== null &&
@@ -1123,7 +1140,7 @@ export function buildDemoResults(inputs: AppInputs): ResultBundle {
       ? computeProfile({
           geometry: { sections },
           design_pressure_bar: inputs.section_profile.design_pressure_bar,
-          smys_mpa: inputs.section_profile.smys_mpa,
+          smys_mpa: effectiveSmys,
           location_class: inputs.location_class,
           highest_elevation_m: inputs.section_profile.highest_elevation_m,
           lowest_elevation_m: inputs.section_profile.lowest_elevation_m,
@@ -1535,7 +1552,7 @@ export function buildSceneData(inputs: AppInputs, results: { profile?: PressureP
     inputs.air.pressure_bar ??
     results.profile?.selected_window.minimum_required_pressure_bar ??
     0;
-  const smysMpa = inputs.section_profile.smys_mpa ?? 450;
+  const smysMpa = resolveEffectiveSmys(inputs, sections) ?? 450;
   const maxAllowable = results.profile?.maximum_allowable_pressure_at_low_point_bar ?? 193.55;
   const segments: SceneSegment[] = [];
 
@@ -1582,27 +1599,32 @@ export function buildSceneData(inputs: AppInputs, results: { profile?: PressureP
         .map((idx) => profile[idx]);
     }
 
+    const requiredBps = [0, ...sectionRanges.map((r) => r.end), totalLength];
+    const isRequiredBp = (val: number) => requiredBps.some((r) => Math.abs(r - val) <= 1e-6);
     const rawBreakpoints = [
-      0,
-      ...sectionRanges.map((r) => r.end),
+      ...requiredBps,
       ...chosenProfile.map((p) => p.x),
-      totalLength,
     ]
       .filter((v) => Number.isFinite(v) && v >= 0 && v <= totalLength)
       .sort((a, b) => a - b);
 
     const breakpoints: number[] = [];
     for (const bp of rawBreakpoints) {
-      if (breakpoints.length === 0 || bp - breakpoints[breakpoints.length - 1] >= 1.0) {
+      if (breakpoints.length === 0) {
+        breakpoints.push(bp);
+        continue;
+      }
+      const prev = breakpoints[breakpoints.length - 1];
+      if (bp - prev >= 1.0) {
+        breakpoints.push(bp);
+      } else if (isRequiredBp(bp) && !isRequiredBp(prev)) {
+        breakpoints[breakpoints.length - 1] = bp;
+      } else if (isRequiredBp(bp) && isRequiredBp(prev) && bp > prev + 1e-6) {
         breakpoints.push(bp);
       }
     }
-    if (breakpoints.length > 0 && breakpoints[breakpoints.length - 1] < totalLength) {
-      if (totalLength - breakpoints[breakpoints.length - 1] >= 1.0) {
-        breakpoints.push(totalLength);
-      } else {
-        breakpoints[breakpoints.length - 1] = totalLength;
-      }
+    if (breakpoints.length > 0 && breakpoints[breakpoints.length - 1] < totalLength - 1e-6) {
+      breakpoints.push(totalLength);
     }
 
     for (let index = 0; index < breakpoints.length - 1; index += 1) {
@@ -1636,6 +1658,8 @@ export function buildSceneData(inputs: AppInputs, results: { profile?: PressureP
         startKpM !== null
           ? `${labelPrefix} · KP ${formatKp(startKpM + start)}–${formatKp(startKpM + end)}`
           : `${labelPrefix} · #${index + 1}`;
+      const segGrade =
+        sec.material_grade ?? (sec.smys_mpa == null ? (inputs.material_grade || null) : null);
       segments.push({
         id: `scene-seg-${index + 1}`,
         label: segLabel,
@@ -1645,7 +1669,7 @@ export function buildSceneData(inputs: AppInputs, results: { profile?: PressureP
         end_elevation_m: round(z1, 2),
         outside_diameter_mm: sec.outside_diameter_mm,
         wall_thickness_mm: sec.wall_thickness_mm,
-        grade: sec.material_grade ?? (inputs.material_grade || null),
+        grade: segGrade,
         smys_mpa: effSmys,
         pressure_at_100_smys_bar: round(limitSmys, 2),
         pressure_bar: basePressure > 0 ? segPressure : undefined,
@@ -1658,12 +1682,18 @@ export function buildSceneData(inputs: AppInputs, results: { profile?: PressureP
     sections.forEach((section, index) => {
       const start = station;
       const end = station + section.length_m;
-      const effSmys = isPositive(section.smys_mpa) ? section.smys_mpa : smysMpa;
+      const z0 = interpolateElevation(profile, start);
+      const z1 = interpolateElevation(profile, end);
+      const zMid = 0.5 * (z0 + z1);
+      const headBar = (WATER_DENSITY_15C * 9.80665 * (zMid - pumpElev)) / 100_000;
+      const segPressure = basePressure > 0 ? Math.max(0, round(basePressure - headBar, 2)) : 0;
+      const hasCustomSmys = isPositive(section.smys_mpa);
+      const effSmys = hasCustomSmys ? (section.smys_mpa as number) : smysMpa;
       const limitSmys =
         effSmys > 0 && section.outside_diameter_mm > 0
           ? (20 * effSmys * section.wall_thickness_mm) / section.outside_diameter_mm
           : maxAllowable;
-      const utilization = basePressure > 0 && limitSmys > 0 ? basePressure / limitSmys : 0;
+      const utilization = basePressure > 0 && limitSmys > 0 ? segPressure / limitSmys : 0;
       const status =
         basePressure <= 0
           ? "pending"
@@ -1672,6 +1702,8 @@ export function buildSceneData(inputs: AppInputs, results: { profile?: PressureP
             : utilization > 0.9
               ? "warning"
               : "pass";
+      const segGrade =
+        section.material_grade ?? (!hasCustomSmys ? (inputs.material_grade || null) : null);
       segments.push({
         id: `scene-seg-${index + 1}`,
         label:
@@ -1679,14 +1711,14 @@ export function buildSceneData(inputs: AppInputs, results: { profile?: PressureP
           `Segment ${index + 1} · ${section.outside_diameter_mm.toFixed(1)} mm`,
         start_m: start,
         end_m: end,
-        start_elevation_m: interpolateElevation(profile, start),
-        end_elevation_m: interpolateElevation(profile, end),
+        start_elevation_m: z0,
+        end_elevation_m: z1,
         outside_diameter_mm: section.outside_diameter_mm,
         wall_thickness_mm: section.wall_thickness_mm,
-        grade: section.material_grade ?? (inputs.material_grade || null),
+        grade: segGrade,
         smys_mpa: effSmys,
         pressure_at_100_smys_bar: round(limitSmys, 2),
-        pressure_bar: basePressure > 0 ? basePressure : undefined,
+        pressure_bar: basePressure > 0 ? segPressure : undefined,
         utilization: basePressure > 0 ? round(utilization, 4) : 0,
         status,
       });

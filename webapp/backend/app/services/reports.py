@@ -24,7 +24,7 @@ from hidrostatik_test.services.report_export import (
 
 from ..core.config import Settings
 from ..core.errors import AppError
-from ..core.timeutil import as_float, fmt_number, iso_z, utcnow
+from ..core.timeutil import as_float, as_positive_float, fmt_number, iso_z, utcnow
 from ..desktop_labels import FIELD_CHECKS, KEY_TO_B_SOURCE_LABEL
 from ..models import HydroSession, TestResult
 from . import coefficients as coefficient_service
@@ -176,17 +176,16 @@ def build_context(
         except Exception:
             logger.exception("Backend comparison failed during report export")
             backend_cmp_error = "Su ozelligi backend karsilastirmasi uretilemedi."
-    default_smys = as_float(profile.get("smys_mpa"))
+    default_smys = as_positive_float(profile.get("smys_mpa"))
     seg_smys_values: list[float] = []
     has_seg_override = False
     for seg_item in segments:
-        raw_seg_smys = seg_item.get("smys_mpa")
-        seg_smys = None if isinstance(raw_seg_smys, bool) else as_float(raw_seg_smys)
+        seg_smys = as_positive_float(seg_item.get("smys_mpa"))
         seg_grade = str(seg_item.get("material_grade") or "").strip()
-        if (seg_smys is not None and seg_smys > 0) or seg_grade:
+        if seg_smys is not None or seg_grade:
             has_seg_override = True
-        eff = seg_smys if (seg_smys is not None and seg_smys > 0) else default_smys
-        if eff is not None and eff > 0:
+        eff = seg_smys if seg_smys is not None else default_smys
+        if eff is not None:
             seg_smys_values.append(eff)
 
     geometry_data = {
@@ -337,18 +336,13 @@ def build_report_text(context: dict[str, Any], session: HydroSession) -> str:
 
     segments = _geometry_rows(inputs)
     if segments:
-        default_smys = as_float(profile.get("smys_mpa"))
+        default_smys = as_positive_float(profile.get("smys_mpa"))
         lines.append("Segment Listesi")
         for index, item in enumerate(segments, start=1):
-            raw_seg_smys = item.get("smys_mpa")
-            seg_smys = None if isinstance(raw_seg_smys, bool) else as_float(raw_seg_smys)
+            seg_smys = as_positive_float(item.get("smys_mpa"))
             seg_grade = str(item.get("material_grade") or "").strip()
-            eff_smys = seg_smys if (seg_smys is not None and seg_smys > 0) else default_smys
-            smys_note = (
-                f" | SMYS {fmt_number(eff_smys, 1)} MPa"
-                if eff_smys is not None and eff_smys > 0
-                else ""
-            )
+            eff_smys = seg_smys if seg_smys is not None else default_smys
+            smys_note = f" | SMYS {fmt_number(eff_smys, 1)} MPa" if eff_smys is not None else ""
             if smys_note and seg_smys is None and default_smys is not None:
                 smys_note += " (hat varsayilani)"
             grade_note = f" | {seg_grade}" if seg_grade else ""
@@ -540,7 +534,7 @@ def build_report_text(context: dict[str, Any], session: HydroSession) -> str:
             "Not",
             "Nihai karar ASME B31.8 ve proje proseduru ile birlikte degerlendirilmelidir.",
             "Isaret sozlesmesi: dT = Tilk - Tson, Pa = Pilk - Pson.",
-            f"SMYS (MPa): {fmt_number(as_float(profile.get('smys_mpa')), 1) or '-'}",
+            f"SMYS (MPa): {fmt_number(as_positive_float(profile.get('smys_mpa')), 1) or '-'}",
             f"Rapor uretim zamani (UTC): {iso_z(utcnow())}",
         ]
     )

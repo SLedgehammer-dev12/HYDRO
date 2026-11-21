@@ -277,6 +277,14 @@ export function SelectionCard({ segment, equipment, onClose, onOpenSession }: Se
           <dd className="text-right text-mist-200">{formatPressure(segment.pressure_bar)}</dd>
           <dt className="text-mist-500">Kullanım</dt>
           <dd className="text-right text-mist-200">{formatUtilization(segment.utilization)}</dd>
+          {segment.grade ? (
+            <>
+              <dt className="text-mist-500">Kalite</dt>
+              <dd className="truncate text-right text-mist-200" title={segment.grade}>
+                {segment.grade}
+              </dd>
+            </>
+          ) : null}
           {typeof segment.smys_mpa === "number" && Number.isFinite(segment.smys_mpa) ? (
             <>
               <dt className="text-mist-500">SMYS</dt>

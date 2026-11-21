@@ -16,6 +16,7 @@ from hidrostatik_test.domain import DEFAULT_STEEL_MODEL
 from ..core.errors import AppError, error_from_domain, not_found
 from ..core.timeutil import (
     as_float,
+    as_positive_float,
     deep_merge,
     ensure_utc,
     iso_z,
@@ -1210,10 +1211,7 @@ def _sections_from_inputs(inputs: dict[str, Any]) -> list[Any]:
             length = as_float(item.get("length_m"))
             if od is None or wt is None or length is None:
                 continue
-            raw_smys = item.get("smys_mpa")
-            smys_val = None if isinstance(raw_smys, bool) else as_float(raw_smys)
-            if smys_val is not None and smys_val <= 0:
-                smys_val = None
+            smys_val = as_positive_float(item.get("smys_mpa"))
             raw_grade = item.get("material_grade")
             grade_val = raw_grade.strip() or None if isinstance(raw_grade, str) else None
             rows.append(
@@ -1237,10 +1235,7 @@ def _sections_from_inputs(inputs: dict[str, Any]) -> list[Any]:
     if od is None or wt is None or length is None:
         return []
     profile = inputs.get("section_profile") or {}
-    raw_smys = profile.get("smys_mpa")
-    smys_val = None if isinstance(raw_smys, bool) else as_float(raw_smys)
-    if smys_val is not None and smys_val <= 0:
-        smys_val = None
+    smys_val = as_positive_float(profile.get("smys_mpa"))
     raw_grade = inputs.get("material_grade")
     grade_val = raw_grade.strip() or None if isinstance(raw_grade, str) else None
     return [
@@ -1264,8 +1259,8 @@ def profile_summary(inputs: dict[str, Any]) -> dict[str, Any] | None:
         if not sections:
             return None
         design = as_float(profile.get("design_pressure_bar"))
-        smys = as_float(profile.get("smys_mpa"))
-        if smys is None or smys <= 0:
+        smys = as_positive_float(profile.get("smys_mpa"))
+        if smys is None:
             seg_smys = [
                 sec.smys_mpa for sec in sections if sec.smys_mpa is not None and sec.smys_mpa > 0
             ]

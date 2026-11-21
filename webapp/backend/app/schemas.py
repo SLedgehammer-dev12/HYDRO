@@ -145,6 +145,22 @@ class PressureProfileRequest(StrictModel):
     pump_location: str
     monitored_pressure_bar: float | None = None
 
+    @field_validator(
+        "design_pressure_bar",
+        "smys_mpa",
+        "highest_elevation_m",
+        "lowest_elevation_m",
+        "start_elevation_m",
+        "end_elevation_m",
+        "monitored_pressure_bar",
+        mode="before",
+    )
+    @classmethod
+    def _reject_bool_numbers(cls, value: Any) -> Any:
+        if isinstance(value, bool):
+            raise ValueError("Boolean deger sayisal alan icin gecersizdir.")
+        return value
+
 
 class PigSpeedRequest(StrictModel):
     mode: str

@@ -46,7 +46,7 @@ from hidrostatik_test.domain.time_series import (
 from hidrostatik_test.services.report_ocr import PageText, parse_number
 
 from ..core.errors import AppError
-from ..core.timeutil import iso_z, json_safe, utcnow
+from ..core.timeutil import as_positive_float, iso_z, json_safe, utcnow
 from ..desktop_labels import FIELD_CHECKS
 from ..models import HydroSession, OcrAnalysis, Project, SectionForm, TestResult, new_uuid
 from . import audit
@@ -2075,10 +2075,7 @@ def evaluate_section_calculations(
             s_od = _finite_float(seg.get("outside_diameter_mm"))
             s_wt = _finite_float(seg.get("wall_thickness_mm"))
             s_len = _finite_float(seg.get("length_m"))
-            raw_smys = seg.get("smys_mpa")
-            s_smys = None if isinstance(raw_smys, bool) else _finite_float(raw_smys)
-            if s_smys is not None and s_smys <= 0:
-                s_smys = None
+            s_smys = as_positive_float(seg.get("smys_mpa"))
             raw_grade = seg.get("material_grade")
             s_grade = raw_grade.strip() or None if isinstance(raw_grade, str) else None
             if s_od and s_wt and s_len and s_od > 2 * s_wt and s_len > 0:
@@ -2268,8 +2265,8 @@ def evaluate_section_calculations(
 
     # 3) Pressure Profile & SMYS Feasibility evaluation
     design_p = _finite_float(merged_header.get("design_pressure_bar"))
-    smys_mpa = _finite_float(merged_header.get("smys_mpa"))
-    if (smys_mpa is None or smys_mpa <= 0) and valid_segs:
+    smys_mpa = as_positive_float(merged_header.get("smys_mpa"))
+    if smys_mpa is None and valid_segs:
         seg_smys = [sec.smys_mpa for sec in valid_segs if sec.smys_mpa is not None]
         if len(seg_smys) == len(valid_segs):
             smys_mpa = min(seg_smys)
@@ -4243,18 +4240,26 @@ def _persist_formal_test_results(
     fld_inp = s_inputs.get("field") or {}
     eff_hdr = merged_header or {}
 
-    valid_segs = [
-        {
-            "outside_diameter_mm": float(seg["outside_diameter_mm"]),
-            "wall_thickness_mm": float(seg["wall_thickness_mm"]),
-            "length_m": float(seg["length_m"]),
-        }
-        for seg in (s_inputs.get("segments") or [])
-        if isinstance(seg, dict)
-        and _finite_float(seg.get("outside_diameter_mm"))
-        and _finite_float(seg.get("wall_thickness_mm"))
-        and _finite_float(seg.get("length_m"))
-    ]
+    valid_segs: list[dict[str, Any]] = []
+    for seg in s_inputs.get("segments") or []:
+        if not isinstance(seg, dict):
+            continue
+        s_od = _finite_float(seg.get("outside_diameter_mm"))
+        s_wt = _finite_float(seg.get("wall_thickness_mm"))
+        s_len = _finite_float(seg.get("length_m"))
+        if s_od and s_wt and s_len and s_od > 0 and s_wt > 0 and s_len > 0:
+            seg_entry: dict[str, Any] = {
+                "outside_diameter_mm": float(s_od),
+                "wall_thickness_mm": float(s_wt),
+                "length_m": float(s_len),
+            }
+            s_smys = as_positive_float(seg.get("smys_mpa"))
+            if s_smys is not None:
+                seg_entry["smys_mpa"] = float(s_smys)
+            raw_grade = seg.get("material_grade")
+            if isinstance(raw_grade, str) and raw_grade.strip():
+                seg_entry["material_grade"] = raw_grade.strip()
+            valid_segs.append(seg_entry)
     g_od = _finite_float(eff_hdr.get("outside_diameter_mm")) or _finite_float(
         geom.get("outside_diameter_mm")
     )
@@ -4277,7 +4282,13 @@ def _persist_formal_test_results(
     if geom_payload is not None:
         # 1) Profile
         design_p = _finite_float(sp.get("design_pressure_bar"))
-        smys_mpa = _finite_float(sp.get("smys_mpa"))
+        smys_mpa = as_positive_float(sp.get("smys_mpa"))
+        if smys_mpa is None and valid_segs:
+            seg_smys_list = [
+                float(seg["smys_mpa"]) for seg in valid_segs if seg.get("smys_mpa") is not None
+            ]
+            if len(seg_smys_list) == len(valid_segs):
+                smys_mpa = min(seg_smys_list)
         hi_el = _finite_float(sp.get("highest_elevation_m"))
         lo_el = _finite_float(sp.get("lowest_elevation_m"))
         st_el = _finite_float(sp.get("start_elevation_m"))

@@ -13,6 +13,7 @@ from conftest import air_payload, pressure_payload, profile_payload
 
 from hidrostatik_test.domain import (
     AirContentInputs,
+    PipeGeometry,
     PipeSection,
     PressureVariationInputs,
     SectionPressureProfileInputs,
@@ -192,6 +193,70 @@ def test_parity_pressure_profile(client):
     )
     _close(actual["total_length_m"], expected.total_length_m)
     _close(actual["total_internal_volume_m3"], expected.total_internal_volume_m3)
+    assert actual["feasible"] is expected.feasible
+
+
+def test_parity_pressure_profile_per_segment_smys(client):
+    seg1 = PipeSection(
+        outside_diameter_mm=406.4,
+        wall_thickness_mm=8.74,
+        length_m=600.0,
+        smys_mpa=450.0,
+        material_grade="API 5L X65",
+    )
+    seg2 = PipeSection(
+        outside_diameter_mm=406.4,
+        wall_thickness_mm=8.74,
+        length_m=400.0,
+        smys_mpa=290.0,
+        material_grade="API 5L X42",
+    )
+    domain_inputs = SectionPressureProfileInputs(
+        pipe=PipeGeometry(sections=(seg1, seg2)),
+        design_pressure_bar=100.0,
+        smys_mpa=450.0,
+        location_class=get_location_class_rule("Class 1 - min 1.25 x dizayn basinci"),
+        highest_elevation_m=200.0,
+        lowest_elevation_m=100.0,
+        start_elevation_m=100.0,
+        end_elevation_m=180.0,
+        selected_pump_location="Baslangic noktasi",
+        monitored_pressure_bar=135.0,
+    )
+    expected = evaluate_section_pressure_profile(domain_inputs)
+    actual = client.post(
+        "/api/calculations/pressure-profile",
+        json=profile_payload(
+            geometry={
+                "sections": [
+                    {
+                        "outside_diameter_mm": 406.4,
+                        "wall_thickness_mm": 8.74,
+                        "length_m": 600.0,
+                        "smys_mpa": 450.0,
+                        "material_grade": "API 5L X65",
+                    },
+                    {
+                        "outside_diameter_mm": 406.4,
+                        "wall_thickness_mm": 8.74,
+                        "length_m": 400.0,
+                        "smys_mpa": 290.0,
+                        "material_grade": "API 5L X42",
+                    },
+                ]
+            },
+            design_pressure_bar=100.0,
+            smys_mpa=450.0,
+            monitored_pressure_bar=135.0,
+        ),
+    ).json()
+    _close(
+        actual["limiting_pressure_at_100_smys_bar"],
+        expected.limiting_pressure_at_100_smys_bar,
+    )
+    assert actual["limiting_segment_index"] == expected.limiting_segment_index == 2
+    assert actual["limiting_smys_mpa"] == expected.limiting_smys_mpa == 290.0
+    assert actual["limiting_pipe_description"] == expected.limiting_pipe_description
     assert actual["feasible"] is expected.feasible
 
 

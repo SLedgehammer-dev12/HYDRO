@@ -253,5 +253,32 @@ describe("3D real profile_points and equipment inputs", () => {
     expect(seg1?.smys_mpa).toBe(450);
     expect(seg2?.smys_mpa).toBe(290);
     expect((seg2?.utilization ?? 0)).toBeGreaterThan(seg1?.utilization ?? 0);
+
+    // toApiInputs -> normalizeInputs round-trip preserves segment smys_mpa and material_grade
+    const roundTripped = normalizeInputs(toApiInputs(normalized));
+    expect(roundTripped.segments[0].smys_mpa).toBe(450);
+    expect(roundTripped.segments[1].smys_mpa).toBe(290);
+    expect(roundTripped.segments[1].material_grade).toContain("X42");
+
+    // Custom numeric SMYS segment (without grade) does not inherit top-level X65 label,
+    // and segment SMYS boundary at 500 m survives a close terrain point at 499.4 m.
+    normalized.profile_points = [
+      { station_m: 0, elevation_m: 100 },
+      { station_m: 499.4, elevation_m: 110 },
+      { station_m: 1000, elevation_m: 100 },
+    ];
+    normalized.segments[1].material_grade = "";
+    normalized.segments[1].smys_mpa = 305;
+    const boundaryScene = buildSceneData(normalized, { profile: prof });
+    const hasExactBoundary = boundaryScene.segments.some((s) => Math.abs(s.end_m - 500) < 0.01);
+    expect(hasExactBoundary).toBe(true);
+    const customSeg = boundaryScene.segments.find((s) => s.start_m >= 500);
+    expect(customSeg?.smys_mpa).toBe(305);
+    expect(customSeg?.grade).toBeNull();
+
+    // buildDemoResults derives profile when line SMYS is null if all segments have SMYS
+    normalized.section_profile.smys_mpa = null;
+    const demoSegOnly = buildDemoResults(normalized);
+    expect(demoSegOnly.profile?.limiting_smys_mpa).toBe(305);
   });
 });

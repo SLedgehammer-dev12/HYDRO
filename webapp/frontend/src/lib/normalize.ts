@@ -427,6 +427,8 @@ export function toApiInputs(inputs: AppInputs): Record<string, unknown> {
       nps_label: segment.nps_label || null,
       schedule_label: segment.schedule_label || null,
       start_station_m: segment.start_station_m ?? null,
+      smys_mpa: segment.smys_mpa ?? null,
+      material_grade: segment.material_grade?.trim() || null,
     })),
   };
 }

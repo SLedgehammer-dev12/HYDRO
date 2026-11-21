@@ -25,6 +25,7 @@ interface TooltipEntry {
   value?: number | string | null;
   color?: string;
   dataKey?: string | number;
+  payload?: { label?: string; [key: string]: unknown };
 }
 
 function ChartTooltip({
@@ -41,12 +42,16 @@ function ChartTooltip({
   labelFormatter?: (label: number | string) => string;
 }) {
   if (!active || !payload || payload.length === 0) return null;
+  const detailLabel = payload[0]?.payload?.label;
   return (
     <div className="rounded-lg border border-[var(--border-strong)] bg-[var(--surface-raised)] px-2.5 py-2 shadow-xl">
       {label !== undefined ? (
         <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-faint)]">
           {labelFormatter ? labelFormatter(label) : label}
         </p>
+      ) : null}
+      {detailLabel ? (
+        <p className="mb-1 font-mono text-[10px] text-[var(--text-muted)]">{detailLabel}</p>
       ) : null}
       {payload.map((entry, index) => {
         const numeric = typeof entry.value === "number" ? entry.value : Number(entry.value ?? 0);

@@ -15,7 +15,7 @@ from hidrostatik_test.domain import get_available_water_property_backends
 from hidrostatik_test.domain.operations import get_pig_speed_limit_options
 
 from ..core.errors import AppError
-from ..core.timeutil import as_float, deep_merge, fmt_number, iso_z, utcnow
+from ..core.timeutil import as_float, as_positive_float, deep_merge, fmt_number, iso_z, utcnow
 from ..desktop_labels import (
     B_SOURCE_TO_KEY,
     KEY_TO_B_SOURCE_LABEL,
@@ -109,8 +109,7 @@ def _segments_payload(segments: Any) -> list[dict[str, str]]:
     for item in segments:
         if not isinstance(item, dict):
             continue
-        raw_smys = item.get("smys_mpa")
-        smys_val = None if isinstance(raw_smys, bool) else as_float(raw_smys)
+        smys_val = as_positive_float(item.get("smys_mpa"))
         rows.append(
             {
                 "outside_diameter_mm": fmt_number(as_float(item.get("outside_diameter_mm"))),
@@ -484,10 +483,14 @@ def apply_snapshot(
                     else:
                         seg_smys = parsed_seg_smys
                         state.converted += 1
-            seg_grade = (
-                state.text(item.get("material_grade"), f"geometry_segments[{index}].material_grade")
-                or ""
-            )
+            raw_seg_grade = item.get("material_grade")
+            seg_grade = ""
+            if raw_seg_grade is not None:
+                if not isinstance(raw_seg_grade, str):
+                    state.invalid_fields.append(f"geometry_segments[{index}].material_grade")
+                elif raw_seg_grade.strip():
+                    seg_grade = raw_seg_grade.strip()
+                    state.converted += 1
             segments.append(
                 {
                     "outside_diameter_mm": parsed_dims["outside_diameter_mm"],

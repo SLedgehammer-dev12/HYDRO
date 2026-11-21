@@ -74,11 +74,13 @@ function SegmentNumberCell({
 function SegmentOptionalNumberCell({
   value,
   onChange,
+  onInvalidChange,
   placeholder,
   label,
 }: {
   value: number | null;
   onChange: (value: number | null) => void;
+  onInvalidChange?: (isInvalid: boolean) => void;
   placeholder?: string;
   label: string;
 }) {
@@ -88,23 +90,31 @@ function SegmentOptionalNumberCell({
   useEffect(() => {
     setText(formatInput(value));
     setInvalidInput(false);
+    onInvalidChange?.(false);
+    // Intentionally sync external resets only on store value change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
+
+  const setValidity = (next: boolean) => {
+    setInvalidInput(next);
+    onInvalidChange?.(next);
+  };
 
   const commit = () => {
     const trimmed = text.trim();
     if (!trimmed) {
-      setInvalidInput(false);
+      setValidity(false);
       onChange(null);
       setText("");
       return;
     }
     const parsed = parseNumber(trimmed);
     if (parsed !== null && Number.isFinite(parsed) && parsed > 0) {
-      setInvalidInput(false);
+      setValidity(false);
       onChange(parsed);
       return;
     }
-    setInvalidInput(true);
+    setValidity(true);
   };
 
   return (
@@ -117,7 +127,7 @@ function SegmentOptionalNumberCell({
       value={text}
       onChange={(event) => {
         setText(event.target.value);
-        if (invalidInput) setInvalidInput(false);
+        if (invalidInput) setValidity(false);
       }}
       onBlur={commit}
       onKeyDown={(event) => {
@@ -146,7 +156,20 @@ export function GeometryPage() {
   const { data: meta } = useMeta();
   const calculate = useCalculateGeometry();
   const [confirmClearSegments, setConfirmClearSegments] = useState(false);
+  const [invalidSmysIds, setInvalidSmysIds] = useState<Record<string, boolean>>({});
   const segmentTableCaptionId = useId();
+
+  const setRowSmysInvalid = (id: string, isInvalid: boolean) => {
+    setInvalidSmysIds((prev) => {
+      if (isInvalid) {
+        return prev[id] ? prev : { ...prev, [id]: true };
+      }
+      if (!(id in prev)) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  };
 
   const selectedPipe = pipes.find((pipe) => pipe.option_label === inputs.geometry_catalog.size_option);
   const scheduleOptions = selectedPipe?.schedules ?? [];
@@ -259,11 +282,27 @@ export function GeometryPage() {
   const segmentLengthTone =
     segmentSummary.status === "fail" ? "fail" : segmentSummary.status === "warning" ? "warning" : "pass";
 
+  const hasInvalidSmys = inputs.segments.some((seg) => invalidSmysIds[seg.id]);
+  const badgeSegmentMinSmys =
+    profile.smys_mpa === null &&
+    inputs.segments.length > 0 &&
+    segmentSmysAnalysis.perRow.every((row) => row.effectiveSmys !== null)
+      ? Math.min(...segmentSmysAnalysis.perRow.map((row) => row.effectiveSmys as number))
+      : null;
+
   function validateGeometry() {
+    if (hasInvalidSmys) {
+      pushToast(
+        "error",
+        "Geçersiz segment SMYS değeri",
+        "Segment tablosundaki SMYS (MPa) değerleri 0'dan büyük geçerli bir sayı olmalı veya boş bırakılmalıdır.",
+      );
+      return;
+    }
     if (segmentSummary.status === "fail") {
       pushToast(
         "error",
-        "Segment kontrolü engelleyevi",
+        "Segment kontrolü engelleyici",
         segmentSummary.headline || "Segmentleri Section KP aralığıyla eşleştirin.",
       );
       return;
@@ -578,8 +617,9 @@ export function GeometryPage() {
                       <td className="w-[82px] max-w-[90px]">
                         <SegmentOptionalNumberCell
                           label={`Segment ${index + 1} SMYS (MPa)`}
-                          placeholder={profile.smys_mpa ? String(profile.smys_mpa) : "—"}
+                          placeholder={profile.smys_mpa ? formatInput(profile.smys_mpa) : "—"}
                           value={segment.smys_mpa ?? null}
+                          onInvalidChange={(isInvalid) => setRowSmysInvalid(segment.id, isInvalid)}
                           onChange={(value) => {
                             if (value === null) {
                               updateSegment(segment.id, { smys_mpa: null, material_grade: "" });
@@ -672,7 +712,10 @@ export function GeometryPage() {
                             type="button"
                             className="btn btn-icon btn-sm hover:text-[var(--danger)]"
                             aria-label={`Segment ${index + 1} sil`}
-                            onClick={() => removeSegment(segment.id)}
+                            onClick={() => {
+                              setRowSmysInvalid(segment.id, false);
+                              removeSegment(segment.id);
+                            }}
                           >
                             <Trash2 size={12} />
                           </button>
@@ -702,6 +745,11 @@ export function GeometryPage() {
           </div>
         )}
         {wtError ? <p className="mt-2 text-[11px] text-[var(--danger)]">{wtError}</p> : null}
+        {hasInvalidSmys ? (
+          <p role="alert" className="mt-2 text-[11px] text-[var(--danger)]">
+            Bazı segmentlerde geçersiz SMYS değeri var. Segment SMYS (MPa) değerleri 0'dan büyük olmalı veya boş bırakılmalıdır.
+          </p>
+        ) : null}
         {segmentSummary.hasSegments && segmentSummary.issues.length > 0 ? (
           <div className="mt-3 space-y-1">
             <InlineNotice
@@ -737,7 +785,15 @@ export function GeometryPage() {
         title="Test bölümü profili"
         description="Kotlar, dizayn basıncı, malzeme ve Location Class basınç penceresini belirler."
         icon={Mountain}
-        action={<Badge tone={profile.smys_mpa ? "pass" : "warning"}>{profile.smys_mpa ? `SMYS ${num(profile.smys_mpa, 0)} MPa` : "SMYS eksik"}</Badge>}
+        action={
+          <Badge tone={profile.smys_mpa || badgeSegmentMinSmys !== null ? "pass" : "warning"}>
+            {profile.smys_mpa
+              ? `SMYS ${num(profile.smys_mpa, 0)} MPa`
+              : badgeSegmentMinSmys !== null
+                ? `Segment min ${num(badgeSegmentMinSmys, 0)} MPa`
+                : "SMYS eksik"}
+          </Badge>
+        }
       >
         <FieldGrid cols={3}>
           <NumberField
@@ -840,9 +896,9 @@ export function GeometryPage() {
           <ElevationProfileChart inputs={inputs} height={240} />
         </SectionCard>
         <SectionCard title="Segment kullanımı" description="İzlenen basıncın 100% SMYS limitine oranı." icon={Layers}>
-          {results.geometry || results.profile ? (
+          {geometry || results.profile ? (
             <UtilizationChart
-              results={results}
+              results={{ ...results, geometry: geometry ?? undefined }}
               defaultSmysMpa={inputs.section_profile.smys_mpa}
               height={240}
             />
@@ -878,7 +934,10 @@ export function GeometryPage() {
         message="Tüm boru segment satırları listeden kaldırılır; hesaplama tek kesit moduna döner."
         confirmLabel="Tümünü Temizle"
         danger
-        onConfirm={() => setSegments([])}
+        onConfirm={() => {
+          setInvalidSmysIds({});
+          setSegments([]);
+        }}
         onClose={() => setConfirmClearSegments(false)}
       />
     </div>

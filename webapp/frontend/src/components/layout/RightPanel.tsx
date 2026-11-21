@@ -195,8 +195,8 @@ export function RightPanel() {
                     : "Raporu önizleyip dışa aktarın."}
           </p>
           <div className="mt-2 flex flex-wrap gap-1.5">
-            <Badge tone={inputs.material_grade ? "pass" : "warning"}>
-              {inputs.material_grade ? "Malzeme seçili" : "Malzeme eksik"}
+            <Badge tone={inputs.material_grade || hasAllSegmentSmys ? "pass" : "warning"}>
+              {inputs.material_grade || hasAllSegmentSmys ? "Malzeme seçili" : "Malzeme eksik"}
             </Badge>
             <Badge tone={formatCoefficientState(airCoeff?.state) === "BEKLİYOR" ? "pending" : "pass"}>
               A {formatCoefficientState(airCoeff?.state)}

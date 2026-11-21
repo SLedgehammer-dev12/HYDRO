@@ -43,7 +43,7 @@ from hidrostatik_test.services.report_export import _report_fonts
 from ..core.config import Settings
 from ..core.errors import validation_error
 from ..core.security import safe_filename
-from ..core.timeutil import as_float, iso_z, json_safe, utcnow
+from ..core.timeutil import as_float, as_positive_float, iso_z, json_safe, utcnow
 from ..domain_adapter import dataclass_dict, geometry_summary
 from ..models import (
     HydroSession,
@@ -110,20 +110,25 @@ def _geometry_metrics(inputs: dict[str, Any]) -> dict[str, float | int | str | N
     profile: dict[str, Any] = raw_profile if isinstance(raw_profile, dict) else {}
 
     pipe_secs: list[PipeSection] = []
+    seg_smys_vals: list[float] = []
     for seg in segments:
         if not isinstance(seg, dict):
             continue
         od = as_float(seg.get("outside_diameter_mm"))
         wt = as_float(seg.get("wall_thickness_mm"))
         length = as_float(seg.get("length_m"))
+        seg_smys = as_positive_float(seg.get("smys_mpa"))
         if od and wt and length and od > 0 and wt > 0 and length > 0 and 2 * wt < od:
             pipe_secs.append(
                 PipeSection(
                     outside_diameter_mm=od,
                     wall_thickness_mm=wt,
                     length_m=length,
+                    smys_mpa=seg_smys,
                 )
             )
+            if seg_smys is not None:
+                seg_smys_vals.append(seg_smys)
     if not pipe_secs:
         od = as_float(geom.get("outside_diameter_mm"))
         wt = as_float(geom.get("wall_thickness_mm"))
@@ -146,6 +151,10 @@ def _geometry_metrics(inputs: dict[str, Any]) -> dict[str, float | int | str | N
         od_val = as_float(geom.get("outside_diameter_mm"))
         wt_val = as_float(geom.get("wall_thickness_mm"))
 
+    eff_smys = as_positive_float(profile.get("smys_mpa"))
+    if eff_smys is None and pipe_secs and len(seg_smys_vals) == len(pipe_secs):
+        eff_smys = min(seg_smys_vals)
+
     return {
         "length_m": round(total_len, 2) if total_len is not None else None,
         "volume_m3": round(total_vol, 3) if total_vol is not None else None,
@@ -153,7 +162,7 @@ def _geometry_metrics(inputs: dict[str, Any]) -> dict[str, float | int | str | N
         "wt_mm": round(wt_val, 2) if wt_val is not None else None,
         "segment_count": len(segments) if segments else (1 if pipe_secs else 0),
         "design_pressure_bar": as_float(profile.get("design_pressure_bar")),
-        "smys_mpa": as_float(profile.get("smys_mpa")),
+        "smys_mpa": eff_smys,
     }
 
 

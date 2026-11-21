@@ -120,6 +120,17 @@ def as_float(value: Any) -> float | None:
     return number
 
 
+def as_positive_float(value: Any) -> float | None:
+    """Parse finite strictly-positive float while rejecting booleans."""
+
+    if value is None or isinstance(value, bool):
+        return None
+    parsed = as_float(value)
+    if parsed is None or not math.isfinite(parsed) or parsed <= 0:
+        return None
+    return parsed
+
+
 def fmt_number(value: float | None, digits: int = 6) -> str:
     if value is None:
         return ""
@@ -148,6 +159,7 @@ def deep_merge(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
 __all__ = [
     "UTC",
     "as_float",
+    "as_positive_float",
     "deep_merge",
     "ensure_utc",
     "fmt_number",

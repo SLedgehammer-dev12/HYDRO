@@ -646,3 +646,9 @@ def test_geometry_and_pressure_profile_per_segment_smys_and_validation(client):
         },
     )
     assert bad_bool.status_code == 422
+
+    bad_profile_bool = client.post(
+        "/api/calculations/pressure-profile",
+        json=profile_payload(smys_mpa=True),
+    )
+    assert bad_profile_bool.status_code == 422

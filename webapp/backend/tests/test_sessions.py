@@ -1024,3 +1024,51 @@ def test_session_per_segment_smys_scene_snapshot_conflict_and_txt_report(client)
     assert "SMYS 290 MPa" in txt
     assert "API 5L X42" in txt
     assert "Segment SMYS araligi (MPa): 290 - 450" in txt
+
+    # Non-string material_grade and bool section_profile.smys_mpa guards
+    weird_snap = client.post(
+        "/api/import/desktop-snapshot",
+        json={
+            "snapshot": {
+                "schema_version": 1,
+                "geometry_segments": [
+                    {
+                        "outside_diameter_mm": "406.4",
+                        "wall_thickness_mm": "8.74",
+                        "length_m": "500",
+                        "material_grade": 123,
+                    }
+                ],
+            }
+        },
+    )
+    assert weird_snap.status_code == 201
+    assert "geometry_segments[0].material_grade" in weird_snap.json()["mapping"]["invalid_fields"]
+
+    # Segment with custom numeric SMYS & no grade does not inherit top-level material_grade in 3D scene
+    custom_sess = create_session(
+        client,
+        inputs=full_inputs(
+            material_grade="API 5L X65",
+            section_profile={
+                "smys_mpa": True,  # ignored as invalid bool by as_positive_float
+                "highest_elevation_m": 100.0,
+                "lowest_elevation_m": 100.0,
+                "start_elevation_m": 100.0,
+                "end_elevation_m": 100.0,
+                "design_pressure_bar": 80.0,
+            },
+            segments=[
+                {
+                    "outside_diameter_mm": 406.4,
+                    "wall_thickness_mm": 8.74,
+                    "length_m": 500.0,
+                    "smys_mpa": 305.0,
+                    "material_grade": "",
+                }
+            ],
+        ),
+    )
+    custom_scene = client.get(f"/api/sessions/{custom_sess['id']}/scene").json()
+    assert custom_scene["segments"][0]["smys_mpa"] == 305.0
+    assert custom_scene["segments"][0]["grade"] is None

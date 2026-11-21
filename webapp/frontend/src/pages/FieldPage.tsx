@@ -22,7 +22,7 @@ import { useAppStore } from "../store/useAppStore";
 import { useEvaluateShortcut } from "../hooks/useEvaluateShortcut";
 import { CHECK_DEFINITIONS, FALLBACK_PIG_MODES, PUMP_LABELS } from "../lib/constants";
 import { fmt, num, parseNumber } from "../lib/format";
-import { buildSceneData, sectionsFromInputs } from "../lib/mock";
+import { buildSceneData, resolveEffectiveSmys, sectionsFromInputs } from "../lib/mock";
 import type { PressureProfileRequest } from "../lib/types";
 import { cn } from "../lib/utils";
 
@@ -165,16 +165,7 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
       ? "En yüksek kot, en düşük kottan küçük olamaz."
       : null;
 
-  const sectionSmysValues = sections
-    .map((s) => s.smys_mpa)
-    .filter((v): v is number => typeof v === "number" && Number.isFinite(v) && v > 0);
-  const allSegmentsHaveSmys = sections.length > 0 && sectionSmysValues.length === sections.length;
-  const effectiveDefaultSmys =
-    sp.smys_mpa && sp.smys_mpa > 0
-      ? sp.smys_mpa
-      : allSegmentsHaveSmys
-        ? Math.min(...sectionSmysValues)
-        : null;
+  const effectiveDefaultSmys = resolveEffectiveSmys(inputs, sections);
 
   const missing: string[] = [];
   if (!sections.length) missing.push("Geometri");

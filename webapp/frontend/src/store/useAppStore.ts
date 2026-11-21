@@ -29,6 +29,14 @@ export const PERSIST_KEY = "hydro-app-v1";
 const makeId = (prefix: string): string =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
+const GEOMETRY_AFFECTING_KEYS = new Set<keyof AppInputs>([
+  "geometry",
+  "geometry_catalog",
+  "segments",
+  "section_profile",
+  "material_grade",
+]);
+
 function freshState(empty = false) {
   const inputs = empty ? createEmptyInputs() : createDefaultInputs();
   return {
@@ -194,7 +202,9 @@ export const useAppStore = create<AppStore>()(
       patchInputs: (patch) =>
         set((state) => {
           const merged: AppInputs = { ...state.inputs };
+          let geometryAffected = false;
           for (const key of Object.keys(patch) as Array<keyof AppInputs>) {
+            if (GEOMETRY_AFFECTING_KEYS.has(key)) geometryAffected = true;
             const update = patch[key];
             if (update === undefined) continue;
             const current = merged[key];
@@ -207,11 +217,21 @@ export const useAppStore = create<AppStore>()(
               };
             }
           }
-          return { inputs: merged, dirty: true };
+          return {
+            inputs: merged,
+            dirty: true,
+            ...(geometryAffected
+              ? { results: { ...state.results, geometry: undefined } }
+              : {}),
+          };
         }),
 
       setSegments: (segments) =>
-        set((state) => ({ inputs: { ...state.inputs, segments }, dirty: true })),
+        set((state) => ({
+          inputs: { ...state.inputs, segments },
+          dirty: true,
+          results: { ...state.results, geometry: undefined },
+        })),
 
       setProfilePoints: (profile_points) =>
         set((state) => ({ inputs: { ...state.inputs, profile_points }, dirty: true })),
@@ -228,6 +248,7 @@ export const useAppStore = create<AppStore>()(
             ),
           },
           dirty: true,
+          results: { ...state.results, geometry: undefined },
         })),
 
       addSegment: () =>
@@ -250,6 +271,7 @@ export const useAppStore = create<AppStore>()(
           return {
             inputs: { ...state.inputs, segments: [...state.inputs.segments, segment] },
             dirty: true,
+            results: { ...state.results, geometry: undefined },
           };
         }),
 
@@ -262,7 +284,11 @@ export const useAppStore = create<AppStore>()(
             station += segment.length_m ?? 0;
             return next;
           });
-          return { inputs: { ...state.inputs, segments: renumbered }, dirty: true };
+          return {
+            inputs: { ...state.inputs, segments: renumbered },
+            dirty: true,
+            results: { ...state.results, geometry: undefined },
+          };
         }),
 
       moveSegment: (id, direction) =>
@@ -279,7 +305,11 @@ export const useAppStore = create<AppStore>()(
             station += segment.length_m ?? 0;
             return next;
           });
-          return { inputs: { ...state.inputs, segments: renumbered }, dirty: true };
+          return {
+            inputs: { ...state.inputs, segments: renumbered },
+            dirty: true,
+            results: { ...state.results, geometry: undefined },
+          };
         }),
 
       toggleCheck: (key) =>

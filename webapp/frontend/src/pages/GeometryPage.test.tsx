@@ -104,15 +104,23 @@ describe("GeometryPage per-segment SMYS and material grade", () => {
     expect(segments[1].smys_mpa).toBe(305);
     expect(segments[1].material_grade).toBe("");
 
-    // Negative SMYS triggers aria-invalid without corrupting store
+    // Negative SMYS triggers aria-invalid, inline alert, and blocks validateGeometry without corrupting store
     fireEvent.change(smysInput2, { target: { value: "-50" } });
     fireEvent.blur(smysInput2);
     expect(smysInput2).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("alert").textContent).toContain("geçersiz SMYS");
     expect(useAppStore.getState().inputs.segments[1].smys_mpa).toBe(305);
 
-    // Clearing SMYS resets to hat varsayilani
+    const prevToasts = useAppStore.getState().toasts.length;
+    fireEvent.click(screen.getByRole("button", { name: /Geometriyi doğrula/i }));
+    const nextToasts = useAppStore.getState().toasts;
+    expect(nextToasts.length).toBeGreaterThan(prevToasts);
+    expect(nextToasts[nextToasts.length - 1].title).toContain("Geçersiz segment SMYS");
+
+    // Clearing SMYS resets to hat varsayilani and clears stale results.geometry on store edits
     fireEvent.change(smysInput2, { target: { value: "" } });
     fireEvent.blur(smysInput2);
     expect(useAppStore.getState().inputs.segments[1].smys_mpa).toBeNull();
+    expect(useAppStore.getState().results.geometry).toBeUndefined();
   });
 });

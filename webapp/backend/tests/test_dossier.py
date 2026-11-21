@@ -1773,3 +1773,100 @@ def test_zero_celsius_ambient_preserved_and_lazy_backend_comparison(client, head
         )
     )
     assert res_air.acceptance_limit_m3 > 0
+
+
+def test_persist_formal_test_results_respects_per_segment_smys_and_fallback(client, headers):
+    from app import db as app_db
+    from app.models import HydroSession, TestResult
+    from app.services.dossier import _persist_formal_test_results
+
+    # Case 1: line SMYS is 450, Segment 2 has 290 -> persisted formal profile uses 290
+    s1 = client.post(
+        "/api/sessions",
+        json={
+            "name": "Formal Mixed SMYS",
+            "inputs": {
+                "section_profile": {
+                    "design_pressure_bar": 80.0,
+                    "smys_mpa": 450.0,
+                    "highest_elevation_m": 150.0,
+                    "lowest_elevation_m": 100.0,
+                    "start_elevation_m": 100.0,
+                    "end_elevation_m": 140.0,
+                },
+                "pump_location": "Baslangic noktasi",
+                "location_class": "Class 1 - min 1.25 x dizayn basinci",
+                "segments": [
+                    {
+                        "outside_diameter_mm": 406.4,
+                        "wall_thickness_mm": 8.74,
+                        "length_m": 500.0,
+                        "smys_mpa": 450.0,
+                        "material_grade": "API 5L X65",
+                    },
+                    {
+                        "outside_diameter_mm": 406.4,
+                        "wall_thickness_mm": 8.74,
+                        "length_m": 500.0,
+                        "smys_mpa": 290.0,
+                        "material_grade": "API 5L X42",
+                    },
+                ],
+            },
+        },
+        headers=headers,
+    ).json()
+
+    # Case 2: line SMYS omitted (None), every segment defines positive SMYS -> falls back to min (320)
+    s2 = client.post(
+        "/api/sessions",
+        json={
+            "name": "Formal Segment Only SMYS",
+            "inputs": {
+                "section_profile": {
+                    "design_pressure_bar": 80.0,
+                    "smys_mpa": None,
+                    "highest_elevation_m": 150.0,
+                    "lowest_elevation_m": 100.0,
+                    "start_elevation_m": 100.0,
+                    "end_elevation_m": 140.0,
+                },
+                "pump_location": "Baslangic noktasi",
+                "location_class": "Class 1 - min 1.25 x dizayn basinci",
+                "segments": [
+                    {
+                        "outside_diameter_mm": 406.4,
+                        "wall_thickness_mm": 8.74,
+                        "length_m": 500.0,
+                        "smys_mpa": 450.0,
+                    },
+                    {
+                        "outside_diameter_mm": 406.4,
+                        "wall_thickness_mm": 8.74,
+                        "length_m": 500.0,
+                        "smys_mpa": 320.0,
+                    },
+                ],
+            },
+        },
+        headers=headers,
+    ).json()
+
+    with app_db.session_scope() as db:
+        row1 = db.get(HydroSession, s1["id"])
+        row2 = db.get(HydroSession, s2["id"])
+        assert row1 is not None and row2 is not None
+        saved1 = _persist_formal_test_results(db, row1)
+        saved2 = _persist_formal_test_results(db, row2)
+        assert "profile" in saved1
+        assert "profile" in saved2
+        db.commit()
+
+        res1 = db.query(TestResult).filter_by(session_id=s1["id"], test_type="profile").first()
+        res2 = db.query(TestResult).filter_by(session_id=s2["id"], test_type="profile").first()
+        assert res1 is not None and res2 is not None
+        assert res1.result["limiting_segment_index"] == 2
+        assert res1.result["limiting_smys_mpa"] == 290.0
+        assert "API 5L X42" in res1.result["limiting_pipe_description"]
+        assert res2.result["limiting_segment_index"] == 2
+        assert res2.result["limiting_smys_mpa"] == 320.0
