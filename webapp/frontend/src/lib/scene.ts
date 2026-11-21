@@ -15,6 +15,9 @@ export interface SceneSegment {
   end_elevation_m: number;
   outside_diameter_mm: number;
   wall_thickness_mm: number;
+  grade?: string | null;
+  smys_mpa?: number | null;
+  pressure_at_100_smys_bar?: number | null;
   pressure_bar?: number;
   utilization?: number;
   status?: SceneStatus;

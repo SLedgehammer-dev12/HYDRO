@@ -200,14 +200,25 @@ function formatArraySummary(path: string, items: unknown[]): string {
   if (items.length === 0) return "0 kayıt";
   if (path === "segments") {
     let totalLength = 0;
+    const smysValues: number[] = [];
     for (const raw of items) {
-      if (isPlainRecord(raw) && typeof raw.length_m === "number" && Number.isFinite(raw.length_m)) {
-        totalLength += raw.length_m;
+      if (isPlainRecord(raw)) {
+        if (typeof raw.length_m === "number" && Number.isFinite(raw.length_m)) {
+          totalLength += raw.length_m;
+        }
+        if (typeof raw.smys_mpa === "number" && Number.isFinite(raw.smys_mpa) && raw.smys_mpa > 0) {
+          smysValues.push(raw.smys_mpa);
+        }
       }
     }
-    return totalLength > 0
-      ? `${items.length} segment (Σ ${num(totalLength, 0)} m)`
-      : `${items.length} segment`;
+    const baseText =
+      totalLength > 0 ? `${items.length} segment (Σ ${num(totalLength, 0)} m)` : `${items.length} segment`;
+    if (smysValues.length === 0) return baseText;
+    const minSmys = Math.min(...smysValues);
+    const maxSmys = Math.max(...smysValues);
+    return minSmys === maxSmys
+      ? `${baseText} · SMYS ${num(minSmys, 0)} MPa`
+      : `${baseText} · SMYS ${num(minSmys, 0)}–${num(maxSmys, 0)} MPa`;
   }
   if (path === "profile_points") return `${items.length} kot noktası`;
   if (path === "equipment") return `${items.length} ekipman`;
@@ -252,6 +263,8 @@ function stripSegmentIds(items: unknown[]): unknown[] {
       nps_label: typeof item.nps_label === "string" ? item.nps_label : "",
       schedule_label: typeof item.schedule_label === "string" ? item.schedule_label : "",
       start_station_m: item.start_station_m ?? null,
+      smys_mpa: item.smys_mpa ?? null,
+      material_grade: typeof item.material_grade === "string" ? item.material_grade : "",
     };
   });
 }

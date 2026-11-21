@@ -294,7 +294,8 @@ def build_scene(inputs: dict[str, Any]) -> dict[str, Any]:
     warnings = list(dict.fromkeys(warnings))
 
     profile = inputs.get("section_profile") or {}
-    smys = as_float(profile.get("smys_mpa"))
+    default_smys = as_float(profile.get("smys_mpa"))
+    default_grade = str(inputs.get("material_grade") or "").strip() or None
     air = inputs.get("air") or {}
     pressure_inputs = inputs.get("pressure") or {}
     field_inputs = inputs.get("field") or {}
@@ -346,7 +347,9 @@ def build_scene(inputs: dict[str, Any]) -> dict[str, Any]:
         schema_section = station.get("schema")
         od = float(section.outside_diameter_mm)
         wt = float(section.wall_thickness_mm)
-        limit_smys = 20.0 * smys * wt / od if smys is not None and od > 0 else None
+        seg_smys = section.smys_mpa if section.smys_mpa is not None else default_smys
+        seg_grade = section.material_grade or default_grade
+        limit_smys = 20.0 * seg_smys * wt / od if seg_smys is not None and od > 0 else None
         pressure = pressure_at(station["station_start_m"])
         utilization = _scaled_utilization(pressure, limit_smys)
         nps_label = getattr(schema_section, "nps_label", None)
@@ -368,8 +371,8 @@ def build_scene(inputs: dict[str, Any]) -> dict[str, Any]:
                 "od_mm": od,
                 "wt_mm": wt,
                 "id_mm": od - 2.0 * wt,
-                "grade": str(inputs.get("material_grade") or "") or None,
-                "smys_mpa": smys,
+                "grade": seg_grade,
+                "smys_mpa": seg_smys,
                 "pressure_at_100_smys_bar": limit_smys,
                 "pressure_bar": pressure,
                 "utilization": utilization,
@@ -670,16 +673,34 @@ def build_project_scene(
         od_mm = as_float(geom.get("outside_diameter_mm"))
         wt_mm = as_float(geom.get("wall_thickness_mm"))
         seg_len_sum = 0.0
+        raw_seg_items: list[dict[str, Any]] = []
         for item in raw_segs:
             if not isinstance(item, dict):
                 continue
+            s_od = as_float(item.get("outside_diameter_mm"))
+            s_wt = as_float(item.get("wall_thickness_mm"))
             l_val = as_float(item.get("length_m"))
             if l_val and l_val > 0:
                 seg_len_sum += l_val
+                raw_smys = item.get("smys_mpa")
+                s_smys = None if isinstance(raw_smys, bool) else as_float(raw_smys)
+                if s_smys is not None and s_smys <= 0:
+                    s_smys = None
+                raw_grade = item.get("material_grade")
+                s_grade = raw_grade.strip() or None if isinstance(raw_grade, str) else None
+                raw_seg_items.append(
+                    {
+                        "od_mm": s_od if s_od and s_od > 0 else (od_mm or 406.4),
+                        "wt_mm": s_wt if s_wt and s_wt > 0 else (wt_mm or 8.74),
+                        "length_m": l_val,
+                        "smys_mpa": s_smys,
+                        "material_grade": s_grade,
+                    }
+                )
             if od_mm is None:
-                od_mm = as_float(item.get("outside_diameter_mm"))
+                od_mm = s_od
             if wt_mm is None:
-                wt_mm = as_float(item.get("wall_thickness_mm"))
+                wt_mm = s_wt
 
         has_valid_kp = start_kp_m is not None and end_kp_m is not None and end_kp_m > start_kp_m
         geom_len = as_float(geom.get("length_m"))
@@ -692,6 +713,19 @@ def build_project_scene(
             sec_len = round(seg_len_sum, 2)
         else:
             sec_len = 1000.0
+
+        seg_spans: list[dict[str, Any]] = []
+        if raw_seg_items and seg_len_sum > 0:
+            scale = sec_len / seg_len_sum
+            cursor_local = 0.0
+            for item_idx, seg_it in enumerate(raw_seg_items):
+                seg_end = (
+                    sec_len
+                    if item_idx == len(raw_seg_items) - 1
+                    else cursor_local + seg_it["length_m"] * scale
+                )
+                seg_spans.append({**seg_it, "start_m": cursor_local, "end_m": seg_end})
+                cursor_local = seg_end
 
         records.append(
             {
@@ -710,6 +744,7 @@ def build_project_scene(
                 "sec_len": sec_len,
                 "od_mm": od_mm if od_mm and od_mm > 0 else 406.4,
                 "wt_mm": wt_mm if wt_mm and wt_mm > 0 else 8.74,
+                "seg_spans": seg_spans,
             }
         )
 
@@ -873,8 +908,9 @@ def build_project_scene(
         if base_p is None:
             base_p = as_float(air_in.get("pressure_bar"))
 
-        smys_mpa = as_float(sp.get("smys_mpa")) or 450.0
-        limit_smys = (20.0 * smys_mpa * rec["wt_mm"]) / rec["od_mm"] if rec["od_mm"] > 0 else 0.0
+        default_smys = as_float(sp.get("smys_mpa")) or 450.0
+        default_grade = str(inputs.get("material_grade") or "").strip() or None
+        rec_seg_spans: list[dict[str, Any]] = rec.get("seg_spans") or []
 
         pump_loc = str(inputs.get("pump_location") or "")
         pump_at_end = "Bitis" in pump_loc or "Bitiş" in pump_loc
@@ -892,7 +928,8 @@ def build_project_scene(
 
         target_pts = max(3, min(24, round(64.0 * sec_len / max(total_length_m, 1.0))))
         sub_pts = _thin_points(local_pts, target_pts)
-        bps = sorted({0.0, sec_len, *(pt[0] for pt in sub_pts)})
+        seg_boundaries = [round(span["end_m"], 2) for span in rec_seg_spans[:-1]]
+        bps = sorted({0.0, sec_len, *seg_boundaries, *(pt[0] for pt in sub_pts)})
         clean_bps: list[float] = []
         for bp in bps:
             if not clean_bps or (bp - clean_bps[-1]) >= 0.5:
@@ -909,6 +946,25 @@ def build_project_scene(
             b = clean_bps[sub_idx + 1]
             if b - a < 0.5:
                 continue
+            mid = 0.5 * (a + b)
+            matched_span = next(
+                (span for span in rec_seg_spans if span["start_m"] <= mid <= span["end_m"] + 1e-6),
+                rec_seg_spans[-1] if rec_seg_spans else None,
+            )
+            sub_od = matched_span["od_mm"] if matched_span else rec["od_mm"]
+            sub_wt = matched_span["wt_mm"] if matched_span else rec["wt_mm"]
+            sub_smys = (
+                matched_span["smys_mpa"]
+                if matched_span and matched_span["smys_mpa"] is not None
+                else default_smys
+            )
+            sub_grade = (
+                matched_span["material_grade"]
+                if matched_span and matched_span["material_grade"]
+                else default_grade
+            )
+            sub_limit_smys = (20.0 * sub_smys * sub_wt) / sub_od if sub_od > 0 else 0.0
+
             z0 = round(local_interp(a), 2)
             z1 = round(local_interp(b), 2)
             z_mid = 0.5 * (z0 + z1)
@@ -924,8 +980,8 @@ def build_project_scene(
                     / PRESSURE_CONVERSION_PASCAL_TO_BAR
                 )
                 seg_pressure = max(0.0, round(base_p - head_bar, 2))
-                if limit_smys > 0:
-                    utilization = round(seg_pressure / limit_smys, 4)
+                if sub_limit_smys > 0:
+                    utilization = round(seg_pressure / sub_limit_smys, 4)
                     if utilization > 1.0:
                         seg_status = "fail"
                     elif base_status == "fail":
@@ -961,8 +1017,13 @@ def build_project_scene(
                 "end_m": round(offset_m + b, 2),
                 "start_elevation_m": z0,
                 "end_elevation_m": z1,
-                "outside_diameter_mm": round(rec["od_mm"], 2),
-                "wall_thickness_mm": round(rec["wt_mm"], 2),
+                "outside_diameter_mm": round(sub_od, 2),
+                "wall_thickness_mm": round(sub_wt, 2),
+                "smys_mpa": sub_smys,
+                "grade": sub_grade,
+                "pressure_at_100_smys_bar": round(sub_limit_smys, 2)
+                if sub_limit_smys > 0
+                else None,
                 "status": seg_status,
             }
             if seg_pressure is not None:

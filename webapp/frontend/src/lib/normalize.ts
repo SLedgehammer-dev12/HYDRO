@@ -121,6 +121,8 @@ function asSegments(value: unknown, fallback: SegmentRow[]): SegmentRow[] {
     const wt = asNumber(row.wall_thickness_mm, null);
     const length = asNumber(row.length_m, null);
     if (od === null || wt === null || length === null) return;
+    const parsedSmys = asNumber(row.smys_mpa, null);
+    const segGrade = asString(row.material_grade).trim();
     rows.push({
       id: asString(row.id, `seg-${index + 1}`),
       nps_label: asString(row.nps_label),
@@ -129,6 +131,8 @@ function asSegments(value: unknown, fallback: SegmentRow[]): SegmentRow[] {
       wall_thickness_mm: wt,
       length_m: length,
       start_station_m: asNumber(row.start_station_m, null),
+      material_grade: segGrade,
+      smys_mpa: parsedSmys !== null && parsedSmys > 0 ? parsedSmys : null,
     });
   });
   return rows;

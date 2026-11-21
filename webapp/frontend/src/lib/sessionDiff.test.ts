@@ -194,4 +194,43 @@ describe("sessionDiff helpers", () => {
     expect(built[0].localDisplay).toBe("0");
     expect(built[1].group).toBe("Oturum");
   });
+
+  it("diffs segment SMYS or grade changes and includes SMYS range in summary", () => {
+    const serverInputs = createDefaultInputs();
+    serverInputs.segments = [
+      {
+        id: "srv-1",
+        nps_label: "NPS 16",
+        schedule_label: "Sch 20",
+        outside_diameter_mm: 406.4,
+        wall_thickness_mm: 8.74,
+        length_m: 1000,
+        start_station_m: 0,
+        material_grade: "API 5L X65",
+        smys_mpa: 450,
+      },
+    ];
+    const localInputs = createDefaultInputs();
+    localInputs.segments = [
+      {
+        id: "loc-1",
+        nps_label: "NPS 16",
+        schedule_label: "Sch 20",
+        outside_diameter_mm: 406.4,
+        wall_thickness_mm: 8.74,
+        length_m: 1000,
+        start_station_m: 0,
+        material_grade: "API 5L X42",
+        smys_mpa: 290,
+      },
+    ];
+    const diff = computeSessionDiff(
+      { name: "Kesit K-01", status: "active", projectId: "proj-1", inputs: localInputs },
+      makeServerSession({ inputs: serverInputs as unknown as Record<string, unknown> }),
+    );
+    const segDiff = diff.find((d) => d.path === "segments");
+    expect(segDiff).toBeDefined();
+    expect(segDiff?.localDisplay).toContain("SMYS 290 MPa");
+    expect(segDiff?.serverDisplay).toContain("SMYS 450 MPa");
+  });
 });

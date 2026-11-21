@@ -51,7 +51,7 @@ class ValidationError(ValueError):
 
 
 def _require_finite(value: float, label: str) -> float:
-    if not isfinite(value):
+    if isinstance(value, bool) or not isfinite(value):
         raise ValidationError(f"{label} sonlu bir sayi olmalidir.")
     return value
 
@@ -61,6 +61,8 @@ class PipeSection:
     outside_diameter_mm: float
     wall_thickness_mm: float
     length_m: float
+    smys_mpa: float | None = None
+    material_grade: str | None = None
 
     def __post_init__(self) -> None:
         _require_finite(self.outside_diameter_mm, "Dis cap")
@@ -76,6 +78,14 @@ class PipeSection:
             raise ValidationError(
                 "Et kalinligi borunun ic capini sifira dusurecek kadar buyuk olamaz."
             )
+        if self.smys_mpa is not None:
+            _require_finite(self.smys_mpa, "Segment SMYS")
+            if self.smys_mpa <= 0:
+                raise ValidationError("Segment SMYS sifirdan buyuk olmalidir.")
+        if self.material_grade is not None:
+            if not isinstance(self.material_grade, str):
+                raise ValidationError("Segment malzeme kalitesi metin olmalidir.")
+            object.__setattr__(self, "material_grade", self.material_grade.strip() or None)
 
     @property
     def internal_radius_mm(self) -> float:
@@ -89,6 +99,16 @@ class PipeSection:
     @property
     def elasticity_term(self) -> float:
         return 0.884 * self.internal_radius_mm / self.wall_thickness_mm
+
+    def pressure_at_100_smys_bar(self, fallback_smys_mpa: float | None = None) -> float:
+        """Compute hoop-stress pressure at 100% SMYS in bar for this segment."""
+        effective_smys = self.smys_mpa if self.smys_mpa is not None else fallback_smys_mpa
+        if effective_smys is None:
+            raise ValidationError("100% SMYS basinci icin SMYS degeri gereklidir.")
+        _require_finite(effective_smys, "SMYS")
+        if effective_smys <= 0:
+            raise ValidationError("SMYS sifirdan buyuk olmalidir.")
+        return 20.0 * effective_smys * self.wall_thickness_mm / self.outside_diameter_mm
 
 
 @dataclass(frozen=True)

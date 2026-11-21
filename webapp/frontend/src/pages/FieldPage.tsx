@@ -165,6 +165,17 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
       ? "En yüksek kot, en düşük kottan küçük olamaz."
       : null;
 
+  const sectionSmysValues = sections
+    .map((s) => s.smys_mpa)
+    .filter((v): v is number => typeof v === "number" && Number.isFinite(v) && v > 0);
+  const allSegmentsHaveSmys = sections.length > 0 && sectionSmysValues.length === sections.length;
+  const effectiveDefaultSmys =
+    sp.smys_mpa && sp.smys_mpa > 0
+      ? sp.smys_mpa
+      : allSegmentsHaveSmys
+        ? Math.min(...sectionSmysValues)
+        : null;
+
   const missing: string[] = [];
   if (!sections.length) missing.push("Geometri");
   if (sp.highest_elevation_m === null) missing.push("en yüksek kot");
@@ -172,7 +183,7 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
   if (sp.start_elevation_m === null) missing.push("başlangıç kotu");
   if (sp.end_elevation_m === null) missing.push("bitiş kotu");
   if (!sp.design_pressure_bar) missing.push("dizayn basıncı");
-  if (!sp.smys_mpa) missing.push("SMYS / malzeme");
+  if (!effectiveDefaultSmys) missing.push("SMYS / malzeme");
   if (!inputs.pump_location) missing.push("pompa konumu");
   if (elevationError) missing.push("geçerli kot aralığı");
 
@@ -184,7 +195,7 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
       sp.start_elevation_m === null ||
       sp.end_elevation_m === null ||
       !sp.design_pressure_bar ||
-      !sp.smys_mpa ||
+      !effectiveDefaultSmys ||
       !inputs.pump_location
     ) {
       return null;
@@ -192,7 +203,7 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
     return {
       geometry: { sections },
       design_pressure_bar: sp.design_pressure_bar,
-      smys_mpa: sp.smys_mpa,
+      smys_mpa: effectiveDefaultSmys,
       location_class: inputs.location_class,
       highest_elevation_m: sp.highest_elevation_m,
       lowest_elevation_m: sp.lowest_elevation_m,

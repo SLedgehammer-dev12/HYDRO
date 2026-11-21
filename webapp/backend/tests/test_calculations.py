@@ -544,3 +544,105 @@ def test_evaluate_test_coefficient_b_propagates_backend(client):
     )
     assert saved.status_code == 201, saved.text
     assert "table_v1" in saved.json()["result"]["note"]
+
+
+def test_geometry_and_pressure_profile_per_segment_smys_and_validation(client):
+    geom = client.post(
+        "/api/calculations/geometry",
+        json={
+            "sections": [
+                {
+                    "outside_diameter_mm": 406.4,
+                    "wall_thickness_mm": 8.74,
+                    "length_m": 600.0,
+                    "smys_mpa": 450.0,
+                    "material_grade": "API 5L X65",
+                },
+                {
+                    "outside_diameter_mm": 406.4,
+                    "wall_thickness_mm": 8.74,
+                    "length_m": 400.0,
+                    "smys_mpa": 290.0,
+                    "material_grade": "API 5L X42",
+                },
+            ]
+        },
+    )
+    assert geom.status_code == 200, geom.text
+    gbody = geom.json()
+    assert gbody["sections"][0]["smys_mpa"] == 450.0
+    assert gbody["sections"][0]["material_grade"] == "API 5L X65"
+    assert gbody["sections"][1]["smys_mpa"] == 290.0
+    assert math.isclose(
+        gbody["sections"][1]["pressure_at_100_smys_bar"],
+        20.0 * 290.0 * 8.74 / 406.4,
+        rel_tol=1e-9,
+    )
+
+    prof = client.post(
+        "/api/calculations/pressure-profile",
+        json=profile_payload(
+            geometry={
+                "sections": [
+                    {
+                        "outside_diameter_mm": 406.4,
+                        "wall_thickness_mm": 8.74,
+                        "length_m": 600.0,
+                        "smys_mpa": 450.0,
+                        "material_grade": "API 5L X65",
+                    },
+                    {
+                        "outside_diameter_mm": 406.4,
+                        "wall_thickness_mm": 8.74,
+                        "length_m": 400.0,
+                        "smys_mpa": 290.0,
+                        "material_grade": "API 5L X42",
+                    },
+                ]
+            },
+            smys_mpa=450.0,
+            design_pressure_bar=100.0,
+        ),
+    )
+    assert prof.status_code == 200, prof.text
+    pbody = prof.json()
+    assert pbody["limiting_segment_index"] == 2
+    assert pbody["limiting_smys_mpa"] == 290.0
+    assert math.isclose(
+        pbody["limiting_pressure_at_100_smys_bar"],
+        20.0 * 290.0 * 8.74 / 406.4,
+        rel_tol=1e-9,
+    )
+    assert "Limit segment 2" in pbody["limiting_pipe_description"]
+    assert "API 5L X42" in pbody["limiting_pipe_description"]
+
+    bad_neg = client.post(
+        "/api/calculations/geometry",
+        json={
+            "sections": [
+                {
+                    "outside_diameter_mm": 406.4,
+                    "wall_thickness_mm": 8.74,
+                    "length_m": 500.0,
+                    "smys_mpa": -290.0,
+                }
+            ]
+        },
+    )
+    assert bad_neg.status_code == 400
+    assert bad_neg.json()["code"] == "domain_validation_error"
+
+    bad_bool = client.post(
+        "/api/calculations/geometry",
+        json={
+            "sections": [
+                {
+                    "outside_diameter_mm": 406.4,
+                    "wall_thickness_mm": 8.74,
+                    "length_m": 500.0,
+                    "smys_mpa": True,
+                }
+            ]
+        },
+    )
+    assert bad_bool.status_code == 422

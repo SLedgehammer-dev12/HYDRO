@@ -563,6 +563,8 @@ export function sectionsFromInputs(inputs: AppInputs): GeometryIn["sections"] {
       nps_label: s.nps_label || null,
       schedule_label: s.schedule_label || null,
       start_station_m: s.start_station_m ?? null,
+      smys_mpa: isPositive(s.smys_mpa) ? s.smys_mpa : null,
+      material_grade: s.material_grade?.trim() || null,
     }));
   }
   const g = inputs.geometry;
@@ -575,6 +577,8 @@ export function sectionsFromInputs(inputs: AppInputs): GeometryIn["sections"] {
         nps_label: inputs.geometry_catalog.size_option || null,
         schedule_label: inputs.geometry_catalog.schedule_option || null,
         start_station_m: 0,
+        smys_mpa: isPositive(inputs.section_profile.smys_mpa) ? inputs.section_profile.smys_mpa : null,
+        material_grade: inputs.material_grade?.trim() || null,
       },
     ];
   }
@@ -589,6 +593,11 @@ export function computeGeometry(sections: GeometryIn["sections"]): GeometryRespo
   const results = sections.map((section, index) => {
     const ri = section.outside_diameter_mm / 2 - section.wall_thickness_mm;
     const volume = Math.PI * (ri / 1000) ** 2 * section.length_m;
+    const smys = isPositive(section.smys_mpa) ? section.smys_mpa : null;
+    const pressureAt100 =
+      smys !== null && section.outside_diameter_mm > 0
+        ? (20 * smys * section.wall_thickness_mm) / section.outside_diameter_mm
+        : null;
     return {
       index: index + 1,
       outside_diameter_mm: section.outside_diameter_mm,
@@ -597,6 +606,9 @@ export function computeGeometry(sections: GeometryIn["sections"]): GeometryRespo
       internal_radius_mm: round(ri, 3),
       internal_volume_m3: round(volume, 6),
       elasticity_term: round((0.884 * ri) / section.wall_thickness_mm, 6),
+      smys_mpa: smys,
+      material_grade: section.material_grade ?? null,
+      pressure_at_100_smys_bar: pressureAt100 !== null ? round(pressureAt100, 6) : null,
     };
   });
 
@@ -805,9 +817,11 @@ export function computeProfile(request: PressureProfileRequest): PressureProfile
   const factor = factors?.minimum_test_factor ?? 1.25;
   const classNumber = factors?.class_number ?? 1;
   const requiredMin = request.design_pressure_bar * factor;
+  const effectiveSmysOf = (section: GeometryIn["sections"][number]) =>
+    isPositive(section.smys_mpa) ? section.smys_mpa : request.smys_mpa;
   const maxLow = Math.min(
     ...request.geometry.sections.map(
-      (s) => (20 * request.smys_mpa * s.wall_thickness_mm) / s.outside_diameter_mm,
+      (s) => (20 * effectiveSmysOf(s) * s.wall_thickness_mm) / s.outside_diameter_mm,
     ),
   );
   const headPerM = (WATER_DENSITY_15C * 9.80665) / 1e5;
@@ -843,17 +857,27 @@ export function computeProfile(request: PressureProfileRequest): PressureProfile
   const underMax = monitored === null ? null : monitored <= selected.maximum_allowable_pressure_bar;
   const passed = feasible && meetsMin !== false && underMax !== false;
 
+  const firstEffSmys = effectiveSmysOf(request.geometry.sections[0]);
   const limiting = request.geometry.sections.reduce(
-    (best, s) => {
-      const p = (20 * request.smys_mpa * s.wall_thickness_mm) / s.outside_diameter_mm;
-      return p < best.p ? { p, s } : best;
+    (best, s, idx) => {
+      const effSmys = effectiveSmysOf(s);
+      const p = (20 * effSmys * s.wall_thickness_mm) / s.outside_diameter_mm;
+      return p < best.p ? { p, s, index: idx + 1, effSmys } : best;
     },
     {
-      p: (20 * request.smys_mpa * request.geometry.sections[0].wall_thickness_mm) /
+      p:
+        (20 * firstEffSmys * request.geometry.sections[0].wall_thickness_mm) /
         request.geometry.sections[0].outside_diameter_mm,
       s: request.geometry.sections[0],
+      index: 1,
+      effSmys: firstEffSmys,
     },
   );
+  const gradePart = limiting.s.material_grade?.trim() ? ` | ${limiting.s.material_grade.trim()}` : "";
+  const descPrefix = request.geometry.sections.length === 1 ? "Tek kesit" : `Limit segment ${limiting.index}`;
+  const limitingDescription =
+    `${descPrefix} | OD=${limiting.s.outside_diameter_mm.toFixed(2)} mm | ` +
+    `Et=${limiting.s.wall_thickness_mm.toFixed(2)} mm | SMYS=${limiting.effSmys.toFixed(1)} MPa${gradePart}`;
 
   return {
     location_class: {
@@ -870,7 +894,9 @@ export function computeProfile(request: PressureProfileRequest): PressureProfile
     end_window: endWindow,
     selected_window: selected,
     limiting_pressure_at_100_smys_bar: round(limiting.p, 3),
-    limiting_pipe_description: `OD=${limiting.s.outside_diameter_mm.toFixed(2)} mm | Et=${limiting.s.wall_thickness_mm.toFixed(2)} mm`,
+    limiting_pipe_description: limitingDescription,
+    limiting_segment_index: limiting.index,
+    limiting_smys_mpa: round(limiting.effSmys, 3),
     total_length_m: geometry.total_length_m,
     total_internal_volume_m3: geometry.internal_volume_m3,
     within_length_limit: withinLength,
@@ -1520,6 +1546,8 @@ export function buildSceneData(inputs: AppInputs, results: { profile?: PressureP
       outside_diameter_mm: number;
       wall_thickness_mm: number;
       nps_label: string | null;
+      smys_mpa: number | null;
+      material_grade: string | null;
     }> = [];
     let cursor = 0;
     for (const sec of sections) {
@@ -1529,6 +1557,8 @@ export function buildSceneData(inputs: AppInputs, results: { profile?: PressureP
         outside_diameter_mm: sec.outside_diameter_mm,
         wall_thickness_mm: sec.wall_thickness_mm,
         nps_label: sec.nps_label ?? null,
+        smys_mpa: isPositive(sec.smys_mpa) ? sec.smys_mpa : null,
+        material_grade: sec.material_grade ?? null,
       });
       cursor += sec.length_m;
     }
@@ -1587,9 +1617,10 @@ export function buildSceneData(inputs: AppInputs, results: { profile?: PressureP
       const zMid = 0.5 * (z0 + z1);
       const headBar = (WATER_DENSITY_15C * 9.80665 * (zMid - pumpElev)) / 100_000;
       const segPressure = basePressure > 0 ? Math.max(0, round(basePressure - headBar, 2)) : 0;
+      const effSmys = sec.smys_mpa ?? smysMpa;
       const limitSmys =
-        smysMpa > 0 && sec.outside_diameter_mm > 0
-          ? (20 * smysMpa * sec.wall_thickness_mm) / sec.outside_diameter_mm
+        effSmys > 0 && sec.outside_diameter_mm > 0
+          ? (20 * effSmys * sec.wall_thickness_mm) / sec.outside_diameter_mm
           : maxAllowable;
       const utilization = basePressure > 0 && limitSmys > 0 ? round(segPressure / limitSmys, 4) : 0;
       const status =
@@ -1614,6 +1645,9 @@ export function buildSceneData(inputs: AppInputs, results: { profile?: PressureP
         end_elevation_m: round(z1, 2),
         outside_diameter_mm: sec.outside_diameter_mm,
         wall_thickness_mm: sec.wall_thickness_mm,
+        grade: sec.material_grade ?? (inputs.material_grade || null),
+        smys_mpa: effSmys,
+        pressure_at_100_smys_bar: round(limitSmys, 2),
         pressure_bar: basePressure > 0 ? segPressure : undefined,
         utilization: basePressure > 0 ? utilization : undefined,
         status,
@@ -1624,8 +1658,20 @@ export function buildSceneData(inputs: AppInputs, results: { profile?: PressureP
     sections.forEach((section, index) => {
       const start = station;
       const end = station + section.length_m;
-      const utilization = maxAllowable > 0 ? basePressure / maxAllowable : 0;
-      const status = utilization > 1 ? "fail" : utilization > 0.9 ? "warning" : "pass";
+      const effSmys = isPositive(section.smys_mpa) ? section.smys_mpa : smysMpa;
+      const limitSmys =
+        effSmys > 0 && section.outside_diameter_mm > 0
+          ? (20 * effSmys * section.wall_thickness_mm) / section.outside_diameter_mm
+          : maxAllowable;
+      const utilization = basePressure > 0 && limitSmys > 0 ? basePressure / limitSmys : 0;
+      const status =
+        basePressure <= 0
+          ? "pending"
+          : utilization > 1
+            ? "fail"
+            : utilization > 0.9
+              ? "warning"
+              : "pass";
       segments.push({
         id: `scene-seg-${index + 1}`,
         label:
@@ -1637,8 +1683,11 @@ export function buildSceneData(inputs: AppInputs, results: { profile?: PressureP
         end_elevation_m: interpolateElevation(profile, end),
         outside_diameter_mm: section.outside_diameter_mm,
         wall_thickness_mm: section.wall_thickness_mm,
+        grade: section.material_grade ?? (inputs.material_grade || null),
+        smys_mpa: effSmys,
+        pressure_at_100_smys_bar: round(limitSmys, 2),
         pressure_bar: basePressure > 0 ? basePressure : undefined,
-        utilization: round(utilization, 4),
+        utilization: basePressure > 0 ? round(utilization, 4) : 0,
         status,
       });
       station = end;

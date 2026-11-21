@@ -313,10 +313,12 @@ export function PressureWindowChart({
 
 export function UtilizationChart({
   results,
+  defaultSmysMpa,
   height = 200,
   className,
 }: {
   results: ResultBundle;
+  defaultSmysMpa?: number | null;
   height?: number;
   className?: string;
 }) {
@@ -325,11 +327,24 @@ export function UtilizationChart({
     results.profile?.monitored_pressure_bar ?? results.pressure?.actual_pressure_change_bar;
   const segments = results.geometry?.sections ?? [];
   const data = segments.map((segment, index) => {
-    const utilization = pressure && maxPressure > 0 ? Math.min((pressure / maxPressure) * 100, 160) : 0;
+    const effSmys =
+      segment.smys_mpa && segment.smys_mpa > 0
+        ? segment.smys_mpa
+        : defaultSmysMpa && defaultSmysMpa > 0
+          ? defaultSmysMpa
+          : null;
+    const segLimit =
+      segment.pressure_at_100_smys_bar && segment.pressure_at_100_smys_bar > 0
+        ? segment.pressure_at_100_smys_bar
+        : effSmys && segment.outside_diameter_mm > 0
+          ? (20 * effSmys * segment.wall_thickness_mm) / segment.outside_diameter_mm
+          : maxPressure;
+    const utilization = pressure && segLimit > 0 ? Math.min((pressure / segLimit) * 100, 160) : 0;
+    const smysNote = effSmys ? ` · ${num(effSmys, 0)} MPa` : "";
     return {
       name: `Seg ${index + 1}`,
       utilization,
-      label: `${num(segment.outside_diameter_mm, 1)} / ${num(segment.wall_thickness_mm, 2)} mm`,
+      label: `${num(segment.outside_diameter_mm, 1)} / ${num(segment.wall_thickness_mm, 2)} mm${smysNote}`,
     };
   });
 

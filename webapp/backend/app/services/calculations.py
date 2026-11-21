@@ -133,6 +133,8 @@ def calculate_pressure_profile(request: Any) -> dict[str, Any]:
         "selected_window": dataclass_dict(result.selected_window),
         "limiting_pressure_at_100_smys_bar": result.limiting_pressure_at_100_smys_bar,
         "limiting_pipe_description": result.limiting_pipe_description,
+        "limiting_segment_index": result.limiting_segment_index,
+        "limiting_smys_mpa": result.limiting_smys_mpa,
         "total_length_m": result.total_length_m,
         "total_internal_volume_m3": result.total_internal_volume_m3,
         "within_length_limit": result.within_length_limit,

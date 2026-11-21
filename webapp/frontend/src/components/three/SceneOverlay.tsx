@@ -277,6 +277,14 @@ export function SelectionCard({ segment, equipment, onClose, onOpenSession }: Se
           <dd className="text-right text-mist-200">{formatPressure(segment.pressure_bar)}</dd>
           <dt className="text-mist-500">Kullanım</dt>
           <dd className="text-right text-mist-200">{formatUtilization(segment.utilization)}</dd>
+          {typeof segment.smys_mpa === "number" && Number.isFinite(segment.smys_mpa) ? (
+            <>
+              <dt className="text-mist-500">SMYS</dt>
+              <dd className="text-right text-mist-200">
+                {numberFormat1.format(segment.smys_mpa)} MPa
+              </dd>
+            </>
+          ) : null}
           <dt className="col-span-2 mt-1 text-mist-500">{formatDiameter(segment)}</dt>
         </dl>
       ) : null}

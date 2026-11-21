@@ -20,11 +20,15 @@ def _raise(exc: BaseException, **kwargs: Any) -> NoReturn:
 def build_pipe_section(data: Any) -> Any:
     from hidrostatik_test.domain import PipeSection
 
+    raw_smys = getattr(data, "smys_mpa", None)
+    raw_grade = getattr(data, "material_grade", None)
     try:
         return PipeSection(
             outside_diameter_mm=float(data.outside_diameter_mm),
             wall_thickness_mm=float(data.wall_thickness_mm),
             length_m=float(data.length_m),
+            smys_mpa=float(raw_smys) if raw_smys is not None else None,
+            material_grade=raw_grade,
         )
     except Exception as exc:  # domain ValidationError / conversion
         _raise(exc)
@@ -97,6 +101,11 @@ def geometry_response(geometry: Any, sections: list[Any]) -> dict[str, Any]:
             "internal_radius_mm": section.internal_radius_mm,
             "internal_volume_m3": section.internal_volume_m3,
             "elasticity_term": section.elasticity_term,
+            "smys_mpa": section.smys_mpa,
+            "material_grade": section.material_grade,
+            "pressure_at_100_smys_bar": (
+                section.pressure_at_100_smys_bar() if section.smys_mpa is not None else None
+            ),
         }
         for index, section in enumerate(sections, start=1)
     ]

@@ -63,6 +63,39 @@ class PipeSectionTests(unittest.TestCase):
                 with self.assertRaises(ValidationError):
                     PipeSection(**payload)
 
+    def test_segment_smys_and_material_grade_validation_and_100_smys(self) -> None:
+        sec = PipeSection(
+            outside_diameter_mm=406.4,
+            wall_thickness_mm=8.74,
+            length_m=100.0,
+            smys_mpa=290.0,
+            material_grade="  API 5L X42  ",
+        )
+        self.assertEqual(sec.smys_mpa, 290.0)
+        self.assertEqual(sec.material_grade, "API 5L X42")
+        self.assertTrue(
+            isclose(sec.pressure_at_100_smys_bar(), 20.0 * 290.0 * 8.74 / 406.4, rel_tol=1e-12)
+        )
+
+        blank_grade = PipeSection(
+            outside_diameter_mm=406.4,
+            wall_thickness_mm=8.74,
+            length_m=100.0,
+            material_grade="   ",
+        )
+        self.assertIsNone(blank_grade.material_grade)
+
+        invalid_smys_values: tuple[object, ...] = (0.0, -290.0, float("nan"), float("inf"), True)
+        for bad_smys in invalid_smys_values:
+            with self.subTest(smys_mpa=bad_smys):
+                with self.assertRaises(ValidationError):
+                    PipeSection(
+                        outside_diameter_mm=406.4,
+                        wall_thickness_mm=8.74,
+                        length_m=100.0,
+                        smys_mpa=bad_smys,  # type: ignore[arg-type]
+                    )
+
 
 class AirContentTests(unittest.TestCase):
     def test_air_content_pass_case(self) -> None:

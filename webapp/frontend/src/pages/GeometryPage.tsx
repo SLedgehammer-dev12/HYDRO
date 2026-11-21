@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import {
   ArrowDown,
   ArrowRight,
@@ -62,7 +62,66 @@ function SegmentNumberCell({
       onChange={(event) => setText(event.target.value)}
       onBlur={commit}
       onKeyDown={(event) => {
-        if (event.key === "Enter") {
+        if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+          commit();
+          (event.target as HTMLInputElement).blur();
+        }
+      }}
+    />
+  );
+}
+
+function SegmentOptionalNumberCell({
+  value,
+  onChange,
+  placeholder,
+  label,
+}: {
+  value: number | null;
+  onChange: (value: number | null) => void;
+  placeholder?: string;
+  label: string;
+}) {
+  const [text, setText] = useState(() => formatInput(value));
+  const [invalidInput, setInvalidInput] = useState(false);
+
+  useEffect(() => {
+    setText(formatInput(value));
+    setInvalidInput(false);
+  }, [value]);
+
+  const commit = () => {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      setInvalidInput(false);
+      onChange(null);
+      setText("");
+      return;
+    }
+    const parsed = parseNumber(trimmed);
+    if (parsed !== null && Number.isFinite(parsed) && parsed > 0) {
+      setInvalidInput(false);
+      onChange(parsed);
+      return;
+    }
+    setInvalidInput(true);
+  };
+
+  return (
+    <input
+      className="table-input"
+      inputMode="decimal"
+      placeholder={placeholder}
+      aria-label={label}
+      aria-invalid={invalidInput || undefined}
+      value={text}
+      onChange={(event) => {
+        setText(event.target.value);
+        if (invalidInput) setInvalidInput(false);
+      }}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" && !event.nativeEvent.isComposing) {
           commit();
           (event.target as HTMLInputElement).blur();
         }
@@ -87,6 +146,7 @@ export function GeometryPage() {
   const { data: meta } = useMeta();
   const calculate = useCalculateGeometry();
   const [confirmClearSegments, setConfirmClearSegments] = useState(false);
+  const segmentTableCaptionId = useId();
 
   const selectedPipe = pipes.find((pipe) => pipe.option_label === inputs.geometry_catalog.size_option);
   const scheduleOptions = selectedPipe?.schedules ?? [];
@@ -155,6 +215,35 @@ export function GeometryPage() {
 
   const totalLength = geometry?.total_length_m ?? 0;
   const totalVolume = geometry?.internal_volume_m3 ?? 0;
+
+  const segmentSmysAnalysis = useMemo(() => {
+    const defaultSmys = profile.smys_mpa;
+    const perRow = inputs.segments.map((segment) => {
+      const customSmys =
+        segment.smys_mpa !== null && segment.smys_mpa !== undefined && segment.smys_mpa > 0
+          ? segment.smys_mpa
+          : null;
+      const effectiveSmys =
+        customSmys ?? (defaultSmys !== null && defaultSmys > 0 ? defaultSmys : null);
+      const od = segment.outside_diameter_mm;
+      const wt = segment.wall_thickness_mm;
+      const p100 =
+        effectiveSmys !== null &&
+        od !== null &&
+        wt !== null &&
+        od > 0 &&
+        wt > 0 &&
+        wt * 2 < od
+          ? (20 * effectiveSmys * wt) / od
+          : null;
+      return { customSmys, effectiveSmys, p100 };
+    });
+    const validPressures = perRow
+      .map((item) => item.p100)
+      .filter((value): value is number => value !== null && Number.isFinite(value));
+    const minPressure = validPressures.length > 0 ? Math.min(...validPressures) : null;
+    return { perRow, minPressure };
+  }, [inputs.segments, profile.smys_mpa]);
 
   /* Segment kontrolü: Σ Segment Uzunluğu == Section (ΔKP) ve istasyon/geometri doğruluğu */
   const segmentSummary = useMemo(
@@ -379,26 +468,44 @@ export function GeometryPage() {
             }
           />
         ) : (
-          <div className="table-wrap scroll-thin">
+          <div
+            tabIndex={0}
+            role="region"
+            aria-labelledby={segmentTableCaptionId}
+            className="table-wrap scroll-thin"
+          >
             <table className="data compact">
-              <caption className="sr-only">Boru segmentleri; dış çap, et kalınlığı, uzunluk ve istasyon</caption>
+              <caption id={segmentTableCaptionId} className="sr-only">
+                Boru segmentleri; çap, et kalınlığı, malzeme kalitesi, SMYS, uzunluk, 100% SMYS ve istasyon
+              </caption>
               <thead>
                 <tr>
                   <th scope="col">#</th>
                   <th scope="col">NPS</th>
                   <th scope="col">Schedule</th>
+                  <th scope="col">Kalite</th>
+                  <th scope="col" className="num">SMYS (MPa)</th>
                   <th scope="col" className="num">OD (mm)</th>
                   <th scope="col" className="num">WT (mm)</th>
                   <th scope="col" className="num">L (m)</th>
+                  <th scope="col" className="num">100% SMYS (bar)</th>
                   <th scope="col" className="num">İstasyon (m)</th>
                   <th scope="col" className="num">Vt (m³)</th>
                   <th scope="col" className="num">KP Aralığı</th>
+                  <th scope="col">Durum</th>
                   <th scope="col"><span className="sr-only">İşlemler</span></th>
                 </tr>
               </thead>
               <tbody>
                 {inputs.segments.map((segment, index) => {
                   const row = segmentSummary.rows[index];
+                  const smysRow = segmentSmysAnalysis.perRow[index];
+                  const p100 = smysRow?.p100 ?? null;
+                  const isLimitingSegment =
+                    inputs.segments.length >= 2 &&
+                    p100 !== null &&
+                    segmentSmysAnalysis.minPressure !== null &&
+                    Math.abs(p100 - segmentSmysAnalysis.minPressure) < 1e-6;
                   const invalid =
                     segment.outside_diameter_mm !== null &&
                     segment.wall_thickness_mm !== null &&
@@ -412,10 +519,11 @@ export function GeometryPage() {
                         ((segment.outside_diameter_mm / 2 - segment.wall_thickness_mm) / 1000) ** 2 *
                         segment.length_m
                       : null;
+                  const selectedGradeOption = segment.material_grade ?? "";
                   return (
                     <tr key={segment.id}>
                       <td className="font-mono text-[11px] text-[var(--text-faint)]">{index + 1}</td>
-                      <td className="w-[108px] max-w-[108px]">
+                      <td className="w-[104px] max-w-[104px]">
                         <input
                           className="table-input text-left font-sans"
                           aria-label={`Segment ${index + 1} NPS`}
@@ -424,13 +532,71 @@ export function GeometryPage() {
                           onChange={(event) => updateSegment(segment.id, { nps_label: event.target.value })}
                         />
                       </td>
-                      <td className="w-[118px] max-w-[118px]">
+                      <td className="w-[112px] max-w-[112px]">
                         <input
                           className="table-input text-left font-sans"
                           aria-label={`Segment ${index + 1} schedule`}
                           title={segment.schedule_label}
                           value={segment.schedule_label}
                           onChange={(event) => updateSegment(segment.id, { schedule_label: event.target.value })}
+                        />
+                      </td>
+                      <td className="min-w-[142px] max-w-[168px]">
+                        <select
+                          className="table-input text-left font-sans"
+                          aria-label={`Segment ${index + 1} malzeme kalitesi`}
+                          value={selectedGradeOption}
+                          onChange={(event) => {
+                            const val = event.target.value;
+                            if (!val) {
+                              updateSegment(segment.id, { material_grade: "", smys_mpa: null });
+                              return;
+                            }
+                            const matched = grades.find((item) => item.option_label === val);
+                            updateSegment(segment.id, {
+                              material_grade: val,
+                              smys_mpa: matched?.smys_mpa ?? segment.smys_mpa ?? null,
+                            });
+                          }}
+                        >
+                          <option value="">
+                            {profile.smys_mpa
+                              ? `Hat varsayılanı (${num(profile.smys_mpa, 0)})`
+                              : "Hat varsayılanı"}
+                          </option>
+                          {selectedGradeOption &&
+                          !grades.some((item) => item.option_label === selectedGradeOption) ? (
+                            <option value={selectedGradeOption}>{selectedGradeOption}</option>
+                          ) : null}
+                          {grades.map((grade) => (
+                            <option key={grade.option_label} value={grade.option_label}>
+                              {grade.grade} ({grade.smys_mpa} MPa)
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="w-[82px] max-w-[90px]">
+                        <SegmentOptionalNumberCell
+                          label={`Segment ${index + 1} SMYS (MPa)`}
+                          placeholder={profile.smys_mpa ? String(profile.smys_mpa) : "—"}
+                          value={segment.smys_mpa ?? null}
+                          onChange={(value) => {
+                            if (value === null) {
+                              updateSegment(segment.id, { smys_mpa: null, material_grade: "" });
+                              return;
+                            }
+                            const currentGrade = grades.find(
+                              (item) => item.option_label === (segment.material_grade ?? ""),
+                            );
+                            const nextGrade =
+                              currentGrade && Math.abs(currentGrade.smys_mpa - value) < 1e-6
+                                ? segment.material_grade
+                                : "";
+                            updateSegment(segment.id, {
+                              smys_mpa: value,
+                              material_grade: nextGrade,
+                            });
+                          }}
                         />
                       </td>
                       <td>
@@ -455,6 +621,12 @@ export function GeometryPage() {
                           value={segment.length_m}
                           onChange={(value) => updateSegment(segment.id, { length_m: value })}
                         />
+                      </td>
+                      <td className="num">
+                        <div className="flex items-center justify-end gap-1">
+                          <span>{p100 !== null ? num(p100, 1) : "—"}</span>
+                          {isLimitingSegment ? <Badge tone="warning">Limit</Badge> : null}
+                        </div>
                       </td>
                       <td className="num text-[var(--text-faint)]">{num(segment.start_station_m, 0)}</td>
                       <td className="num">{volume !== null ? num(volume, 3) : "—"}</td>
@@ -512,13 +684,18 @@ export function GeometryPage() {
               </tbody>
               <tfoot>
                 <tr>
-                  <td colSpan={5} className="text-right text-[11px] font-semibold text-[var(--text-muted)]">
-                    Toplam
+                  <td colSpan={7} className="text-right text-[11px] font-semibold text-[var(--text-muted)]">
+                    Toplam / Limit
                   </td>
                   <td className="num font-semibold">{num(totalLength, 2)}</td>
+                  <td className="num text-[11px] font-semibold text-[var(--text-muted)]">
+                    {segmentSmysAnalysis.minPressure !== null
+                      ? num(segmentSmysAnalysis.minPressure, 1)
+                      : "—"}
+                  </td>
                   <td className="num">{num(totalLength, 0)}</td>
                   <td className="num font-semibold">{num(totalVolume, 3)}</td>
-                  <td />
+                  <td colSpan={3} />
                 </tr>
               </tfoot>
             </table>
@@ -609,7 +786,7 @@ export function GeometryPage() {
             }}
             options={grades.map((grade) => ({ value: grade.option_label, label: grade.option_label }))}
             placeholder="API 5L PSL2 kalite seçin"
-            help="SMYS seçilen kaliteden türetilir."
+            help="Hat varsayılanı; segment tablosunda farklı kalite girilmemişse kullanılır."
           />
           <ReadonlyValue
             label="SMYS"
@@ -664,7 +841,11 @@ export function GeometryPage() {
         </SectionCard>
         <SectionCard title="Segment kullanımı" description="İzlenen basıncın 100% SMYS limitine oranı." icon={Layers}>
           {results.geometry || results.profile ? (
-            <UtilizationChart results={results} height={240} />
+            <UtilizationChart
+              results={results}
+              defaultSmysMpa={inputs.section_profile.smys_mpa}
+              height={240}
+            />
           ) : (
             <EmptyState title="Kullanım verisi yok" description="Önce geometriyi doğrulayın ve profil hesabını çalıştırın." icon={Layers} />
           )}

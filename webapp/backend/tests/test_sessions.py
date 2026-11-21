@@ -904,3 +904,123 @@ def test_snapshot_merge_ambient_diff_bool_segments_and_invalid_fields(client):
     assert stale_replace.status_code == 409
     rep_map = {e["path"]: e for e in stale_replace.json()["details"]["diff"]}
     assert rep_map["material_grade"]["incoming"] == "API 5L X60"
+
+
+def test_session_per_segment_smys_scene_snapshot_conflict_and_txt_report(client):
+    inputs = full_inputs(
+        segments=[
+            {
+                "outside_diameter_mm": 406.4,
+                "wall_thickness_mm": 8.74,
+                "length_m": 1000.0,
+                "nps_label": "NPS 16",
+                "schedule_label": "Sch 20",
+                "material_grade": "API 5L X65",
+                "smys_mpa": 450.0,
+            },
+            {
+                "outside_diameter_mm": 406.4,
+                "wall_thickness_mm": 8.74,
+                "length_m": 500.0,
+                "nps_label": "NPS 16",
+                "schedule_label": "Sch 20",
+                "material_grade": "API 5L X42",
+                "smys_mpa": 290.0,
+            },
+        ],
+    )
+    session = create_session(client, inputs=inputs)
+
+    # 3D scene computes per-segment SMYS and utilization
+    scene = client.get(f"/api/sessions/{session['id']}/scene").json()
+    assert len(scene["segments"]) == 2
+    assert scene["segments"][0]["smys_mpa"] == 450.0
+    assert scene["segments"][0]["grade"] == "API 5L X65"
+    assert scene["segments"][1]["smys_mpa"] == 290.0
+    assert scene["segments"][1]["grade"] == "API 5L X42"
+    assert scene["segments"][1]["utilization"] > scene["segments"][0]["utilization"]
+
+    # Snapshot export & re-import round-trip preserves per-segment SMYS & grade
+    snap = client.get(f"/api/sessions/{session['id']}/snapshot").json()
+    assert snap["geometry_segments"][0]["smys_mpa"] == "450"
+    assert snap["geometry_segments"][1]["smys_mpa"] == "290"
+    assert snap["geometry_segments"][1]["material_grade"] == "API 5L X42"
+
+    imported = client.post(
+        "/api/import/desktop-snapshot",
+        json={"snapshot": snap},
+    )
+    assert imported.status_code == 201, imported.text
+    imp_segs = imported.json()["session"]["inputs"]["segments"]
+    assert imp_segs[1]["smys_mpa"] == 290.0
+    assert imp_segs[1]["material_grade"] == "API 5L X42"
+
+    # Invalid segment smys_mpa in snapshot is recorded in invalid_fields
+    bad_snap = client.post(
+        "/api/import/desktop-snapshot",
+        json={
+            "snapshot": {
+                "schema_version": 1,
+                "geometry_segments": [
+                    {
+                        "outside_diameter_mm": "406.4",
+                        "wall_thickness_mm": "8.74",
+                        "length_m": "500",
+                        "smys_mpa": "-100",
+                    }
+                ],
+            }
+        },
+    )
+    assert bad_snap.status_code == 201
+    assert "geometry_segments[0].smys_mpa" in bad_snap.json()["mapping"]["invalid_fields"]
+
+    # 409 diff detects per-segment SMYS change
+    bump = client.put(
+        f"/api/sessions/{session['id']}",
+        json={"notes": "Rev 2"},
+        headers={"If-Match": f'"{session["revision"]}"'},
+    )
+    assert bump.status_code == 200
+    stale_seg = client.put(
+        f"/api/sessions/{session['id']}",
+        json={
+            "inputs": {
+                "segments": [
+                    {
+                        "outside_diameter_mm": 406.4,
+                        "wall_thickness_mm": 8.74,
+                        "length_m": 1000.0,
+                        "nps_label": "NPS 16",
+                        "schedule_label": "Sch 20",
+                        "material_grade": "API 5L X65",
+                        "smys_mpa": 450.0,
+                    },
+                    {
+                        "outside_diameter_mm": 406.4,
+                        "wall_thickness_mm": 8.74,
+                        "length_m": 500.0,
+                        "nps_label": "NPS 16",
+                        "schedule_label": "Sch 20",
+                        "material_grade": "API 5L X52",
+                        "smys_mpa": 360.0,
+                    },
+                ]
+            }
+        },
+        headers={"If-Match": f'"{session["revision"]}"'},
+    )
+    assert stale_seg.status_code == 409
+    assert any(entry["path"] == "segments" for entry in stale_seg.json()["details"]["diff"])
+
+    # TXT export renders per-segment SMYS and grade
+    txt_res = client.get(
+        f"/api/sessions/{session['id']}/export",
+        params={"format": "txt", "preview": True},
+    )
+    assert txt_res.status_code == 200
+    body = txt_res.json()
+    txt = body["content"]
+    assert "SMYS 290 MPa" in txt
+    assert "API 5L X42" in txt
+    assert "Segment SMYS araligi (MPa): 290 - 450" in txt

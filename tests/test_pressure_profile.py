@@ -7,6 +7,7 @@ from hidrostatik_test.domain import (
     MAX_TEST_SECTION_LENGTH_M,
     MAX_TEST_SECTION_VOLUME_M3,
     START_PUMP_LOCATION,
+    PipeGeometry,
     PipeSection,
     SectionPressureProfileInputs,
     ValidationError,
@@ -138,6 +139,85 @@ class PressureProfileTests(unittest.TestCase):
         self.assertFalse(result.within_volume_limit)
         self.assertTrue(result.total_internal_volume_m3 > MAX_TEST_SECTION_VOLUME_M3)
         self.assertFalse(result.feasible)
+
+    def test_segmented_pipe_uses_per_segment_smys_and_identifies_limiting_segment(self) -> None:
+        # Segment 1: thinner wall (8.74 mm) but higher SMYS (450 MPa) -> 193.553 bar
+        # Segment 2: thicker wall (10.31 mm) but lower SMYS (290 MPa, X42) -> 147.151 bar (governing!)
+        pipe = PipeGeometry(
+            sections=(
+                PipeSection(
+                    outside_diameter_mm=406.4,
+                    wall_thickness_mm=8.74,
+                    length_m=600.0,
+                    smys_mpa=450.0,
+                    material_grade="API 5L X65",
+                ),
+                PipeSection(
+                    outside_diameter_mm=406.4,
+                    wall_thickness_mm=10.31,
+                    length_m=400.0,
+                    smys_mpa=290.0,
+                    material_grade="API 5L X42",
+                ),
+            )
+        )
+        result = evaluate_section_pressure_profile(
+            SectionPressureProfileInputs(
+                pipe=pipe,
+                design_pressure_bar=100.0,
+                smys_mpa=450.0,
+                location_class=get_location_class_rule("Class 1 - min 1.25 x dizayn basinci"),
+                highest_elevation_m=50.0,
+                lowest_elevation_m=0.0,
+                start_elevation_m=0.0,
+                end_elevation_m=50.0,
+                selected_pump_location=START_PUMP_LOCATION,
+            )
+        )
+        expected_seg2 = 20.0 * 290.0 * 10.31 / 406.4
+        self.assertTrue(
+            isclose(result.limiting_pressure_at_100_smys_bar, expected_seg2, rel_tol=1e-9)
+        )
+        self.assertEqual(result.limiting_segment_index, 2)
+        self.assertEqual(result.limiting_smys_mpa, 290.0)
+        self.assertIn("Limit segment 2", result.limiting_pipe_description)
+        self.assertIn("SMYS=290.0 MPa", result.limiting_pipe_description)
+        self.assertIn("API 5L X42", result.limiting_pipe_description)
+
+    def test_mixed_override_and_fallback_segment_smys(self) -> None:
+        pipe = PipeGeometry(
+            sections=(
+                PipeSection(outside_diameter_mm=406.4, wall_thickness_mm=8.74, length_m=500.0),
+                PipeSection(
+                    outside_diameter_mm=406.4,
+                    wall_thickness_mm=8.74,
+                    length_m=500.0,
+                    smys_mpa=320.0,
+                ),
+            )
+        )
+        result = evaluate_section_pressure_profile(
+            SectionPressureProfileInputs(
+                pipe=pipe,
+                design_pressure_bar=80.0,
+                smys_mpa=450.0,
+                location_class=get_location_class_rule("Class 1 - min 1.25 x dizayn basinci"),
+                highest_elevation_m=10.0,
+                lowest_elevation_m=0.0,
+                start_elevation_m=0.0,
+                end_elevation_m=10.0,
+                selected_pump_location=START_PUMP_LOCATION,
+            )
+        )
+        self.assertEqual(result.limiting_segment_index, 2)
+        self.assertEqual(result.limiting_smys_mpa, 320.0)
+        self.assertTrue(
+            isclose(
+                result.limiting_pressure_at_100_smys_bar,
+                20.0 * 320.0 * 8.74 / 406.4,
+                rel_tol=1e-9,
+            )
+        )
 
 
 if __name__ == "__main__":

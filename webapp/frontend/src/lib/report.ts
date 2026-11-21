@@ -100,14 +100,18 @@ export function buildReportText(
   if (inputs.segments.length > 0) {
     lines.push("2. SEGMENT LİSTESİ");
     lines.push(rule("-"));
-    lines.push("No  NPS / Schedule                 OD (mm)   Et (mm)    L (m)");
+    lines.push("No  NPS / Schedule                 OD (mm)   Et (mm)    L (m)  SMYS (MPa)     Kalite");
+    const defaultSmys = inputs.section_profile.smys_mpa;
     inputs.segments.forEach((segment, index) => {
+      const effSmys = segment.smys_mpa && segment.smys_mpa > 0 ? segment.smys_mpa : defaultSmys;
+      const smysText = effSmys ? `${num(effSmys, 0)}${segment.smys_mpa ? "" : " (vars.)"}` : "—";
+      const gradeText = segment.material_grade?.trim() || (segment.smys_mpa ? "Özel" : "Hat varsayılanı");
       lines.push(
         `${String(index + 1).padEnd(3)} ${(segment.nps_label || "—").padEnd(30)} ${String(
           num(segment.outside_diameter_mm, 2),
         ).padStart(8)} ${String(num(segment.wall_thickness_mm, 2)).padStart(9)} ${String(
           num(segment.length_m, 2),
-        ).padStart(8)}`,
+        ).padStart(8)} ${smysText.padStart(11)}     ${gradeText}`,
       );
     });
     lines.push("");
@@ -168,6 +172,7 @@ export function buildReportText(
     lines.push(`İzlenen basınç  : ${fmt.bar(profile.monitored_pressure_bar)}`);
     lines.push(`Hidrolik span   : ${fmt.bar(profile.hydraulic_span_bar)}`);
     lines.push(`100% SMYS limit : ${fmt.bar(profile.limiting_pressure_at_100_smys_bar)}`);
+    lines.push(`Limit kesit     : ${profile.limiting_pipe_description}`);
     lines.push(`Uygun           : ${profile.feasible ? "EVET" : "HAYIR"}`);
     lines.push("");
   }
@@ -358,6 +363,8 @@ export function buildSnapshot(
       length_m: str(segment.length_m),
       nps_label: segment.nps_label,
       schedule_label: segment.schedule_label,
+      material_grade: segment.material_grade ?? "",
+      smys_mpa: str(segment.smys_mpa),
     })),
     report: { ...inputs.report },
     report_entries: [],

@@ -496,6 +496,11 @@ export function evaluateSegmentConsistency(params: {
 
     const od = seg.outside_diameter_mm;
     const wt = seg.wall_thickness_mm;
+    const smys = seg.smys_mpa;
+    const smysValid =
+      smys === null ||
+      smys === undefined ||
+      (typeof smys === "number" && Number.isFinite(smys) && smys > 0);
     const dimensionValid =
       od !== null &&
       od > 0 &&
@@ -503,7 +508,8 @@ export function evaluateSegmentConsistency(params: {
       wt > 0 &&
       wt * 2 < od &&
       seg.length_m !== null &&
-      seg.length_m > 0;
+      seg.length_m > 0 &&
+      smysValid;
 
     const volumeM3 =
       dimensionValid && od !== null && wt !== null
@@ -515,7 +521,9 @@ export function evaluateSegmentConsistency(params: {
 
     if (!dimensionValid) {
       status = "fail";
-      if (!seg.length_m || seg.length_m <= 0) {
+      if (!smysValid) {
+        note = "Segment SMYS > 0 MPa olmalıdır.";
+      } else if (!seg.length_m || seg.length_m <= 0) {
         note = "Segment uzunluğu > 0 olmalıdır.";
       } else if (!od || od <= 0 || !wt || wt <= 0) {
         note = "OD ve WT > 0 olmalıdır.";

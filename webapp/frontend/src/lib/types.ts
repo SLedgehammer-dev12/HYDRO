@@ -95,6 +95,8 @@ export interface PipeSectionIn {
   nps_label?: string | null;
   schedule_label?: string | null;
   start_station_m?: number | null;
+  smys_mpa?: number | null;
+  material_grade?: string | null;
 }
 
 export interface GeometryIn {
@@ -109,6 +111,9 @@ export interface GeometrySectionResult {
   internal_radius_mm: number;
   internal_volume_m3: number;
   elasticity_term: number;
+  smys_mpa?: number | null;
+  material_grade?: string | null;
+  pressure_at_100_smys_bar?: number | null;
 }
 
 export interface GeometrySummary {
@@ -381,6 +386,8 @@ export interface PressureProfileResponse {
   selected_window: PressureWindow;
   limiting_pressure_at_100_smys_bar: number;
   limiting_pipe_description: string;
+  limiting_segment_index?: number | null;
+  limiting_smys_mpa?: number | null;
   total_length_m: number;
   total_internal_volume_m3: number;
   within_length_limit: boolean;
@@ -1034,6 +1041,8 @@ export interface SegmentRow extends GeometryInputs {
   nps_label: string;
   schedule_label: string;
   start_station_m: number | null;
+  material_grade?: string;
+  smys_mpa?: number | null;
 }
 
 export interface GeometryCatalogInputs {

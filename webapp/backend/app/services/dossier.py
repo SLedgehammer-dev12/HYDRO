@@ -2075,11 +2075,21 @@ def evaluate_section_calculations(
             s_od = _finite_float(seg.get("outside_diameter_mm"))
             s_wt = _finite_float(seg.get("wall_thickness_mm"))
             s_len = _finite_float(seg.get("length_m"))
+            raw_smys = seg.get("smys_mpa")
+            s_smys = None if isinstance(raw_smys, bool) else _finite_float(raw_smys)
+            if s_smys is not None and s_smys <= 0:
+                s_smys = None
+            raw_grade = seg.get("material_grade")
+            s_grade = raw_grade.strip() or None if isinstance(raw_grade, str) else None
             if s_od and s_wt and s_len and s_od > 2 * s_wt and s_len > 0:
                 try:
                     valid_segs.append(
                         PipeSection(
-                            outside_diameter_mm=s_od, wall_thickness_mm=s_wt, length_m=s_len
+                            outside_diameter_mm=s_od,
+                            wall_thickness_mm=s_wt,
+                            length_m=s_len,
+                            smys_mpa=s_smys,
+                            material_grade=s_grade,
                         )
                     )
                 except ValidationError:
@@ -2259,6 +2269,10 @@ def evaluate_section_calculations(
     # 3) Pressure Profile & SMYS Feasibility evaluation
     design_p = _finite_float(merged_header.get("design_pressure_bar"))
     smys_mpa = _finite_float(merged_header.get("smys_mpa"))
+    if (smys_mpa is None or smys_mpa <= 0) and valid_segs:
+        seg_smys = [sec.smys_mpa for sec in valid_segs if sec.smys_mpa is not None]
+        if len(seg_smys) == len(valid_segs):
+            smys_mpa = min(seg_smys)
     h_high = _finite_float(merged_header.get("highest_elevation_m"))
     h_low = _finite_float(merged_header.get("lowest_elevation_m"))
     h_start = _finite_float(merged_header.get("start_elevation_m"))
@@ -2317,6 +2331,8 @@ def evaluate_section_calculations(
                 "p_min_bar": p_min_bar,
                 "p_max_bar": p_max_bar,
                 "p_100_smys_bar": p_smys_bar,
+                "limiting_pipe_description": prof_res.limiting_pipe_description,
+                "limiting_smys_mpa": prof_res.limiting_smys_mpa,
                 "hydraulic_span_bar": round(prof_res.hydraulic_span_bar, 2),
                 "monitored_pressure_bar": mon_p,
                 "location_class": raw_loc,

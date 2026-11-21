@@ -3,7 +3,14 @@ import {
   countDistinctProfileStations,
   parseSurveyPointsText,
 } from "../components/geometry/SiteSurveyPanel";
-import { buildDemoResults, buildSceneData, createDefaultInputs, createEmptyInputs } from "./mock";
+import {
+  buildDemoResults,
+  buildSceneData,
+  computeProfile,
+  createDefaultInputs,
+  createEmptyInputs,
+  sectionsFromInputs,
+} from "./mock";
 import { normalizeInputs, toApiInputs } from "./normalize";
 
 describe("3D real profile_points and equipment inputs", () => {
@@ -164,5 +171,87 @@ describe("3D real profile_points and equipment inputs", () => {
         status: "warning",
       },
     ]);
+  });
+
+  it("computes per-segment SMYS limits in computeProfile, buildSceneData, and normalizeInputs", () => {
+    const inputs = createEmptyInputs();
+    inputs.material_grade = "API 5L PSL2 X65 / L450 - SMYS 450 MPa";
+    inputs.section_profile = {
+      highest_elevation_m: 100,
+      lowest_elevation_m: 100,
+      start_elevation_m: 100,
+      end_elevation_m: 100,
+      design_pressure_bar: 100,
+      smys_mpa: 450,
+    };
+    inputs.pump_location = "Baslangic noktasi";
+    inputs.field.monitored_pressure_bar = 130;
+    inputs.segments = [
+      {
+        id: "s1",
+        nps_label: "NPS 16",
+        schedule_label: "Sch 20",
+        outside_diameter_mm: 406.4,
+        wall_thickness_mm: 8.74,
+        length_m: 500,
+        start_station_m: 0,
+        material_grade: "API 5L PSL2 X65 / L450 - SMYS 450 MPa",
+        smys_mpa: 450,
+      },
+      {
+        id: "s2",
+        nps_label: "NPS 16",
+        schedule_label: "Sch 20",
+        outside_diameter_mm: 406.4,
+        wall_thickness_mm: 8.74,
+        length_m: 500,
+        start_station_m: 500,
+        material_grade: "API 5L PSL2 X42 / L290 - SMYS 290 MPa",
+        smys_mpa: 290,
+      },
+    ];
+
+    const normalized = normalizeInputs(inputs);
+    expect(normalized.segments[1].smys_mpa).toBe(290);
+    expect(normalized.segments[1].material_grade).toContain("X42");
+
+    const sections = sectionsFromInputs(normalized);
+    const prof = computeProfile({
+      geometry: { sections },
+      design_pressure_bar: 100,
+      smys_mpa: 450,
+      location_class: normalized.location_class,
+      highest_elevation_m: 100,
+      lowest_elevation_m: 100,
+      start_elevation_m: 100,
+      end_elevation_m: 100,
+      pump_location: normalized.pump_location,
+      monitored_pressure_bar: 130,
+    });
+    expect(prof.limiting_segment_index).toBe(2);
+    expect(prof.limiting_smys_mpa).toBe(290);
+    expect(prof.limiting_pipe_description).toContain("Limit segment 2");
+    expect(prof.limiting_pipe_description).toContain("SMYS=290.0 MPa");
+
+    // Non-survey scene uses per-segment SMYS
+    const approxScene = buildSceneData(normalized, { profile: prof });
+    expect(approxScene.segments).toHaveLength(2);
+    expect(approxScene.segments[0].smys_mpa).toBe(450);
+    expect(approxScene.segments[1].smys_mpa).toBe(290);
+    expect((approxScene.segments[1].utilization ?? 0)).toBeGreaterThan(
+      approxScene.segments[0].utilization ?? 0,
+    );
+
+    // Survey scene uses per-segment SMYS too
+    normalized.profile_points = [
+      { station_m: 0, elevation_m: 100 },
+      { station_m: 1000, elevation_m: 100 },
+    ];
+    const surveyScene = buildSceneData(normalized, { profile: prof });
+    const seg1 = surveyScene.segments.find((s) => s.end_m <= 500);
+    const seg2 = surveyScene.segments.find((s) => s.start_m >= 500);
+    expect(seg1?.smys_mpa).toBe(450);
+    expect(seg2?.smys_mpa).toBe(290);
+    expect((seg2?.utilization ?? 0)).toBeGreaterThan(seg1?.utilization ?? 0);
   });
 });

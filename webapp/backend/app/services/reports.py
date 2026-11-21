@@ -176,6 +176,19 @@ def build_context(
         except Exception:
             logger.exception("Backend comparison failed during report export")
             backend_cmp_error = "Su ozelligi backend karsilastirmasi uretilemedi."
+    default_smys = as_float(profile.get("smys_mpa"))
+    seg_smys_values: list[float] = []
+    has_seg_override = False
+    for seg_item in segments:
+        raw_seg_smys = seg_item.get("smys_mpa")
+        seg_smys = None if isinstance(raw_seg_smys, bool) else as_float(raw_seg_smys)
+        seg_grade = str(seg_item.get("material_grade") or "").strip()
+        if (seg_smys is not None and seg_smys > 0) or seg_grade:
+            has_seg_override = True
+        eff = seg_smys if (seg_smys is not None and seg_smys > 0) else default_smys
+        if eff is not None and eff > 0:
+            seg_smys_values.append(eff)
+
     geometry_data = {
         "Dis cap (mm)": fmt_number(od, 2) or "-",
         "Et kalinligi (mm)": fmt_number(wt, 2) or "-",
@@ -183,7 +196,18 @@ def build_context(
         "Segment sayisi": str(len(segments) or 1),
         "Location Class": str(inputs.get("location_class") or "-"),
         "Boru malzeme kalitesi": str(inputs.get("material_grade") or "-"),
-        "SMYS (MPa)": fmt_number(as_float(profile.get("smys_mpa")), 1) or "-",
+        "SMYS (MPa)": fmt_number(default_smys, 1) or "-",
+        **(
+            {
+                "Segment SMYS araligi (MPa)": (
+                    f"{fmt_number(min(seg_smys_values), 1)} - {fmt_number(max(seg_smys_values), 1)}"
+                    if len(set(round(v, 3) for v in seg_smys_values)) > 1
+                    else (fmt_number(seg_smys_values[0], 1) or "-")
+                )
+            }
+            if has_seg_override and seg_smys_values
+            else {}
+        ),
         "Dizayn basinci (bar)": fmt_number(as_float(profile.get("design_pressure_bar")), 2) or "-",
         "En yuksek nokta (m)": fmt_number(as_float(profile.get("highest_elevation_m")), 2) or "-",
         "En dusuk nokta (m)": fmt_number(as_float(profile.get("lowest_elevation_m")), 2) or "-",
@@ -301,19 +325,40 @@ def build_report_text(context: dict[str, Any], session: HydroSession) -> str:
         f"Hat uzunlugu (m): {context['geometry_data']['Hat uzunlugu (m)']}",
         f"Location Class: {inputs.get('location_class') or '-'}",
         f"Pompa konumu: {inputs.get('pump_location') or '-'}",
+        *(
+            [
+                f"Segment SMYS araligi (MPa): {context['geometry_data']['Segment SMYS araligi (MPa)']}"
+            ]
+            if "Segment SMYS araligi (MPa)" in context["geometry_data"]
+            else []
+        ),
         "",
     ]
 
     segments = _geometry_rows(inputs)
     if segments:
+        default_smys = as_float(profile.get("smys_mpa"))
         lines.append("Segment Listesi")
         for index, item in enumerate(segments, start=1):
+            raw_seg_smys = item.get("smys_mpa")
+            seg_smys = None if isinstance(raw_seg_smys, bool) else as_float(raw_seg_smys)
+            seg_grade = str(item.get("material_grade") or "").strip()
+            eff_smys = seg_smys if (seg_smys is not None and seg_smys > 0) else default_smys
+            smys_note = (
+                f" | SMYS {fmt_number(eff_smys, 1)} MPa"
+                if eff_smys is not None and eff_smys > 0
+                else ""
+            )
+            if smys_note and seg_smys is None and default_smys is not None:
+                smys_note += " (hat varsayilani)"
+            grade_note = f" | {seg_grade}" if seg_grade else ""
             lines.append(
                 f"{index}. {item.get('nps_label') or '-'} | "
                 f"{item.get('schedule_label') or '-'} | "
                 f"OD {fmt_number(as_float(item.get('outside_diameter_mm')), 2)} mm | "
                 f"Et {fmt_number(as_float(item.get('wall_thickness_mm')), 2)} mm | "
                 f"L {fmt_number(as_float(item.get('length_m')), 2)} m"
+                f"{smys_note}{grade_note}"
             )
         lines.append("")
 

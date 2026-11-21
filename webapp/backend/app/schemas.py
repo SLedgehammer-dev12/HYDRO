@@ -43,6 +43,22 @@ class PipeSectionIn(StrictModel):
     nps_label: str | None = None
     schedule_label: str | None = None
     start_station_m: float | None = None
+    smys_mpa: float | None = None
+    material_grade: str | None = Field(default=None, max_length=160)
+
+    @field_validator(
+        "outside_diameter_mm",
+        "wall_thickness_mm",
+        "length_m",
+        "start_station_m",
+        "smys_mpa",
+        mode="before",
+    )
+    @classmethod
+    def _reject_bool_numbers(cls, value: Any) -> Any:
+        if isinstance(value, bool):
+            raise ValueError("Boolean deger sayisal alan icin gecersizdir.")
+        return value
 
 
 class GeometryIn(StrictModel):

@@ -2,7 +2,7 @@
 
 > Tek kaynak özet. Ayrıntı için "Ayrıntılı notlar" bölümündeki dosyalara bakın.
 >
-> **Son güncelleme:** 2026-11-20
+> **Son güncelleme:** 2026-11-21
 > **Dal:** `main` (`v1.9.1` — Güvenlik Sertleştirme, Tip Temizliği & Güvenilirlik Güncellemeleri)
 > **Son commit:** `hidrostatik-test-v1.9.1` hazırlık & üretim sertleştirme (`v1.9.0` → `v1.9.1`)
 
@@ -12,9 +12,9 @@
 
 | Alan | Durum | Kanıt |
 | --- | --- | --- |
-| Masaüstü uygulaması | Çalışıyor, kararlı | 720 unittest PASS (`skipped=1`) |
-| Web backend (FastAPI) | Çalışıyor | 227 pytest PASS (Alembic `0003`), 87 OpenAPI path / 101 operation, 48 dosyada `mypy` temiz |
-| Web frontend (React 19) | Çalışıyor | `npm run lint` (0 hata, `jsx-a11y`), `npm test` (52 Vitest / 15 dosya), `npm run typecheck` + `npm run build` + `check:bundle` PASS (`146,9 kB` gzip ilk yükleme JS), `verify-tabs.mjs` 12/12 PASS |
+| Masaüstü uygulaması | Çalışıyor, kararlı | 723 unittest PASS (`skipped=1`) |
+| Web backend (FastAPI) | Çalışıyor | 230 pytest PASS (Alembic `0003`), 87 OpenAPI path / 101 operation, 48 dosyada `mypy` temiz |
+| Web frontend (React 19) | Çalışıyor | `npm run lint` (0 hata, `jsx-a11y`), `npm test` (56 Vitest / 16 dosya), `npm run typecheck` + `npm run build` + `check:bundle` PASS (`147,3 kB` gzip ilk yükleme JS), `verify-tabs.mjs` 12/12 PASS |
 | Program İkon & Marka Sistemi | Hazır | Boru kesiti + su dalgası + manometre ikonu (`tools/generate_icons.py`, `assets/icons/*`, `webapp/frontend/public/*`, `<HydroLogo />`, PyInstaller/Inno Setup/Tkinter) |
 | Web Güncelleme Yöneticisi | Çalışıyor | `/api/update/*`, SHA-256 + fail-closed Ed25519 `.sig` doğrulama, `UpdateManagerModal`, macOS `.dmg` / Win `.exe`/`.zip` kurulum |
 | BOTAŞ Test Bölümü Formları | Çalışıyor | Seçenek 1 sol menü (`015`..`023`, `KUR-001`, `KUR-002` + 5 ek), `SectionFormPage`, `rows`/`pig_runs`/`findings`, tekil OCR, `020`/`022` gömülü hesaplama ve `023` (`BOT-FRM-CDB-001-024`) Şartname 16–17 çift yönlü entegrasyonu |
@@ -27,7 +27,7 @@
 | OCR rapor kontrolü | Çalışıyor (Vision + Excel) | `ocrmac`, `.xlsx`/`.xls`, `commit-dossier` proje/bölüm kaydı, tekil onay/uygulama |
 | Docker / dağıtım | Hazır | `webapp/Dockerfile`, `docker-compose.yml`, `.github/workflows/release.yml` |
 
-**Durum:** MVP, performans/güvenlik ön sertleştirmesi, Alembic şema göçü (`0003`), 3D gerçek kot profili/saha ekipmanı (`profile_points[]`/`equipment[]`), Şartname 10.1 `+2 °C` / negatif `B`/`beta_water` / `water_backend` karşılaştırma + rapor kimliği iyileştirmeleri, masaüstü JSON snapshot içe aktarma UI'sı + `409 revision_conflict` fark çözümleme modalı ve Şartname Bölüm 12 & 15 zaman serili termal dengeleme / 24 saatlik test kayıt modeli + Form `018`/`021` çift yönlü senkronizasyonu + Web UI (`TimeSeriesPanel`, `TimeSeriesChart`) tamam. Kalan işler kurumsal Auth/OIDC/RBAC kararı, `psycopg` Postgres runtime testi ve kurum onayı bekleyen veri/saha formu işleridir.
+**Durum:** MVP, performans/güvenlik ön sertleştirmesi, Alembic şema göçü (`0003`), 3D gerçek kot profili/saha ekipmanı (`profile_points[]`/`equipment[]`), Şartname 10.1 `+2 °C` / negatif `B`/`beta_water` / `water_backend` karşılaştırma + rapor kimliği iyileştirmeleri, masaüstü JSON snapshot içe aktarma UI'sı + `409 revision_conflict` fark çözümleme modalı, Şartname Bölüm 12 & 15 zaman serili termal dengeleme / 24 saatlik test kayıt modeli (`TimeSeriesPanel`, `TimeSeriesChart`, Form `018`/`021`) ve segment bazlı SMYS/malzeme kalitesi desteği (`PipeSection.smys_mpa`/`material_grade`) tamam. Kalan işler kurumsal Auth/OIDC/RBAC kararı, `psycopg` Postgres runtime testi ve kurum onayı bekleyen veri/saha formu işleridir.
 
 ---
 
@@ -149,7 +149,7 @@ Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen iş
 - [x] Masaüstü JSON içe aktarma: `POST /api/import/desktop-snapshot` (`project_id` bağlama, `ProjectImportModal` sekmesi ve `ReportsPage` tek tıkla yeni kesit oluşturma, mapping özet bildirimi).
 - [x] Eşzamanlı düzenleme: `revision` + `If-Match`, çakışmada `409` + diff (`PUT /sessions/{id}`, `POST /snapshot`, `POST /results` üzerinde `details.current` + `details.diff` ve satır bazlı Sunucu/Yerel birleştirme modalı `RevisionConflictModal`).
 - [x] Taranmış (metin katmanı olmayan) PDF için rasterizer (`pypdfium2` Apache-2.0/BSD-3-Clause + macOS `Quartz` + Windows taşınabilir Tesseract).
-- [ ] Segment bazlı SMYS/kalite (şu an tek kalite tüm hat için).
+- [x] Segment bazlı SMYS/kalite (`PipeSection.smys_mpa`, `material_grade`, segment bazlı `%100 SMYS` limit hesabı, Web UI segment tablosu, 3D kullanım renklendirmesi, snapshot/diff/rapor uyumu).
 
 ---
 
@@ -166,7 +166,7 @@ Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen iş
 
 ---
 
-## 6. Doğrulama (son çalıştırma: 2026-11-20)
+## 6. Doğrulama (son çalıştırma: 2026-11-21)
 
 ```bash
 # Lint & tip denetimi
@@ -175,16 +175,16 @@ python3 -m mypy hidrostatik_test/domain/                       # Success: no iss
 python3 -m mypy --ignore-missing-imports webapp/backend/app    # Success: no issues found (48 files)
 
 # Web backend (Alembic + API + domain parity)
-python3 -m pytest webapp/backend/tests -q                      # 227 passed
+python3 -m pytest webapp/backend/tests -q                      # 230 passed
 
 # Masaüstü
-python3 -m unittest discover -s tests -p "test_*.py"           # 720 tests OK (skipped=1)
+python3 -m unittest discover -s tests -p "test_*.py"           # 723 tests OK (skipped=1)
 
 # Masaüstü paketli Web self-test
 python3 webapp/desktop_launcher.py --self-test                 # SELF_TEST_OK
 
 # Frontend derleme, lint & test
-cd webapp/frontend && npm run lint && npm test && npm run typecheck && npm run build && npm run check:bundle  # PASS (52 Vitest, 146,9 kB gzip)
+cd webapp/frontend && npm run lint && npm test && npm run typecheck && npm run build && npm run check:bundle  # PASS (56 Vitest, 147,3 kB gzip)
 
 # Sekme + BOTAŞ Form Ağacı & 020/022/023 Gömülü Hesaplama & Güncelleme Yöneticisi smoke (port 8099, izole DB)
 cd webapp/frontend && HYDRO_APP_URL=http://127.0.0.1:8099 \

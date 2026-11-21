@@ -1225,3 +1225,58 @@ def test_project_scene_mixed_sections_duplicate_eq_ids_and_recommit_preserve(cli
     s1_after = client.get(f"/api/sessions/{s1['id']}", headers=headers).json()
     assert len(s1_after["inputs"]["equipment"]) == 1
     assert s1_after["inputs"]["equipment"][0]["label"] == "S1 Vana"
+
+
+def test_project_scene_respects_per_segment_smys(client, headers):
+    proj = client.post(
+        "/api/projects", json={"name": "Karma Kalite Koridor"}, headers=headers
+    ).json()
+    sess = client.post(
+        "/api/sessions",
+        json={
+            "name": "K-01",
+            "project_id": proj["id"],
+            "inputs": {
+                "section_meta": {"section_no": "K-01", "start_kp": "0+000", "end_kp": "1+000"},
+                "section_profile": {
+                    "smys_mpa": 450.0,
+                    "highest_elevation_m": 100.0,
+                    "lowest_elevation_m": 100.0,
+                    "start_elevation_m": 100.0,
+                    "end_elevation_m": 100.0,
+                },
+                "field": {"monitored_pressure_bar": 135.0},
+                "segments": [
+                    {
+                        "outside_diameter_mm": 406.4,
+                        "wall_thickness_mm": 8.74,
+                        "length_m": 500.0,
+                        "smys_mpa": 450.0,
+                        "material_grade": "API 5L X65",
+                    },
+                    {
+                        "outside_diameter_mm": 406.4,
+                        "wall_thickness_mm": 8.74,
+                        "length_m": 500.0,
+                        "smys_mpa": 290.0,
+                        "material_grade": "API 5L X42",
+                    },
+                ],
+                "profile_points": [
+                    {"station_m": 0.0, "elevation_m": 100.0},
+                    {"station_m": 1000.0, "elevation_m": 100.0},
+                ],
+            },
+        },
+        headers=headers,
+    )
+    assert sess.status_code == 201, sess.text
+    scene = client.get(f"/api/projects/{proj['id']}/scene", headers=headers).json()
+    assert len(scene["segments"]) >= 2
+    first_half = next(s for s in scene["segments"] if s["end_m"] <= 500.5)
+    second_half = next(s for s in scene["segments"] if s["start_m"] >= 499.5)
+    assert first_half["smys_mpa"] == 450.0
+    assert second_half["smys_mpa"] == 290.0
+    assert second_half["grade"] == "API 5L X42"
+    assert second_half["utilization"] > 0.9
+    assert first_half["utilization"] < 0.75

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final
 
-from .hydrotest_core import PipeModel, PipeSection, ValidationError
+from .hydrotest_core import PipeModel, PipeSection, ValidationError, _require_finite
 from .water_properties import WATER_DENSITY_DEFAULT_KG_PER_M3, calculate_water_density
 
 GRAVITY_M_PER_S2: Final[float] = 9.80665
@@ -48,10 +48,16 @@ class SectionPressureProfileInputs:
     monitored_pressure_bar: float | None = None
 
     def __post_init__(self) -> None:
+        _require_finite(self.design_pressure_bar, "Dizayn basinci")
+        _require_finite(self.smys_mpa, "SMYS")
         if self.design_pressure_bar <= 0:
             raise ValidationError("Dizayn basinci sifirdan buyuk olmalidir.")
         if self.smys_mpa <= 0:
             raise ValidationError("SMYS sifirdan buyuk olmalidir.")
+        _require_finite(self.highest_elevation_m, "En yuksek nokta kotu")
+        _require_finite(self.lowest_elevation_m, "En dusuk nokta kotu")
+        _require_finite(self.start_elevation_m, "Baslangic kotu")
+        _require_finite(self.end_elevation_m, "Bitis kotu")
         if self.highest_elevation_m < self.lowest_elevation_m:
             raise ValidationError("En yuksek nokta kotu, en dusuk nokta kotundan kucuk olamaz.")
         for label, elevation in (
@@ -64,8 +70,10 @@ class SectionPressureProfileInputs:
             raise ValidationError(
                 "Pompa konumu kullanici tarafindan baslangic veya bitis noktasi olarak secilmelidir."
             )
-        if self.monitored_pressure_bar is not None and self.monitored_pressure_bar < 0:
-            raise ValidationError("Izlenen basinc negatif olamaz.")
+        if self.monitored_pressure_bar is not None:
+            _require_finite(self.monitored_pressure_bar, "Izlenen basinc")
+            if self.monitored_pressure_bar < 0:
+                raise ValidationError("Izlenen basinc negatif olamaz.")
 
 
 @dataclass(frozen=True)
@@ -89,6 +97,8 @@ class SectionPressureProfileResult:
     monitored_pressure_bar: float | None
     monitored_meets_minimum: bool | None
     monitored_under_maximum: bool | None
+    limiting_segment_index: int | None = None
+    limiting_smys_mpa: float | None = None
 
 
 LOCATION_CLASS_RULES: tuple[LocationClassRule, ...] = (
@@ -148,7 +158,12 @@ def evaluate_section_pressure_profile(
     required_pressure_with_span_bar = (
         required_minimum_pressure_at_high_point_bar + hydraulic_span_bar
     )
-    limiting_pressure_at_100_smys_bar, limiting_pipe_description = _pressure_at_100_smys_bar(
+    (
+        limiting_pressure_at_100_smys_bar,
+        limiting_pipe_description,
+        limiting_segment_index,
+        limiting_smys_mpa,
+    ) = _pressure_at_100_smys_bar(
         pipe=inputs.pipe,
         smys_mpa=inputs.smys_mpa,
     )
@@ -212,6 +227,8 @@ def evaluate_section_pressure_profile(
         monitored_pressure_bar=inputs.monitored_pressure_bar,
         monitored_meets_minimum=monitored_meets_minimum,
         monitored_under_maximum=monitored_under_maximum,
+        limiting_segment_index=limiting_segment_index,
+        limiting_smys_mpa=limiting_smys_mpa,
     )
 
 
@@ -248,13 +265,22 @@ def _hydraulic_head_bar(delta_h_m: float, temp_c: float = 15.0) -> float:
     return density_kg_per_m3 * delta_h_m * GRAVITY_M_PER_S2 / PRESSURE_CONVERSION_PASCAL_TO_BAR
 
 
-def _pressure_at_100_smys_bar(pipe: PipeModel, smys_mpa: float) -> tuple[float, str]:
+def _effective_section_smys_mpa(section: PipeSection, fallback_smys_mpa: float) -> float:
+    return section.smys_mpa if section.smys_mpa is not None else fallback_smys_mpa
+
+
+def _pressure_at_100_smys_bar(
+    pipe: PipeModel, smys_mpa: float
+) -> tuple[float, str, int | None, float]:
     if isinstance(pipe, PipeSection):
+        eff_smys = _effective_section_smys_mpa(pipe, smys_mpa)
         pressure_bar = _pipe_section_pressure_at_100_smys_bar(pipe, smys_mpa)
+        grade_part = f" | {pipe.material_grade}" if pipe.material_grade else ""
         description = (
-            f"Tek kesit | OD={pipe.outside_diameter_mm:.2f} mm | Et={pipe.wall_thickness_mm:.2f} mm"
+            f"Tek kesit | OD={pipe.outside_diameter_mm:.2f} mm | "
+            f"Et={pipe.wall_thickness_mm:.2f} mm | SMYS={eff_smys:.1f} MPa{grade_part}"
         )
-        return pressure_bar, description
+        return pressure_bar, description, 1, eff_smys
 
     limiting_index = -1
     limiting_pressure = float("inf")
@@ -266,11 +292,13 @@ def _pressure_at_100_smys_bar(pipe: PipeModel, smys_mpa: float) -> tuple[float, 
     if limiting_index < 0:
         raise ValidationError("Segmentli geometri icin 100% SMYS limiti hesaplanamadi.")
     limiting_section = pipe.sections[limiting_index - 1]
+    eff_smys = _effective_section_smys_mpa(limiting_section, smys_mpa)
+    grade_part = f" | {limiting_section.material_grade}" if limiting_section.material_grade else ""
     description = (
         f"Limit segment {limiting_index} | OD={limiting_section.outside_diameter_mm:.2f} mm | "
-        f"Et={limiting_section.wall_thickness_mm:.2f} mm"
+        f"Et={limiting_section.wall_thickness_mm:.2f} mm | SMYS={eff_smys:.1f} MPa{grade_part}"
     )
-    return limiting_pressure, description
+    return limiting_pressure, description, limiting_index, eff_smys
 
 
 def _pipe_model_total_length_m(pipe: PipeModel) -> float:
@@ -280,7 +308,7 @@ def _pipe_model_total_length_m(pipe: PipeModel) -> float:
 
 
 def _pipe_section_pressure_at_100_smys_bar(section: PipeSection, smys_mpa: float) -> float:
-    return 20.0 * smys_mpa * section.wall_thickness_mm / section.outside_diameter_mm
+    return section.pressure_at_100_smys_bar(smys_mpa)
 
 
 __all__ = [

@@ -109,6 +109,8 @@ def _segments_payload(segments: Any) -> list[dict[str, str]]:
     for item in segments:
         if not isinstance(item, dict):
             continue
+        raw_smys = item.get("smys_mpa")
+        smys_val = None if isinstance(raw_smys, bool) else as_float(raw_smys)
         rows.append(
             {
                 "outside_diameter_mm": fmt_number(as_float(item.get("outside_diameter_mm"))),
@@ -116,6 +118,8 @@ def _segments_payload(segments: Any) -> list[dict[str, str]]:
                 "length_m": fmt_number(as_float(item.get("length_m"))),
                 "nps_label": str(item.get("nps_label") or "-"),
                 "schedule_label": str(item.get("schedule_label") or "Elle giris"),
+                "material_grade": str(item.get("material_grade") or ""),
+                "smys_mpa": fmt_number(smys_val, 3),
             }
         )
     return rows
@@ -462,6 +466,28 @@ def apply_snapshot(
             if len(parsed_dims) < 3:
                 continue
             state.converted += 3
+            raw_seg_smys = item.get("smys_mpa")
+            seg_smys: float | None = None
+            if raw_seg_smys is not None and not (
+                isinstance(raw_seg_smys, str) and not raw_seg_smys.strip()
+            ):
+                if isinstance(raw_seg_smys, bool):
+                    state.invalid_fields.append(f"geometry_segments[{index}].smys_mpa")
+                else:
+                    parsed_seg_smys = as_float(raw_seg_smys)
+                    if (
+                        parsed_seg_smys is None
+                        or not math.isfinite(parsed_seg_smys)
+                        or parsed_seg_smys <= 0
+                    ):
+                        state.invalid_fields.append(f"geometry_segments[{index}].smys_mpa")
+                    else:
+                        seg_smys = parsed_seg_smys
+                        state.converted += 1
+            seg_grade = (
+                state.text(item.get("material_grade"), f"geometry_segments[{index}].material_grade")
+                or ""
+            )
             segments.append(
                 {
                     "outside_diameter_mm": parsed_dims["outside_diameter_mm"],
@@ -469,6 +495,8 @@ def apply_snapshot(
                     "length_m": parsed_dims["length_m"],
                     "nps_label": str(item.get("nps_label") or "-"),
                     "schedule_label": str(item.get("schedule_label") or "Elle giris"),
+                    "material_grade": seg_grade,
+                    "smys_mpa": seg_smys,
                 }
             )
         patch["segments"] = segments

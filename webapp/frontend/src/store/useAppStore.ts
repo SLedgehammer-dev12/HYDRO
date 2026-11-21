@@ -244,6 +244,8 @@ export const useAppStore = create<AppStore>()(
             wall_thickness_mm: state.inputs.geometry.wall_thickness_mm ?? 8.74,
             length_m: 1_000,
             start_station_m: nextStation,
+            material_grade: "",
+            smys_mpa: null,
           };
           return {
             inputs: { ...state.inputs, segments: [...state.inputs.segments, segment] },

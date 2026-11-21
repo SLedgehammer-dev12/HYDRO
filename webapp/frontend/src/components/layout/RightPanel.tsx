@@ -36,7 +36,12 @@ export function RightPanel() {
     missing.push("Basınç: ΔT girilmedi.");
   if (isMissingNumber(inputs.pressure.actual_pressure_change_bar))
     missing.push("Basınç: Pa girilmedi.");
-  if (isMissingNumber(inputs.section_profile.smys_mpa))
+  const hasAllSegmentSmys =
+    inputs.segments.length > 0 &&
+    inputs.segments.every(
+      (s) => typeof s.smys_mpa === "number" && Number.isFinite(s.smys_mpa) && s.smys_mpa > 0,
+    );
+  if (isMissingNumber(inputs.section_profile.smys_mpa) && !hasAllSegmentSmys)
     missing.push("Profil: malzeme kalitesi / SMYS seçilmedi.");
 
   const formProgressTone = formsSummary?.failed_forms?.length
