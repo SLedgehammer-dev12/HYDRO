@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.10.1 - 2026-11-23
+
+### Fixed
+
+- **Güncelleyici TLS Sertifika Doğrulama Düzeltmesi (`hidrostatik_test/services/tls.py`, `updater.py`, `download_manager.py`, `requirements.txt`, `HydroWeb.spec`, `HidrostatikTest.spec`)**:
+  - Tüm güncelleme paketi, `.sha256.txt` ve Ed25519 `.sig` indirmelerinde Python `urlopen` çağrıları `truststore` (macOS Keychain, Windows Certificate Store / Schannel) ve `certifi` destekli sıkı `ssl.SSLContext` (`CERT_REQUIRED`) kullanacak şekilde güncellendi; paketli macOS ve kurumsal Windows ortamlarındaki `CERTIFICATE_VERIFY_FAILED` hatası giderildi.
+  - Kurumsal Windows ağlarında Python TLS katmanının reddedildiği durumlar için `DownloadManager.download_file`, `_download_checksum` ve `_download_signature` akışlarına Windows PowerShell TLS fallback desteği eklendi.
+
 ## 1.10.0 - 2026-11-23
 
 ### Added

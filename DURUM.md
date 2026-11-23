@@ -3,8 +3,8 @@
 > Tek kaynak özet. Ayrıntı için "Ayrıntılı notlar" bölümündeki dosyalara bakın.
 >
 > **Son güncelleme:** 2026-11-23
-> **Dal:** `main` (`v1.10.0` — Web Denetim Raporu v3 `F1`–`F17` Sertleştirme, Sözleşme & Kapsam Kapıları)
-> **Son commit:** `hidrostatik-test-v1.10.0` sürüm yükseltmesi ve Web v3 remediasyonu (`F1`–`F17`)
+> **Dal:** `main` (`v1.10.1` — Güncelleyici TLS Sertifika Düzeltmesi & Web Denetim Raporu v3 Sertleştirmesi)
+> **Son commit:** `hidrostatik-test-v1.10.1` güncelleyici TLS (`truststore`/`certifi`) düzeltmesi ve sürüm yükseltmesi
 
 ---
 
@@ -18,7 +18,7 @@
 | Program İkon & Marka Sistemi | Hazır | Boru kesiti + su dalgası + manometre ikonu (`tools/generate_icons.py`, `assets/icons/*`, `webapp/frontend/public/*`, `<HydroLogo />`, PyInstaller/Inno Setup/Tkinter) |
 | Web Güncelleme Yöneticisi | Çalışıyor | `/api/update/*`, SHA-256 + fail-closed Ed25519 `.sig` doğrulama, `UpdateManagerModal`, macOS `.dmg` / Win `.exe`/`.zip` kurulum |
 | BOTAŞ Test Bölümü Formları | Çalışıyor | Seçenek 1 sol menü (`015`..`023`, `KUR-001`, `KUR-002` + 5 ek), `SectionFormPage`, `rows`/`pig_runs`/`findings`, tekil OCR, `020`/`022` gömülü hesaplama ve `023` (`BOT-FRM-CDB-001-024`) Şartname 16–17 çift yönlü entegrasyonu |
-| Bağımsız Web paketleme | Hazır (`v1.10.0`) | `HydroWeb.spec`, `build_web_dmg.sh` (`arm64`, taranmış PDF `--self-test` PASS), `build_web_exe.ps1` (WinRT `Windows.Media.Ocr` + `Windows.Data.Pdf`) + `installer/hydro_web.iss` |
+| Bağımsız Web paketleme | Hazır (`v1.10.1`) | `HydroWeb.spec`, `build_web_dmg.sh` (`arm64`, taranmış PDF `--self-test` PASS), `build_web_exe.ps1` (WinRT `Windows.Media.Ocr` + `Windows.Data.Pdf`) + `installer/hydro_web.iss` |
 | Kurumsal Windows OCR/PDF | Çalışıyor | Süreç-içi `Windows.Media.Ocr` + `Windows.Data.Pdf`, Proxy-bypass `127.0.0.1` + `instance_id` doğrulama, SQLite `WAL → DELETE` fallback |
 | Domain parity | Masaüstü ile aynı kaynak | `hidrostatik_test.domain` doğrudan import edilir |
 | Proje / Test Bölümü (Section) DB | Çalışıyor | `projects` + `sessions.project_id` + `inputs.section_meta` |
@@ -83,7 +83,7 @@
   - `#/forms/{form_code}` rotasında (`SectionFormPage.tsx` + `FormBodyEditor.tsx`) resmî `BOT-FRM` başlık/imza/tablo düzeni, satır içi düzenleme (`PUT /api/sessions/{id}/forms/{code}`), tekil form OCR tarama (`POST /api/sessions/{id}/forms/{code}/scan`), `form_details.py` ile yapılandırılmış `rows`/`pig_runs`/`drying`/`findings` kalıcılığı ve `4-NGTL 0-GN-P-002-5007 R4` şartname bulguları.
   - `020` (`air_acceptance`), `022` (`pressure_acceptance`) ve `023` (`dewatering` / `BOT-FRM-CDB-001-024`) formlarında isteğe bağlı açılıp kapanan **"Detay Hesaplamaları Göster"** bandı ile mevcut `<AirPage embedded />`, `<PressurePage embedded />` ve Şartname 16–17 `<OperationsPanel />` modülleri satır içi gösterilir; `023` formundaki Şartname 16–17 verileri ile oturum sonuçları çift yönlü senkronize edilir (`#/air` ve `#/pressure` doğrudan rotaları korunur).
   - `Projeler & Kesitler` sayfasında her kesit için genişletilmiş form bulgu özetleri (`findings_counts`, ilk bulgulu forma tek tıkla geçiş, `key_metrics`).
-- Bağımsız masaüstü Web dağıtımı (`v1.10.0`): `webapp/desktop_launcher.py` (yerel FastAPI + statik React + durum/durdurma penceresi + `--self-test`), `HydroWeb.spec`, macOS M1+ `arm64` `.dmg` (`build_web_dmg.sh`), Windows x64 Inno Setup kurulum `.exe` + taşınabilir `.zip` (`installer/hydro_web.iss`, `build_web_exe.ps1`).
+- Bağımsız masaüstü Web dağıtımı (`v1.10.1`): `webapp/desktop_launcher.py` (yerel FastAPI + statik React + durum/durdurma penceresi + `--self-test`), `HydroWeb.spec`, macOS M1+ `arm64` `.dmg` (`build_web_dmg.sh`), Windows x64 Inno Setup kurulum `.exe` + taşınabilir `.zip` (`installer/hydro_web.iss`, `build_web_exe.ps1`).
 - **Domain İkon Sistemi & Faz 1–5 Web Arayüzü İyileştirmeleri (`tasks/web_ui_plan.md`)**:
   - Konuya özgü Boru Kesiti + Hidrostatik Su + Manometre ikon seti (`tools/generate_icons.py`, `assets/icons/*`, `webapp/frontend/public/*`, `site.webmanifest`, `<HydroLogo />` + `Sidebar`/`TopBar`/`UpdateManagerModal`, `HydroWeb.spec`/`HidrostatikTest.spec`/`installer/hydro_web.iss`/`webapp/desktop_launcher.py`/`hidrostatik_test/ui/app.py`).
   - Modern Web & Erişilebilirlik: yerel `<dialog>` + `.showModal()` + `closedby="any"` + Safari pointer-coordinate light-dismiss fallback (`Dialog.tsx`, mobil `Sidebar.tsx` çekmecesi), `:root`/`[data-theme="dark"]` `color-scheme` + `accent-color` ve ilk boyama öncesi tema betiği (`index.html`, `styles.css`), `eslint-plugin-jsx-a11y` kapısı (tıklanabilir kart/tablo satırlarının native `<button>` dönüşümü, klavye `ArrowLeft/Right/Home/End` destekli WAI-ARIA `tablist`/`tabpanel`, kararlı liste anahtarları), **21 Vitest + Testing Library** birim/bileşen testi ve CI bağlantısı (`.github/workflows/lint.yml`).
@@ -238,7 +238,7 @@ docker compose -f webapp/docker-compose.yml up --build
 | `webapp/docs/architecture.md` | Web mimarisi |
 | `webapp/docs/ux_plan.md` | UX planı + açık UX kararları |
 | `webapp/docs/decisions.md` | Web karar kaydı |
-| `WHATS_NEW.md` | Sürüm bazlı yenilik özeti (`v1.10.0`) |
+| `WHATS_NEW.md` | Sürüm bazlı yenilik özeti (`v1.10.1`) |
 | `CHANGELOG.md` | Sürüm bazlı yapılanlar |
 
 ---
