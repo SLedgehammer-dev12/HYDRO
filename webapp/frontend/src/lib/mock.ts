@@ -71,7 +71,7 @@ export const DEMO_NOW = "2026-11-15T19:42:11Z";
 /* ------------------------------------------------------------------ */
 
 export const DEMO_META: MetaResponse = {
-  app: { name: "Hidrostatik Test Değerlendirme", version: "1.10.1" },
+  app: { name: "Hidrostatik Test Değerlendirme", version: "2.0.0" },
   spec: {
     code: "4-NGTL 0-GN-P-002-5007 R4",
     title: "Hidrostatik Test ve İçten Denetleme Şartnamesi",

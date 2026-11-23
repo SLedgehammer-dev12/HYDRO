@@ -1,7 +1,7 @@
 # HYDRO Web - Uygulama Durumu
 
 Tarih: 2026-11-23
-Dal: `main` (`v1.10.1`)
+Dal: `main` (`v2.0.0`)
 
 > Tek sayfalık güncel özet ve yapılacaklar listesi: [`../../DURUM.md`](../../DURUM.md)
 
@@ -25,7 +25,7 @@ Dal: `main` (`v1.10.1`)
 ```bash
 python3 -m coverage run --source=webapp/backend/app -m pytest webapp/backend/tests -q  # 251 passed (%83 kapsam)
 python3 -m unittest discover -s tests -p "test_*.py"  # 723 tests OK (skipped=1)
-cd webapp/frontend && npm run check:api && npm run lint && npm test && npm run typecheck && npm run build && npm run check:bundle  # PASS (61 Vitest / 20 dosya, 148,1 kB gzip)
+cd webapp/frontend && npm run check:api && npm run lint && npm test && npm run typecheck && npm run build && npm run check:bundle  # PASS (63 Vitest / 21 dosya, 150,1 kB gzip)
 cd webapp/frontend && HYDRO_APP_URL=http://127.0.0.1:8099 node scripts/verify-tabs.mjs  # 12/12 PASS (önceki canlı kontrol)
 ```
 

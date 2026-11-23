@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.0 - 2026-11-23
+
+### Added
+
+- **Sadeleştirilmiş 3 Fazlı Arayüz & Kullanıcı Onaylı Rehberli Demo Turu (`App.tsx`, `Sidebar.tsx`, `DashboardPage.tsx`, `OnboardingWelcomeCard.tsx`, `GuidedTourOverlay.tsx`, `HelpDialog.tsx`)**:
+  - Gezinme menüsü mühendislik akışına göre **Başlangıç**, **Denetim & Hesap** ve **Çıktı & Araçlar** olarak 3 faza düzenlendi; gelişmiş araçlar (`Katsayılar`, `Ayarlar`) katlanabilir `<details>` alanına taşındı.
+  - Üst karar şeridi (`DecisionStrip`) yalnız hesap/form sekmelerinde gösterilerek çift sabit çubuk yığılması kaldırıldı, sağ özet paneli varsayılan kapalıya çekildi ve `Dashboard` üzerinde **4 adımlı canlı ilerleme çubuğu** eklendi.
+  - İlk açılışta ekranı kilitlemeyen **İlk Kullanım Rehberi** (`Rehberli Demo Turunu Başlat`, `Kendi Projemle Başla`, `Şimdi değil`) ile `POST /api/projects/generate-sample` üzerinden örnek proje oluşturan 5 adımlı yerel `popover="manual"` + CSS Anchor Positioning destekli etkileşimli demo turu eklendi (`?` Yardım içinden istenildiği zaman yeniden başlatılabilir).
+
 ## 1.10.1 - 2026-11-23
 
 ### Fixed

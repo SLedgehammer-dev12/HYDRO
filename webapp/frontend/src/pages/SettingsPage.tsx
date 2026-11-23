@@ -368,14 +368,14 @@ export function SettingsPage() {
           <Badge tone={updateStatus?.update_available ? "pass" : "info"}>
             {updateStatus?.update_available && updateStatus.latest_version
               ? `Yeni sürüm v${updateStatus.latest_version}`
-              : `v${updateStatus?.current_version ?? meta?.app.version ?? "1.10.1"}`}
+              : `v${updateStatus?.current_version ?? meta?.app.version ?? "2.0.0"}`}
           </Badge>
         }
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="space-y-1 text-xs text-[var(--text-soft)]">
             <p>
-              Yüklü sürüm: <strong className="font-mono text-[var(--text)]">v{updateStatus?.current_version ?? meta?.app.version ?? "1.10.1"}</strong>
+              Yüklü sürüm: <strong className="font-mono text-[var(--text)]">v{updateStatus?.current_version ?? meta?.app.version ?? "2.0.0"}</strong>
               {updateStatus?.latest_version ? (
                 <>
                   {" · "}Son sürüm: <strong className="font-mono text-[var(--text)]">v{updateStatus.latest_version}</strong>
