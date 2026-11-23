@@ -338,6 +338,7 @@ def delete_project(
         )
         for form in forms:
             db.delete(form)
+        db.flush()
         for session in sessions:
             db.delete(session)
         db.flush()

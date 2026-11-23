@@ -109,6 +109,7 @@ class HydroSession(Base):
 
 class TestResult(Base):
     __tablename__ = "test_results"
+    __test__ = False
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
     session_id: Mapped[str] = mapped_column(
