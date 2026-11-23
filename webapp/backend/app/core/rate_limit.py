@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import threading
 import time
 from collections import deque
@@ -69,7 +70,13 @@ def enforce_rate_limit(
     if not settings.rate_limit_enabled:
         return
     client_host = (request.client.host if request.client else "").strip() or "unknown"
-    RATE_LIMITER.check(bucket, client_host, limit=limit, window_s=window_s)
+    raw_ws = (request.headers.get("X-Session-ID") or "").strip()
+    if raw_ws:
+        ws_tag = hashlib.sha256(raw_ws[:256].encode("utf-8", errors="ignore")).hexdigest()[:12]
+        client_key = f"{client_host}:{ws_tag}"
+    else:
+        client_key = client_host
+    RATE_LIMITER.check(bucket, client_key, limit=limit, window_s=window_s)
 
 
 __all__ = ["RATE_LIMITER", "RateLimiter", "enforce_rate_limit"]

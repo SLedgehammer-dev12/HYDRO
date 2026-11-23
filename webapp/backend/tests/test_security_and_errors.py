@@ -515,3 +515,178 @@ def test_update_status_redacts_job_verified_path(client, monkeypatch):
     res = client.get("/api/update/status")
     assert res.status_code == 200
     assert res.json()["job"]["verified_path"] == ""
+
+
+def test_slice1_form_optimistic_concurrency_and_etag(client, headers):
+    sess = client.post("/api/sessions", json={"name": "F1 Concurrency"}, headers=headers).json()
+    sid = sess["id"]
+
+    # Initial GET returns ETag "0"
+    g0 = client.get(f"/api/sessions/{sid}/forms/cleaning", headers=headers)
+    assert g0.status_code == 200
+    assert g0.headers.get("etag") == '"0"'
+
+    # Matching If-Match "0" succeeds -> revision becomes 1, ETag "1"
+    u1 = client.put(
+        f"/api/sessions/{sid}/forms/cleaning",
+        headers={**headers, "If-Match": '"0"'},
+        json={"form_date": "2026-11-23", "extracted_data": {"notes": "rev1"}},
+    )
+    assert u1.status_code == 200, u1.text
+    assert u1.headers.get("etag") == '"1"'
+    assert u1.json()["form"]["revision"] == 1
+
+    # Stale If-Match "0" returns 409 revision_conflict with current form payload
+    stale_hdr = client.put(
+        f"/api/sessions/{sid}/forms/cleaning",
+        headers={**headers, "If-Match": '"0"'},
+        json={"form_date": "2026-11-23", "extracted_data": {"notes": "stale"}},
+    )
+    assert stale_hdr.status_code == 409
+    err = stale_hdr.json()
+    assert err["code"] == "revision_conflict"
+    assert err["details"]["expected_revision"] == 0
+    assert err["details"]["current_revision"] == 1
+    assert err["details"]["current"]["revision"] == 1
+
+    # Stale body revision (without If-Match header) also returns 409
+    stale_body = client.put(
+        f"/api/sessions/{sid}/forms/cleaning",
+        headers=headers,
+        json={"revision": 0, "extracted_data": {"notes": "stale-body"}},
+    )
+    assert stale_body.status_code == 409
+
+    # Matching revision 1 succeeds -> revision becomes 2
+    u2 = client.put(
+        f"/api/sessions/{sid}/forms/cleaning",
+        headers={**headers, "If-Match": '"1"'},
+        json={"form_date": "2026-11-23", "extracted_data": {"notes": "rev2"}},
+    )
+    assert u2.status_code == 200
+    assert u2.json()["form"]["revision"] == 2
+
+
+def test_slice1_strict_write_models_and_list_bounds():
+    import pydantic
+    import pytest
+    from app import schemas
+
+    # F15: extra="forbid" on write/analysis schemas rejects typo fields
+    with pytest.raises(pydantic.ValidationError):
+        schemas.SectionFormUpdateRequest.model_validate({"unknown_typo": 123})
+    with pytest.raises(pydantic.ValidationError):
+        schemas.CoefficientARequest.model_validate(
+            {"temperature_c": 15.0, "pressure_bar": 80.0, "extra_field": True}
+        )
+
+    # F6: realistic upper bounds on list inputs
+    with pytest.raises(pydantic.ValidationError):
+        schemas.GeometryIn.model_validate(
+            {
+                "sections": [
+                    {"outside_diameter_mm": 323.9, "wall_thickness_mm": 6.4, "length_m": 10.0}
+                ]
+                * 2001
+            }
+        )
+    with pytest.raises(pydantic.ValidationError):
+        schemas.PressurizationRampRequest.model_validate(
+            {
+                "readings": [
+                    {"elapsed_min": 1.0, "pressure_bar": 10.0, "cumulative_added_volume_m3": 0.1}
+                ]
+                * 5001,
+                "test_pressure_100_smys_bar": 100.0,
+                "total_filled_volume_m3": 500.0,
+            }
+        )
+    with pytest.raises(pydantic.ValidationError):
+        schemas.ThermalBalanceRequest.model_validate(
+            {"records": [{"pressure_bar": 80.0, "temperature_c": 15.0}] * 10001}
+        )
+
+
+def test_slice1_heavy_endpoint_rate_limits_and_workspace_isolation(tmp_path: Path):
+    from app.core.rate_limit import RATE_LIMITER
+
+    s = Settings(
+        host="127.0.0.1",
+        data_dir=tmp_path / "rl",
+        database_url=f"sqlite:///{tmp_path / 'rl' / 'hydro.db'}",
+        rate_limit_enabled=True,
+    )
+    app = create_app(s)
+    try:
+        with TestClient(app) as tc:
+            ws1 = {"X-Session-ID": "ws-alpha"}
+            ws2 = {"X-Session-ID": "ws-beta"}
+            sess1 = tc.post("/api/sessions", json={"name": "RL1"}, headers=ws1).json()
+            proj1 = tc.post("/api/projects", json={"name": "RLProj"}, headers=ws1).json()
+            bkp = tc.post("/api/system/db-backup", headers=ws1, json={"reason": "rl"}).json()
+
+            RATE_LIMITER.reset()
+            # Archive limit=15 -> 16th call for ws1 returns 429, while ws2 on same IP is NOT blocked
+            for _ in range(15):
+                assert (
+                    tc.get(f"/api/projects/{proj1['id']}/archive", headers=ws1).status_code == 200
+                )
+            r429 = tc.get(f"/api/projects/{proj1['id']}/archive", headers=ws1)
+            assert r429.status_code == 429
+            assert r429.json()["code"] == "rate_limited"
+
+            proj2 = tc.post("/api/projects", json={"name": "RLProj2"}, headers=ws2).json()
+            assert tc.get(f"/api/projects/{proj2['id']}/archive", headers=ws2).status_code == 200
+
+            # DB backup download limit=20 -> 21st call returns 429
+            RATE_LIMITER.reset()
+            for _ in range(20):
+                assert (
+                    tc.get(f"/api/system/db-backups/{bkp['filename']}", headers=ws1).status_code
+                    == 200
+                )
+            assert (
+                tc.get(f"/api/system/db-backups/{bkp['filename']}", headers=ws1).status_code == 429
+            )
+
+            # Session export limit=30 -> 31st call returns 429
+            RATE_LIMITER.reset()
+            for _ in range(30):
+                assert (
+                    tc.get(
+                        f"/api/sessions/{sess1['id']}/export?format=txt", headers=ws1
+                    ).status_code
+                    == 200
+                )
+            assert (
+                tc.get(f"/api/sessions/{sess1['id']}/export?format=txt", headers=ws1).status_code
+                == 429
+            )
+    finally:
+        db.dispose_database()
+
+
+def test_slice1_auth_mode_fails_closed_even_with_allow_remote_or_loopback(
+    tmp_path: Path, monkeypatch
+):
+    from app.core.config import validate_bind_security
+
+    err_remote = validate_bind_security(
+        Settings(host="0.0.0.0", data_dir=tmp_path, auth_mode="oidc", allow_remote=True)
+    )
+    assert err_remote is not None and "HYDRO_AUTH_MODE" in err_remote
+
+    err_loop = validate_bind_security(
+        Settings(host="127.0.0.1", data_dir=tmp_path, auth_mode="oidc", allow_remote=False)
+    )
+    assert err_loop is not None and "HYDRO_AUTH_MODE" in err_loop
+
+    repo_root = Path(__file__).resolve().parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from webapp import run_web
+
+    monkeypatch.setenv("HYDRO_AUTH_MODE", "oidc")
+    monkeypatch.setenv("HYDRO_ALLOW_REMOTE", "1")
+    code = run_web.main(["--host", "127.0.0.1", "--data-dir", str(tmp_path / "rw")])
+    assert code == 2

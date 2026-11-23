@@ -117,11 +117,14 @@ def get_session_forms(
 def get_single_session_form(
     session_id: str,
     form_code: str,
+    response: Response,
     db: OrmSession = Depends(get_db),
     workspace: Workspace = Depends(get_workspace),
 ) -> dict:
     session = session_service.get_session(db, session_id, workspace.hash)
-    return json_safe(dossier_service.get_single_session_form_payload(db, session, form_code))
+    payload = dossier_service.get_single_session_form_payload(db, session, form_code)
+    _etag(response, int(payload["form"].get("revision") or 0))
+    return json_safe(payload)
 
 
 @router.put("/{session_id}/forms/{form_code}")
@@ -129,21 +132,25 @@ def update_session_form(
     session_id: str,
     form_code: str,
     payload: schemas.SectionFormUpdateRequest,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
     db: OrmSession = Depends(get_db),
     workspace: Workspace = Depends(get_workspace),
 ) -> dict:
     session = session_service.get_session(db, session_id, workspace.hash)
-    return json_safe(
-        dossier_service.update_session_form(
-            db,
-            session,
-            workspace_hash=workspace.hash,
-            form_code=form_code,
-            form_date=payload.form_date,
-            extracted_data=payload.extracted_data,
-            overwrite_session_inputs=payload.overwrite_session_inputs,
-        )
+    expected = parse_if_match(if_match) if if_match is not None else payload.revision
+    result = dossier_service.update_session_form(
+        db,
+        session,
+        workspace_hash=workspace.hash,
+        form_code=form_code,
+        form_date=payload.form_date,
+        extracted_data=payload.extracted_data,
+        overwrite_session_inputs=payload.overwrite_session_inputs,
+        expected_revision=expected,
     )
+    _etag(response, int(result["form"].get("revision") or 0))
+    return json_safe(result)
 
 
 @router.post("/{session_id}/forms/{form_code}/scan")
@@ -416,10 +423,13 @@ def delete_time_series(
 
 @router.get("/{session_id}/scene")
 def scene(
+    request: Request,
     session_id: str,
     db: OrmSession = Depends(get_db),
     workspace: Workspace = Depends(get_workspace),
+    settings: Settings = Depends(get_settings),
 ) -> dict:
+    enforce_rate_limit(request, settings, bucket="session_scene", limit=60)
     session = session_service.get_session(db, session_id, workspace.hash)
     return json_safe(scene_service.build_scene(session.inputs or {}))
 
@@ -456,6 +466,7 @@ def audit_events(
 
 @router.get("/{session_id}/export")
 def export_session(
+    request: Request,
     session_id: str,
     fmt: str = Query(alias="format"),
     preview: bool = Query(default=False),
@@ -464,6 +475,7 @@ def export_session(
     workspace: Workspace = Depends(get_workspace),
     settings: Settings = Depends(get_settings),
 ):
+    enforce_rate_limit(request, settings, bucket="session_export", limit=30)
     _ = include_raw_ocr
     if fmt not in report_service.FORMAT_ALIASES:
         raise validation_error(f"Desteklenmeyen rapor formati: {fmt}", field="format")

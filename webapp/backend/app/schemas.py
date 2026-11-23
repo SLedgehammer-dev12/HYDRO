@@ -36,6 +36,10 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
 
 
+class StrictWriteModel(StrictModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
 class PipeSectionIn(StrictModel):
     outside_diameter_mm: float
     wall_thickness_mm: float
@@ -62,7 +66,7 @@ class PipeSectionIn(StrictModel):
 
 
 class GeometryIn(StrictModel):
-    sections: list[PipeSectionIn] = Field(default_factory=list)
+    sections: list[PipeSectionIn] = Field(default_factory=list, max_length=2000)
 
 
 # ---------------------------------------------------------------------------
@@ -70,13 +74,13 @@ class GeometryIn(StrictModel):
 # ---------------------------------------------------------------------------
 
 
-class CoefficientARequest(StrictModel):
+class CoefficientARequest(StrictWriteModel):
     temperature_c: float
     pressure_bar: float
     backend: str | None = None
 
 
-class CoefficientBRequest(StrictModel):
+class CoefficientBRequest(StrictWriteModel):
     source: B_SOURCE = "institutional"
     temperature_c: float
     pressure_bar: float
@@ -182,8 +186,8 @@ class PressurizationReadingIn(StrictModel):
     cumulative_added_volume_m3: float
 
 
-class PressurizationRampRequest(StrictModel):
-    readings: list[PressurizationReadingIn] = Field(default_factory=list)
+class PressurizationRampRequest(StrictWriteModel):
+    readings: list[PressurizationReadingIn] = Field(default_factory=list, max_length=5000)
     test_pressure_100_smys_bar: float
     total_filled_volume_m3: float
 
@@ -194,19 +198,19 @@ class PressureHoldReadingIn(StrictModel):
     temperature_c: float
 
 
-class PressureHoldRequest(StrictModel):
-    readings: list[PressureHoldReadingIn] = Field(default_factory=list)
+class PressureHoldRequest(StrictWriteModel):
+    readings: list[PressureHoldReadingIn] = Field(default_factory=list, max_length=5000)
     target_pressure_bar: float
 
 
-class DepressurizationRequest(StrictModel):
+class DepressurizationRequest(StrictWriteModel):
     test_passed: bool | None = None
     release_valve_diameter_in: float | None = None
     pipe_equipment_checked: bool | None = None
     environmental_impact_checked: bool | None = None
 
 
-class DischargeRequest(StrictModel):
+class DischargeRequest(StrictWriteModel):
     destination: str | None = None
     used_discharge_pig: bool | None = None
     hydraulic_load_measures_taken: bool | None = None
@@ -249,11 +253,11 @@ class ThermalBalanceRecordIn(_TimeSeriesRecordBase):
     pass
 
 
-class ThermalBalanceRequest(StrictModel):
-    records: list[ThermalBalanceRecordIn] = Field(default_factory=list)
+class ThermalBalanceRequest(StrictWriteModel):
+    records: list[ThermalBalanceRecordIn] = Field(default_factory=list, max_length=10000)
 
 
-class WaterDensityRequest(StrictModel):
+class WaterDensityRequest(StrictWriteModel):
     temperature_c: float = 15.0
     pressure_bar: float = 1.0
 
@@ -512,7 +516,7 @@ class OcrApplyRequest(StrictModel):
     overwrite: bool = False
 
 
-class OcrDossierCommitRequest(StrictModel):
+class OcrDossierCommitRequest(StrictWriteModel):
     target_project_id: str | None = None
     create_new_project: bool = False
     new_project_name: str | None = Field(default=None, max_length=200)
@@ -521,13 +525,14 @@ class OcrDossierCommitRequest(StrictModel):
     selected_sections: list[str] | None = None
 
 
-class SectionFormUpdateRequest(StrictModel):
+class SectionFormUpdateRequest(StrictWriteModel):
     form_date: str | None = Field(default=None, max_length=40)
     extracted_data: dict[str, Any] = Field(default_factory=dict)
     overwrite_session_inputs: bool = True
+    revision: int | None = None
 
 
-class MappingProfileCreate(StrictModel):
+class MappingProfileCreate(StrictWriteModel):
     name: str = Field(min_length=1, max_length=200)
     format_key: str = Field(min_length=1, max_length=120)
     schema_version: int = 1
@@ -536,7 +541,7 @@ class MappingProfileCreate(StrictModel):
     mapping: dict[str, Any] = Field(default_factory=dict)
 
 
-class MappingProfileUpdate(StrictModel):
+class MappingProfileUpdate(StrictWriteModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     format_key: str | None = Field(default=None, min_length=1, max_length=120)
     schema_version: int | None = None

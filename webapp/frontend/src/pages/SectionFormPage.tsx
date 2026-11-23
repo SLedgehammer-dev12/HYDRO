@@ -18,6 +18,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { BOTAS_FORM_BY_CODE, BOTAS_FORM_NAV_ITEMS } from "../lib/constants";
+import { ApiError } from "../lib/api";
 import { dateTime, num } from "../lib/format";
 import type { BotasFormCode, FormFinding, SectionFormRecord } from "../lib/types";
 import {
@@ -107,6 +108,10 @@ export function SectionFormPage() {
   const [dirty, setDirty] = useState(false);
   const [showDetailCalc, setShowDetailCalc] = useState(false);
   const [pendingNavCode, setPendingNavCode] = useState<BotasFormCode | null>(null);
+  const [conflictInfo, setConflictInfo] = useState<{
+    currentRevision: number;
+    serverForm: SectionFormRecord | null;
+  } | null>(null);
 
   const uploadInputId = useId();
   const appendUploadInputId = useId();
@@ -153,6 +158,7 @@ export function SectionFormPage() {
     setDraftDate(latestRecord?.form_date || "");
     setDraftData(ext);
     setDirty(false);
+    setConflictInfo(null);
     if (contextChanged) {
       setShowDetailCalc(false);
       setPendingNavCode(null);
@@ -233,15 +239,18 @@ export function SectionFormPage() {
     setDirty(true);
   }
 
-  function handleSave(onSaved?: () => void) {
+  function handleSave(onSaved?: () => void, overrideRevision?: number | null) {
     if (isDemoOrOffline) {
       pushToast("warning", "Sunucu veya aktif kesit yok", "Formu veritabanına kaydetmek için Projeler & Kesitler ekranından bir kesit seçin.");
       return;
     }
+    const targetRevision =
+      overrideRevision !== undefined ? overrideRevision : (formRecord?.revision ?? null);
     updateForm.mutate(
       {
         sessionId: sessionId!,
         formCode: spec.code,
+        ifMatch: targetRevision,
         payload: {
           form_date: draftDate,
           extracted_data: draftData,
@@ -251,10 +260,37 @@ export function SectionFormPage() {
       {
         onSuccess: () => {
           setDirty(false);
+          setConflictInfo(null);
           onSaved?.();
+        },
+        onError: (err) => {
+          if (err instanceof ApiError && err.status === 409 && err.code === "revision_conflict") {
+            const curRev =
+              typeof err.details.current_revision === "number"
+                ? err.details.current_revision
+                : (formRecord?.revision ?? 0) + 1;
+            const curForm =
+              err.details.current && typeof err.details.current === "object"
+                ? (err.details.current as unknown as SectionFormRecord)
+                : null;
+            setConflictInfo({ currentRevision: curRev, serverForm: curForm });
+          }
         },
       },
     );
+  }
+
+  async function handleReloadFromServer() {
+    if (conflictInfo?.serverForm) {
+      const ext = conflictInfo.serverForm.extracted_data
+        ? structuredClone(conflictInfo.serverForm.extracted_data)
+        : {};
+      setDraftDate(conflictInfo.serverForm.form_date || "");
+      setDraftData(ext);
+    }
+    setDirty(false);
+    setConflictInfo(null);
+    await formsQuery.refetch();
   }
 
   async function handleUploadFormFiles(
@@ -272,6 +308,7 @@ export function SectionFormPage() {
         await updateForm.mutateAsync({
           sessionId: sessionId!,
           formCode: spec.code,
+          ifMatch: formRecord?.revision ?? null,
           payload: {
             form_date: draftDate,
             extracted_data: draftData,
@@ -484,6 +521,37 @@ export function SectionFormPage() {
             </Button>
           </div>
         </div>
+      ) : null}
+
+      {conflictInfo ? (
+        <InlineNotice tone="danger" title="Revizyon Çakışması (409)">
+          <div className="space-y-2">
+            <p>
+              Bu form siz düzenlerken başka bir sekme veya kullanıcı tarafından güncellendi (Sunucu
+              revizyonu: {conflictInfo.currentRevision}). Veri kaybını önlemek için nasıl devam
+              etmek istediğinizi seçin:
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                variant="default"
+                onClick={() => {
+                  void handleReloadFromServer();
+                }}
+              >
+                Sunucudaki Güncel Formu Yükle
+              </Button>
+              <Button
+                size="sm"
+                variant="danger"
+                loading={updateForm.isPending}
+                onClick={() => handleSave(undefined, conflictInfo.currentRevision)}
+              >
+                Değişikliklerimle Üzerine Yaz
+              </Button>
+            </div>
+          </div>
+        </InlineNotice>
       ) : null}
 
       {isDemoOrOffline ? (

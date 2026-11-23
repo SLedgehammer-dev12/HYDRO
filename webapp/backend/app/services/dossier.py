@@ -5437,6 +5437,7 @@ def update_session_form(
     form_date: str | None = None,
     extracted_data: dict[str, Any] | None = None,
     overwrite_session_inputs: bool = True,
+    expected_revision: int | None = None,
 ) -> dict[str, Any]:
     spec = _require_form_spec(form_code)
     ensure_section_form_slots(db, session, commit=False)
@@ -5445,6 +5446,19 @@ def update_session_form(
             SectionForm.session_id == session.id, SectionForm.form_code == form_code
         )
     ).scalar_one_or_none()
+
+    current_rev = int(row.revision or 0) if row is not None else 0
+    if expected_revision is not None and expected_revision != current_rev:
+        raise AppError(
+            "revision_conflict",
+            "Form baska bir istemci veya sekme tarafindan guncellendi.",
+            status_code=409,
+            details={
+                "expected_revision": expected_revision,
+                "current_revision": current_rev,
+                "current": json_safe(_serialize_form_row(spec, row, session.id)),
+            },
+        )
 
     now = utcnow()
     if row is None:

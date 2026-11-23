@@ -651,11 +651,13 @@ export const api = {
     sessionId: string,
     formCode: string,
     body: SectionFormUpdatePayload,
+    ifMatch?: number | null,
     signal?: AbortSignal,
   ) =>
     apiFetch<SectionFormUpdateResponse>(`/sessions/${sessionId}/forms/${formCode}`, {
       method: "PUT",
       body,
+      ifMatch: ifMatch !== undefined && ifMatch !== null ? ifMatch : body.revision ?? undefined,
       signal,
     }),
 

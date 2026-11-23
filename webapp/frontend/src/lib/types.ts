@@ -811,6 +811,7 @@ export interface SectionFormUpdatePayload {
   form_date?: string | null;
   extracted_data: Record<string, unknown>;
   overwrite_session_inputs?: boolean;
+  revision?: number | null;
 }
 
 export interface SectionFormUpdateResponse {

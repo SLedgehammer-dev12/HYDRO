@@ -244,7 +244,15 @@ def normalize_host_header(raw_host: str | None) -> str:
 
 
 def validate_bind_security(settings: Settings) -> str | None:
-    """Reject non-loopback binds without enforced app auth unless explicitly allowed."""
+    """Reject unsupported HYDRO_AUTH_MODE values and non-loopback binds without explicit opt-in."""
+
+    mode = settings.auth_mode.strip().lower()
+    if mode != "none" and not settings.has_enforced_auth:
+        return (
+            f"HATA: HYDRO_AUTH_MODE='{settings.auth_mode}' ayarlandi ancak bu surumde uygulama "
+            "duzeyinde kimlik dogrulama ara yazilimi uygulanmamistir. Guvenlik nedeniyle sunucu "
+            "baslatilmadi; yalnizca HYDRO_AUTH_MODE=none kullanin."
+        )
 
     if (
         not settings.is_loopback_host

@@ -304,12 +304,14 @@ def clone_project(
 
 @router.get("/{project_id}/archive")
 def export_project_archive(
+    request: Request,
     project_id: str,
     include_attachments: bool = Query(default=True),
     db: OrmSession = Depends(get_db),
     workspace: Workspace = Depends(get_workspace),
     settings: Settings = Depends(get_settings),
 ) -> Response:
+    enforce_rate_limit(request, settings, bucket="project_archive", limit=15)
     zip_bytes, download_name = project_archive_service.export_project_archive(
         db,
         settings,

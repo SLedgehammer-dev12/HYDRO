@@ -318,6 +318,7 @@ def download_db_backup(
     settings: Settings = Depends(get_settings),
 ) -> FileResponse:
     _require_local_admin(request, settings)
+    enforce_rate_limit(request, settings, bucket="db_backup_download", limit=20)
     target = db_admin_service.resolve_backup_path(settings, filename)
     return FileResponse(path=target, media_type="application/octet-stream", filename=target.name)
 

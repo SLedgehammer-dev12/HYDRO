@@ -670,10 +670,15 @@ export function useUpdateSessionForm() {
   return useMutation<
     SectionFormUpdateResponse,
     Error,
-    { sessionId: string; formCode: string; payload: SectionFormUpdatePayload }
+    {
+      sessionId: string;
+      formCode: string;
+      payload: SectionFormUpdatePayload;
+      ifMatch?: number | null;
+    }
   >({
-    mutationFn: async ({ sessionId, formCode, payload }) =>
-      api.updateSessionForm(sessionId, formCode, payload),
+    mutationFn: async ({ sessionId, formCode, payload, ifMatch }) =>
+      api.updateSessionForm(sessionId, formCode, payload, ifMatch),
     onSuccess: (res) => {
       const store = useAppStore.getState();
       queryClient.setQueryData(["session-forms", res.session.id], res.forms_payload);
