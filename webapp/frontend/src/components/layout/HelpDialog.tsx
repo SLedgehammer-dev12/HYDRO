@@ -1,6 +1,9 @@
+import { Compass } from "lucide-react";
 import { useMeta, useSpec } from "../../hooks/queries";
+import { useAppStore } from "../../store/useAppStore";
 import { Modal } from "../ui/Dialog";
 import { Badge } from "../ui/Badge";
+import { Button } from "../ui/Button";
 
 const SHORTCUTS: Array<[string, string]> = [
   ["Alt + 1…9", "Ana sekmeler arası geç (mühendislik sırasıyla)"],
@@ -22,6 +25,7 @@ const STATUSES: Array<{ label: string; tone: "pending" | "warning" | "pass" | "f
 export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { data: meta } = useMeta();
   const { data: spec } = useSpec();
+  const startTour = useAppStore((state) => state.startTour);
 
   return (
     <Modal
@@ -31,6 +35,26 @@ export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
       description="Denetimli akış: doğru sıra, doğru birim, doğru işaret."
     >
       <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[color-mix(in_srgb,var(--primary)_30%,var(--border))] bg-[var(--surface-2)] p-3">
+          <div>
+            <p className="text-xs font-bold text-[var(--text)]">Etkileşimli Rehberli Tur</p>
+            <p className="text-[11px] text-[var(--text-muted)]">
+              5 adımda temel iş akışını tekrar gözden geçirin.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="primary"
+            icon={<Compass size={13} />}
+            onClick={() => {
+              onClose();
+              startTour(null);
+            }}
+          >
+            Rehberli Demo Turunu Başlat
+          </Button>
+        </div>
+
         <section>
           <h3 className="eyebrow">Klavye</h3>
           <div className="mt-2 overflow-hidden rounded-lg border border-[var(--border)]">

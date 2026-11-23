@@ -72,6 +72,10 @@ export interface AppStore {
   desktopSidebarOpen: boolean;
   rightPanelOpen: boolean;
   sceneScope: "section" | "project";
+  onboardingDismissed: boolean;
+  tourActive: boolean;
+  tourStep: number;
+  tourSampleProjectId: string | null;
 
   backend: BackendMode;
   health: HealthResponse | null;
@@ -128,6 +132,10 @@ export interface AppStore {
   setSessionApiReady: (ready: boolean | null) => void;
   setPendingServerSync: (pending: boolean) => void;
   setStorageQuotaError: (flag: boolean) => void;
+  setOnboardingDismissed: (dismissed: boolean) => void;
+  startTour: (sampleProjectId?: string | null) => void;
+  setTourStep: (step: number) => void;
+  endTour: () => void;
 
   addHistory: (entry: Omit<HistoryEntry, "id" | "at"> & { at?: string }) => void;
   addExport: (entry: Omit<ExportEntry, "id" | "at"> & { at?: string }) => void;
@@ -163,8 +171,12 @@ export const useAppStore = create<AppStore>()(
       theme: "dark",
       sidebarOpen: false,
       desktopSidebarOpen: true,
-      rightPanelOpen: true,
+      rightPanelOpen: false,
       sceneScope: "section",
+      onboardingDismissed: false,
+      tourActive: false,
+      tourStep: 0,
+      tourSampleProjectId: null,
 
       backend: "checking",
       health: null,
@@ -375,6 +387,16 @@ export const useAppStore = create<AppStore>()(
       setSessionApiReady: (sessionApiReady) => set({ sessionApiReady }),
       setPendingServerSync: (pendingServerSync) => set({ pendingServerSync }),
       setStorageQuotaError: (storageQuotaError) => set({ storageQuotaError }),
+      setOnboardingDismissed: (onboardingDismissed) => set({ onboardingDismissed }),
+      startTour: (sampleProjectId = null) =>
+        set({
+          tourActive: true,
+          tourStep: 0,
+          tourSampleProjectId: sampleProjectId ?? null,
+          onboardingDismissed: true,
+        }),
+      setTourStep: (tourStep) => set({ tourStep: Math.max(0, tourStep) }),
+      endTour: () => set({ tourActive: false, tourStep: 0, tourSampleProjectId: null }),
 
       addHistory: (entry) =>
         set((state) => ({
@@ -487,6 +509,7 @@ export const useAppStore = create<AppStore>()(
         exports: state.exports,
         theme: state.theme,
         rightPanelOpen: state.rightPanelOpen,
+        onboardingDismissed: state.onboardingDismissed,
       }),
       /**
        * Eski sürümlerden gelen `inputs` şeması eksik olabilir (ör. `section_meta`).

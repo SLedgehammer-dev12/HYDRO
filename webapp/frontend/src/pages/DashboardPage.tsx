@@ -20,6 +20,7 @@ import { SectionCard, KpiCard, ResultTile } from "../components/ui/Card";
 import { Badge, StatusBadge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { DecisionCard } from "../components/ui/DecisionCard";
+import { OnboardingWelcomeCard } from "../components/onboarding/OnboardingWelcomeCard";
 import { OfflineNotice, EmptyState, InlineNotice } from "../components/ui/State";
 import { ElevationProfileChart, TrendChart } from "../components/charts/LazyCharts";
 import { RatioGauge, ProgressBar } from "../components/ui/Gauge";
@@ -45,6 +46,8 @@ export function DashboardPage() {
   const setTab = useAppStore((state) => state.setTab);
   const setPendingScrollTarget = useAppStore((state) => state.setPendingScrollTarget);
   const openForm = useAppStore((state) => state.openForm);
+  const onboardingDismissed = useAppStore((state) => state.onboardingDismissed);
+  const tourActive = useAppStore((state) => state.tourActive);
   const { data: meta } = useMeta();
   const { data: formsPayload } = useSessionForms(sessionId);
   const formsSummary = formsPayload?.summary;
@@ -136,6 +139,44 @@ export function DashboardPage() {
     },
   ];
 
+  const testsAndFormsDone = Boolean(
+    air && pressure && (formsSummary ? formsSummary.filled_required >= formsSummary.required_total : true),
+  );
+  const workflowSteps = [
+    {
+      num: 1,
+      label: "Proje & Kesit",
+      detail: projectId ? projectCode || projectName || "Seçildi" : "Seçim bekliyor",
+      done: Boolean(projectId),
+      active: !projectId,
+      tab: "projects" as const,
+    },
+    {
+      num: 2,
+      label: "Geometri & Kot",
+      detail: geometry ? `${geometry.section_count} segment` : "Eksik",
+      done: Boolean(geometry),
+      active: Boolean(projectId) && !geometry,
+      tab: "geometry" as const,
+    },
+    {
+      num: 3,
+      label: "Testler & Formlar",
+      detail: air && pressure ? "Kararlar üretildi" : formsSummary ? `${formsSummary.filled_required}/${formsSummary.required_total} form` : "Hesap bekliyor",
+      done: testsAndFormsDone,
+      active: Boolean(geometry) && !testsAndFormsDone,
+      tab: air && pressure ? ("forms" as const) : !air ? ("air" as const) : ("pressure" as const),
+    },
+    {
+      num: 4,
+      label: "Resmî Rapor",
+      detail: air && pressure ? "Çıktıya hazır" : "Test sonrası",
+      done: false,
+      active: Boolean(air && pressure),
+      tab: "reports" as const,
+    },
+  ];
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -175,6 +216,50 @@ export function DashboardPage() {
       />
 
       {backend === "demo" ? <OfflineNotice /> : null}
+      {!onboardingDismissed && !tourActive ? <OnboardingWelcomeCard /> : null}
+
+      {/* 4 Adımlı Canlı İlerleme Çubuğu */}
+      <nav aria-label="Test değerlendirme adımları" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {workflowSteps.map((stepItem) => (
+          <button
+            key={stepItem.num}
+            type="button"
+            onClick={() => {
+              if (stepItem.tab === "forms") openForm(targetFormCode);
+              else setTab(stepItem.tab);
+            }}
+            className={cn(
+              "flex items-center gap-2.5 rounded-xl border px-3 py-2 text-left transition-colors",
+              stepItem.active
+                ? "border-[var(--primary)] bg-[var(--primary-soft)]"
+                : stepItem.done
+                  ? "border-[var(--success-border)] bg-[var(--surface-2)] hover:border-[var(--border-strong)]"
+                  : "border-[var(--border)] bg-[var(--surface-2)] hover:border-[var(--border-strong)]",
+            )}
+          >
+            <span
+              className={cn(
+                "grid size-6 shrink-0 place-items-center rounded-full font-mono text-[11px] font-bold",
+                stepItem.done
+                  ? "bg-[var(--success-bg)] text-[var(--success)]"
+                  : stepItem.active
+                    ? "bg-[var(--primary)] text-[var(--primary-ink)]"
+                    : "bg-[var(--surface-3)] text-[var(--text-muted)]",
+              )}
+            >
+              {stepItem.done ? <CheckCircle2 size={13} aria-hidden /> : stepItem.num}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[11.5px] font-semibold text-[var(--text)]">
+                {stepItem.label}
+              </span>
+              <span className="block truncate text-[10px] text-[var(--text-muted)]">
+                {stepItem.detail}
+              </span>
+            </span>
+          </button>
+        ))}
+      </nav>
 
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <KpiCard

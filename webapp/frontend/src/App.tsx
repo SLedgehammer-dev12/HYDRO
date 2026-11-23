@@ -60,6 +60,11 @@ const RevisionConflictModal = lazy(() =>
     default: module.RevisionConflictModal,
   })),
 );
+const GuidedTourOverlay = lazy(() =>
+  import("./components/onboarding/GuidedTourOverlay").then((module) => ({
+    default: module.GuidedTourOverlay,
+  })),
+);
 
 const SKELETON_CARDS = ["kpi-1", "kpi-2", "kpi-3", "kpi-4"] as const;
 
@@ -110,6 +115,7 @@ export default function App() {
   const rightPanelOpen = useAppStore((state) => state.rightPanelOpen);
   const updateModalOpen = useAppStore((state) => state.updateModalOpen);
   const revisionConflict = useAppStore((state) => state.revisionConflict);
+  const tourActive = useAppStore((state) => state.tourActive);
   const backend = useAppStore((state) => state.backend);
   const sessionId = useAppStore((state) => state.sessionId);
   const applySessionInputs = useAppStore((state) => state.applySessionInputs);
@@ -311,7 +317,9 @@ export default function App() {
         <Sidebar />
         <div className="flex min-w-0 flex-1 flex-col">
           <TopBar onOpenHelp={() => setHelpOpen(true)} />
-          <DecisionStrip />
+          {tab === "air" || tab === "pressure" || tab === "geometry" || tab === "forms" ? (
+            <DecisionStrip />
+          ) : null}
 
           <div className="mx-auto flex w-full max-w-[1500px] flex-1 gap-5 px-3 py-4 sm:px-4 sm:py-5">
             <main className="min-w-0 flex-1">
@@ -365,6 +373,11 @@ export default function App() {
       {revisionConflict ? (
         <Suspense fallback={null}>
           <RevisionConflictModal />
+        </Suspense>
+      ) : null}
+      {tourActive ? (
+        <Suspense fallback={null}>
+          <GuidedTourOverlay />
         </Suspense>
       ) : null}
       <ToastHost />

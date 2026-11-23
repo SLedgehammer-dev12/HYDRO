@@ -1393,3 +1393,41 @@ input:not([type="checkbox"]):not([type="radio"]):not(.visually-hidden) {
     background: #fff;
   }
 }
+
+/* ---------- Guided Tour (popover="manual" + CSS Anchor Positioning) ---------- */
+
+.tour-highlight-target {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  background: var(--primary-soft);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 18%, transparent);
+}
+
+.hydro-tour-popover {
+  popover: manual;
+  width: min(390px, calc(100vw - 1.5rem));
+  padding: 1rem;
+  border-radius: 14px;
+  border: 1.5px solid color-mix(in srgb, var(--primary) 45%, var(--border-strong));
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 24px 56px -18px rgba(0, 0, 0, 0.72);
+}
+
+@supports (position-area: right center) {
+  .hydro-tour-popover {
+    inset: auto;
+    margin: 0 0 0 0.75rem;
+    position-anchor: --hydro-tour-anchor;
+    position-area: right center;
+    position-try-fallbacks: flip-inline, flip-block, flip-block flip-inline;
+  }
+}
+
+@supports not (position-area: right center) {
+  .hydro-tour-popover {
+    position: fixed;
+    inset: auto 1rem 1rem auto;
+    margin: 0;
+  }
+}

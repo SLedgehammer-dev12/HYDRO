@@ -143,9 +143,15 @@ export function Sidebar() {
   const silentCheckFired = useRef(false);
   const mobileDrawerRef = useRef<HTMLDialogElement>(null);
 
-  const [formsExpanded, setFormsExpanded] = useState(true);
+  const [formsExpanded, setFormsExpanded] = useState(() => Boolean(sessionId));
   const [extrasExpanded, setExtrasExpanded] = useState(false);
   const [formFilter, setFormFilter] = useState<FormFilter>("all");
+
+  useEffect(() => {
+    if (tab === "forms") {
+      setFormsExpanded(true);
+    }
+  }, [tab]);
 
   useEffect(() => {
     if (backend === "online" && !silentCheckFired.current) {
@@ -292,6 +298,37 @@ export function Sidebar() {
     );
   }
 
+  function renderNavButton(item: (typeof VISIBLE_TABS)[number]) {
+    const Icon = ICONS[item.key];
+    return (
+      <button
+        key={item.key}
+        type="button"
+        data-tour={`nav-${item.key}`}
+        className="nav-item"
+        aria-current={tab === item.key ? "page" : undefined}
+        title={`${item.label} · Alt+${item.index}`}
+        onClick={() => {
+          setTab(item.key);
+          setSidebarOpen(false);
+        }}
+      >
+        <Icon size={16} strokeWidth={1.9} aria-hidden />
+        <span>{item.label}</span>
+        <span className="nav-index">{item.index}</span>
+      </button>
+    );
+  }
+
+  const startTabs = VISIBLE_TABS.filter((item) => item.key === "dashboard" || item.key === "projects");
+  const auditAndCalcTabs = VISIBLE_TABS.filter((item) =>
+    item.key === "ocr" || item.key === "geometry" || item.key === "air" || item.key === "pressure",
+  );
+  const outputTabs = VISIBLE_TABS.filter((item) => item.key === "reports");
+  const advancedTabs = VISIBLE_TABS.filter(
+    (item) => item.key === "coefficients" || item.key === "settings",
+  );
+
   const nav = (
     <nav className="flex h-full flex-col gap-3" aria-label="Ana gezinme">
       <div className="flex items-center justify-between px-1">
@@ -370,34 +407,21 @@ export function Sidebar() {
         )}
       </div>
 
-      <div className="flex-1 space-y-3.5 overflow-y-auto pr-0.5 scroll-thin">
-        {/* Çalışma grubu */}
+      <div className="min-h-0 flex-1 space-y-3.5 overflow-y-auto pb-2 pr-0.5 scroll-thin">
+        {/* 1. Başlangıç */}
         <div>
           <p className="px-2 pb-1 text-[10.5px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">
-            Çalışma
+            Başlangıç
           </p>
-          <div className="space-y-0.5">
-            {VISIBLE_TABS.filter((item) => item.group === "calisma").map((item) => {
-              const Icon = ICONS[item.key];
-              return (
-                <button
-                  key={item.key}
-                  type="button"
-                  className="nav-item"
-                  aria-current={tab === item.key ? "page" : undefined}
-                  title={`${item.label} · Alt+${item.index}`}
-                  onClick={() => {
-                    setTab(item.key);
-                    setSidebarOpen(false);
-                  }}
-                >
-                  <Icon size={16} strokeWidth={1.9} aria-hidden />
-                  <span>{item.label}</span>
-                  <span className="nav-index">{item.index}</span>
-                </button>
-              );
-            })}
-          </div>
+          <div className="space-y-0.5">{startTabs.map((item) => renderNavButton(item))}</div>
+        </div>
+
+        {/* 2. Denetim & Hesap */}
+        <div>
+          <p className="px-2 pb-1 text-[10.5px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">
+            Denetim &amp; Hesap
+          </p>
+          <div className="space-y-0.5">{auditAndCalcTabs.map((item) => renderNavButton(item))}</div>
         </div>
 
         {/* Seçenek 1: Kesite Bağlı Açılır Test Bölümü Formları Ağacı */}
@@ -501,38 +525,26 @@ export function Sidebar() {
           ) : null}
         </div>
 
-        {/* Çıktı & Sistem grubu */}
+        {/* 3. Çıktı & Araçlar */}
         <div>
           <p className="px-2 pb-1 text-[10.5px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">
-            Çıktı &amp; Sistem
+            Çıktı &amp; Araçlar
           </p>
-          <div className="space-y-0.5">
-            {VISIBLE_TABS.filter((item) => item.group === "cikti").map((item) => {
-              const Icon = ICONS[item.key];
-              return (
-                <button
-                  key={item.key}
-                  type="button"
-                  className="nav-item"
-                  aria-current={tab === item.key ? "page" : undefined}
-                  title={`${item.label} · Alt+${item.index}`}
-                  onClick={() => {
-                    setTab(item.key);
-                    setSidebarOpen(false);
-                  }}
-                >
-                  <Icon size={16} strokeWidth={1.9} aria-hidden />
-                  <span>{item.label}</span>
-                  <span className="nav-index">{item.index}</span>
-                </button>
-              );
-            })}
-          </div>
+          <div className="space-y-0.5">{outputTabs.map((item) => renderNavButton(item))}</div>
+          <details
+            className="mt-1.5 rounded-xl border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-2)_45%,transparent)] p-1"
+            open={tab === "coefficients" || tab === "settings" ? true : undefined}
+          >
+            <summary className="cursor-pointer list-none rounded-lg px-2 py-1 text-[10.5px] font-semibold text-[var(--text-muted)] hover:bg-[var(--surface-3)] hover:text-[var(--text)]">
+              Gelişmiş &amp; Ayarlar
+            </summary>
+            <div className="mt-1 space-y-0.5">{advancedTabs.map((item) => renderNavButton(item))}</div>
+          </details>
         </div>
       </div>
 
       {/* Alt Sunucu & Güncelleme Yöneticisi Kartı */}
-      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-2.5">
+      <div className="shrink-0 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-2.5">
         <div className="flex items-center justify-between gap-2 text-[10.5px] font-semibold text-[var(--text-muted)]">
           <span className="flex items-center gap-1.5">
             <BackendDot backend={backend} />
