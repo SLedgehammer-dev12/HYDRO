@@ -26,7 +26,7 @@ from ..core.config import Settings
 from ..core.errors import AppError
 from ..core.timeutil import as_float, as_positive_float, fmt_number, iso_z, utcnow
 from ..desktop_labels import FIELD_CHECKS, KEY_TO_B_SOURCE_LABEL
-from ..models import HydroSession, TestResult
+from ..models import Attachment, HydroSession, OcrAnalysis, SectionForm, TestResult
 from . import coefficients as coefficient_service
 from .snapshot import backend_label
 
@@ -98,12 +98,100 @@ def _resolve_ambient_temp(inputs: dict[str, Any]) -> float | None:
     return ambient
 
 
+def _neutralize_excel_cell(value: Any) -> Any:
+    if isinstance(value, str):
+        cleaned = "".join(ch for ch in value if ord(ch) >= 32 or ch in "\t\n\r")
+        if cleaned.lstrip()[:1] in {"=", "+", "-", "@"}:
+            return f"'{cleaned}"
+        return cleaned
+    return value
+
+
+def _summarize_extracted_dict(data: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for key, val in data.items():
+        if val is None or val == "" or val == [] or val == {}:
+            continue
+        if isinstance(val, list):
+            parts.append(f"{key}=[{len(val)} satir]")
+        elif isinstance(val, dict):
+            nested = ", ".join(f"{k}:{v}" for k, v in val.items() if v is not None and v != "")
+            if nested:
+                parts.append(f"{key}={{{nested}}}")
+        else:
+            parts.append(f"{key}={val}")
+    return "; ".join(parts) if parts else "-"
+
+
+def build_ocr_appendix(db: Any, session_id: str) -> list[dict[str, Any]]:
+    from sqlalchemy import select
+
+    rows: list[dict[str, Any]] = []
+    forms = (
+        db.execute(
+            select(SectionForm)
+            .where(SectionForm.session_id == session_id)
+            .order_by(SectionForm.created_at.asc(), SectionForm.form_code.asc())
+        )
+        .scalars()
+        .all()
+    )
+    seen_analysis_ids: set[str] = set()
+    for form in forms:
+        has_content = (
+            form.status != "empty"
+            or bool(form.source_filename)
+            or bool(form.form_date)
+            or bool(form.extracted_data)
+        )
+        if not has_content:
+            continue
+        if form.analysis_id:
+            seen_analysis_ids.add(form.analysis_id)
+        rows.append(
+            {
+                "code": form.botas_code or form.form_code,
+                "title": form.form_title,
+                "source": form.source_filename or "-",
+                "date": form.form_date or "-",
+                "summary": _summarize_extracted_dict(form.extracted_data or {}),
+            }
+        )
+
+    analyses = (
+        db.execute(
+            select(OcrAnalysis)
+            .where(OcrAnalysis.session_id == session_id, OcrAnalysis.status == "succeeded")
+            .order_by(OcrAnalysis.created_at.asc())
+        )
+        .scalars()
+        .all()
+    )
+    for analysis in analyses:
+        att = db.get(Attachment, analysis.attachment_id) if analysis.attachment_id else None
+        filename = att.filename if att is not None else analysis.id
+        report_dict = analysis.report if isinstance(analysis.report, dict) else {}
+        raw_text = str(report_dict.get("raw_text") or "").strip()
+        summary = raw_text[:1000] if raw_text else _summarize_extracted_dict(report_dict)
+        rows.append(
+            {
+                "code": "OCR",
+                "title": f"OCR Analizi ({analysis.source or 'ocr'})",
+                "source": filename,
+                "date": iso_z(analysis.finished_at) or "-",
+                "summary": summary,
+            }
+        )
+    return rows
+
+
 def build_context(
     session: HydroSession,
     results: Iterable[TestResult],
     *,
     include_backend_comparison: bool = False,
     time_series_rows: Iterable[Any] | None = None,
+    ocr_appendix: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     inputs = session.inputs or {}
     latest = _latest_by_type(results)
@@ -285,6 +373,7 @@ def build_context(
         "backend_comparison": backend_cmp,
         "backend_comparison_error": backend_cmp_error,
         "time_series_summary": ts_summary,
+        "ocr_appendix": list(ocr_appendix) if ocr_appendix is not None else None,
     }
 
 
@@ -528,6 +617,19 @@ def build_report_text(context: dict[str, Any], session: HydroSession) -> str:
             ]
         )
 
+    ocr_appendix = context.get("ocr_appendix")
+    if ocr_appendix is not None:
+        lines.extend(["", "OCR Kaynak ve Ham Metin Ozeti"])
+        if ocr_appendix:
+            for item in ocr_appendix:
+                lines.append(
+                    f"- [{item.get('code', '-')}] {item.get('title', '-')} | "
+                    f"Kaynak: {item.get('source', '-')} | Tarih: {item.get('date', '-')} | "
+                    f"Icerik: {item.get('summary', '-')}"
+                )
+        else:
+            lines.append("- Kayitli OCR formu veya analizi bulunmuyor.")
+
     lines.extend(
         [
             "",
@@ -548,6 +650,31 @@ def _target_path(settings: Settings, session_id: str, fmt: str) -> Path:
     return folder / f"{stamp}-{uuid.uuid4().hex[:8]}-report{EXTENSIONS[fmt]}"
 
 
+def _append_ocr_sheet_to_xlsx(target: Path, ocr_appendix: list[dict[str, Any]]) -> None:
+    import openpyxl
+
+    wb = openpyxl.load_workbook(target)
+    try:
+        sheet_name = "OCR_Ham_Metin"
+        if sheet_name in wb.sheetnames:
+            del wb[sheet_name]
+        ws = wb.create_sheet(title=sheet_name)
+        ws.append(["Kod", "Baslik", "Kaynak Dosya", "Tarih", "Ham Metin / Cikarilan Alanlar"])
+        for item in ocr_appendix:
+            ws.append(
+                [
+                    _neutralize_excel_cell(str(item.get("code") or "-")),
+                    _neutralize_excel_cell(str(item.get("title") or "-")),
+                    _neutralize_excel_cell(str(item.get("source") or "-")),
+                    _neutralize_excel_cell(str(item.get("date") or "-")),
+                    _neutralize_excel_cell(str(item.get("summary") or "-")),
+                ]
+            )
+        wb.save(target)
+    finally:
+        wb.close()
+
+
 def write_report(
     settings: Settings,
     *,
@@ -558,13 +685,29 @@ def write_report(
     test_results: dict[str, Any],
     checklist: list[dict[str, Any]],
     text: str | None = None,
+    ocr_appendix: list[dict[str, Any]] | None = None,
     target: Path,
 ) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
     if fmt == "pdf":
-        export_pdf_report(target, title, metadata, geometry_data, test_results, checklist)
+        pdf_checklist = list(checklist)
+        if ocr_appendix:
+            for item in ocr_appendix:
+                pdf_checklist.append(
+                    {
+                        "checked": True,
+                        "label": (
+                            f"OCR [{item.get('code', '-')}] {item.get('title', '-')} "
+                            f"({item.get('source', '-')}): {str(item.get('summary', '-'))[:180]}"
+                        ),
+                        "ref": str(item.get("date") or "OCR"),
+                    }
+                )
+        export_pdf_report(target, title, metadata, geometry_data, test_results, pdf_checklist)
     elif fmt == "xlsx":
         export_excel_report(target, title, metadata, geometry_data, test_results, checklist)
+        if ocr_appendix is not None:
+            _append_ocr_sheet_to_xlsx(target, ocr_appendix)
     elif fmt == "txt":
         target.write_text(text or "", encoding="utf-8")
     else:
@@ -584,12 +727,14 @@ def export_session(
     *,
     fmt: str,
     time_series_rows: Iterable[Any] | None = None,
+    ocr_appendix: list[dict[str, Any]] | None = None,
 ) -> tuple[Path, dict[str, Any]]:
     context = build_context(
         session,
         results,
         include_backend_comparison=(fmt == "txt"),
         time_series_rows=time_series_rows,
+        ocr_appendix=ocr_appendix,
     )
     text = build_report_text(context, session) if fmt == "txt" else None
     target = _target_path(settings, session.id, fmt)
@@ -603,6 +748,7 @@ def export_session(
             test_results=context["test_results"],
             checklist=context["checklist"],
             text=text,
+            ocr_appendix=ocr_appendix,
             target=target,
         )
     except AppError:

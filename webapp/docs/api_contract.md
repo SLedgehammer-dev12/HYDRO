@@ -1,13 +1,11 @@
 # HYDRO Web — API Sözleşmesi
 
-**Sürüm:** v1 (taslak)
+**Sürüm:** v1 (aktif — makine doğrulanabilir şema: [openapi.json](openapi.json))
 **Base URL:** `/api`
 **İçerik tipi:** `application/json; charset=utf-8` (dosya uçları hariç)
-**İlgili:** [architecture.md](architecture.md), [parity_matrix.md](parity_matrix.md)
+**İlgili:** [architecture.md](architecture.md), [parity_matrix.md](parity_matrix.md), [openapi.json](openapi.json)
 
-> Bu doküman sözleşmedir; uygulama bu dokümana göre yazılır. Örneklerdeki sayısal
-> değerler **gösterim amaçlıdır**, kabul değeri değildir. Gerçek değerler domain
-> fonksiyonlarından üretilir ve parity fixture'larıyla doğrulanır.
+> Makine doğrulanabilir tek kaynak şema `webapp/docs/openapi.json` dosyasıdır (`87` yol, `101` HTTP operasyonu; `test_openapi_contract.py` ve `npm run check:api` ile CI'da denetlenir). Bu doküman başlıkları, zarf kurallarını ve uç gruplarını açıklar.
 
 ---
 
@@ -20,8 +18,9 @@
 | `Content-Type` | İstek | JSON uçlarında evet | `application/json` |
 | `X-Session-ID` | İstek/yanıt | Önerilen | Anonim **workspace** anahtarı (UUID). Oturum kaynağının `id`'si değildir. Yoksa sunucu üretir ve yanıtta döner. |
 | `X-Request-ID` | İstek/yanıt | Hayır | İstemci üretirse korunur; yoksa sunucu üretir. |
-| `If-Match` | İstek | `PUT` için evet | `sessions.revision` değeri, ETag biçiminde: `"3"`. |
-| `ETag` | Yanıt | Oturum GET/PUT | `"<revision>"`; `If-Match` ile aynı biçim. |
+| `If-Match` | İstek | Oturum `PUT` için zorunlu, `PUT /sessions/{id}/forms/{form_code}` için önerilen | `revision` değeri, ETag biçiminde: `"3"`. Uyuşmazlıkta `409 revision_conflict` döner. |
+| `ETag` | Yanıt | Oturum ve BOTAŞ form `GET`/`PUT` | `"<revision>"`; `If-Match` ile aynı biçim. |
+| `X-Hydro-Admin-Token` | İstek | Loopback dışı (ör. Docker `0.0.0.0`) `/system/*` ve `/update/*` uçlarında zorunlu | `HYDRO_LOCAL_ADMIN_TOKEN` ile eşleşen paylaşımlı yönetici anahtarı. |
 | `Idempotency-Key` | İstek | Hayır | `POST /results`, `/reports/export`, `/ocr/analyze` için önerilir. 24 saat saklanır. |
 | `Retry-After` | Yanıt | 429/503 | Saniye. |
 | `X-Total-Count` | Yanıt | Liste | Sayfalama toplamı (gövdede de var). |
@@ -2196,12 +2195,17 @@ export interface ApiError {
 
 ---
 
-## 15. Sürümleme ve uyumluluk
+## 15. Sürümleme, uç envanteri ve uyumluluk
 
 - Yol tabanlı sürüm: `/api` = v1. Kırıcı değişiklikte `/api/v2`; v1 en az 6 ay yaşar.
 - JSON içinde `schema_version` taşıyan nesneler (`SessionInputs`, `HydrotestReport`,
   `SceneModel`, `mapping`) kendi sürümlerini taşır.
 - Kaldırılacak alanlar önce `Deprecation: true` + `Sunset` başlığıyla duyurulur.
-- OpenAPI şeması CI'da üretilir ve `webapp/docs/openapi.json` olarak commit edilir;
-  frontend tipleri bu şemadan doğrulanır (`openapi-typescript` önerilir).
-- Alan adları `snake_case`; frontend'de dönüşüm yapılmaz (kopya anahtar üretmemek için).
+- OpenAPI şeması `PYTHONPATH=webapp/backend:. python3 -m app.tools.dump_openapi` ile üretilir,
+  `webapp/docs/openapi.json` olarak commit edilir ve `test_openapi_contract.py` + `npm run check:api` ile doğrulanır.
+- Alan adları `snake_case`; yazma istek modellerinde (`StrictWriteModel`) tanımsız alanlar `422 extra_forbidden` ile reddedilir.
+- Ek uç grupları (`openapi.json` içinde tam şemalarıyla yer alır):
+  - **Projeler & Dossier (`/api/projects/*`):** proje CRUD, kesit üretimi, arşiv indirme/içe aktarma, form matrisi, plan-profil CAD analizi/önizleme/commit, 3D proje sahnesi, örnek proje üretimi.
+  - **BOTAŞ Saha Formları (`/api/forms/*`, `/api/sessions/{id}/forms/*`):** 16 form kataloğu, form okuma/güncelleme (`ETag` / `If-Match` revizyon korumalı), zaman serisi senkronizasyonu.
+  - **Sistem & Veritabanı Yönetimi (`/api/system/*`, `/api/update/*`):** `db-stats`, `db-backup`, `db-backups`, `db-restore` (dosya veya yedek adı), `db-maintenance`, `trash`, `workspaces`, `claim-workspace` ve kendi kendini güncelleme uçları (`X-Hydro-Admin-Token` destekli).
+  - **İçe Aktarma (`/api/import/*`, `/api/survey/*`):** masaüstü JSON snapshot, masaüstü SQLite (`.db`) önizleme/içe aktarma, saha kot/etüd tablosu ayrıştırma ve DWG/DXF CAD okuyucu durumu.

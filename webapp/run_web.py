@@ -78,6 +78,26 @@ def validate_bind_security(settings) -> str | None:  # noqa: ANN001
     return _validate_bind_security(settings)
 
 
+def resolve_worker_count(database_url: str, raw_workers: str | None = None) -> int:
+    """Parse HYDRO_WEB_WORKERS and force single-worker execution on SQLite."""
+
+    workers = 1
+    if raw_workers is not None and raw_workers.strip():
+        try:
+            workers = int(raw_workers.strip())
+        except ValueError:
+            workers = 1
+    workers = max(1, min(workers, 32))
+    if workers > 1 and database_url.strip().lower().startswith("sqlite"):
+        print(
+            "  UYARI     : SQLite ve surec-ici OCR kuyrugu aktif oldugu icin "
+            "HYDRO_WEB_WORKERS=1 degerine sabitlendi.",
+            file=sys.stderr,
+        )
+        return 1
+    return workers
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
 
@@ -148,12 +168,13 @@ def main(argv: list[str] | None = None) -> int:
 
     import uvicorn
 
+    workers = resolve_worker_count(settings.database_url, os.environ.get("HYDRO_WEB_WORKERS"))
     uvicorn.run(
         app,
         host=settings.host,
         port=settings.port,
         log_level=settings.log_level.lower(),
-        workers=1,
+        workers=workers,
     )
     return 0
 

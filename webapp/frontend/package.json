@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5173",
     "build": "tsc -b && vite build",
+    "check:api": "node scripts/check-api-contract.mjs",
     "check:bundle": "node scripts/check-bundle-budget.mjs",
     "lint": "eslint src",
     "typecheck": "tsc -b --noEmit",

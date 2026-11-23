@@ -20,9 +20,10 @@ python3 webapp/run_web.py --host 127.0.0.1 --port 8080
 # http://127.0.0.1:8080
 ```
 
-- Durum ve dogrulama: `webapp/docs/implementation_status.md`
-- Mimari / parity / API / UX: `webapp/docs/`
-- Docker: `docker compose -f webapp/docker-compose.yml up --build`
+- Durum ve dogrulama: `DURUM.md` ve `webapp/docs/implementation_status.md`
+- Mimari / parity / API (`openapi.json`) / UX: `webapp/docs/`
+- Veritabani destegi: CI tarafindan dogrulanan resmi varsayilan motor **SQLite (WAL)** modudur (`HYDRO_WEB_WORKERS=1` zorunludur); PostgreSQL (`psycopg[binary]`) harici kurulum gerektiren deneysel/opsiyonel hedeftir.
+- Docker: `docker compose -f webapp/docker-compose.yml up --build` (Docker `0.0.0.0` icinde Veritabani Yonetimi ve Guncelleme uclarini kullanmak icin `HYDRO_LOCAL_ADMIN_TOKEN` tanimlayip Ayarlar ekranina `X-Hydro-Admin-Token` girin).
 
 ## Hizli Baslangic
 

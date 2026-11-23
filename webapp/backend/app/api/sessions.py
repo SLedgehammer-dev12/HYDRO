@@ -476,7 +476,6 @@ def export_session(
     settings: Settings = Depends(get_settings),
 ):
     enforce_rate_limit(request, settings, bucket="session_export", limit=30)
-    _ = include_raw_ocr
     if fmt not in report_service.FORMAT_ALIASES:
         raise validation_error(f"Desteklenmeyen rapor formati: {fmt}", field="format")
     session = session_service.get_session(db, session_id, workspace.hash)
@@ -494,8 +493,14 @@ def export_session(
         .all()
     )
     ts_rows = session_service.get_ordered_time_series(db, session)
+    ocr_appendix = report_service.build_ocr_appendix(db, session.id) if include_raw_ocr else None
     if fmt == "txt" and preview:
-        context = report_service.build_context(session, result_rows, time_series_rows=ts_rows)
+        context = report_service.build_context(
+            session,
+            result_rows,
+            time_series_rows=ts_rows,
+            ocr_appendix=ocr_appendix,
+        )
         content = report_service.build_report_text(context, session)
         audit.record(
             db,
@@ -504,12 +509,17 @@ def export_session(
             entity_id=session.id,
             session_id=session.id,
             workspace_hash=workspace.hash,
-            after={"format": "txt", "preview": True},
+            after={"format": "txt", "preview": True, "include_raw_ocr": include_raw_ocr},
         )
         db.commit()
         return {"format": "txt", "content": content}
     target, _context = report_service.export_session(
-        settings, session, result_rows, fmt=fmt, time_series_rows=ts_rows
+        settings,
+        session,
+        result_rows,
+        fmt=fmt,
+        time_series_rows=ts_rows,
+        ocr_appendix=ocr_appendix,
     )
     audit.record(
         db,
@@ -518,7 +528,7 @@ def export_session(
         entity_id=session.id,
         session_id=session.id,
         workspace_hash=workspace.hash,
-        after={"format": fmt, "path": target.name},
+        after={"format": fmt, "path": target.name, "include_raw_ocr": include_raw_ocr},
     )
     db.commit()
     return FileResponse(

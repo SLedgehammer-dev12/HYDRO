@@ -71,6 +71,7 @@ export function ReportsPage() {
 
   const [generatedAt, setGeneratedAt] = useState(() => new Date());
   const [busy, setBusy] = useState<Format | null>(null);
+  const [includeRawOcr, setIncludeRawOcr] = useState(false);
   const [snapshotBusy, setSnapshotBusy] = useState(false);
   const [snapshotMode, setSnapshotMode] = useState<"merge" | "replace">("merge");
   const [lastMapping, setLastMapping] = useState<{
@@ -143,7 +144,7 @@ export function ReportsPage() {
       if (!sessionId) {
         return;
       }
-      const { blob, filename } = await api.exportSession(sessionId, format);
+      const { blob, filename } = await api.exportSession(sessionId, format, { includeRawOcr });
       const link = document.createElement("a");
       const url = URL.createObjectURL(blob);
       link.href = url;
@@ -390,6 +391,15 @@ export function ReportsPage() {
           </SectionCard>
 
           <SectionCard title="Dışa aktarma" description="PDF, Excel ve TXT biçimleri." icon={Download}>
+            <label className="mb-2.5 flex cursor-pointer items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-[11.5px] text-[var(--text-soft)]">
+              <input
+                type="checkbox"
+                className="accent-[var(--primary)]"
+                checked={includeRawOcr}
+                onChange={(event) => setIncludeRawOcr(event.target.checked)}
+              />
+              <span>Ham OCR özetini rapora ekle (include_raw_ocr)</span>
+            </label>
             <div className="grid grid-cols-3 gap-2">
               {(Object.keys(FORMAT_META) as Format[]).map((format) => {
                 const Icon = FORMAT_META[format].icon;

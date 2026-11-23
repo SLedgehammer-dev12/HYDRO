@@ -762,16 +762,30 @@ export const api = {
   summary: (id: string, signal?: AbortSignal) =>
     apiFetch<Record<string, unknown>>(`/sessions/${id}/summary`, { signal }),
 
-  exportSession: (id: string, format: "pdf" | "xlsx" | "txt", signal?: AbortSignal) =>
-    apiDownload(`/sessions/${id}/export?format=${format}`, {
+  exportSession: (
+    id: string,
+    format: "pdf" | "xlsx" | "txt",
+    options?: AbortSignal | { signal?: AbortSignal; includeRawOcr?: boolean },
+  ) => {
+    const signal = options instanceof AbortSignal ? options : options?.signal;
+    const includeRawOcr = options instanceof AbortSignal ? false : Boolean(options?.includeRawOcr);
+    const qs = includeRawOcr ? `format=${format}&include_raw_ocr=true` : `format=${format}`;
+    return apiDownload(`/sessions/${id}/export?${qs}`, {
       signal,
       fallbackFilename: `hidrostatik_test_raporu.${format}`,
-    }),
+    });
+  },
 
-  exportPreview: (id: string, signal?: AbortSignal) =>
-    apiFetch<{ format: "txt"; content: string }>(`/sessions/${id}/export?format=txt&preview=true`, {
+  exportPreview: (id: string, options?: AbortSignal | { signal?: AbortSignal; includeRawOcr?: boolean }) => {
+    const signal = options instanceof AbortSignal ? options : options?.signal;
+    const includeRawOcr = options instanceof AbortSignal ? false : Boolean(options?.includeRawOcr);
+    const qs = includeRawOcr
+      ? "format=txt&preview=true&include_raw_ocr=true"
+      : "format=txt&preview=true";
+    return apiFetch<{ format: "txt"; content: string }>(`/sessions/${id}/export?${qs}`, {
       signal,
-    }),
+    });
+  },
 
   freeReport: (
     body: {

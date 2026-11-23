@@ -42,7 +42,7 @@ Kapsam dışı (MVP):
 | API | **FastAPI** | Pydantic v2 ile sözleşme-önce geliştirme, OpenAPI, `async` dosya/OCR işleri, düşük operasyonel yük | Django: admin/ORM ağır, async dosya işleri daha zahmetli |
 | Şema | **Pydantic v2** | `dataclass` tabanlı domain nesneleriyle alan adı eşlemesi kolay; hata mesajları 422'ye standart | marshmallow: iki şema kaynağı |
 | ORM | **SQLAlchemy 2.0** | SQLite ve Postgres arasında aynı kod; Alembic ile migration | Ham SQL: iki lehçe bakımı |
-| DB | **SQLite (WAL)** → **Postgres** | Yerel/LAN kurulumda sıfır servis; bulutta Postgres'e aynı şema | Sadece SQLite: çok kullanıcıda kilit |
+| DB | **SQLite (WAL)** (resmi/CI onaylı) · *Postgres (deneysel/opsiyonel)* | Yerel/LAN ve Docker kurulumda sıfır ek servis; Postgres geçişi harici `psycopg[binary]` kurulumu gerektirir ve deneyseldir | Sadece Postgres: saha/yerel kurulumda ağır bağımlılık |
 | Migration | **Alembic** | Şema evrimi denetlenebilir | `create_all`: üretimde yetersiz |
 | Frontend | **React 19 + TypeScript 5** | Uzun ömürlü, geniş ekosistem, 3D ve grafik kütüphaneleriyle uyum | Vue/Svelte: ekip ve 3D ekosistemi daha dar |
 | Build | **Vite 6** | Hızlı HMR, statik build, `run_web.py` ile tek klasörden servis | CRA: bakımda değil |
@@ -869,7 +869,8 @@ volumes: { hydro_data: {}, pg_data: {} }
 |---|---|---|
 | `HYDRO_WEB_HOST` | `127.0.0.1` | Bind adresi |
 | `HYDRO_WEB_PORT` | `8080` | Port |
-| `HYDRO_WEB_WORKERS` | `1` | SQLite'ta 1; Postgres'te artırılabilir |
+| `HYDRO_WEB_WORKERS` | `1` | `run_web.py` tarafından okunur; SQLite'ta otomatik `1`'e sabitlenir. OCR kuyruğu süreç-içi (`ThreadPoolExecutor`) olduğundan OCR açıkken çok worker önerilmez |
+| `HYDRO_LOCAL_ADMIN_TOKEN` | boş | Loopback dışı (ör. Docker `0.0.0.0`) `/api/system/*` ve `/api/update/*` uçları için `X-Hydro-Admin-Token` doğrulama anahtarı |
 | `HYDRO_DB_URL` | `sqlite:///webapp/data/hydro_web.db` | SQLAlchemy URL |
 | `HYDRO_DATA_DIR` | `webapp/data` | Upload/export kökü |
 | `HYDRO_CORS_ORIGINS` | boş | Virgüllü origin listesi; boşsa same-origin |

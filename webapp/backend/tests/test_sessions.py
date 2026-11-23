@@ -1072,3 +1072,76 @@ def test_session_per_segment_smys_scene_snapshot_conflict_and_txt_report(client)
     custom_scene = client.get(f"/api/sessions/{custom_sess['id']}/scene").json()
     assert custom_scene["segments"][0]["smys_mpa"] == 305.0
     assert custom_scene["segments"][0]["grade"] is None
+
+
+def test_export_include_raw_ocr_appends_ocr_summary_in_txt_xlsx_and_pdf(client):
+    import io
+
+    import openpyxl
+
+    session = create_session(client, inputs=full_inputs())
+    client.post(
+        f"/api/sessions/{session['id']}/results",
+        json={"test_type": "air", "payload": air_payload()},
+    )
+    put_resp = client.put(
+        f"/api/sessions/{session['id']}/forms/pressure_test",
+        json={
+            "form_date": "=2026-11-23",
+            "extracted_data": {
+                "notes": "HIZAN_FORM_021.pdf OCR ham satir: Pilk=92.4 bar, Pson=92.3 bar",
+                "start_pressure_bar": 92.4,
+            },
+        },
+    )
+    assert put_resp.status_code == 200, put_resp.text
+
+    preview_off = client.get(
+        f"/api/sessions/{session['id']}/export",
+        params={"format": "txt", "preview": True, "include_raw_ocr": False},
+    )
+    assert preview_off.status_code == 200
+    assert "OCR Kaynak ve Ham Metin Ozeti" not in preview_off.json()["content"]
+    assert "HIZAN_FORM_021.pdf" not in preview_off.json()["content"]
+
+    preview_on = client.get(
+        f"/api/sessions/{session['id']}/export",
+        params={"format": "txt", "preview": True, "include_raw_ocr": True},
+    )
+    assert preview_on.status_code == 200
+    txt_preview = preview_on.json()["content"]
+    assert "OCR Kaynak ve Ham Metin Ozeti" in txt_preview
+    assert "HIZAN_FORM_021.pdf" in txt_preview
+    assert "OCR ham satir: Pilk=92.4 bar" in txt_preview
+
+    txt_file = client.get(
+        f"/api/sessions/{session['id']}/export",
+        params={"format": "txt", "include_raw_ocr": True},
+    )
+    assert txt_file.status_code == 200
+    assert "OCR Kaynak ve Ham Metin Ozeti" in txt_file.text
+
+    xlsx_file = client.get(
+        f"/api/sessions/{session['id']}/export",
+        params={"format": "xlsx", "include_raw_ocr": True},
+    )
+    assert xlsx_file.status_code == 200
+    wb = openpyxl.load_workbook(io.BytesIO(xlsx_file.content))
+    assert "OCR_Ham_Metin" in wb.sheetnames
+    sheet = wb["OCR_Ham_Metin"]
+    values = [
+        str(cell) for row in sheet.iter_rows(values_only=True) for cell in row if cell is not None
+    ]
+    joined = " | ".join(values)
+    assert "HIZAN_FORM_021.pdf" in joined
+    # Formula injection neutralization check: Date cell was neutralized to "'=2026-11-23" and zero cells start with raw '='
+    assert "'=2026-11-23" in values
+    assert not any(v.startswith("=") for v in values)
+
+    pdf_file = client.get(
+        f"/api/sessions/{session['id']}/export",
+        params={"format": "pdf", "include_raw_ocr": True},
+    )
+    assert pdf_file.status_code == 200
+    assert pdf_file.headers["content-type"].startswith("application/pdf")
+    assert len(pdf_file.content) > 100
