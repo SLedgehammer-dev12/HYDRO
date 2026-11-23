@@ -135,14 +135,12 @@ Mevcut kod:
 - Oturumlari SQLite ve JSON olarak kaydedip geri yukleyebilir; PDF/Excel rapor uretir
 - Windows `.zip` ve macOS `.dmg` paketleri icin SHA-256 dogrulamali self-update akisina sahiptir
 - `HYDRO` repo ayrisma gecisi icin legacy `Programlar` release kaynagina fallback destekler
-- 709 masaüstü unittest ve 176 web backend pytest testi ile dogrulanir
+- 239 web backend pytest testi, 56 frontend Vitest testi ve `tests.test_report_ocr` (76 unittest, 1 skipped; önceki tam masaüstü paketi: 723 unittest) ile dogrulanir
 
 Mevcut kod henuz sunlari tam modellememektedir:
 
-- 14.2 basinc-hacim izlemesinin arayuz akisina tam baglanmasi (domain hesabi `pressurization.py` icinde var)
-- 16-17. bolum bosaltma ve basinc dusurme operasyonlarinin sayisal/surecsel akisi
-- 21. bolum form bazli saha rapor setinin sartnamedeki formlarla birebir eslesmesi
-- Kurum ici A/B tablosundaki 7 degC / 90-98 bar anomalisinin resmi duzeltmesi
+- Web arayüzü 14.2 basınc-hacim/ilave su zaman serisini (`Form 018`), 16–17 boşaltma/basınç düşürme akışını (`Form 023`) ve 21. bölüm BOTAŞ saha formları setini (`015`–`023`, `KUR-001/002` + 5 ek form) modeller; bu akışların **masaüstü Tkinter UI** entegrasyonu ertelenmiştir.
+- Kurum ici A/B tablosundaki 7 degC / 90-98 bar anomalisinin çalışma zamanı lineer köprü onarımı aktiftir; resmi veri güncellemesi kurum onayı beklemektedir.
 
 ## Muhendislik Notu
 

@@ -1,4 +1,6 @@
-# Aktif Plan
+# Aktif Plan (Tarihsel Masaüstü Kaydı)
+
+> **Not:** Web backend/frontend ve güncel doğrulama durumu `DURUM.md` dosyasında takip edilir. Aşağıdaki açık maddeler yalnızca **masaüstü (Tkinter UI)** / kurum veri onayı backlog'una aittir.
 
 ## Tamamlananlar
 
@@ -10,18 +12,19 @@
 - [x] UI'ye aktif teste ozel akis kontrol listesi eklendi
 - [x] `Saha Kontrol` sekmesi ile operasyonel checklist ve pig hizi hesabi eklendi
 - [x] Regresyon testleri yeni yapi ile yeniden yesil hale getirildi
+- [x] Web uygulamasında 14.2 (`Form 018`), 12/15 24h zaman serisi (`Form 021`), 16–17 (`Form 023`), 21. bölüm BOTAŞ formları ve `+2 °C` / `0–4 °C` negatif `B` uyarıları tamamlandı (ayrıntı: `DURUM.md`)
 
-## Acik Isler
+## Masaüstü UI / Kurum Onayı Açık İşler
 
-- [ ] 14.2 basinc-hacim iliskisi ve `%0.2` ilave su alarm mantigini modele ekle
-- [ ] 12 ve 15 icin zaman serili termal dengeleme / 24 saatlik test kayit veri modelini kur
-- [ ] 16-17 icin basinc dusurme ve bosaltma is akislarini rapor bazli tasarla
-- [ ] 21. bolumdeki saha formlarina uygun rapor ciktisi uret
+- [ ] (Masaüstü UI) 14.2 basinc-hacim iliskisi ve `%0.2` ilave su alarm mantigini Tkinter UI akisina bagla (web'de tamam)
+- [ ] (Masaüstü UI) 12 ve 15 icin zaman serili termal dengeleme / 24 saatlik test kayit modelini Tkinter UI'de kur (web'de tamam)
+- [ ] (Masaüstü UI) 16-17 icin basinc dusurme ve bosaltma is akislarini Tkinter UI'de tasarla (web'de tamam)
+- [ ] (Masaüstü UI) 21. bolumdeki saha formlarina uygun rapor ciktisi uret (web'de tamam)
 - [ ] Segmentli geometri indirgemesi icin kurum ici metod notu hazirla
-- [ ] +2 degC dolum kisiti icin saha uyari mantigi ekle
-- [ ] `table_v1` backend'i icin UI secici ve backend-karsilastirma raporu ekle
+- [ ] (Masaüstü UI) +2 degC dolum kisiti icin saha uyari mantigi ekle (web'de tamam)
+- [ ] `table_v1` backend'i icin masaüstü Tkinter UI secici ekle (web'de tamam)
 - [ ] Kurum ici dogrulanmis A/B veri seti geldikten sonra `table_v1` gridini resmi veri ile yeniden doldur
-- [ ] 0-4 degC araliginda negatif `beta_water` ve gecersiz `B` davranisini UI'de acik sekilde goster
+- [ ] (Masaüstü UI) 0-4 degC araliginda negatif `beta_water` ve gecersiz `B` davranisini Tkinter UI'de acik sekilde goster (web'de tamam)
 
 ## Dogrulama Kaydi
 

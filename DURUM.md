@@ -2,7 +2,7 @@
 
 > Tek kaynak özet. Ayrıntı için "Ayrıntılı notlar" bölümündeki dosyalara bakın.
 >
-> **Son güncelleme:** 2026-11-21
+> **Son güncelleme:** 2026-11-22
 > **Dal:** `main` (`v1.9.1` — Güvenlik Sertleştirme, Tip Temizliği & Güvenilirlik Güncellemeleri)
 > **Son commit:** `hidrostatik-test-v1.9.1` hazırlık & üretim sertleştirme (`v1.9.0` → `v1.9.1`)
 
@@ -12,8 +12,8 @@
 
 | Alan | Durum | Kanıt |
 | --- | --- | --- |
-| Masaüstü uygulaması | Çalışıyor, kararlı | 723 unittest PASS (`skipped=1`) |
-| Web backend (FastAPI) | Çalışıyor | 232 pytest PASS (Alembic `0003`), 87 OpenAPI path / 101 operation, 48 dosyada `mypy` temiz |
+| Masaüstü uygulaması | Çalışıyor, kararlı (`hidrostatik_test/ui/*` kapsam dışı tutuldu) | `tests.test_report_ocr` 76 unittest OK (`skipped=1`; önceki tam masaüstü koşusu: 723 unittest) |
+| Web backend (FastAPI) | Çalışıyor | 239 pytest PASS (Alembic `0003`, `SAWarning=0`), 87 OpenAPI path / 101 operation, 48 dosyada `mypy` temiz |
 | Web frontend (React 19) | Çalışıyor | `npm run lint` (0 hata, `jsx-a11y`), `npm test` (56 Vitest / 16 dosya), `npm run typecheck` + `npm run build` + `check:bundle` PASS (`147,5 kB` gzip ilk yükleme JS), `verify-tabs.mjs` 12/12 PASS |
 | Program İkon & Marka Sistemi | Hazır | Boru kesiti + su dalgası + manometre ikonu (`tools/generate_icons.py`, `assets/icons/*`, `webapp/frontend/public/*`, `<HydroLogo />`, PyInstaller/Inno Setup/Tkinter) |
 | Web Güncelleme Yöneticisi | Çalışıyor | `/api/update/*`, SHA-256 + fail-closed Ed25519 `.sig` doğrulama, `UpdateManagerModal`, macOS `.dmg` / Win `.exe`/`.zip` kurulum |
@@ -166,7 +166,7 @@ Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen iş
 
 ---
 
-## 6. Doğrulama (son çalıştırma: 2026-11-21)
+## 6. Doğrulama (son çalıştırma: 2026-11-22)
 
 ```bash
 # Lint & tip denetimi
@@ -174,17 +174,20 @@ python3 -m ruff check . && python3 -m ruff format --check .     # PASS (147 dosy
 python3 -m mypy hidrostatik_test/domain/                       # Success: no issues found (14 files)
 python3 -m mypy --ignore-missing-imports webapp/backend/app    # Success: no issues found (48 files)
 
-# Web backend (Alembic + API + domain parity)
-python3 -m pytest webapp/backend/tests -q                      # 232 passed
+# Web backend (Alembic + API + domain parity + OCR/CAD/dossier)
+python3 -m pytest webapp/backend/tests -q -W default::sqlalchemy.exc.SAWarning  # 239 passed (SAWarning yok)
 
-# Masaüstü
+# OCR/PDF servis birim testleri
+python3 -m unittest tests.test_report_ocr                      # 76 tests OK (skipped=1)
+
+# Masaüstü tam paket (önceki baseline koşu)
 python3 -m unittest discover -s tests -p "test_*.py"           # 723 tests OK (skipped=1)
 
 # Masaüstü paketli Web self-test
 python3 webapp/desktop_launcher.py --self-test                 # SELF_TEST_OK
 
 # Frontend derleme, lint & test
-cd webapp/frontend && npm run lint && npm test && npm run typecheck && npm run build && npm run check:bundle  # PASS (56 Vitest, 147,5 kB gzip)
+cd webapp/frontend && npm run lint && npm test && npm run typecheck  # PASS (56 Vitest, 16 dosya)
 
 # Sekme + BOTAŞ Form Ağacı & 020/022/023 Gömülü Hesaplama & Güncelleme Yöneticisi smoke (port 8099, izole DB)
 cd webapp/frontend && HYDRO_APP_URL=http://127.0.0.1:8099 \
