@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import http.client
 import json
 import logging
 import os
 import re
 import shutil
+import ssl
 import stat
 import subprocess
 import sys
@@ -365,6 +367,50 @@ def _download_via_powershell(
         raise UpdateError("PowerShell indirmesi bos bir dosya olusturdu.")
 
 
+def _is_tls_url_error(exc: URLError) -> bool:
+    """Return True when ``URLError`` indicates a TLS/certificate verification error."""
+    if isinstance(getattr(exc, "reason", None), ssl.SSLError):
+        return True
+    text = f"{exc!s} {getattr(exc, 'reason', '')!s}".lower()
+    return any(token in text for token in ("certificate", "ssl", "tls"))
+
+
+def _load_json_via_curl(url: str, headers: dict[str, str], timeout_seconds: int) -> Any:
+    """macOS/Unix strict-TLS JSON fallback via system ``curl``."""
+    cmd = ["curl", "-fsSL", "--max-time", str(max(1, int(timeout_seconds)))]
+    for key, value in headers.items():
+        cmd.extend(["-H", f"{key}: {value}"])
+    cmd.append(url)
+    try:
+        completed = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=max(2, int(timeout_seconds) + 2),
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise UpdateError("Sistem curl araci bulunamadi.") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise UpdateError("curl ag cagrisi zaman asimina ugradi.") from exc
+    except OSError as exc:
+        raise UpdateError(f"curl calistirilamadi: {exc}") from exc
+
+    if completed.returncode != 0:
+        detail = (
+            completed.stderr.strip() or completed.stdout.strip() or f"cikis {completed.returncode}"
+        )
+        raise UpdateError(detail)
+    raw_output = completed.stdout.strip()
+    if not raw_output:
+        raise UpdateError("curl bos bir release cevabi dondurdu.")
+    try:
+        return json.loads(raw_output)
+    except json.JSONDecodeError as exc:
+        raise UpdateError("curl release cevabi JSON olarak okunamadi.") from exc
+
+
 def _download_bytes_via_powershell_fallback(
     url: str,
     headers: dict[str, str],
@@ -392,20 +438,42 @@ def _fetch_release_payload(source_url: str, timeout_seconds: int) -> list[dict[s
     headers = _build_headers("application/vnd.github+json")
     request = Request(source_url, headers=headers)
 
-    try:
-        with open_url(request, timeout=timeout_seconds, opener=urlopen) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except HTTPError as exc:
-        raise UpdateError(f"GitHub release bilgisi okunamadi: HTTP {exc.code}") from exc
-    except URLError:
+    payload: Any = None
+    last_net_exc: Exception | None = None
+    for attempt in range(2):
+        try:
+            with open_url(request, timeout=timeout_seconds, opener=urlopen) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            last_net_exc = None
+            break
+        except HTTPError as exc:
+            raise UpdateError(f"GitHub release bilgisi okunamadi: HTTP {exc.code}") from exc
+        except URLError as exc:
+            last_net_exc = exc
+            break
+        except http.client.HTTPException as exc:
+            last_net_exc = exc
+            if attempt == 0:
+                continue
+            break
+        except json.JSONDecodeError as exc:
+            raise UpdateError("GitHub release cevabi okunamadi.") from exc
+
+    if last_net_exc is not None:
         try:
             payload = _load_json_via_powershell(source_url, headers, timeout_seconds)
-        except UpdateError as fallback_exc:
-            raise UpdateError(
-                "GitHub release servisine ulasilamadi. Python TLS dogrulamasi ve Windows fallback denemesi basarisiz oldu."
-            ) from fallback_exc
-    except json.JSONDecodeError as exc:
-        raise UpdateError("GitHub release cevabi okunamadi.") from exc
+        except UpdateError as ps_exc:
+            if sys.platform == "darwin":
+                try:
+                    payload = _load_json_via_curl(source_url, headers, timeout_seconds)
+                except UpdateError as curl_exc:
+                    raise UpdateError(
+                        "GitHub release servisine ulasilamadi. Python TLS dogrulamasi ve macOS curl fallback denemesi basarisiz oldu."
+                    ) from curl_exc
+            else:
+                raise UpdateError(
+                    "GitHub release servisine ulasilamadi. Python TLS dogrulamasi ve Windows fallback denemesi basarisiz oldu."
+                ) from ps_exc
 
     if not isinstance(payload, list):
         raise UpdateError("GitHub release cevabi beklenen list formatinda degil.")
@@ -531,12 +599,20 @@ def _download_checksum(
                 continue
             raise UpdateError(f"SHA-256 dosyasi indirilemedi: HTTP {exc.code}") from exc
         except URLError as exc:
-            raw_ps = _download_bytes_via_powershell_fallback(checksum_url, headers, timeout_seconds)
-            if raw_ps is not None:
-                content = raw_ps.decode("utf-8", errors="replace").strip()
-            else:
-                if sys.platform == "win32":
+            if sys.platform == "win32" and _is_tls_url_error(exc):
+                try:
+                    raw_ps = _download_bytes_via_powershell_fallback(
+                        checksum_url, headers, timeout_seconds
+                    )
+                except UpdateError as ps_exc:
+                    raise UpdateError(
+                        "SHA-256 dogrulama dosyasina ulasilamadi. Guvenlik riski nedeniyle guncelleme iptal edildi."
+                    ) from ps_exc
+                if raw_ps is not None:
+                    content = raw_ps.decode("utf-8", errors="replace").strip()
+                else:
                     continue
+            else:
                 raise UpdateError(
                     "SHA-256 dogrulama dosyasina ulasilamadi. Guvenlik riski nedeniyle guncelleme iptal edildi."
                 ) from exc
@@ -695,14 +771,21 @@ def _download_signature(
                 "Guvenlik nedeniyle guncelleme iptal edildi; lutfen daha sonra tekrar deneyin."
             ) from exc
         except URLError as exc:
-            raw_ps = _download_bytes_via_powershell_fallback(
-                signature_url, headers, timeout_seconds
-            )
-            if raw_ps is not None:
-                data = raw_ps
-            else:
-                if sys.platform == "win32":
+            if sys.platform == "win32" and _is_tls_url_error(exc):
+                try:
+                    raw_ps = _download_bytes_via_powershell_fallback(
+                        signature_url, headers, timeout_seconds
+                    )
+                except UpdateError as ps_exc:
+                    raise UpdateError(
+                        "Imza dosyasina ulasilamadi. Ag baglantisini kontrol edip tekrar deneyin; "
+                        "guvenlik nedeniyle imzasiz guncelleme yapilmaz."
+                    ) from ps_exc
+                if raw_ps is not None:
+                    data = raw_ps
+                else:
                     continue
+            else:
                 raise UpdateError(
                     "Imza dosyasina ulasilamadi. Ag baglantisini kontrol edip tekrar deneyin; "
                     "guvenlik nedeniyle imzasiz guncelleme yapilmaz."

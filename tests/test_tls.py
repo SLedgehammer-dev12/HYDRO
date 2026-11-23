@@ -6,7 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from urllib.error import URLError
 from urllib.request import Request
 
@@ -114,6 +114,62 @@ class UpdaterWindowsTlsFallbackTests(unittest.TestCase):
             self.assertEqual(updater._download_checksum(asset_url, 10), digest)
             self.assertEqual(updater._download_signature(asset_url, 10), raw_sig)
             self.assertEqual(sys.platform, sys.platform)
+
+    def test_non_tls_urlerror_on_win32_does_not_invoke_powershell(self) -> None:
+        asset_url = "https://example.com/app.zip"
+        with (
+            patch.object(updater.sys, "platform", "win32"),
+            patch.object(updater, "open_url", side_effect=URLError("offline")),
+            patch.object(updater, "_download_via_powershell") as mocked_ps,
+        ):
+            with self.assertRaisesRegex(updater.UpdateError, "Imza dosyasina ulasilamadi"):
+                updater._download_signature(asset_url, 10)
+            mocked_ps.assert_not_called()
+
+    def test_darwin_fetch_release_payload_falls_back_to_curl_and_retries_http_exception(
+        self,
+    ) -> None:
+        import http.client
+        import json
+
+        fake_payload = [{"tag_name": "hidrostatik-test-v1.10.1"}]
+        with (
+            patch.object(updater.sys, "platform", "darwin"),
+            patch.object(updater, "open_url", side_effect=URLError("CERTIFICATE_VERIFY_FAILED")),
+            patch.object(
+                updater, "_load_json_via_powershell", side_effect=updater.UpdateError("no pwsh")
+            ),
+            patch(
+                "hidrostatik_test.services.updater.subprocess.run",
+                return_value=Mock(returncode=0, stdout=json.dumps(fake_payload), stderr=""),
+            ) as mocked_run,
+        ):
+            result = updater._fetch_release_payload("https://api.github.com/repos/a/b/releases", 10)
+        self.assertEqual(result, fake_payload)
+        curl_cmd = mocked_run.call_args.args[0]
+        self.assertEqual(curl_cmd[0], "curl")
+        self.assertNotIn("-k", curl_cmd)
+
+        # Transient RemoteDisconnected recovers on second open_url attempt
+        class _FakeResp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self) -> bytes:
+                return json.dumps(fake_payload).encode("utf-8")
+
+        with patch.object(
+            updater,
+            "open_url",
+            side_effect=[http.client.RemoteDisconnected("closed"), _FakeResp()],
+        ):
+            retried = updater._fetch_release_payload(
+                "https://api.github.com/repos/a/b/releases", 10
+            )
+        self.assertEqual(retried, fake_payload)
 
 
 if __name__ == "__main__":
