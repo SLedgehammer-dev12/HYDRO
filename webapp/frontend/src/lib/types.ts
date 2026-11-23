@@ -159,6 +159,7 @@ export interface SpecLimits {
   max_file_size_bytes: number;
   max_pdf_pages: number;
   max_ocr_pages: number;
+  ocr_timeout_s?: number;
   max_test_section_length_m: number;
   max_test_section_volume_m3: number;
   air_acceptance_factor: number;
@@ -181,7 +182,14 @@ export interface MetaResponse {
   pump_locations: string[];
   pig_modes: PigModeOption[];
   limits: SpecLimits;
-  features: { ocr: boolean; scene: boolean; dev_backends: boolean; auth: string };
+  features: {
+    ocr: boolean;
+    scene: boolean;
+    dev_backends: boolean;
+    auth: string;
+    admin_token_configured?: boolean;
+    is_loopback_host?: boolean;
+  };
   units: Record<string, string>;
 }
 

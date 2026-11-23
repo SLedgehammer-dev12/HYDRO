@@ -172,6 +172,33 @@ export function getWorkspaceId(): string {
   }
 }
 
+const ADMIN_TOKEN_KEY = "hydro.admin_token";
+
+export function getAdminToken(): string {
+  try {
+    return (sessionStorage.getItem(ADMIN_TOKEN_KEY) ?? "").trim();
+  } catch {
+    return "";
+  }
+}
+
+export function setAdminToken(token: string): string {
+  const clean = token.trim();
+  try {
+    if (clean) sessionStorage.setItem(ADMIN_TOKEN_KEY, clean);
+    else sessionStorage.removeItem(ADMIN_TOKEN_KEY);
+  } catch {
+    /* sessionStorage kapalı olabilir */
+  }
+  return clean;
+}
+
+function adminHeadersFor(path: string): Record<string, string> {
+  if (!path.startsWith("/system/") && !path.startsWith("/update/")) return {};
+  const tok = getAdminToken();
+  return tok ? { "X-Hydro-Admin-Token": tok } : {};
+}
+
 export interface ApiFetchOptions {
   method?: string;
   body?: unknown;
@@ -230,6 +257,7 @@ export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): 
   const requestHeaders: Record<string, string> = {
     Accept: "application/json",
     "X-Session-ID": getWorkspaceId(),
+    ...adminHeadersFor(path),
     ...headers,
   };
 
@@ -316,6 +344,7 @@ export async function apiDownload(
       headers: {
         Accept: "*/*",
         "X-Session-ID": getWorkspaceId(),
+        ...adminHeadersFor(path),
         ...(rest.body ? { "Content-Type": "application/json" } : {}),
         ...rest.headers,
       },

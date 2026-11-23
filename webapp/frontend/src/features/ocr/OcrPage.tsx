@@ -31,7 +31,7 @@ import PlanProfilePanel from "./components/PlanProfilePanel";
 import DossierPanel from "./components/DossierPanel";
 import { PageHeader } from "../../components/layout/PageHeader";
 import { ConfirmDialog } from "../../components/ui/Dialog";
-import { useOpenSession, useProjects, useSessions } from "../../hooks/queries";
+import { useMeta, useOpenSession, useProjects, useSessions } from "../../hooks/queries";
 import { api } from "../../lib/api";
 import { createEmptyInputs } from "../../lib/mock";
 import { toApiInputs } from "../../lib/normalize";
@@ -173,6 +173,7 @@ export default function OcrPage() {
   const pushToast = useAppStore((s) => s.pushToast);
 
   const projectsQuery = useProjects();
+  const metaQuery = useMeta();
   const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data]);
   const [applyMode, setApplyMode] = useState<"existing" | "new">("existing");
   const [applyProjectId, setApplyProjectId] = useState<string>("");
@@ -308,6 +309,9 @@ export default function OcrPage() {
     void loadStatus();
     void loadHistory();
     void loadProfiles();
+    return () => {
+      abortRef.current?.abort();
+    };
   }, [loadStatus, loadHistory, loadProfiles]);
 
   useEffect(() => {
@@ -494,8 +498,10 @@ export default function OcrPage() {
             ? `Tahmini bekleme: ${formatNumber(job.estimated_wait_s, 0)} sn.`
             : "Sunucu analizi başlattı.",
       );
+      const serverTimeoutS = metaQuery.data?.limits?.ocr_timeout_s ?? 600;
       const final = await waitForAnalysis(job.analysis_id, {
         signal: controller.signal,
+        timeoutMs: (serverTimeoutS + 30) * 1000,
         onProgress: (info) => {
           setStage(mapServerStage(info.stage));
           setStageNote(

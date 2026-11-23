@@ -248,9 +248,10 @@ export interface TextFieldProps {
   disabled?: boolean;
   required?: boolean;
   className?: string;
-  type?: "text" | "date" | "email" | "search";
+  type?: "text" | "password" | "date" | "email" | "search";
   id?: string;
   maxLength?: number;
+  autoComplete?: string;
 }
 
 export function TextField({
@@ -266,6 +267,7 @@ export function TextField({
   type = "text",
   id,
   maxLength,
+  autoComplete,
 }: TextFieldProps) {
   const autoId = useId();
   const inputId = id ?? `txt-${autoId}`;
@@ -287,6 +289,7 @@ export function TextField({
         disabled={disabled}
         required={required}
         maxLength={maxLength}
+        autoComplete={autoComplete}
         aria-invalid={error ? true : undefined}
         aria-describedby={error ? `${inputId}-error` : help ? `${inputId}-help` : undefined}
         onChange={(event) => onChange(event.target.value)}

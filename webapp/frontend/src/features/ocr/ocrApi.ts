@@ -322,10 +322,10 @@ export async function waitForAnalysis(
       return result;
     }
     if (Date.now() - startedAt > timeoutMs) {
+      const limitSec = Math.max(1, Math.round(timeoutMs / 1000));
       throw new OcrApiError({
         code: "ocr_timeout",
-        message:
-          "Analiz 600 saniye sınırını aştı. Daha az sayfalı veya daha küçük bir dosyayla yeniden deneyin.",
+        message: `Analiz ${limitSec} saniye sınırını aştı. Daha az sayfalı veya daha küçük bir dosyayla yeniden deneyin.`,
         details: { analysis_id: analysisId },
       });
     }

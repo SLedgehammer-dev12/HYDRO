@@ -216,6 +216,7 @@ def meta_payload(settings: Settings) -> dict[str, Any]:
             "max_file_size_bytes": effective_max_file_size_bytes(),
             "max_pdf_pages": MAX_PDF_PAGES,
             "max_ocr_pages": MAX_OCR_PAGES,
+            "ocr_timeout_s": settings.ocr_timeout_s,
             "max_test_section_length_m": MAX_TEST_SECTION_LENGTH_M,
             "max_test_section_volume_m3": MAX_TEST_SECTION_VOLUME_M3,
             "air_acceptance_factor": AIR_CONTENT_ACCEPTANCE_FACTOR,
@@ -231,6 +232,8 @@ def meta_payload(settings: Settings) -> dict[str, Any]:
             "scene": True,
             "dev_backends": False,
             "auth": settings.auth_mode,
+            "admin_token_configured": bool((settings.local_admin_token or "").strip()),
+            "is_loopback_host": settings.is_loopback_host,
         },
         "units": {
             "pressure": "bar",

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, extractRevisionConflict, isRecoverableError } from "../lib/api";
+import { ApiError, api, extractRevisionConflict, isRecoverableError } from "../lib/api";
 import {
   DEMO_GRADES,
   DEMO_META,
@@ -95,7 +95,7 @@ async function resolveWithMock<T>(
     return { data: await real(), mode: "live" };
   } catch (error) {
     if (isRecoverableError(error)) {
-      useAppStore.getState().setBackend("demo");
+      // Tek bir sorgu zaman aşımı/ağ dalgalanmasında tüm uygulamayı demo kipine düşürme
       return { data: await mock(), mode: "demo" };
     }
     throw error;
@@ -145,31 +145,46 @@ function normalizeHealth(raw: Record<string, unknown>): HealthResponse {
   };
 }
 
+let consecutiveProbeFailures = 0;
+
 export function useBackendProbe() {
   const queryClient = useQueryClient();
   return useQuery<HealthResponse | null>({
     queryKey: ["health"],
     queryFn: async () => {
-      const prevBackend = useAppStore.getState().backend;
+      const storeBefore = useAppStore.getState();
+      const prevBackend = storeBefore.backend;
       try {
         const raw = await api.health();
+        consecutiveProbeFailures = 0;
         const health = normalizeHealth(raw as unknown as Record<string, unknown>);
-        useAppStore.getState().setBackend("online", health);
+        const storeNow = useAppStore.getState();
+        storeNow.setBackend("online", health);
         if (prevBackend !== "online") {
           void queryClient.invalidateQueries({ queryKey: ["sessions"] });
           void queryClient.invalidateQueries({ queryKey: ["projects"] });
           void queryClient.invalidateQueries({ queryKey: ["session-forms"] });
           void queryClient.invalidateQueries({ queryKey: ["project-scene"] });
           void queryClient.invalidateQueries({ queryKey: ["session"] });
+          if (prevBackend === "demo" && storeNow.pendingServerSync) {
+            storeNow.pushToast(
+              "warning",
+              "Sunucu bağlantısı yeniden kuruldu",
+              "Tarayıcıda bekleyen değişiklikleri Kaydet düğmesiyle sunucuya aktarabilirsiniz.",
+            );
+          }
         }
         return health;
       } catch {
-        useAppStore.getState().setBackend("demo", null);
+        consecutiveProbeFailures += 1;
+        if (prevBackend !== "online" || consecutiveProbeFailures >= 2) {
+          useAppStore.getState().setBackend("demo", null);
+        }
         return null;
       }
     },
     retry: false,
-    refetchInterval: 45_000,
+    refetchInterval: () => (useAppStore.getState().backend === "online" ? 45_000 : 15_000),
     staleTime: 15_000,
   });
 }
@@ -297,8 +312,11 @@ export function useSessions(
         state.setSessionApiReady(true);
         return response.items;
       } catch (error) {
-        if (isRecoverableError(error)) {
+        if (error instanceof ApiError && error.status === 404) {
           state.setSessionApiReady(false);
+          return fallback().items;
+        }
+        if (isRecoverableError(error)) {
           return fallback().items;
         }
         throw error;
@@ -1036,18 +1054,26 @@ export function useSaveSession() {
         if (unchangedDuringFlight) {
           store.markSaved(result.session.revision);
         }
+        store.setPendingServerSync(false);
         queryClient.setQueryData(["session", result.session.id], result.session);
       } else if (result.demo && sameActiveSession) {
-        const currentSerialized = JSON.stringify(store.inputs);
-        if (!attempt || currentSerialized === attempt.serializedInputs) {
-          store.markSaved(result.revision);
+        if (store.storageQuotaError) {
+          store.pushToast(
+            "error",
+            "Tarayıcı depolama alanı dolu",
+            "Değişiklikler yerel depolamaya yazılamadı; sunucu bağlantısını kontrol edin.",
+          );
+          return;
         }
+        store.setPendingServerSync(true);
+      } else if (result.session) {
+        store.setPendingServerSync(false);
       }
       store.pushToast(
-        "success",
-        result.demo ? "Tarayıcı oturumuna kaydedildi" : "Oturum kaydedildi",
+        result.demo ? "warning" : "success",
+        result.demo ? "Yalnızca tarayıcıda geçici saklandı" : "Oturum kaydedildi",
         result.demo
-          ? "Sunucu bağlantısı olmadığı için değişiklikler tarayıcıda tutuluyor."
+          ? "Sunucuya ulaşılamadığı için değişiklikler sunucuya yazılmadı; bağlantı geldiğinde yeniden Kaydet yapın."
           : `Revizyon ${result.revision ?? "-"} · ${new Date().toLocaleTimeString("tr-TR")}`,
       );
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });

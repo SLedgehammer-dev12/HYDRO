@@ -23,6 +23,7 @@ import {
   useCreateDbBackup,
   useDbBackups,
   useDbStats,
+  useMeta,
   usePurgeTrashItem,
   useRestoreDbBackup,
   useRestoreTrashItem,
@@ -30,7 +31,7 @@ import {
   useTrash,
   useWorkspaces,
 } from "../../hooks/queries";
-import { api, apiErrorMessage, setWorkspaceId } from "../../lib/api";
+import { ApiError, api, apiErrorMessage, getAdminToken, setAdminToken, setWorkspaceId } from "../../lib/api";
 import { dateTime, fmt, num } from "../../lib/format";
 import { downloadBlob } from "../../lib/report";
 import type { TrashItem } from "../../lib/types";
@@ -59,9 +60,12 @@ export function DatabaseAdminPanel() {
   const [confirmClaimHash, setConfirmClaimHash] = useState<string | null>(null);
   const [claimSourceKey, setClaimSourceKey] = useState("");
   const [customWorkspaceKey, setCustomWorkspaceKey] = useState("");
+  const [adminTokenInput, setAdminTokenInput] = useState(() => getAdminToken());
+  const [savedAdminToken, setSavedAdminToken] = useState(() => getAdminToken());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const online = backend === "online";
+  const metaQuery = useMeta();
   const statsQuery = useDbStats(online);
   const backupsQuery = useDbBackups(online && tab === "backups");
   const trashQuery = useTrash(online && tab === "trash");
@@ -106,6 +110,25 @@ export function DatabaseAdminPanel() {
     pushToast("success", "Çalışma alanı anahtarı güncellendi", "Projeler ve kesitler yeniden yükleniyor.");
   }
 
+  function handleSaveAdminToken() {
+    const saved = setAdminToken(adminTokenInput);
+    setSavedAdminToken(saved);
+    setAdminTokenInput(saved);
+    void queryClient.invalidateQueries();
+    pushToast(
+      saved ? "success" : "info",
+      saved ? "Yönetici anahtarı kaydedildi" : "Yönetici anahtarı temizlendi",
+      "Bu sekme oturumu boyunca X-Hydro-Admin-Token başlığı gönderilecek.",
+    );
+  }
+
+  const isAuth403 = statsQuery.error instanceof ApiError && statsQuery.error.status === 403;
+  const showAdminTokenBar =
+    Boolean(metaQuery.data?.features?.admin_token_configured) ||
+    metaQuery.data?.features?.is_loopback_host === false ||
+    Boolean(savedAdminToken) ||
+    isAuth403;
+
   const stats = statsQuery.data;
 
   return (
@@ -130,6 +153,40 @@ export function DatabaseAdminPanel() {
         </InlineNotice>
       ) : (
         <div className="space-y-4">
+          {showAdminTokenBar ? (
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3">
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="min-w-[220px] flex-1">
+                  <TextField
+                    label="Yönetici Anahtarı (X-Hydro-Admin-Token)"
+                    type="password"
+                    autoComplete="off"
+                    value={adminTokenInput}
+                    onChange={setAdminTokenInput}
+                    placeholder="X-Hydro-Admin-Token anahtarını girin..."
+                  />
+                </div>
+                <Button size="sm" variant="primary" icon={<KeyRound size={13} />} onClick={handleSaveAdminToken}>
+                  Anahtarı Kaydet
+                </Button>
+                {savedAdminToken ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setAdminToken("");
+                      setSavedAdminToken("");
+                      setAdminTokenInput("");
+                      void queryClient.invalidateQueries();
+                    }}
+                  >
+                    Temizle
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
           <div className="seg-control" role="tablist" aria-label="Veritabanı yönetimi sekmeleri">
             {[
               { id: "overview" as const, label: "Durum & Bakım" },

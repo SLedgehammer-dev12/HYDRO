@@ -78,6 +78,8 @@ export interface AppStore {
   lastBackendCheck: string | null;
   /** `/api/sessions` hazır mı? Health çalışırken oturum ucu 404 dönebilir. */
   sessionApiReady: boolean | null;
+  pendingServerSync: boolean;
+  storageQuotaError: boolean;
 
   history: HistoryEntry[];
   exports: ExportEntry[];
@@ -124,6 +126,8 @@ export interface AppStore {
 
   setBackend: (mode: BackendMode, health?: HealthResponse | null) => void;
   setSessionApiReady: (ready: boolean | null) => void;
+  setPendingServerSync: (pending: boolean) => void;
+  setStorageQuotaError: (flag: boolean) => void;
 
   addHistory: (entry: Omit<HistoryEntry, "id" | "at"> & { at?: string }) => void;
   addExport: (entry: Omit<ExportEntry, "id" | "at"> & { at?: string }) => void;
@@ -166,6 +170,8 @@ export const useAppStore = create<AppStore>()(
       health: null,
       lastBackendCheck: null,
       sessionApiReady: null,
+      pendingServerSync: false,
+      storageQuotaError: false,
 
       history: initial.history,
       exports: [],
@@ -367,6 +373,8 @@ export const useAppStore = create<AppStore>()(
         }),
 
       setSessionApiReady: (sessionApiReady) => set({ sessionApiReady }),
+      setPendingServerSync: (pendingServerSync) => set({ pendingServerSync }),
+      setStorageQuotaError: (storageQuotaError) => set({ storageQuotaError }),
 
       addHistory: (entry) =>
         set((state) => ({
@@ -421,6 +429,8 @@ export const useAppStore = create<AppStore>()(
           revision: 0,
           dirty: false,
           revisionConflict: null,
+          pendingServerSync: false,
+          storageQuotaError: false,
           projectId: null,
           projectName: "",
           projectCode: "",
@@ -432,7 +442,34 @@ export const useAppStore = create<AppStore>()(
     }),
     {
       name: PERSIST_KEY,
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() => ({
+        getItem: (name: string) => {
+          try {
+            return localStorage.getItem(name);
+          } catch {
+            return null;
+          }
+        },
+        setItem: (name: string, value: string) => {
+          try {
+            localStorage.setItem(name, value);
+            if (useAppStore?.getState?.().storageQuotaError) {
+              useAppStore.setState({ storageQuotaError: false });
+            }
+          } catch {
+            if (useAppStore?.setState) {
+              useAppStore.setState({ storageQuotaError: true });
+            }
+          }
+        },
+        removeItem: (name: string) => {
+          try {
+            localStorage.removeItem(name);
+          } catch {
+            /* yoksay */
+          }
+        },
+      })),
       partialize: (state) => ({
         tab: state.tab,
         activeFormCode: state.activeFormCode,
@@ -440,6 +477,7 @@ export const useAppStore = create<AppStore>()(
         sessionName: state.sessionName,
         sessionStatus: state.sessionStatus,
         revision: state.revision,
+        pendingServerSync: state.pendingServerSync,
         projectId: state.projectId,
         projectName: state.projectName,
         projectCode: state.projectCode,

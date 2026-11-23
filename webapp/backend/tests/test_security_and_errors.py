@@ -690,3 +690,25 @@ def test_slice1_auth_mode_fails_closed_even_with_allow_remote_or_loopback(
     monkeypatch.setenv("HYDRO_ALLOW_REMOTE", "1")
     code = run_web.main(["--host", "127.0.0.1", "--data-dir", str(tmp_path / "rw")])
     assert code == 2
+
+
+def test_slice2_meta_exposes_ocr_timeout_and_admin_flags_without_token_leak(tmp_path: Path):
+    s = Settings(
+        host="0.0.0.0",
+        data_dir=tmp_path / "m2",
+        database_url=f"sqlite:///{tmp_path / 'm2' / 'hydro.db'}",
+        ocr_timeout_s=900,
+        local_admin_token="top-secret-token-99",
+    )
+    app = create_app(s)
+    try:
+        with TestClient(app) as tc:
+            res = tc.get("/api/meta")
+            assert res.status_code == 200
+            body = res.json()
+            assert body["limits"]["ocr_timeout_s"] == 900
+            assert body["features"]["admin_token_configured"] is True
+            assert body["features"]["is_loopback_host"] is False
+            assert "top-secret-token-99" not in res.text
+    finally:
+        db.dispose_database()
