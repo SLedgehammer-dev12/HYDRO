@@ -1,7 +1,7 @@
 # HYDRO Web - Uygulama Durumu
 
 Tarih: 2026-11-23
-Dal: `main` (`v1.9.1`)
+Dal: `main` (`v1.10.0`)
 
 > Tek sayfalık güncel özet ve yapılacaklar listesi: [`../../DURUM.md`](../../DURUM.md)
 

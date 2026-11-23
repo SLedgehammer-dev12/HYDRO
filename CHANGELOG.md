@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.10.0 - 2026-11-23
+
+### Added
+
+- **Şartname 12, 14.1–14.3, 15, 16 ve 17 Saha Operasyon Modelleri (`hidrostatik_test/domain/`, `OperationsPanel`, `TimeSeriesPanel`, `TimeSeriesChart`)**:
+  - Ardışık 4 saatlik pencereler ve 24 saatlik termal dengeleme modeli (`evaluate_time_series`), %95 SMYS sonrası %0,2 ilave su durdurma ve 2 saatlik basınç tutma kontrolü (`pressurization_monitor.py`), basınç düşürme/boşaltma kontrolleri (`post_test_operations.py`) ve `Form 018` / `021` / `023` çift yönlü senkronizasyonu eklendi.
+- **Segment Bazlı SMYS, Gerçek 3D Kot Profili & Masaüstü Snapshot İçe Aktarma (`PipeSection.smys_mpa`, `SiteSurveyPanel`, `RevisionConflictModal`)**:
+  - Segment başına malzeme kalitesi/SMYS tanımlama, gerçek `profile_points[]` ve `equipment[]` sahne verisi, masaüstü JSON snapshot içe aktarma ve `409 revision_conflict` satır bazlı fark çözümleme modalı eklendi.
+- **Makine Doğrulanabilir API Sözleşmesi & Rapor Ham OCR Eki (`webapp/docs/openapi.json`, `dump_openapi.py`, `check:api`, `ReportsPage.tsx`)**:
+  - `87` yol / `101` HTTP operasyonluk `openapi.json` sözleşmesi, CI denetimi ve TXT/PDF/XLSX raporlarına (`OCR_Ham_Metin` Excel formül enjeksiyon korumalı) `include_raw_ocr` eki eklendi.
+- **Alembic Şema Göçü (`0002` → `0003`), DB Yönetimi & Docker Yönetici Token Arayüzü (`DatabaseAdminPanel.tsx`, `X-Hydro-Admin-Token`)**:
+  - Rollback güvenli `restore_db_backup`, `db_stats`, çöp kutusu geri yükleme ve Docker (`0.0.0.0`) ortamında `sessionStorage` tabanlı `X-Hydro-Admin-Token` desteği eklendi.
+
+### Fixed & Hardened
+
+- **Form Eşzamanlılık Koruması & İstek Sınırları (`sessions.py`, `dossier.py`, `schemas.py`, `rate_limit.py`, `config.py`)**:
+  - `PUT /sessions/{id}/forms/{form_code}` uç noktasına `ETag` / `If-Match` revizyon kontrolü ve `409 revision_conflict` kurtarma akışı, yazma modellerine `StrictWriteModel` (`extra="forbid"`), liste üst sınırları, workspace bazlı hız sınırları ve fail-closed `HYDRO_AUTH_MODE` doğrulaması eklendi.
+- **Çevrimdışı Düşme, Kota & OCR Yoklama Yaşam Döngüsü (`queries.ts`, `useAppStore.ts`, `OcrPage.tsx`, `ocrApi.ts`)**:
+  - Tekil ağ okuma hatalarının uygulamayı kalıcı `demo` moduna alması engellendi; çevrimdışı kayıtlarda açık uyarı + `pendingServerSync` + `QuotaExceededError` yakalama ve `OcrPage` ayrılışında sunucu işini koruyarak istemci yoklamasını durdurma eklendi.
+- **Akışlı Yüklemeler, Diskten Proje Arşivi & Canlı DB Restore Bariyeri (`security.py`, `project_archive.py`, `db.py`, `main.py`, `reports.py`, `run_web.py`)**:
+  - Yüklemeler `stream_upload_to_tempfile` ile diske akışlandı; JSON gövde boyutu `32 MB` ile sınırlandı; eski export dosyaları 24 saat TTL ile temizlenir hale getirildi; proje arşivleri geçici `.zip` dosyası üzerinden akışlandı; canlı DB değişimi sırasında `503 db_restoring` (`Retry-After: 2`) bariyeri ve SQLite'ta `HYDRO_WEB_WORKERS=1` koruması eklendi.
+- **OCR / PDF / CAD Doğruluğu & CI Kapsam Kapısı (`report_ocr.py`, `dossier.py`, `plan_profile.py`, `webapp/Dockerfile`, `.github/workflows/test.yml`)**:
+  - PDF satır gruplama, noktalı ondalık ayrıştırma, CAD dış çap okuma ve BOTAŞ form bulgu kontrolleri iyileştirildi; Docker imajına `tesseract-ocr-tur/eng` eklendi; CI web pytest işine `--fail-under=80` kapsam kapısı eklendi.
+
 ## 1.9.1 - 2026-11-18
 
 ### Added

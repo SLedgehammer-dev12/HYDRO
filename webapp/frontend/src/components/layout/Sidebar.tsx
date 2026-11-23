@@ -544,7 +544,7 @@ export function Sidebar() {
                 ? "Çevrimdışı mod"
                 : "Kontrol ediliyor"}
           </span>
-          <span className="font-mono text-[10px]">v{meta?.app.version ?? "1.9.1"}</span>
+          <span className="font-mono text-[10px]">v{meta?.app.version ?? "1.10.0"}</span>
         </div>
         <button
           type="button"
