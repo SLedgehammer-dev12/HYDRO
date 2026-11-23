@@ -98,6 +98,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt -r requirements-dev.txt -r webapp/requirements-web.txt
 
-      - name: Run web backend pytest suite
+      - name: Run web backend pytest suite with coverage gate
         run: |
-          python -m pytest webapp/backend/tests -q
+          python -m coverage run --source=webapp/backend/app -m pytest webapp/backend/tests -q
+          python -m coverage report --fail-under=80

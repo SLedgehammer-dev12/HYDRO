@@ -64,7 +64,7 @@ from .core.errors import (
     register_exception_handlers,
 )
 from .core.rate_limit import RATE_LIMITER
-from .core.security import actor_for, normalize_workspace, workspace_hash
+from .core.security import MAX_JSON_BODY_BYTES, actor_for, normalize_workspace, workspace_hash
 from .services.ocr_queue import OCR_QUEUE
 
 logger = logging.getLogger("hydro.web")
@@ -201,7 +201,49 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 _apply_security_headers(denied, path, request_id, raw_workspace)
                 return denied
 
-        response = await call_next(request)
+        content_type = request.headers.get("content-type", "").lower()
+        if request.method in {"POST", "PUT", "PATCH"} and "multipart/form-data" not in content_type:
+            raw_cl = request.headers.get("content-length")
+            if raw_cl is not None:
+                try:
+                    if int(raw_cl) > MAX_JSON_BODY_BYTES:
+                        too_large = JSONResponse(
+                            status_code=413,
+                            content={
+                                "code": "payload_too_large",
+                                "message": "Istek govdesi izin verilen 32 MB sinirini asiyor.",
+                                "details": {"max_bytes": MAX_JSON_BODY_BYTES},
+                                "request_id": request_id,
+                            },
+                        )
+                        _apply_security_headers(too_large, path, request_id, raw_workspace)
+                        return too_large
+                except ValueError:
+                    pass
+
+        track_db = path.startswith(f"{API_PREFIX}/") and path not in {
+            f"{API_PREFIX}/health",
+            f"{API_PREFIX}/system/db-restore",
+        }
+        if track_db and not db.enter_request():
+            restoring_resp = JSONResponse(
+                status_code=503,
+                headers={"Retry-After": "2"},
+                content={
+                    "code": "db_restoring",
+                    "message": "Veritabani geri yukleme islemi suruyor; lutfen birkac saniye sonra tekrar deneyin.",
+                    "details": {"retry_after_s": 2},
+                    "request_id": request_id,
+                },
+            )
+            _apply_security_headers(restoring_resp, path, request_id, raw_workspace)
+            return restoring_resp
+
+        try:
+            response = await call_next(request)
+        finally:
+            if track_db:
+                db.exit_request()
         _apply_security_headers(response, path, request_id, raw_workspace)
         if "text/html" in response.headers.get("content-type", ""):
             response.headers["Cache-Control"] = "no-cache"
@@ -229,6 +271,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 REQUEST_ID_HEADER,
                 "If-Match",
                 "Idempotency-Key",
+                "X-Hydro-Admin-Token",
             ],
             expose_headers=[REQUEST_ID_HEADER, SESSION_HEADER, "ETag", "Location", "X-Total-Count"],
         )

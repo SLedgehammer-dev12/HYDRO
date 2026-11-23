@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session as OrmSession
+from starlette.background import BackgroundTask
 
 from .. import schemas
 from ..core import security
@@ -81,20 +84,26 @@ async def import_project_archive(
     workspace: Workspace = Depends(get_workspace),
 ) -> dict:
     enforce_rate_limit(request, settings, bucket="project_import", limit=30)
-    archive_bytes = await security.read_upload_bounded(
-        file, min(settings.max_upload_bytes, project_archive_service.MAX_ARCHIVE_BYTES)
+    temp_archive = await security.stream_upload_to_tempfile(
+        file,
+        min(settings.max_upload_bytes, project_archive_service.MAX_ARCHIVE_BYTES),
+        suffix=".zip",
+        temp_dir=settings.data_dir,
     )
-    return json_safe(
-        project_archive_service.import_project_archive(
-            db,
-            settings,
-            workspace.hash,
-            archive_bytes,
-            target_project_name=target_project_name,
-            target_project_code=target_project_code,
-            include_attachments=include_attachments,
+    try:
+        return json_safe(
+            project_archive_service.import_project_archive(
+                db,
+                settings,
+                workspace.hash,
+                archive_path=temp_archive,
+                target_project_name=target_project_name,
+                target_project_code=target_project_code,
+                include_attachments=include_attachments,
+            )
         )
-    )
+    finally:
+        temp_archive.unlink(missing_ok=True)
 
 
 @router.get("/{project_id}")
@@ -302,6 +311,10 @@ def clone_project(
     )
 
 
+def _unlink_temp_archive(path: Path) -> None:
+    path.unlink(missing_ok=True)
+
+
 @router.get("/{project_id}/archive")
 def export_project_archive(
     request: Request,
@@ -312,17 +325,18 @@ def export_project_archive(
     settings: Settings = Depends(get_settings),
 ) -> Response:
     enforce_rate_limit(request, settings, bucket="project_archive", limit=15)
-    zip_bytes, download_name = project_archive_service.export_project_archive(
+    zip_path, download_name = project_archive_service.export_project_archive_to_tempfile(
         db,
         settings,
         workspace.hash,
         project_id,
         include_attachments=include_attachments,
     )
-    return Response(
-        content=zip_bytes,
+    return FileResponse(
+        path=zip_path,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
+        filename=download_name,
+        background=BackgroundTask(_unlink_temp_archive, zip_path),
     )
 
 

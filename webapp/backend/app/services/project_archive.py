@@ -115,15 +115,28 @@ def _read_zip_entry_bounded(
     return b"".join(chunks)
 
 
-def export_project_archive(
+def _hash_file_on_disk(path: Path, chunk_size: int = 65536) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    total = 0
+    with path.open("rb") as handle:
+        while True:
+            chunk = handle.read(chunk_size)
+            if not chunk:
+                break
+            digest.update(chunk)
+            total += len(chunk)
+    return digest.hexdigest(), total
+
+
+def export_project_archive_to_tempfile(
     db: OrmSession,
     settings: Settings,
     workspace_hash: str,
     project_id: str,
     *,
     include_attachments: bool = True,
-) -> tuple[bytes, str]:
-    """Bundle a full project (metadata, sections, results, time series, BOTAŞ forms, attachments) into `.hydroproj.zip`."""
+) -> tuple[Path, str]:
+    """Stream a full `.hydroproj.zip` archive directly to a disk tempfile without buffering attachments in RAM."""
 
     project = project_service.get_project(db, project_id, workspace_hash)
     sessions = (
@@ -145,7 +158,7 @@ def export_project_archive(
     ts_by_sec: dict[str, list[TimeSeriesRecord]] = {sid: [] for sid in session_ids}
     forms_by_sec: dict[str, list[SectionForm]] = {sid: [] for sid in session_ids}
     attachments_meta: list[dict[str, Any]] = []
-    attachment_blobs: dict[str, bytes] = {}
+    attachment_paths: dict[str, Path] = {}
 
     if session_ids:
         for res in (
@@ -197,20 +210,20 @@ def export_project_archive(
                     resolved = storage.resolve_stored_path(settings.uploads_dir, att.stored_path)
                     if not resolved.exists() or not resolved.is_file():
                         continue
-                    blob = resolved.read_bytes()
+                    file_sha, file_size = _hash_file_on_disk(resolved)
                 except Exception:
                     continue
                 safe_name = security.safe_filename(att.filename)
                 arc_path = f"attachments/{att.id}_{safe_name}"
-                attachment_blobs[arc_path] = blob
+                attachment_paths[arc_path] = resolved
                 attachments_meta.append(
                     {
                         "id": att.id,
                         "session_id": att.session_id,
                         "filename": att.filename,
                         "mime": att.mime,
-                        "size_bytes": len(blob),
-                        "sha256": hashlib.sha256(blob).hexdigest(),
+                        "size_bytes": file_size,
+                        "sha256": file_sha,
                         "kind": att.kind,
                         "archive_path": arc_path,
                     }
@@ -301,14 +314,17 @@ def export_project_archive(
         )
 
     payload_files["attachments.json"] = _encode_json(attachments_meta)
-    for arc_path, blob in attachment_blobs.items():
-        payload_files[arc_path] = blob
 
     manifest_files: dict[str, dict[str, Any]] = {}
     for rel_path, blob in sorted(payload_files.items()):
         manifest_files[rel_path] = {
             "sha256": hashlib.sha256(blob).hexdigest(),
             "size_bytes": len(blob),
+        }
+    for meta_entry in sorted(attachments_meta, key=lambda item: str(item["archive_path"])):
+        manifest_files[str(meta_entry["archive_path"])] = {
+            "sha256": str(meta_entry["sha256"]),
+            "size_bytes": int(meta_entry["size_bytes"]),
         }
 
     manifest_bytes = _encode_json(
@@ -323,41 +339,94 @@ def export_project_archive(
         }
     )
 
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("manifest.json", manifest_bytes)
-        for rel_path, blob in sorted(payload_files.items()):
-            zf.writestr(rel_path, blob)
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix="hydro_archive_", suffix=".zip", dir=str(settings.data_dir)
+    )
+    os.close(fd)
+    zip_path = Path(tmp_name)
+    try:
+        try:
+            os.chmod(zip_path, 0o600)
+        except OSError:
+            pass
+        with zipfile.ZipFile(zip_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("manifest.json", manifest_bytes)
+            for rel_path, blob in sorted(payload_files.items()):
+                zf.writestr(rel_path, blob)
+            for arc_path, disk_path in sorted(attachment_paths.items()):
+                zf.write(disk_path, arcname=arc_path)
+    except Exception:
+        zip_path.unlink(missing_ok=True)
+        raise
 
     slug = security.safe_filename((project.code or project.name or "proje").replace(" ", "_"))
-    return buf.getvalue(), f"{slug}.hydroproj.zip"
+    return zip_path, f"{slug}.hydroproj.zip"
+
+
+def export_project_archive(
+    db: OrmSession,
+    settings: Settings,
+    workspace_hash: str,
+    project_id: str,
+    *,
+    include_attachments: bool = True,
+) -> tuple[bytes, str]:
+    """Bundle a full project into `.hydroproj.zip` bytes (backward-compatible wrapper)."""
+
+    zip_path, download_name = export_project_archive_to_tempfile(
+        db,
+        settings,
+        workspace_hash,
+        project_id,
+        include_attachments=include_attachments,
+    )
+    try:
+        return zip_path.read_bytes(), download_name
+    finally:
+        zip_path.unlink(missing_ok=True)
 
 
 def import_project_archive(
     db: OrmSession,
     settings: Settings,
     workspace_hash: str,
-    archive_bytes: bytes,
+    archive_bytes: bytes | None = None,
     *,
+    archive_path: Path | None = None,
     target_project_name: str | None = None,
     target_project_code: str | None = None,
     include_attachments: bool = True,
 ) -> dict[str, Any]:
     """Verify integrity and atomically import a `.hydroproj.zip` archive into a new Project."""
 
-    if not archive_bytes:
-        raise validation_error("Bos arsiv dosyasi yuklendi.", field="file")
-    if len(archive_bytes) > MAX_ARCHIVE_BYTES:
-        raise AppError(
-            "archive_too_large",
-            f"Arsiv boyutu ust siniri asti ({MAX_ARCHIVE_BYTES // (1024 * 1024)} MB).",
-            status_code=413,
-        )
-
-    try:
-        zf = zipfile.ZipFile(io.BytesIO(archive_bytes), mode="r")
-    except zipfile.BadZipFile as exc:
-        raise validation_error("Gecersiz .hydroproj.zip arsiv dosyasi.", field="file") from exc
+    if archive_path is not None:
+        size = archive_path.stat().st_size if archive_path.is_file() else 0
+        if size == 0:
+            raise validation_error("Bos arsiv dosyasi yuklendi.", field="file")
+        if size > MAX_ARCHIVE_BYTES:
+            raise AppError(
+                "archive_too_large",
+                f"Arsiv boyutu ust siniri asti ({MAX_ARCHIVE_BYTES // (1024 * 1024)} MB).",
+                status_code=413,
+            )
+        try:
+            zf = zipfile.ZipFile(archive_path, mode="r")
+        except zipfile.BadZipFile as exc:
+            raise validation_error("Gecersiz .hydroproj.zip arsiv dosyasi.", field="file") from exc
+    else:
+        if not archive_bytes:
+            raise validation_error("Bos arsiv dosyasi yuklendi.", field="file")
+        if len(archive_bytes) > MAX_ARCHIVE_BYTES:
+            raise AppError(
+                "archive_too_large",
+                f"Arsiv boyutu ust siniri asti ({MAX_ARCHIVE_BYTES // (1024 * 1024)} MB).",
+                status_code=413,
+            )
+        try:
+            zf = zipfile.ZipFile(io.BytesIO(archive_bytes), mode="r")
+        except zipfile.BadZipFile as exc:
+            raise validation_error("Gecersiz .hydroproj.zip arsiv dosyasi.", field="file") from exc
 
     with zf:
         infos = zf.infolist()
@@ -740,33 +809,53 @@ def import_desktop_db(
     db: OrmSession,
     settings: Settings,
     workspace_hash: str,
-    db_bytes: bytes,
+    db_bytes: bytes | None = None,
     *,
+    db_path: Path | None = None,
     project_name: str | None = None,
     project_code: str | None = None,
 ) -> dict[str, Any]:
     """Import sessions, geometry, results and time series from a desktop `hydro.db` SQLite file."""
 
-    if len(db_bytes) < 100 or not db_bytes.startswith(SQLITE_MAGIC):
-        raise validation_error(
-            "Gecersiz SQLite veritabani dosyasi (SQLite format 3 imzasi bulunamadi).", field="file"
-        )
-    if len(db_bytes) > settings.max_upload_bytes:
-        raise AppError("file_too_large", "Veritabani dosya boyut siniri asildi.", status_code=413)
-
-    tmp_fd, tmp_name = tempfile.mkstemp(prefix="hydro_desktop_", suffix=".db")
-    tmp_path = Path(tmp_name)
-    try:
+    owned_tmp_path: Path | None = None
+    if db_path is not None:
+        size = db_path.stat().st_size if db_path.is_file() else 0
+        with db_path.open("rb") as handle:
+            head = handle.read(len(SQLITE_MAGIC))
+        if size < 100 or head != SQLITE_MAGIC:
+            raise validation_error(
+                "Gecersiz SQLite veritabani dosyasi (SQLite format 3 imzasi bulunamadi).",
+                field="file",
+            )
+        if size > settings.max_upload_bytes:
+            raise AppError(
+                "file_too_large", "Veritabani dosya boyut siniri asildi.", status_code=413
+            )
+        target_db_path = db_path
+    else:
+        if not db_bytes or len(db_bytes) < 100 or not db_bytes.startswith(SQLITE_MAGIC):
+            raise validation_error(
+                "Gecersiz SQLite veritabani dosyasi (SQLite format 3 imzasi bulunamadi).",
+                field="file",
+            )
+        if len(db_bytes) > settings.max_upload_bytes:
+            raise AppError(
+                "file_too_large", "Veritabani dosya boyut siniri asildi.", status_code=413
+            )
+        tmp_fd, tmp_name = tempfile.mkstemp(prefix="hydro_desktop_", suffix=".db")
+        owned_tmp_path = Path(tmp_name)
         try:
             os.fchmod(tmp_fd, 0o600)
         except OSError:
             pass
         with os.fdopen(tmp_fd, "wb") as handle:
             handle.write(db_bytes)
+        target_db_path = owned_tmp_path
 
+    try:
         conn: sqlite3.Connection | None = None
         try:
-            conn = sqlite3.connect(f"file:{tmp_path.as_posix()}?mode=ro", uri=True)
+            conn = sqlite3.connect(f"file:{target_db_path.as_posix()}?mode=ro", uri=True)
             conn.row_factory = sqlite3.Row
             qcheck = conn.execute("PRAGMA quick_check").fetchone()
             if not qcheck or str(qcheck[0]).lower() != "ok":
@@ -805,7 +894,8 @@ def import_desktop_db(
             if conn is not None:
                 conn.close()
     finally:
-        tmp_path.unlink(missing_ok=True)
+        if owned_tmp_path is not None:
+            owned_tmp_path.unlink(missing_ok=True)
 
     geom_by_sid: dict[str, sqlite3.Row] = {str(r["session_id"]): r for r in geom_rows}
     entries_by_sid: dict[str, list[sqlite3.Row]] = {}
@@ -969,6 +1059,7 @@ __all__ = [
     "ARCHIVE_FORMAT",
     "ARCHIVE_SCHEMA_VERSION",
     "export_project_archive",
+    "export_project_archive_to_tempfile",
     "import_desktop_db",
     "import_project_archive",
 ]

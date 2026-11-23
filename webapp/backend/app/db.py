@@ -8,6 +8,7 @@ Alembic via :mod:`app.migrations_runner`.
 
 from __future__ import annotations
 
+import threading
 from contextlib import contextmanager
 from typing import Iterator
 
@@ -22,6 +23,45 @@ CURRENT_MIGRATION = migrations_runner.HEAD_REVISION
 _engine: Engine | None = None
 _session_factory: sessionmaker[Session] | None = None
 _current_url: str | None = None
+_restore_cond = threading.Condition()
+_restoring = False
+_in_flight_requests = 0
+
+
+def is_restoring() -> bool:
+    with _restore_cond:
+        return _restoring
+
+
+def enter_request() -> bool:
+    global _in_flight_requests
+    with _restore_cond:
+        if _restoring:
+            return False
+        _in_flight_requests += 1
+        return True
+
+
+def exit_request() -> None:
+    global _in_flight_requests
+    with _restore_cond:
+        _in_flight_requests = max(0, _in_flight_requests - 1)
+        if _in_flight_requests == 0:
+            _restore_cond.notify_all()
+
+
+def begin_restore_swap(timeout_s: float = 2.0) -> None:
+    global _restoring
+    with _restore_cond:
+        _restoring = True
+        _restore_cond.wait_for(lambda: _in_flight_requests == 0, timeout=max(0.0, timeout_s))
+
+
+def end_restore_swap() -> None:
+    global _restoring
+    with _restore_cond:
+        _restoring = False
+        _restore_cond.notify_all()
 
 
 def _is_sqlite(url: str) -> bool:

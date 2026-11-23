@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hmac
+from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Body, Depends, Query, Request, UploadFile
@@ -333,44 +334,53 @@ async def restore_db_backup(
     _require_local_admin(request, settings)
     enforce_rate_limit(request, settings, bucket="db_admin", limit=30)
     content_type = request.headers.get("content-type", "").lower()
-    backup_bytes: bytes | None = None
+    temp_upload_path: Path | None = None
     backup_filename: str | None = None
-    if "multipart/form-data" in content_type:
-        form = await request.form()
-        uploaded = form.get("file")
-        if isinstance(uploaded, UploadFile) or hasattr(uploaded, "read"):
-            backup_bytes = await security.read_upload_bounded(uploaded, settings.max_upload_bytes)
-        raw_name = form.get("backup_filename")
-        if isinstance(raw_name, str) and raw_name.strip():
-            backup_filename = raw_name.strip()
-    else:
-        try:
-            body = await request.json()
-        except Exception as exc:
-            raise AppError(
-                "invalid_request",
-                "Geri yukleme icin gecerli bir dosya veya JSON body gonderin.",
-                status_code=400,
-            ) from exc
-        if not isinstance(body, dict):
-            raise validation_error("JSON govdesi nesne olmalidir.", field="body")
-        try:
-            parsed = schemas.DbRestoreRequest(**body)
-        except (TypeError, ValidationError) as exc:
-            raise validation_error(
-                "Geri yukleme parametreleri gecersiz.",
-                field="backup_filename",
-            ) from exc
-        backup_filename = parsed.backup_filename
+    try:
+        if "multipart/form-data" in content_type:
+            form = await request.form()
+            uploaded = form.get("file")
+            if isinstance(uploaded, UploadFile) or hasattr(uploaded, "read"):
+                temp_upload_path = await security.stream_upload_to_tempfile(
+                    uploaded,
+                    settings.max_upload_bytes,
+                    suffix=".db",
+                    temp_dir=settings.data_dir,
+                )
+            raw_name = form.get("backup_filename")
+            if isinstance(raw_name, str) and raw_name.strip():
+                backup_filename = raw_name.strip()
+        else:
+            try:
+                body = await request.json()
+            except Exception as exc:
+                raise AppError(
+                    "invalid_request",
+                    "Geri yukleme icin gecerli bir dosya veya JSON body gonderin.",
+                    status_code=400,
+                ) from exc
+            if not isinstance(body, dict):
+                raise validation_error("JSON govdesi nesne olmalidir.", field="body")
+            try:
+                parsed = schemas.DbRestoreRequest(**body)
+            except (TypeError, ValidationError) as exc:
+                raise validation_error(
+                    "Geri yukleme parametreleri gecersiz.",
+                    field="backup_filename",
+                ) from exc
+            backup_filename = parsed.backup_filename
 
-    return json_safe(
-        db_admin_service.restore_db_backup(
-            settings,
-            backup_bytes=backup_bytes,
-            backup_filename=backup_filename,
-            workspace_hash=workspace.hash,
+        return json_safe(
+            db_admin_service.restore_db_backup(
+                settings,
+                backup_path=temp_upload_path,
+                backup_filename=backup_filename,
+                workspace_hash=workspace.hash,
+            )
         )
-    )
+    finally:
+        if temp_upload_path is not None:
+            temp_upload_path.unlink(missing_ok=True)
 
 
 @router.get("/system/trash")

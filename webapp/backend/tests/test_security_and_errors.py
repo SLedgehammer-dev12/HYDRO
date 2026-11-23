@@ -712,3 +712,140 @@ def test_slice2_meta_exposes_ocr_timeout_and_admin_flags_without_token_leak(tmp_
             assert "top-secret-token-99" not in res.text
     finally:
         db.dispose_database()
+
+
+def test_slice4_stream_upload_to_tempfile_and_json_body_size_cap(tmp_path: Path):
+    import asyncio
+
+    import pytest
+    from app.core import security
+    from app.core.errors import AppError
+
+    class FakeUpload:
+        def __init__(self, chunks: list[bytes]) -> None:
+            self._chunks = list(chunks)
+
+        async def read(self, _size: int = 65536) -> bytes:
+            return self._chunks.pop(0) if self._chunks else b""
+
+    ok_path = asyncio.run(
+        security.stream_upload_to_tempfile(
+            FakeUpload([b"hello ", b"world"]), max_bytes=64, suffix=".bin", temp_dir=tmp_path
+        )
+    )
+    assert ok_path.is_file()
+    assert ok_path.read_bytes() == b"hello world"
+    ok_path.unlink(missing_ok=True)
+
+    with pytest.raises(AppError) as exc_info:
+        asyncio.run(
+            security.stream_upload_to_tempfile(
+                FakeUpload([b"a" * 40, b"b" * 40]),
+                max_bytes=64,
+                suffix=".oversize",
+                temp_dir=tmp_path,
+            )
+        )
+    assert exc_info.value.status_code == 413
+    assert exc_info.value.code == "file_too_large"
+    assert list(tmp_path.glob("*.oversize")) == []
+
+    # JSON body size cap middleware rejects >32 MB Content-Length before reading into RAM
+    s = Settings(
+        host="127.0.0.1",
+        data_dir=tmp_path / "jcap",
+        database_url=f"sqlite:///{tmp_path / 'jcap' / 'hydro.db'}",
+    )
+    app = create_app(s)
+    try:
+        with TestClient(app) as tc:
+            oversize = tc.post(
+                "/api/sessions",
+                content=b'{"name":"x"}',
+                headers={
+                    "Content-Type": "application/json",
+                    "Content-Length": str(40 * 1024 * 1024),
+                },
+            )
+            assert oversize.status_code == 413
+            assert oversize.json()["code"] == "payload_too_large"
+    finally:
+        db.dispose_database()
+
+
+def test_slice4_export_ttl_cleanup_and_tempfile_project_archive(tmp_path: Path):
+    import io
+    import os
+    import time
+    import zipfile
+
+    from app.services import project_archive, reports
+
+    s = Settings(
+        host="127.0.0.1",
+        data_dir=tmp_path / "exp",
+        database_url=f"sqlite:///{tmp_path / 'exp' / 'hydro.db'}",
+    )
+    app = create_app(s)
+    try:
+        with TestClient(app) as tc:
+            stale_dir = s.exports_dir / "stale-session"
+            stale_dir.mkdir(parents=True, exist_ok=True)
+            stale_file = stale_dir / "old-report.txt"
+            stale_file.write_text("stale", encoding="utf-8")
+            old_ts = time.time() - 90_000
+            os.utime(stale_file, (old_ts, old_ts))
+
+            fresh_dir = s.exports_dir / "fresh-session"
+            fresh_dir.mkdir(parents=True, exist_ok=True)
+            fresh_file = fresh_dir / "fresh-report.txt"
+            fresh_file.write_text("fresh", encoding="utf-8")
+
+            if hasattr(reports, "_reset_export_prune_throttle"):
+                reports._reset_export_prune_throttle()
+
+            sess = tc.post("/api/sessions", json={"name": "TTL Kesit"}).json()
+            exp_res = tc.get(f"/api/sessions/{sess['id']}/export", params={"format": "txt"})
+            assert exp_res.status_code == 200
+            assert not stale_file.exists()
+            assert fresh_file.exists()
+
+            assert hasattr(project_archive, "export_project_archive_to_tempfile")
+            proj = tc.post("/api/projects", json={"name": "Arsiv Projesi", "code": "ARS-01"}).json()
+            arch_res = tc.get(f"/api/projects/{proj['id']}/archive")
+            assert arch_res.status_code == 200
+            with zipfile.ZipFile(io.BytesIO(arch_res.content), "r") as zf:
+                assert "manifest.json" in zf.namelist()
+                assert "project.json" in zf.namelist()
+            # Temp archive file inside data_dir must be unlinked by background cleanup
+            assert list(s.data_dir.glob("hydro_archive_*.zip")) == []
+    finally:
+        db.dispose_database()
+
+
+def test_slice4_db_restore_maintenance_barrier_returns_503_retry_after(tmp_path: Path):
+    s = Settings(
+        host="127.0.0.1",
+        data_dir=tmp_path / "maint",
+        database_url=f"sqlite:///{tmp_path / 'maint' / 'hydro.db'}",
+    )
+    app = create_app(s)
+    try:
+        with TestClient(app) as tc:
+            assert hasattr(db, "begin_restore_swap") and hasattr(db, "end_restore_swap")
+            db.begin_restore_swap(timeout_s=0.5)
+            try:
+                blocked = tc.get("/api/sessions")
+                assert blocked.status_code == 503
+                assert blocked.headers.get("Retry-After") == "2"
+                assert blocked.json()["code"] == "db_restoring"
+
+                health = tc.get("/api/health")
+                assert health.status_code == 200
+            finally:
+                db.end_restore_swap()
+
+            recovered = tc.get("/api/sessions")
+            assert recovered.status_code == 200
+    finally:
+        db.dispose_database()

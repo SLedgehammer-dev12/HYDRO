@@ -529,6 +529,7 @@ def restore_db_backup(
     settings: Settings,
     *,
     backup_bytes: bytes | None = None,
+    backup_path: Path | None = None,
     backup_filename: str | None = None,
     workspace_hash: str = "",
 ) -> dict[str, Any]:
@@ -539,14 +540,28 @@ def restore_db_backup(
         raise validation_error(
             "Geri yukleme yalnizca yerel dosya tabanli SQLite veritabani icin kullanilabilir."
         )
-    if backup_bytes is None and not backup_filename:
+    if backup_bytes is None and backup_path is None and not backup_filename:
         raise validation_error("Geri yukleme icin yedek dosyasi veya dosya adi gereklidir.")
 
     temp_source: Path | None = None
     staging_path: Path | None = None
     try:
         with _RESTORE_LOCK:
-            if backup_bytes is not None:
+            if backup_path is not None:
+                size = backup_path.stat().st_size if backup_path.is_file() else 0
+                with backup_path.open("rb") as handle:
+                    head = handle.read(len(SQLITE_MAGIC))
+                if size < 100 or head != SQLITE_MAGIC:
+                    raise validation_error(
+                        "Yuklenen dosya gecerli bir SQLite veritabani degil.", field="file"
+                    )
+                if size > settings.max_upload_bytes:
+                    raise AppError(
+                        "file_too_large", "Yedek dosyasi boyut sinirini asti.", status_code=413
+                    )
+                source_path = backup_path
+                source_label = "uploaded_file"
+            elif backup_bytes is not None:
                 if len(backup_bytes) < 100 or not backup_bytes.startswith(SQLITE_MAGIC):
                     raise validation_error(
                         "Yuklenen dosya gecerli bir SQLite veritabani degil.", field="file"
@@ -592,27 +607,31 @@ def restore_db_backup(
             if db_path.exists() and db_path.stat().st_size > 0:
                 pre_backup = create_db_backup(settings, reason="pre_restore")
 
-            db_mod.dispose_database()
+            db_mod.begin_restore_swap()
             try:
-                _unlink_sqlite_sidecars(db_path)
-                _copy_sqlite_file(staging_path, db_path)
-                db_mod.configure_database(settings.database_url)
-                db_mod.init_db()
-            except Exception as exc:
-                logger.warning("Restored DB migration failed (%s): %s", source_label, exc)
                 db_mod.dispose_database()
-                _unlink_sqlite_sidecars(db_path)
-                if pre_backup is not None:
-                    rollback_path = resolve_backup_path(settings, str(pre_backup["filename"]))
-                    _copy_sqlite_file(rollback_path, db_path)
-                else:
-                    db_path.unlink(missing_ok=True)
-                db_mod.configure_database(settings.database_url)
-                db_mod.init_db()
-                raise validation_error(
-                    "Yedek veritabani bu uygulama surumuyle uyumlu degil veya butunluk denetiminden gecemedi.",
-                    field="file",
-                ) from exc
+                try:
+                    _unlink_sqlite_sidecars(db_path)
+                    _copy_sqlite_file(staging_path, db_path)
+                    db_mod.configure_database(settings.database_url)
+                    db_mod.init_db()
+                except Exception as exc:
+                    logger.warning("Restored DB migration failed (%s): %s", source_label, exc)
+                    db_mod.dispose_database()
+                    _unlink_sqlite_sidecars(db_path)
+                    if pre_backup is not None:
+                        rollback_path = resolve_backup_path(settings, str(pre_backup["filename"]))
+                        _copy_sqlite_file(rollback_path, db_path)
+                    else:
+                        db_path.unlink(missing_ok=True)
+                    db_mod.configure_database(settings.database_url)
+                    db_mod.init_db()
+                    raise validation_error(
+                        "Yedek veritabani bu uygulama surumuyle uyumlu degil veya butunluk denetiminden gecemedi.",
+                        field="file",
+                    ) from exc
+            finally:
+                db_mod.end_restore_swap()
 
             with db_mod.session_scope() as fresh_db:
                 if workspace_hash:

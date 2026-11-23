@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -39,6 +40,52 @@ CONTENT_TYPES = {
     "txt": "text/plain; charset=utf-8",
 }
 EXTENSIONS = {"pdf": ".pdf", "xlsx": ".xlsx", "txt": ".txt"}
+_EXPORT_TTL_SECONDS = 24.0 * 3600.0
+_EXPORT_PRUNE_INTERVAL_S = 300.0
+_last_export_prune_monotonic = 0.0
+
+
+def _reset_export_prune_throttle() -> None:
+    global _last_export_prune_monotonic
+    _last_export_prune_monotonic = 0.0
+
+
+def _prune_expired_exports(exports_dir: Path, *, max_age_s: float = _EXPORT_TTL_SECONDS) -> int:
+    global _last_export_prune_monotonic
+    now_mono = time.monotonic()
+    if (
+        _last_export_prune_monotonic > 0.0
+        and (now_mono - _last_export_prune_monotonic) < _EXPORT_PRUNE_INTERVAL_S
+    ):
+        return 0
+    _last_export_prune_monotonic = now_mono
+    if not exports_dir.is_dir():
+        return 0
+    cutoff = time.time() - max_age_s
+    removed = 0
+    for child in list(exports_dir.iterdir()):
+        if child.is_dir():
+            for file_path in list(child.iterdir()):
+                if file_path.is_file():
+                    try:
+                        if file_path.stat().st_mtime < cutoff:
+                            file_path.unlink(missing_ok=True)
+                            removed += 1
+                    except OSError:
+                        pass
+            try:
+                if not any(child.iterdir()):
+                    child.rmdir()
+            except OSError:
+                pass
+        elif child.is_file():
+            try:
+                if child.stat().st_mtime < cutoff:
+                    child.unlink(missing_ok=True)
+                    removed += 1
+            except OSError:
+                pass
+    return removed
 
 
 def _latest_by_type(results: Iterable[TestResult]) -> dict[str, TestResult]:
@@ -729,6 +776,7 @@ def export_session(
     time_series_rows: Iterable[Any] | None = None,
     ocr_appendix: list[dict[str, Any]] | None = None,
 ) -> tuple[Path, dict[str, Any]]:
+    _prune_expired_exports(settings.exports_dir)
     context = build_context(
         session,
         results,
@@ -780,6 +828,7 @@ def free_export(
             status_code=422,
             details={"field": "content"},
         )
+    _prune_expired_exports(settings.exports_dir)
     folder = settings.exports_dir / "_adhoc"
     folder.mkdir(parents=True, exist_ok=True)
     target = (

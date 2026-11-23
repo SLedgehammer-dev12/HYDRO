@@ -2,9 +2,9 @@
 
 > Tek kaynak özet. Ayrıntı için "Ayrıntılı notlar" bölümündeki dosyalara bakın.
 >
-> **Son güncelleme:** 2026-11-22
-> **Dal:** `main` (`v1.9.1` — Güvenlik Sertleştirme, Tip Temizliği & Güvenilirlik Güncellemeleri)
-> **Son commit:** `hidrostatik-test-v1.9.1` hazırlık & üretim sertleştirme (`v1.9.0` → `v1.9.1`)
+> **Son güncelleme:** 2026-11-23
+> **Dal:** `main` (`v1.9.1` — Web Denetim Raporu v3 `F1`–`F17` Sertleştirme, Sözleşme & Kapsam Kapıları)
+> **Son commit:** Web v3 remediasyonu (`F1`–`F17`: form `If-Match`/`409`, çevrimdışı düşme & Docker admin token UI, `include_raw_ocr` + `openapi.json`, akışlı yükleme/arşiv/restore kilidi ve `%80` web kapsam kapısı)
 
 ---
 
@@ -13,8 +13,8 @@
 | Alan | Durum | Kanıt |
 | --- | --- | --- |
 | Masaüstü uygulaması | Çalışıyor, kararlı (`hidrostatik_test/ui/*` kapsam dışı tutuldu) | `tests.test_report_ocr` 76 unittest OK (`skipped=1`; önceki tam masaüstü koşusu: 723 unittest) |
-| Web backend (FastAPI) | Çalışıyor | 239 pytest PASS (Alembic `0003`, `SAWarning=0`), 87 OpenAPI path / 101 operation, 48 dosyada `mypy` temiz |
-| Web frontend (React 19) | Çalışıyor | `npm run lint` (0 hata, `jsx-a11y`), `npm test` (56 Vitest / 16 dosya), `npm run typecheck` + `npm run build` + `check:bundle` PASS (`147,5 kB` gzip ilk yükleme JS), `verify-tabs.mjs` 12/12 PASS |
+| Web backend (FastAPI) | Çalışıyor | 251 pytest PASS (Alembic `0003`, `SAWarning=0`, `%83` kapsam ≥ `%80` kapısı), 87 OpenAPI path / 101 operation (`openapi.json`), 50 dosyada `mypy` temiz |
+| Web frontend (React 19) | Çalışıyor | `npm run check:api` (74/87 yol), `npm run lint` (0 hata, `jsx-a11y`), `npm test` (61 Vitest / 20 dosya), `npm run typecheck` + `npm run build` + `check:bundle` PASS (`148,1 kB` gzip ilk yükleme JS), `verify-tabs.mjs` 12/12 PASS |
 | Program İkon & Marka Sistemi | Hazır | Boru kesiti + su dalgası + manometre ikonu (`tools/generate_icons.py`, `assets/icons/*`, `webapp/frontend/public/*`, `<HydroLogo />`, PyInstaller/Inno Setup/Tkinter) |
 | Web Güncelleme Yöneticisi | Çalışıyor | `/api/update/*`, SHA-256 + fail-closed Ed25519 `.sig` doğrulama, `UpdateManagerModal`, macOS `.dmg` / Win `.exe`/`.zip` kurulum |
 | BOTAŞ Test Bölümü Formları | Çalışıyor | Seçenek 1 sol menü (`015`..`023`, `KUR-001`, `KUR-002` + 5 ek), `SectionFormPage`, `rows`/`pig_runs`/`findings`, tekil OCR, `020`/`022` gömülü hesaplama ve `023` (`BOT-FRM-CDB-001-024`) Şartname 16–17 çift yönlü entegrasyonu |
@@ -166,16 +166,17 @@ Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen iş
 
 ---
 
-## 6. Doğrulama (son çalıştırma: 2026-11-22)
+## 6. Doğrulama (son çalıştırma: 2026-11-23)
 
 ```bash
 # Lint & tip denetimi
-python3 -m ruff check . && python3 -m ruff format --check .     # PASS (147 dosya)
+python3 -m ruff check . && python3 -m ruff format --check .     # PASS
 python3 -m mypy hidrostatik_test/domain/                       # Success: no issues found (14 files)
-python3 -m mypy --ignore-missing-imports webapp/backend/app    # Success: no issues found (48 files)
+python3 -m mypy --ignore-missing-imports webapp/backend/app    # Success: no issues found (50 files)
 
-# Web backend (Alembic + API + domain parity + OCR/CAD/dossier)
-python3 -m pytest webapp/backend/tests -q -W default::sqlalchemy.exc.SAWarning  # 239 passed (SAWarning yok)
+# Web backend (Alembic + API + OpenAPI sözleşmesi + domain parity + %80 kapsam kapısı)
+python3 -m coverage run --source=webapp/backend/app -m pytest webapp/backend/tests -q -W default::sqlalchemy.exc.SAWarning
+python3 -m coverage report --fail-under=80                     # 251 passed (SAWarning yok), %83 kapsam
 
 # OCR/PDF servis birim testleri
 python3 -m unittest tests.test_report_ocr                      # 76 tests OK (skipped=1)
@@ -186,8 +187,8 @@ python3 -m unittest discover -s tests -p "test_*.py"           # 723 tests OK (s
 # Masaüstü paketli Web self-test
 python3 webapp/desktop_launcher.py --self-test                 # SELF_TEST_OK
 
-# Frontend derleme, lint & test
-cd webapp/frontend && npm run lint && npm test && npm run typecheck  # PASS (56 Vitest, 16 dosya)
+# Frontend sözleşme, derleme, lint, paket bütçesi & test
+cd webapp/frontend && npm run check:api && npm run lint && npm test && npm run typecheck && npm run build && npm run check:bundle  # PASS (61 Vitest / 20 dosya, 148,1 kB gzip)
 
 # Sekme + BOTAŞ Form Ağacı & 020/022/023 Gömülü Hesaplama & Güncelleme Yöneticisi smoke (port 8099, izole DB)
 cd webapp/frontend && HYDRO_APP_URL=http://127.0.0.1:8099 \

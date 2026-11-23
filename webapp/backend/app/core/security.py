@@ -6,15 +6,22 @@ it is hashed before storage and never logged raw.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
 import re
+import tempfile
 import uuid
+import weakref
 from pathlib import Path
 from typing import Any
 
 WORKSPACE_HEADER = "X-Session-ID"
 DEFAULT_WORKSPACE = "anonymous"
+MAX_JSON_BODY_BYTES = 32 * 1024 * 1024
+_UPLOAD_SEMAPHORES: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = (
+    weakref.WeakKeyDictionary()
+)
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
 _MAGIC_PREFIXES: tuple[tuple[bytes, str], ...] = (
@@ -158,8 +165,68 @@ async def read_upload_bounded(upload: Any, max_bytes: int, *, chunk_size: int = 
     return b"".join(chunks)
 
 
+def _get_upload_semaphore() -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    sem = _UPLOAD_SEMAPHORES.get(loop)
+    if sem is None:
+        sem = asyncio.Semaphore(2)
+        _UPLOAD_SEMAPHORES[loop] = sem
+    return sem
+
+
+async def stream_upload_to_tempfile(
+    upload: Any,
+    max_bytes: int,
+    *,
+    suffix: str = ".bin",
+    chunk_size: int = 65536,
+    temp_dir: Path | None = None,
+) -> Path:
+    """Stream an upload directly to a ``0600`` temporary file on disk under concurrency cap."""
+
+    from .errors import AppError
+
+    if temp_dir is not None:
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
+    sem = _get_upload_semaphore()
+    async with sem:
+        fd, tmp_name = tempfile.mkstemp(
+            prefix="hydro_upload_",
+            suffix=suffix,
+            dir=str(temp_dir) if temp_dir is not None else None,
+        )
+        target = Path(tmp_name)
+        try:
+            try:
+                os.fchmod(fd, 0o600)
+            except OSError:
+                pass
+            total = 0
+            with os.fdopen(fd, "wb") as handle:
+                while True:
+                    chunk = await upload.read(chunk_size)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > max_bytes:
+                        limit_mb = max(1, max_bytes // (1024 * 1024))
+                        raise AppError(
+                            "file_too_large",
+                            f"Yuklenen dosya izin verilen boyutu ({limit_mb} MB) asiyor.",
+                            status_code=413,
+                            details={"max_bytes": max_bytes},
+                        )
+                    handle.write(chunk)
+            return target
+        except Exception:
+            target.unlink(missing_ok=True)
+            raise
+
+
 __all__ = [
     "DEFAULT_WORKSPACE",
+    "MAX_JSON_BODY_BYTES",
     "WORKSPACE_HEADER",
     "actor_for",
     "ensure_within",
@@ -170,6 +237,7 @@ __all__ = [
     "read_upload_bounded",
     "safe_filename",
     "sniff_mime",
+    "stream_upload_to_tempfile",
     "workspace_hash",
     "write_private_file",
 ]

@@ -92,17 +92,25 @@ async def import_desktop_db(
     workspace: Workspace = Depends(get_workspace),
 ) -> dict:
     enforce_rate_limit(request, settings, bucket="desktop_db_import", limit=30)
-    db_bytes = await security.read_upload_bounded(file, settings.max_upload_bytes)
-    return json_safe(
-        project_archive_service.import_desktop_db(
-            db,
-            settings,
-            workspace.hash,
-            db_bytes,
-            project_name=project_name,
-            project_code=project_code,
-        )
+    temp_db = await security.stream_upload_to_tempfile(
+        file,
+        settings.max_upload_bytes,
+        suffix=".db",
+        temp_dir=settings.data_dir,
     )
+    try:
+        return json_safe(
+            project_archive_service.import_desktop_db(
+                db,
+                settings,
+                workspace.hash,
+                db_path=temp_db,
+                project_name=project_name,
+                project_code=project_code,
+            )
+        )
+    finally:
+        temp_db.unlink(missing_ok=True)
 
 
 __all__ = ["router"]
