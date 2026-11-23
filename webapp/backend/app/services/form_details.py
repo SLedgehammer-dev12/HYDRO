@@ -24,7 +24,7 @@ from hidrostatik_test.domain.post_test_operations import (
     evaluate_depressurization,
     evaluate_discharge,
 )
-from hidrostatik_test.services.report_ocr import parse_number
+from hidrostatik_test.services.report_ocr import is_dot_decimal_text, parse_number
 
 from ..core.timeutil import ensure_utc, iso_z
 
@@ -399,10 +399,11 @@ def extract_common_header_extras(text: str) -> dict[str, Any]:
     }
 
 
-def _extract_test_data_tables(text: str) -> dict[str, Any]:
+def _extract_test_data_tables(text: str, *, dot_decimal: bool | None = None) -> dict[str, Any]:
     """Extract segment volumes and point measurements on `015 Hidrostatik Test Verileri`."""
     volume_segments: list[dict[str, Any]] = []
     measurements: list[dict[str, Any]] = []
+    use_dot = is_dot_decimal_text(text) if dot_decimal is None else dot_decimal
     lines = [" ".join(ln.split()).strip() for ln in text.splitlines() if ln.strip()]
 
     in_meas = False
@@ -410,7 +411,10 @@ def _extract_test_data_tables(text: str) -> dict[str, Any]:
         f = _fold(line)
         # Volume row pattern: e.g. `11.1 mm   12000 m   2418.4 m3` or `Et Kalinligi 11.1 Uzunluk 12000 Hacim 2418.4`
         if ("et kalinligi" in f or "boru et" in f) and "hacim" in f and "toplam" not in f:
-            nums = [_finite(parse_number(tok)) for tok in re.findall(r"\d+(?:[.,]\d+)?", line)]
+            nums = [
+                _finite(parse_number(tok, dot_decimal=use_dot))
+                for tok in re.findall(r"\d[\d.,]*", line)
+            ]
             nums_f = [n for n in nums if n is not None]
             if len(nums_f) >= 3:
                 volume_segments.append(
@@ -433,7 +437,19 @@ def _extract_test_data_tables(text: str) -> dict[str, Any]:
             ):
                 in_meas = False
                 continue
-            nums = [_finite(parse_number(tok)) for tok in re.findall(r"[-+]?\d+(?:[.,]\d+)?", line)]
+            kp_normalized = re.sub(
+                r"\b(\d{1,3})\+(\d{3}(?:[.,]\d+)?)\b",
+                lambda m: (
+                    f"{int(m.group(1)) * 1000.0 + float(m.group(2).replace(',', '.')):g}".replace(
+                        ".", "." if use_dot else ","
+                    )
+                ),
+                line,
+            )
+            nums = [
+                _finite(parse_number(tok, dot_decimal=use_dot))
+                for tok in re.findall(r"[-+]?\d[\d.,]*", kp_normalized)
+            ]
             nums_f = [n for n in nums if n is not None]
             if len(nums_f) >= 3 and 50 <= abs(nums_f[0]) <= 5000:
                 measurements.append(
@@ -550,17 +566,43 @@ def _extract_drying_metrics(text: str) -> dict[str, Any]:
 
 def _map_filling_rows(entries: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    has_meter_col = any(
+        len(e.get("nums") or []) >= 5 and float(e["nums"][0]) >= 100.0 for e in entries
+    )
     for ent in list(entries)[:MAX_TABLE_ROWS]:
         nums = [float(n) for n in (ent.get("nums") or [])]
-        row = {
-            "time_str": str(ent.get("time_str") or ""),
-            "meter_reading_m3": nums[0] if len(nums) >= 1 else None,
-            "delta_volume_m3": nums[1] if len(nums) >= 2 else None,
-            "total_volume_m3": nums[2] if len(nums) >= 3 else (nums[0] if len(nums) == 1 else None),
-            "water_inlet_temp_c": nums[3] if len(nums) >= 4 else None,
-            "water_pressure_bar": nums[4] if len(nums) >= 5 else None,
-            "note": str(ent.get("notes") or ""),
-        }
+        if has_meter_col and len(nums) == 2 and abs(nums[0]) < 1e-6 and abs(nums[1]) < 1e-6:
+            row = {
+                "time_str": str(ent.get("time_str") or ""),
+                "meter_reading_m3": None,
+                "delta_volume_m3": 0.0,
+                "total_volume_m3": 0.0,
+                "water_inlet_temp_c": None,
+                "water_pressure_bar": None,
+                "note": str(ent.get("notes") or ""),
+            }
+        elif has_meter_col and len(nums) == 4 and nums[0] < 100.0:
+            row = {
+                "time_str": str(ent.get("time_str") or ""),
+                "meter_reading_m3": None,
+                "delta_volume_m3": nums[0],
+                "total_volume_m3": nums[1],
+                "water_inlet_temp_c": nums[2],
+                "water_pressure_bar": nums[3],
+                "note": str(ent.get("notes") or ""),
+            }
+        else:
+            row = {
+                "time_str": str(ent.get("time_str") or ""),
+                "meter_reading_m3": nums[0] if len(nums) >= 1 else None,
+                "delta_volume_m3": nums[1] if len(nums) >= 2 else None,
+                "total_volume_m3": nums[2]
+                if len(nums) >= 3
+                else (nums[0] if len(nums) == 1 else None),
+                "water_inlet_temp_c": nums[3] if len(nums) >= 4 else None,
+                "water_pressure_bar": nums[4] if len(nums) >= 5 else None,
+                "note": str(ent.get("notes") or ""),
+            }
         rows.append(row)
     return rows
 
@@ -571,20 +613,28 @@ def _map_monitoring_rows(entries: Sequence[dict[str, Any]]) -> list[dict[str, An
         nums = [float(n) for n in (ent.get("nums") or [])]
         # BOTAŞ 018/021 standard column order:
         # Basınç, Çevre T, Toprak1, Boru1, Toprak2, Boru2, Toprak3, Boru3, Toprak4, Boru4, Avg.Toprak, Avg.Boru
+        avg_soil: float | None = None
+        avg_pipe: float | None = None
+        if len(nums) >= 12:
+            if not (abs(nums[-2]) < 1e-6 and abs(nums[-1]) < 1e-6):
+                avg_soil, avg_pipe = nums[-2], nums[-1]
+        elif len(nums) == 6:
+            if not (abs(nums[4]) < 1e-6 and abs(nums[5]) < 1e-6):
+                avg_soil, avg_pipe = nums[4], nums[5]
         row = {
             "time_str": str(ent.get("time_str") or ""),
             "pressure_bar": nums[0] if len(nums) >= 1 else None,
             "ambient_temp_c": nums[1] if len(nums) >= 2 else None,
             "soil_1_c": nums[2] if len(nums) >= 3 else None,
             "pipe_1_c": nums[3] if len(nums) >= 4 else None,
-            "soil_2_c": nums[4] if len(nums) >= 5 else None,
-            "pipe_2_c": nums[5] if len(nums) >= 6 else None,
+            "soil_2_c": nums[4] if len(nums) >= 5 and len(nums) != 6 else None,
+            "pipe_2_c": nums[5] if len(nums) >= 6 and len(nums) != 6 else None,
             "soil_3_c": nums[6] if len(nums) >= 7 else None,
             "pipe_3_c": nums[7] if len(nums) >= 8 else None,
             "soil_4_c": nums[8] if len(nums) >= 9 else None,
             "pipe_4_c": nums[9] if len(nums) >= 10 else None,
-            "avg_soil_c": nums[-2] if len(nums) >= 12 else (nums[4] if len(nums) == 6 else None),
-            "avg_pipe_c": nums[-1] if len(nums) >= 12 else (nums[5] if len(nums) == 6 else None),
+            "avg_soil_c": avg_soil,
+            "avg_pipe_c": avg_pipe,
             "note": str(ent.get("notes") or ""),
         }
         rows.append(row)
@@ -648,8 +698,10 @@ def build_form_structured_payload(
     text: str,
     *,
     time_log_entries: Sequence[dict[str, Any]] | None = None,
+    dot_decimal: bool | None = None,
 ) -> dict[str, Any]:
     """Return enriched table rows, notes, signatures, and form-specific sub-blocks."""
+    use_dot = is_dot_decimal_text(text) if dot_decimal is None else dot_decimal
     extras = extract_common_header_extras(text)
     out: dict[str, Any] = {
         "header_extras": extras["header_extras"],
@@ -658,7 +710,7 @@ def build_form_structured_payload(
     }
     entries = list(time_log_entries or [])
     if form_code == "test_data":
-        out["test_data"] = _extract_test_data_tables(text)
+        out["test_data"] = _extract_test_data_tables(text, dot_decimal=use_dot)
     elif form_code == "filling":
         out["rows"] = _map_filling_rows(entries)
     elif form_code in {"leak_stabilization", "pressure_test"}:

@@ -12,7 +12,7 @@ import shutil
 import statistics
 import subprocess
 import tempfile
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -73,12 +73,18 @@ _OD_RE = re.compile(
     re.IGNORECASE,
 )
 _PIPE_SPEC_INCH_RE = re.compile(
-    r"(?:[ÖO]L[ÇC][ÜU]LER[İI]|KARATER[İI]ST[İI]K|BORU\s*[ÇC]API)\s*[:=]?\s*"
+    r"(?:BORU\s*[ÖO]L[ÇC][ÜU]LER[İI]|[ÖO]L[ÇC][ÜU]LER[İI]|BORU\s*[ÇC]API|KARAK?TER[İI]ST[İI]K)\s*[:=]?\s*"
     r'(4|6|8|10|12|14|16|18|20|22|24|26|28|30|32|34|36|40|42|44|48)\s*(?:"|″|\'\'|\b(?:inch|in[çc])\b)',
     re.IGNORECASE,
 )
+_MAINLINE_INCH_RE = re.compile(
+    r'(?:[Ø⌀]\s*(4|6|8|10|12|14|16|18|20|22|24|26|28|30|32|34|36|40|42|44|48)\s*(?:"|″|\'\'|\b(?:inch|in[çc])\b)'
+    r'|\b(4|6|8|10|12|14|16|18|20|22|24|26|28|30|32|34|36|40|42|44|48)\s*(?:"|″|\'\')\s*'
+    r"(?:GAS\s*PIPE(?:LINE)?|DO[ĞG]AL\s*GAZ|DGBH|BORU\s*HATTI|H[İI]ZAN|[İI]L[ÇC]ES[İI]))",
+    re.IGNORECASE,
+)
 _INCH_OD_RE = re.compile(
-    r"(?<!['′°]\s)(?<!['′°])\b(4|6|8|10|12|14|16|18|20|22|24|26|28|30|32|34|36|40|42|44|48)\s*(?:\"|″|''|\b(?:inch|in[çc])\b)",
+    r"(?<![<>≤≥]\s)(?<![<>≤≥'′°]\s)(?<![<>≤≥'′°])\b(4|6|8|10|12|14|16|18|20|22|24|26|28|30|32|34|36|40|42|44|48)\s*(?:\"|″|''|\b(?:inch|in[çc])\b)",
     re.IGNORECASE,
 )
 _INCH_TO_MM: dict[str, float] = {
@@ -131,6 +137,7 @@ _GRADE_SMYS_MAP: dict[str, tuple[str, float]] = {
 
 _SINGLE_SECTION_TEXT_RE = re.compile(
     r"(?:(?:TEST\s*)?(?:BOLUM(?:U)?|KESI[MT]|SECTION)\s*(?:NO\.?|NUMARASI)?\s*[:=#-]?\s*([o0-9]{1,3}[a-z]?)\b"
+    r"|\b([o0-9]{1,3}[a-z]?)\s*\.\s*(?:TEST\s*)?(?:BOLUM(?:U)?|KESI[MT]|SECTION)\b"
     r"|\b(K-\d{1,3}|S-\d{1,3})\b)",
     re.IGNORECASE,
 )
@@ -165,7 +172,7 @@ def _extract_single_section_label(
     text_labels: list[str] = []
     seen_text: set[str] = set()
     for match in _SINGLE_SECTION_TEXT_RE.finditer(folded_text):
-        label = _normalize_single_section_token(match.group(1), match.group(2))
+        label = _normalize_single_section_token(match.group(1) or match.group(2), match.group(3))
         if label and label not in seen_text:
             seen_text.add(label)
             text_labels.append(label)
@@ -282,11 +289,29 @@ def _elevations_for_span(
     }
 
 
+def _pick_dominant_inch_mm(tokens: list[str]) -> float | None:
+    mms = [_INCH_TO_MM[tok] for tok in tokens if tok in _INCH_TO_MM]
+    if not mms:
+        return None
+    counts = Counter(mms)
+    return max(counts, key=lambda mm: (counts[mm], mm))
+
+
 def _extract_pipe_meta(text: str) -> dict[str, Any]:
     """Metinden boru dış çapı, et kalınlığı, tasarım basıncı ve çelik kalitesini çıkarır."""
+    non_ref_text = "\n".join(ln for ln in text.splitlines() if "typical drawing" not in ln.lower())
     od_match = _OD_RE.search(text)
     spec_inch_match = _PIPE_SPEC_INCH_RE.search(text) if not od_match else None
-    inch_match = _INCH_OD_RE.search(text) if not od_match and not spec_inch_match else None
+    mainline_tokens = (
+        [m.group(1) or m.group(2) for m in _MAINLINE_INCH_RE.finditer(non_ref_text)]
+        if not od_match and not spec_inch_match
+        else []
+    )
+    inch_tokens = (
+        [m.group(1) for m in _INCH_OD_RE.finditer(non_ref_text)]
+        if not od_match and not spec_inch_match and not mainline_tokens
+        else []
+    )
     wt_match = _WT_RE.search(text)
     dp_match = _DESIGN_P_RE.search(text)
     grade_match = _GRADE_RE.search(text)
@@ -295,8 +320,10 @@ def _extract_pipe_meta(text: str) -> dict[str, Any]:
         outside_diameter_mm = _parse_float(od_match.group(1))
     elif spec_inch_match:
         outside_diameter_mm = _INCH_TO_MM.get(spec_inch_match.group(1))
-    elif inch_match:
-        outside_diameter_mm = _INCH_TO_MM.get(inch_match.group(1))
+    elif mainline_tokens:
+        outside_diameter_mm = _pick_dominant_inch_mm(mainline_tokens)
+    elif inch_tokens:
+        outside_diameter_mm = _pick_dominant_inch_mm(inch_tokens)
     else:
         outside_diameter_mm = None
 
@@ -323,6 +350,26 @@ def _extract_pipe_meta(text: str) -> dict[str, Any]:
                     wt_weights[wt_key] += weight
             if wt_weights:
                 wall_thickness_mm = max(wt_weights.items(), key=lambda kv: kv[1])[0]
+
+    # CAD antetlerinde eski şablondan kalan düşük inç etiketi (ör. "ÖLÇÜLERİ : 10''")
+    # gerçek duvar kalınlığıyla (D/t < 25) çelişiyorsa ana hat inç çapını seç.
+    if (
+        spec_inch_match
+        and outside_diameter_mm is not None
+        and wall_thickness_mm is not None
+        and wall_thickness_mm > 0
+        and (outside_diameter_mm / wall_thickness_mm) < 25.0
+    ):
+        cand_tokens = [
+            m.group(1) or m.group(2) for m in _MAINLINE_INCH_RE.finditer(non_ref_text)
+        ] or [m.group(1) for m in _INCH_OD_RE.finditer(non_ref_text)]
+        consistent_tokens = [
+            tok
+            for tok in cand_tokens
+            if tok in _INCH_TO_MM and (_INCH_TO_MM[tok] / wall_thickness_mm) >= 25.0
+        ]
+        if override_mm := _pick_dominant_inch_mm(consistent_tokens):
+            outside_diameter_mm = override_mm
 
     design_pressure_bar = _parse_float(dp_match.group(1)) if dp_match else None
     material_grade = ""
@@ -553,6 +600,12 @@ def parse_plan_profile_text(
         kp_m = parse_kp_meters(f"{m.group(1)}+{m.group(2)}")
         if kp_m is not None:
             all_stations.add(round(kp_m, 1))
+
+    if not profile_points:
+        for st_m, kot in dossier_service.extract_elevasyon_table_rows(text):
+            station_elev_map[st_m] = kot
+            all_stations.add(st_m)
+        profile_points = sorted(station_elev_map.items(), key=lambda item: item[0])
 
     sorted_stations = sorted(all_stations)
 

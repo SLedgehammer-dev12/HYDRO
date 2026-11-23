@@ -29,6 +29,7 @@ from hidrostatik_test.domain.report_schema import (
 from hidrostatik_test.services import report_ocr as ocr
 
 HAVE_PYPDF = importlib.util.find_spec("pypdf") is not None
+HAVE_PYMUPDF = importlib.util.find_spec("fitz") is not None
 HAVE_REPORTLAB = importlib.util.find_spec("reportlab") is not None
 HAVE_PIL = importlib.util.find_spec("PIL") is not None
 HAVE_PYTESSERACT = importlib.util.find_spec("pytesseract") is not None
@@ -252,6 +253,31 @@ class ReportParsingTests(unittest.TestCase):
         for raw, expected in cases.items():
             with self.subTest(raw=raw):
                 self.assertAlmostEqual(ocr.parse_number(raw), expected)
+
+    def test_dot_decimal_detection_and_three_digit_decimals(self) -> None:
+        self.assertAlmostEqual(ocr.parse_number("1.000"), 1000.0)
+        self.assertAlmostEqual(ocr.parse_number("105.250", dot_decimal=True), 105.25)
+        self.assertAlmostEqual(ocr.parse_number("102.009", dot_decimal=True), 102.009)
+        self.assertAlmostEqual(ocr.parse_number("1,952.77", dot_decimal=True), 1952.77)
+
+        tr_text = (
+            "Tarih: 28.09.2026\n"
+            "Dış Çap: 355,60 mm\n"
+            "Et Kalınlığı: 5,20 mm\n"
+            "Uzunluk: 1.000 m\n"
+            "BOT-FRM-İNB-001-017 REV.0\n"
+        )
+        en_text = (
+            "Date: 28.09.2026\n"
+            "KP 9+650.00\n"
+            "1. Test Bolumu\n"
+            "Boru Dış Çapı : 323.90 mm\n"
+            "Boru Et Kalınlığı : 5.20 mm\n"
+            "Basınç : 105.250 bar\n"
+            "BOT-FRM-İNB-001-018 REV.0\n"
+        )
+        self.assertFalse(ocr.is_dot_decimal_text(tr_text))
+        self.assertTrue(ocr.is_dot_decimal_text(en_text))
 
     def test_date_formats(self) -> None:
         self.assertEqual(ocr.parse_date("15.11.2026"), "2026-11-15")
@@ -655,6 +681,36 @@ class PdfPipelineTests(unittest.TestCase):
         self.assertEqual(result.report.report_no.value, "R-5")
         self.assertTrue(result.report.missing_required_fields())
         self.assertTrue(result.needs_human_review)
+
+    @unittest.skipUnless(
+        HAVE_PYMUPDF and HAVE_REPORTLAB, "PyMuPDF/reportlab yok: gorsel sira testi atlandi"
+    )
+    def test_pdf_visual_row_ordering_preserves_out_of_order_columns(self) -> None:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfgen import canvas
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "out_of_order_cols.pdf"
+            pdf = canvas.Canvas(str(path), pagesize=A4)
+            # Draw right/middle columns BEFORE left time column at identical y coordinates
+            pdf.drawString(160, 760, "105.800 22.0 15.950")
+            pdf.drawString(160, 740, "105.750 21.0 15.803")
+            pdf.drawString(50, 760, "12:10")
+            pdf.drawString(50, 740, "13:10")
+            pdf.showPage()
+            pdf.save()
+
+            pages = ocr.extract_text(path)
+            self.assertEqual(len(pages), 1)
+            lines = [ln.strip() for ln in pages[0].text.splitlines() if ln.strip()]
+            self.assertTrue(
+                any(ln.startswith("12:10") and "105.800" in ln for ln in lines),
+                f"Beklenen gorsel satir siralama bulunamadi: {lines}",
+            )
+            self.assertTrue(
+                any(ln.startswith("13:10") and "105.750" in ln for ln in lines),
+                f"Beklenen ikinci gorsel satir bulunamadi: {lines}",
+            )
 
     @staticmethod
     def _write_image_only_pdf(path: Path, text: str = "HIDROSTATIK TEST\n80 BAR") -> None:

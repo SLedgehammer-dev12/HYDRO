@@ -1870,3 +1870,449 @@ def test_persist_formal_test_results_respects_per_segment_smys_and_fallback(clie
         assert "API 5L X42" in res1.result["limiting_pipe_description"]
         assert res2.result["limiting_segment_index"] == 2
         assert res2.result["limiting_smys_mpa"] == 320.0
+
+
+def test_calculation_sheet_dot_decimal_vsec_location_and_test_data_elevations():
+    calc_text = "\n".join(
+        [
+            "HİZAN İLÇESİ DGBH YAPIM İŞİ PROJESİ",
+            "SECTION 1 0+000.00 - 1+132.21",
+            "Kot Değerleri:",
+            "Lokasyon = 1.2",
+            "Başlangıç Noktası (Hs) = 1772.97 (m)  Ls : 0+000 (EM)",
+            "Bitiş Noktası (He) = 1779.18 (m)  Le : 1+132 (EM)",
+            "Max Nokta (Hmax) = 1779.4 (m)  L : 1+132 (m)",
+            "Min Nokta (Hmin) = 1766.65 (m)  Pmin : 93.75 bars",
+            "Basınç Değerleri:",
+            "Ps = Pmin + (Hmax-Hs)*9810 * g * 10-5",
+            "Ps = 94.381 Bars",
+            "Pmax = Pmin + (Hmax-Hmin) * 9810 * 10-5",
+            "Pmax = 95.001 Bars",
+            "D = 323.9 mm(12 inch)",
+            "Wt = 5.2 mm",
+            "SMYS = 358.53",
+            "Vsec = Lsec * Vpipe",
+            "Vpipe = 3,14 * (323.9-5,2-5,2)^2 / 4 * 10-6",
+            "Vpipe = 0.077 m3/m",
+            "Vsec = 87.35 m3 (<12.500m3 limitler içinde)",
+        ]
+    )
+    dos_calc = analyze_dossier_pages(
+        [PageText(page_number=1, text=calc_text, source="pdf-text-layer")],
+        source_filename="hizan_calc.pdf",
+    )
+    assert dos_calc["sections_count"] == 1
+    sec = dos_calc["sections"][0]
+    hdr = sec["header"]
+    assert hdr["section_volume_m3"] == pytest.approx(87.35, rel=1e-4)
+    assert hdr["location_class"] == "Class 1 - min 1.25 x dizayn basinci"
+    assert hdr["monitored_pressure_bar"] == pytest.approx(94.381, rel=1e-4)
+    assert hdr["test_pressure_bar"] == pytest.approx(95.001, rel=1e-4)
+    assert sec["calculations"]["profile"]["status"] == "passed"
+
+    test_data_text = "\n".join(
+        [
+            "HİDROSTATİK TEST VERİLERİ",
+            "Test Bölüm No : BÖLÜM 3",
+            "Test Bölüm Boyu : 1657.31 m",
+            "Test Bölüm Hacmi : 127.925 m3",
+            "Boru Dış Çapı : 323.90 mm",
+            "Boru Et Kalınlığı : 5.20 mm",
+            "3.Test Ölçümleri:",
+            "Boru Üst Kotu Ölçüm Noktası Maksimum Basınç(Bar) %SMYS",
+            "Başlangıç Noktası 1,952.77 7+995 113.330 0.980",
+            "En Yüksek Noktası 2,152.41 8+811 93.750 0.810",
+            "4.Açıklama:",
+        ]
+    )
+    dos_td = analyze_dossier_pages(
+        [PageText(page_number=1, text=test_data_text, source="pdf-text-layer")],
+        source_filename="veri.pdf",
+    )
+    assert dos_td["sections_count"] == 1
+    td_sec = dos_td["sections"][0]
+    assert td_sec["header"]["section_volume_m3"] == pytest.approx(127.925, rel=1e-4)
+    meas = td_sec["present_forms"][0]["extracted_data"]["test_data"]["test_measurements"]
+    assert len(meas) == 2
+    assert meas[0]["pipe_top_elev_m"] == pytest.approx(1952.77, rel=1e-4)
+    assert meas[0]["max_pressure_bar"] == pytest.approx(113.33, rel=1e-4)
+
+
+def test_slice2_filling_zero_placeholder_and_monitoring_000_not_freezing():
+    fill_text = "\n".join(
+        [
+            "SU DOLUM RAPORU",
+            "Test Bölüm No : BÖLÜM 4",
+            "Test Bölüm Boyu : 1325.34 m",
+            "Test Bölüm Hacmi : 102.009 m3",
+            "Okuma Saati Sayaç Okuması Hacim Değişimi Toplam Hacim Su Giriş Sıcaklığı Su Basıncı NOT",
+            "08:55 0 0 Başlangıç: 25.09.2026",
+            "09:15 8020 35 35 ÖN SU VERİLDİ",
+            "09:35 8025 5 40 14.0 3.0",
+            "10:35 8069 44 0",
+            "11:35 8114 45 89 3.0",
+            "11:55 8128 14 103 14.0",
+        ]
+    )
+    dos_fill = analyze_dossier_pages(
+        [PageText(page_number=1, text=fill_text, source="pdf-text-layer")],
+        source_filename="dolum.pdf",
+    )
+    sec4 = dos_fill["sections"][0]
+    fill_ext = sec4["present_forms"][0]["extracted_data"]
+    assert fill_ext["filling"]["total_filled_m3"] == pytest.approx(103.0)
+    assert fill_ext["filling"]["min_temp_c"] is not None
+    assert fill_ext["filling"]["min_temp_c"] >= 2.0
+    assert sec4["check_details"]["ambient_temp"]["status"] == "passed"
+    assert fill_ext["rows"][0]["meter_reading_m3"] is None
+    assert fill_ext["rows"][0]["total_volume_m3"] == pytest.approx(0.0)
+
+    mon_horiz = "\n".join(
+        [
+            "DENGELEME İÇİN KAÇAK TEST RAPORU",
+            "Test Bölüm No : BÖLÜM 2",
+            "12:10 105,800 22,0 14,20 14,50 15,80 16,60 15,60 15,90 18,20 18,00 15,950 16,250",
+            "13:10 105,750 22,0 0,00 0,00",
+            "14:10 105,750 17,1 0,00 0,00",
+        ]
+    )
+    ext_horiz = _extract_form_specific_data("leak_stabilization", mon_horiz)
+    assert ext_horiz["monitoring"]["min_temp_c"] == pytest.approx(14.2)
+    assert ext_horiz["rows"][1]["avg_soil_c"] is None
+    assert ext_horiz["rows"][1]["avg_pipe_c"] is None
+
+    mon_land = "\n".join(
+        [
+            "DENGELEME İÇİN KAÇAK TEST RAPORU",
+            "Test Bölüm No : BÖLÜM 8",
+            "Avg. Boru",
+            "Sıcaklığı",
+            "16,20",
+            "16,25",
+            "Toprak",
+            "Sıcaklığı",
+            "0,00",
+            "0,00",
+            "16,0",
+            "Basınç : 84,0",
+            "83,4",
+            "Zaman : 14:00",
+            "15:00",
+            "16:00",
+            "17:00",
+            "18:00",
+            "19:00",
+        ]
+    )
+    ext_land = _extract_form_specific_data("leak_stabilization", mon_land)
+    assert ext_land["monitoring"]["min_temp_c"] == pytest.approx(16.0)
+
+
+def test_slice2_ocr_time_repair_7445_and_b_coeff_1k_prefix():
+    rows_24h = []
+    for offset in range(24):
+        hh = (14 + offset) % 24
+        if offset % 4 == 0:
+            rows_24h.append(
+                f"{hh:02d}:45 102,800 19,5 16,8 16,9 16,4 16,7 17,0 17,5 16,3 16,5 16,90 16,63"
+            )
+        else:
+            rows_24h.append(f"{hh:02d}:45 102,750 19,0 16,7 16,8 0,00 0,00")
+    rows_24h.append("7445 102,600 19,5 16,8 16,9 16,4 16,7 17,0 17,5 16,3 16,5 16,90 16,63")
+    pt_text = "\n".join(
+        [
+            "BASINÇ TESTİ RAPORU",
+            "Test Bölüm No : BÖLÜM 5",
+            *rows_24h,
+        ]
+    )
+    pt_ext = _extract_form_specific_data("pressure_test", pt_text)
+    assert pt_ext["time_log"]["row_count"] == 25
+    assert pt_ext["time_log"]["last_time"] == "14:45"
+    assert pt_ext["time_log"]["duration_hours"] == pytest.approx(24.0)
+
+    pa_text = "\n".join(
+        [
+            "BASINÇ TESTİ KABUL RAPORU",
+            "Test Bölüm No : BÖLÜM 9",
+            "2. Parametreler ve Veriler:",
+            "PA",
+            "Ölçülen Basınç Değişimi : 0,200",
+            "ΔP : 0,168",
+            "ΔT : 0,083",
+            "Su ve Çeliğin Isıl Genleşme Katsayıları Arasındaki Fark",
+            "(1K : 149,805",
+            "Suyun İzotermal Sıkışabilirlik Katsayısı : 45,137",
+            "PL : 0,300",
+            "TEST KABUL EDİLMİŞTİR.",
+        ]
+    )
+    pa_ext = _extract_form_specific_data("pressure_acceptance", pa_text)
+    assert pa_ext["pressure_acceptance"]["b_micro_per_c"] == pytest.approx(149.805)
+    assert pa_ext["pressure_acceptance"]["a_micro_per_bar"] == pytest.approx(45.137)
+
+
+def test_slice2_cumulative_commit_mixed_elevation_datums_preserves_profile_result(client, headers):
+    from app import db as app_db
+    from app.core.timeutil import json_safe, utcnow
+    from app.models import Attachment, OcrAnalysis, TestResult, new_uuid
+    from app.services.dossier import commit_dossier_to_project
+
+    calc_text = "\n".join(
+        [
+            '12" HİZAN İLÇESİ DGBH YAPIM İŞİ PROJESİ',
+            "SECTION 4 9+665.00 - 11+016.17",
+            "Lokasyon = 1.2",
+            "Başlangıç Noktası (Hs) = 1969.97 (m)",
+            "Bitiş Noktası (He) = 1777.71 (m)",
+            "Max Nokta (Hmax) = 1972.81 (m)",
+            "Min Nokta (Hmin) = 1777.71 (m)  Pmin : 93.75 bars",
+            "D = 323.9 mm",
+            "Wt = 5.2 mm",
+            "SMYS = 358.53",
+            "Vsec = 104.24 m3",
+        ]
+    )
+    veri_text = "\n".join(
+        [
+            "HİDROSTATİK TEST VERİLERİ",
+            '12" HİZAN İLÇESİ DGBH YAPIM İŞİ PROJESİ',
+            "Test Bölüm No : BÖLÜM 4",
+            "Test Bölüm Boyu : 1325.34 m",
+            "Test Bölüm Hacmi : 102.009 m3",
+            "Boru Dış Çapı : 323.90 mm",
+            "Boru Et Kalınlığı : 5.20 mm",
+            "Maxımum İşletme Basıncı : 75.000 bar",
+            "Test Bölümünün En Düşük Kotu : 1,784.88 m",
+            "Test Bölümünün En Yüksek Kotu : 1,973.70 m",
+            "Test Bölümünün Başlangıç Noktası : 9+650 km",
+            "Test Bölümünün Bitiş Noktası : 10+973 km",
+        ]
+    )
+    d1 = analyze_dossier_pages([PageText(page_number=1, text=calc_text, source="pdf-text-layer")])
+    d2 = analyze_dossier_pages([PageText(page_number=1, text=veri_text, source="pdf-text-layer")])
+
+    from app.core import security
+
+    ws_hash = security.workspace_hash(headers["X-Session-ID"])
+
+    with app_db.session_scope() as db:
+        att1 = Attachment(
+            id=new_uuid(),
+            workspace_id_hash=ws_hash,
+            filename="c.pdf",
+            stored_path="c.pdf",
+            mime="application/pdf",
+            size_bytes=10,
+            sha256="a" * 64,
+            kind="ocr",
+        )
+        oa1 = OcrAnalysis(
+            id=new_uuid(),
+            workspace_id_hash=ws_hash,
+            attachment_id=att1.id,
+            status="succeeded",
+            source="pdf-text-layer",
+            page_count=1,
+            character_count=100,
+            confidence=0.9,
+            report={},
+            dossier=json_safe(d1),
+            finished_at=utcnow(),
+        )
+        att2 = Attachment(
+            id=new_uuid(),
+            workspace_id_hash=ws_hash,
+            filename="v.pdf",
+            stored_path="v.pdf",
+            mime="application/pdf",
+            size_bytes=10,
+            sha256="b" * 64,
+            kind="ocr",
+        )
+        oa2 = OcrAnalysis(
+            id=new_uuid(),
+            workspace_id_hash=ws_hash,
+            attachment_id=att2.id,
+            status="succeeded",
+            source="pdf-text-layer",
+            page_count=1,
+            character_count=100,
+            confidence=0.9,
+            report={},
+            dossier=json_safe(d2),
+            finished_at=utcnow(),
+        )
+        db.add_all([att1, oa1, att2, oa2])
+        db.flush()
+
+        c1 = commit_dossier_to_project(
+            db,
+            oa1,
+            workspace_hash=ws_hash,
+            target_project_id=None,
+            create_new_project=True,
+            new_project_name="Hizan Datum Test",
+            new_project_code="HZ-DT",
+            overwrite_filled=True,
+            selected_sections=None,
+        )
+        proj_id = c1["project"]["id"]
+        c2 = commit_dossier_to_project(
+            db,
+            oa2,
+            workspace_hash=ws_hash,
+            target_project_id=proj_id,
+            create_new_project=False,
+            new_project_name=None,
+            new_project_code=None,
+            overwrite_filled=True,
+            selected_sections=None,
+        )
+        assert c2["updated_sections_count"] == 1
+        assert c2["sections_summary"][0]["calculations"]["profile"]["status"] == "passed"
+        sid = c2["updated_sections"][0]["session_id"]
+        prof_results = (
+            db.query(TestResult)
+            .filter_by(session_id=sid, test_type="profile")
+            .order_by(TestResult.computed_at.desc())
+            .all()
+        )
+        assert prof_results and prof_results[0].decision_status == "BASARILI"
+
+
+def test_slice3_activity_profile_o1_and_elevasyon_classified_as_calc_sheet():
+    activity_text = "\n".join(
+        [
+            "HIZAN ILÇESI DOGAL GAZ BORU HATLARI YAPIM IŞI PROJESI",
+            "HIDROSTATIK TEST AKTIVETİSİ PROFILI SECTION O1",
+            "KP: 0+000.00 & KP: 1+132.21",
+            "Hs: 1772.97",
+            "He: 1779.18",
+            "Hmin:1766.65",
+            "Hmax:1779.40",
+        ]
+    )
+    res_act = analyze_dossier_pages(
+        [PageText(page_number=1, text=activity_text, source="pdf-text-layer")]
+    )
+    assert res_act["sections_count"] == 1
+    sec_act = res_act["sections"][0]
+    assert sec_act["section_no"] == "BÖLÜM 1"
+    assert any(f["form_code"] == "calculation_sheet" for f in sec_act["present_forms"])
+    hdr_act = sec_act["header"]
+    assert hdr_act["start_kp"] == "0+000"
+    assert hdr_act["end_kp"] == "1+132,21"
+    assert hdr_act["length_m"] == pytest.approx(1132.21)
+    assert hdr_act["start_elevation_m"] == pytest.approx(1772.97)
+    assert hdr_act["end_elevation_m"] == pytest.approx(1779.18)
+    assert hdr_act["lowest_elevation_m"] == pytest.approx(1766.65)
+    assert hdr_act["highest_elevation_m"] == pytest.approx(1779.40)
+
+    elev_text = "\n".join(
+        [
+            "12'' HİZAN İLÇESİ DGBH 4. BÖLÜM ELEVASYON (MAX KOT FARKI: 188. 816MT)",
+            "İNDİRGENMİŞ KOT  KM  SAHA ALIM KODU",
+            "1973.699 9650.080 1999.699",
+            "1910.250 10120.500 1936.250",
+            "1784.883 10973.420 1810.883",
+        ]
+    )
+    res_elev = analyze_dossier_pages(
+        [PageText(page_number=1, text=elev_text, source="pdf-text-layer")]
+    )
+    assert res_elev["sections_count"] == 1
+    sec_elev = res_elev["sections"][0]
+    assert sec_elev["section_no"] == "BÖLÜM 4"
+    assert any(f["form_code"] == "calculation_sheet" for f in sec_elev["present_forms"])
+    hdr_elev = sec_elev["header"]
+    assert hdr_elev["outside_diameter_mm"] == pytest.approx(323.9)
+    assert hdr_elev["start_kp"] == "9+650,08"
+    assert hdr_elev["end_kp"] == "10+973,42"
+    assert hdr_elev["length_m"] == pytest.approx(1323.34)
+    assert hdr_elev["start_elevation_m"] == pytest.approx(1973.699)
+    assert hdr_elev["end_elevation_m"] == pytest.approx(1784.883)
+    assert hdr_elev["lowest_elevation_m"] == pytest.approx(1784.883)
+    assert hdr_elev["highest_elevation_m"] == pytest.approx(1973.699)
+
+
+def test_wrapped_elevasyon_headers_and_tilted_scan_monitoring_row_realignment():
+    wrapped_elev_text = "\n".join(
+        [
+            "TEST",
+            "1973.699 9650.080 1999.699 NOKTASI(HMAX) 12'' HİZAN İLÇESİ DGBH 4. BÖLÜM ELEVASYON (MAX KOT FARKI: 188. 816MT)",
+            "1784.883 10973.420 1810.883 NOKTASI(HMİN)",
+            "1850.000",
+            "1828.496",
+            "1800.000  1787.874",
+            "1785.877  1784.883",
+            "SAHA ALIM",
+            "İNDİRGENMİŞ KM",
+            "KODU",
+            "KOT",
+        ]
+    )
+    res_wrap = analyze_dossier_pages(
+        [PageText(page_number=1, text=wrapped_elev_text, source="text-layer")]
+    )
+    assert res_wrap["unassigned_pages"] == []
+    assert res_wrap["sections_count"] == 1
+    sec_w = res_wrap["sections"][0]
+    assert sec_w["section_no"] == "BÖLÜM 4"
+    assert any(f["form_code"] == "calculation_sheet" for f in sec_w["present_forms"])
+    assert sec_w["header"]["outside_diameter_mm"] == pytest.approx(323.9)
+    assert sec_w["header"]["start_kp"] == "9+650,08"
+    assert sec_w["header"]["end_kp"] == "10+973,42"
+
+    base_mon = "\n".join(
+        [
+            "DENGELEME İÇİN KAÇAK TEST RAPORU",
+            "Test Bölüm No : BÖLÜM 8",
+            "13:45",
+            "84,000",
+            "19,0",
+            "15,4",
+            "15,8",
+            "14:45",
+            "0,00",
+            "0,00",
+            "83,900",
+            "18,0",
+            "15,4",
+            "15,8",
+            "0,00",
+            "0,00",
+            "16:45",
+            "83,800",
+            "16,0",
+            "15,4",
+            "15,7",
+            "15,4 15,8",
+            "15,6 16,0",
+            "15,4 15,6",
+            "17:45",
+            "15,45",
+            "15,78",
+            "83,800",
+            "14,0",
+            "15,4",
+            "15,7",
+            "0,00",
+            "0,00",
+        ]
+    )
+    res_clean = analyze_dossier_pages([PageText(page_number=1, text=base_mon, source="vision")])
+    sec_c = res_clean["sections"][0]
+    form_c = sec_c["present_forms"][0]["extracted_data"]
+    assert form_c["monitoring"]["min_temp_c"] >= 14.0
+    assert sec_c["check_details"]["ambient_temp"]["status"] == "passed"
+    row_1445 = next(r for r in form_c["rows"] if r["time_str"] == "14:45")
+    row_1645 = next(r for r in form_c["rows"] if r["time_str"] == "16:45")
+    assert row_1445["pressure_bar"] == pytest.approx(83.9)
+    assert row_1645["avg_pipe_c"] == pytest.approx(15.78)
+
+    freeze_mon = base_mon + "\n18:45\n83,700\n0,0\n4,2\n4,5"
+    res_freeze = analyze_dossier_pages([PageText(page_number=1, text=freeze_mon, source="vision")])
+    sec_f = res_freeze["sections"][0]
+    assert sec_f["present_forms"][0]["extracted_data"]["monitoring"]["min_temp_c"] == 0.0
+    assert sec_f["check_details"]["ambient_temp"]["status"] == "failed"

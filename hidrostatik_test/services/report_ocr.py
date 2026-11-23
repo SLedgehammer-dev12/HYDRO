@@ -772,6 +772,13 @@ def _extract_pdf_text(
     deadline_monotonic: float | None = None,
 ) -> list[PageText]:
     _check_ocr_abort(cancel_event, deadline_monotonic)
+    pymupdf_pages = _extract_pdf_text_with_pymupdf(
+        path,
+        cancel_event=cancel_event,
+        deadline_monotonic=deadline_monotonic,
+    )
+    if pymupdf_pages is not None:
+        return pymupdf_pages
     reader_pages = _extract_pdf_text_with_pypdf(
         path,
         cancel_event=cancel_event,
@@ -790,6 +797,74 @@ def _extract_pdf_text(
         "PDF okumak icin pypdf (veya pdfplumber) gerekli. requirements-ocr.txt kurun.",
         ERROR_DEPENDENCY_MISSING,
     )
+
+
+def _extract_pdf_text_with_pymupdf(
+    path: Path,
+    *,
+    cancel_event: threading.Event | None = None,
+    deadline_monotonic: float | None = None,
+) -> list[PageText] | None:
+    if importlib.util.find_spec("fitz") is None:
+        return None
+    fitz = importlib.import_module("fitz")
+    try:
+        doc = fitz.open(str(path))
+    except Exception as exc:
+        raise ReportOcrError(
+            "PDF dosyasi okunamadi veya bozuk.",
+            ERROR_CORRUPT_DOCUMENT,
+            detail=str(exc),
+        ) from exc
+
+    try:
+        if getattr(doc, "is_encrypted", False):
+            auth_ok = False
+            try:
+                auth_ok = bool(doc.authenticate(""))
+            except Exception:
+                auth_ok = False
+            if not auth_ok:
+                raise ReportOcrError(
+                    "PDF sifreli; sifre girilmeden rapor okunamaz.",
+                    ERROR_ENCRYPTED_PDF,
+                )
+
+        page_count = min(len(doc), MAX_PDF_PAGES)
+        pages: list[PageText] = []
+        for index in range(page_count):
+            _check_ocr_abort(cancel_event, deadline_monotonic)
+            try:
+                words = doc[index].get_text("words") or []
+            except Exception:  # tek sayfa bozuksa digerleri okunmaya devam eder
+                words = []
+
+            sorted_words = sorted(
+                words,
+                key=lambda item: (0.5 * (float(item[1]) + float(item[3])), float(item[0])),
+            )
+            rows: list[tuple[float, list[Any]]] = []
+            for word in sorted_words:
+                yc = 0.5 * (float(word[1]) + float(word[3]))
+                if rows and abs(yc - rows[-1][0]) <= 3.5:
+                    rows[-1][1].append(word)
+                else:
+                    rows.append((yc, [word]))
+
+            lines: list[str] = []
+            for _row_yc, row_words in rows:
+                row_words.sort(key=lambda item: float(item[0]))
+                parts: list[str] = [str(row_words[0][4])]
+                for prev_w, cur_w in zip(row_words, row_words[1:]):
+                    gap = float(cur_w[0]) - float(prev_w[2])
+                    parts.append(("  " if gap >= 18.0 else " ") + str(cur_w[4]))
+                line_text = "".join(parts).strip()
+                if line_text:
+                    lines.append(line_text)
+            pages.append(PageText(page_number=index + 1, text="\n".join(lines)))
+        return pages
+    finally:
+        doc.close()
 
 
 def _extract_pdf_text_with_pypdf(
@@ -2748,24 +2823,51 @@ def _build_fuzzy_aliases(
     return tuple(merged)
 
 
-def parse_number(raw: str) -> float:
+_DOT_DEC_DATE_RE: Final[re.Pattern[str]] = re.compile(r"\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b")
+_DOT_DEC_KP_RE: Final[re.Pattern[str]] = re.compile(r"\b\d{1,3}\s*\+\s*\d{3}(?:[.,]\d+)?\b")
+_DOT_DEC_REV_RE: Final[re.Pattern[str]] = re.compile(r"\brev\.?\s*\d+\b", re.IGNORECASE)
+_DOT_DEC_ITEM_RE: Final[re.Pattern[str]] = re.compile(r"(?m)^\s*\d+\.\s*[A-Za-zÇĞİÖŞÜçğıöşü]")
+_DOT_DEC_EXPLICIT_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:\b\d{1,3},\d{3}\.\d+\b|\b\d+\.\d{1,2}\b|\b\d+\.\d{4,}\b|\b0\.\d{3}\b)"
+)
+_COMMA_DEC_EXPLICIT_RE: Final[re.Pattern[str]] = re.compile(r"\b\d+,(?!\d{3}\.\d)\d+\b")
+
+
+def is_dot_decimal_text(text: str) -> bool:
+    """Return True when numeric values in ``text`` use '.' as the decimal separator."""
+
+    if not text:
+        return False
+    scrubbed = _DOT_DEC_DATE_RE.sub(" ", text)
+    scrubbed = _DOT_DEC_KP_RE.sub(" ", scrubbed)
+    scrubbed = _DOT_DEC_REV_RE.sub(" ", scrubbed)
+    scrubbed = _DOT_DEC_ITEM_RE.sub(" ", scrubbed)
+    dot_hits = len(_DOT_DEC_EXPLICIT_RE.findall(scrubbed))
+    if dot_hits < 2:
+        return False
+    comma_hits = len(_COMMA_DEC_EXPLICIT_RE.findall(scrubbed))
+    return comma_hits == 0 or dot_hits >= comma_hits * 3
+
+
+def parse_number(raw: str, *, dot_decimal: bool = False) -> float:
     """Parse a Turkish/English formatted number from ``raw``.
 
     Kurallar:
 
     - Hem ``.`` hem ``,`` varsa en sagdaki ondalik ayiricidir.
     - Tek ``,`` Turkce gelenegi geregi ondalik kabul edilir (``45,515``).
-    - Tek ``.`` ve tam 3 hane ondalik + 1-3 haneli tam kismi binlik kabul
-      edilir (``1.000`` -> 1000); ``0.884`` gibi basi sifirli degerler
-      ondalik kalir.
+    - ``dot_decimal=False`` iken tek ``.`` ve tam 3 hane ondalik + 1-3 haneli
+      tam kismi binlik kabul edilir (``1.000`` -> 1000); ``0.884`` gibi basi
+      sifirli degerler ondalik kalir. ``dot_decimal=True`` iken tek ``.`` her
+      zaman ondalik kabul edilir (``105.250`` -> 105.25).
     - Bosluk ve kesme isareti binlik ayirici sayilir.
     """
 
-    value, _ambiguous = _parse_number_detail(raw)
+    value, _ambiguous = _parse_number_detail(raw, dot_decimal=dot_decimal)
     return value
 
 
-def _parse_number_detail(raw: str) -> tuple[float, bool]:
+def _parse_number_detail(raw: str, *, dot_decimal: bool = False) -> tuple[float, bool]:
     match = _NUMBER_RE.search(str(raw))
     if match is None:
         raise ValueError(f"Sayi bulunamadi: {raw!r}")
@@ -2813,7 +2915,7 @@ def _parse_number_detail(raw: str) -> tuple[float, bool]:
             ambiguous = True
         else:
             integer_part, fraction = parts
-            if fraction and len(fraction) == 3 and 1 <= len(integer_part) <= 3:
+            if not dot_decimal and fraction and len(fraction) == 3 and 1 <= len(integer_part) <= 3:
                 if integer_part == "0":
                     token = f"0.{fraction}"
                 else:
@@ -2970,6 +3072,7 @@ def parse_report(
         start_kp_seen = False
         page_text = page.text[:remaining_chars]
         remaining_chars -= len(page_text)
+        page_dot_decimal = is_dot_decimal_text(page_text)
         for raw_line in page_text.splitlines():
             folded = _fold(raw_line)
             stripped = folded.strip()
@@ -3020,7 +3123,14 @@ def parse_report(
                 key = "end_kp"
 
             order += 1
-            extracted = _build_field(key, rest, page, warnings, source=page.source)
+            extracted = _build_field(
+                key,
+                rest,
+                page,
+                warnings,
+                source=page.source,
+                dot_decimal=page_dot_decimal,
+            )
             if extracted is None:
                 continue
             if key == "start_kp":
@@ -3269,6 +3379,7 @@ def _build_field(
     warnings: list[str],
     *,
     source: str,
+    dot_decimal: bool = False,
 ) -> ExtractedField | None:
     if source == TEXT_SOURCE_SPREADSHEET:
         base_confidence = 0.96
@@ -3332,7 +3443,14 @@ def _build_field(
             page=page.page_number,
         )
 
-    return _build_numeric_field(key, rest, page, warnings, base_confidence=base_confidence)
+    return _build_numeric_field(
+        key,
+        rest,
+        page,
+        warnings,
+        base_confidence=base_confidence,
+        dot_decimal=dot_decimal,
+    )
 
 
 def _build_numeric_field(
@@ -3342,12 +3460,13 @@ def _build_numeric_field(
     warnings: list[str],
     *,
     base_confidence: float,
+    dot_decimal: bool = False,
 ) -> ExtractedField | None:
     match = _NUMBER_RE.search(rest)
     if match is None:
         return None
     try:
-        value, ambiguous = _parse_number_detail(match.group(0))
+        value, ambiguous = _parse_number_detail(match.group(0), dot_decimal=dot_decimal)
     except ValueError:
         return None
 
@@ -3932,6 +4051,7 @@ __all__ = [
     "effective_max_file_size_bytes",
     "extract_text",
     "has_blocking_discrepancies",
+    "is_dot_decimal_text",
     "normalize_result",
     "ocr_available",
     "ocr_engine_details",

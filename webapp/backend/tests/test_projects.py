@@ -1280,3 +1280,48 @@ def test_project_scene_respects_per_segment_smys(client, headers):
     assert second_half["grade"] == "API 5L X42"
     assert second_half["utilization"] > 0.9
     assert first_half["utilization"] < 0.75
+
+
+def test_slice3_cad_48in_mainline_od_project_name_and_elevasyon_profile():
+    import pytest
+    from app.services import dossier as dossier_service
+    from app.services.plan_profile import _extract_pipe_meta, parse_plan_profile_text
+
+    cad_text = "\n".join(
+        [
+            "Plan Profil",
+            "BORU HATTI GÜZERGAHI VE SOME NOKTASI",
+            "ET KALINLIĞI",
+            "14.3 mm",
+            "ÖLÇÜLERİ : 10''",
+            'DIAMETER PIPELINE (< 16") OPEN CUT',
+            'DIAMETER PIPELINE (> 16") OPEN CUT',
+            'TYPICAL DRAWING FAULT CROSSING 48" GAS PIPELINE',
+            '( Ø 48" )',
+            "BATI KARADENİZ DOĞAL GAZ BORU HATTI FAZ-2 ETÜT VE MÜHENDİSLİK İŞİ",
+        ]
+    )
+    pipe_meta = _extract_pipe_meta(cad_text)
+    project_name = dossier_service.extract_project_name_from_text(cad_text, max_lines=None)
+    assert pipe_meta["outside_diameter_mm"] == pytest.approx(1219.2)
+    assert pipe_meta["wall_thickness_mm"] == pytest.approx(14.3)
+    assert project_name == "BATI KARADENİZ DOĞAL GAZ BORU HATTI FAZ-2 ETÜT VE MÜHENDİSLİK İŞİ"
+
+    elev_text = "\n".join(
+        [
+            "12'' HİZAN İLÇESİ DGBH 4. BÖLÜM ELEVASYON (MAX KOT FARKI: 188. 816MT)",
+            "İNDİRGENMİŞ KOT  KM  SAHA ALIM KODU",
+            "1973.699 9650.080 1999.699",
+            "1910.250 10120.500 1936.250",
+            "1784.883 10973.420 1810.883",
+        ]
+    )
+    res = parse_plan_profile_text(elev_text, file_name="ELEVASYON.pdf")
+    assert res["pipe_meta"]["outside_diameter_mm"] == pytest.approx(323.9)
+    assert len(res["draft_sections"]) == 1
+    sec = res["draft_sections"][0]
+    assert sec["section_no"] == "BÖLÜM 4"
+    assert sec["start_m"] == pytest.approx(9650.08, abs=0.2)
+    assert sec["end_m"] == pytest.approx(10973.42, abs=0.2)
+    assert sec["start_elevation_m"] == pytest.approx(1973.7, abs=0.2)
+    assert sec["lowest_elevation_m"] == pytest.approx(1784.9, abs=0.2)
