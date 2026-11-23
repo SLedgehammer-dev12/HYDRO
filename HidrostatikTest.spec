@@ -182,9 +182,12 @@ _extra_hidden = [
     'xlrd',
     'PIL',
     'pytesseract',
+    'certifi',
+    'truststore',
 ]
 
 _extra_datas.extend(_safe_collect_data_files('pdfminer'))
+_extra_datas.extend(_safe_collect_data_files('certifi'))
 for _pkg in ('pypdfium2', 'pypdfium2_raw') + (('ocrmac',) if sys.platform == 'darwin' else ()):
     _d, _b, _h = _safe_collect_all(_pkg)
     _extra_datas.extend(_d)

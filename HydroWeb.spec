@@ -160,6 +160,8 @@ _SUBMODULE_PACKAGES = [
     'defusedxml',
     'pint',
     'cryptography',
+    'certifi',
+    'truststore',
     'CoolProp',
 ]
 

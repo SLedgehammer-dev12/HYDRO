@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import sys
 import time
 from dataclasses import dataclass, replace
 from enum import Enum, auto
@@ -9,6 +10,8 @@ from threading import Event, RLock, Thread
 from typing import Any, Callable, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+from .tls import open_url
 
 CHUNK_SIZE = 8192
 MAX_RETRIES = 3
@@ -391,7 +394,7 @@ class DownloadManager:
             headers["Range"] = f"bytes={resume_pos}-"
 
         request = Request(task.url, headers=headers)
-        with urlopen(request, timeout=30) as response:
+        with open_url(request, timeout=30, opener=urlopen) as response:
             status_code = getattr(response, "status", None)
             if status_code is None and hasattr(response, "getcode"):
                 status_code = response.getcode()
@@ -459,22 +462,32 @@ class DownloadManager:
         destination.parent.mkdir(parents=True, exist_ok=True)
         headers = {"User-Agent": "HidrostatikTest-updater/1.0"}
         request = Request(url, headers=headers)
-        with urlopen(request, timeout=30) as response:
-            total = _content_length(response) or 0
-            downloaded = 0
-            start = time.monotonic()
-            with destination.open("wb") as output:
-                while True:
-                    chunk = response.read(CHUNK_SIZE)
-                    if not chunk:
-                        break
-                    output.write(chunk)
-                    downloaded += len(chunk)
-                    if on_progress and total > 0:
-                        elapsed = time.monotonic() - start
-                        speed = downloaded / elapsed if elapsed > 0 else 0
-                        eta = (total - downloaded) / speed if speed > 0 else 0
-                        on_progress(destination, downloaded, total, speed, eta)
+        try:
+            with open_url(request, timeout=30, opener=urlopen) as response:
+                total = _content_length(response) or 0
+                downloaded = 0
+                start = time.monotonic()
+                with destination.open("wb") as output:
+                    while True:
+                        chunk = response.read(CHUNK_SIZE)
+                        if not chunk:
+                            break
+                        output.write(chunk)
+                        downloaded += len(chunk)
+                        if on_progress and total > 0:
+                            elapsed = time.monotonic() - start
+                            speed = downloaded / elapsed if elapsed > 0 else 0
+                            eta = (total - downloaded) / speed if speed > 0 else 0
+                            on_progress(destination, downloaded, total, speed, eta)
+        except URLError:
+            if sys.platform != "win32":
+                raise
+            from .updater import _download_via_powershell
+
+            _download_via_powershell(url, headers, destination, timeout_seconds=120)
+            if on_progress and destination.is_file():
+                size = destination.stat().st_size
+                on_progress(destination, size, size, 0.0, 0.0)
 
 
 def _content_length(response: object) -> int:

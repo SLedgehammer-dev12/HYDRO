@@ -33,6 +33,7 @@ from ..app_metadata import (
     UPDATE_SIGNING_PUBLIC_KEY,
 )
 from .download_manager import DownloadManager, ProgressCallback
+from .tls import open_url
 
 DEFAULT_TIMEOUT_SECONDS = 10
 POWERSHELL_JSON_DEPTH = 32
@@ -364,12 +365,35 @@ def _download_via_powershell(
         raise UpdateError("PowerShell indirmesi bos bir dosya olusturdu.")
 
 
+def _download_bytes_via_powershell_fallback(
+    url: str,
+    headers: dict[str, str],
+    timeout_seconds: int,
+) -> bytes | None:
+    """Windows TLS fallback via PowerShell; returns ``None`` on HTTP 404."""
+    if sys.platform != "win32":
+        return None
+    fd, tmp_name = tempfile.mkstemp(prefix="hydro_ps_dl_", suffix=".tmp")
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        try:
+            _download_via_powershell(url, headers, tmp_path, timeout_seconds)
+        except UpdateError as exc:
+            if "404" in str(exc):
+                return None
+            raise
+        return tmp_path.read_bytes()
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
 def _fetch_release_payload(source_url: str, timeout_seconds: int) -> list[dict[str, Any]]:
     headers = _build_headers("application/vnd.github+json")
     request = Request(source_url, headers=headers)
 
     try:
-        with urlopen(request, timeout=timeout_seconds) as response:
+        with open_url(request, timeout=timeout_seconds, opener=urlopen) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         raise UpdateError(f"GitHub release bilgisi okunamadi: HTTP {exc.code}") from exc
@@ -496,9 +520,10 @@ def _download_checksum(
     candidates = _checksum_candidate_urls(asset_download_url)
     last_not_found: HTTPError | None = None
     for checksum_url in candidates:
-        request = Request(checksum_url, headers=_build_headers("text/plain"))
+        headers = _build_headers("text/plain")
+        request = Request(checksum_url, headers=headers)
         try:
-            with urlopen(request, timeout=timeout_seconds) as response:
+            with open_url(request, timeout=timeout_seconds, opener=urlopen) as response:
                 content = response.read().decode("utf-8").strip()
         except HTTPError as exc:
             if exc.code == 404:
@@ -506,9 +531,15 @@ def _download_checksum(
                 continue
             raise UpdateError(f"SHA-256 dosyasi indirilemedi: HTTP {exc.code}") from exc
         except URLError as exc:
-            raise UpdateError(
-                "SHA-256 dogrulama dosyasina ulasilamadi. Guvenlik riski nedeniyle guncelleme iptal edildi."
-            ) from exc
+            raw_ps = _download_bytes_via_powershell_fallback(checksum_url, headers, timeout_seconds)
+            if raw_ps is not None:
+                content = raw_ps.decode("utf-8", errors="replace").strip()
+            else:
+                if sys.platform == "win32":
+                    continue
+                raise UpdateError(
+                    "SHA-256 dogrulama dosyasina ulasilamadi. Guvenlik riski nedeniyle guncelleme iptal edildi."
+                ) from exc
         parts = content.replace("\t", " ").split()
         if not parts:
             raise UpdateError("SHA-256 dosyasi bos.")
@@ -651,9 +682,10 @@ def _download_signature(
     404 disindaki HTTP hatalari ve ag hatalari ``UpdateError`` olarak yukselir.
     """
     for signature_url in _signature_candidate_urls(asset_download_url):
-        request = Request(signature_url, headers=_build_headers("application/octet-stream"))
+        headers = _build_headers("application/octet-stream")
+        request = Request(signature_url, headers=headers)
         try:
-            with urlopen(request, timeout=timeout_seconds) as response:
+            with open_url(request, timeout=timeout_seconds, opener=urlopen) as response:
                 data = response.read()
         except HTTPError as exc:
             if exc.code == 404:
@@ -663,10 +695,18 @@ def _download_signature(
                 "Guvenlik nedeniyle guncelleme iptal edildi; lutfen daha sonra tekrar deneyin."
             ) from exc
         except URLError as exc:
-            raise UpdateError(
-                "Imza dosyasina ulasilamadi. Ag baglantisini kontrol edip tekrar deneyin; "
-                "guvenlik nedeniyle imzasiz guncelleme yapilmaz."
-            ) from exc
+            raw_ps = _download_bytes_via_powershell_fallback(
+                signature_url, headers, timeout_seconds
+            )
+            if raw_ps is not None:
+                data = raw_ps
+            else:
+                if sys.platform == "win32":
+                    continue
+                raise UpdateError(
+                    "Imza dosyasina ulasilamadi. Ag baglantisini kontrol edip tekrar deneyin; "
+                    "guvenlik nedeniyle imzasiz guncelleme yapilmaz."
+                ) from exc
         if data.strip():
             return data
     return None
