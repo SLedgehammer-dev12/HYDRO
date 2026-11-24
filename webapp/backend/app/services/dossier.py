@@ -21,6 +21,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from hidrostatik_test.data.pipe_catalog import API_5L_PSL2_GRADES
 from hidrostatik_test.domain import (
     AIR_CONTENT_ACCEPTANCE_FACTOR,
+    DEFAULT_STEEL_MODEL,
     END_PUMP_LOCATION,
     PRESSURE_VARIATION_ACCEPTANCE_BAR,
     START_PUMP_LOCATION,
@@ -30,6 +31,9 @@ from hidrostatik_test.domain import (
     PressureVariationInputs,
     SectionPressureProfileInputs,
     ValidationError,
+    calculate_b_coefficient,
+    calculate_water_compressibility_a,
+    calculate_water_thermal_expansion_beta,
     evaluate_air_content_test,
     evaluate_fill_temperature,
     evaluate_pig_speed,
@@ -2430,6 +2434,89 @@ def _extract_form_specific_data(form_code: str, text: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+DEFAULT_STEEL_ALPHA_MICRO_PER_C = 11.7
+
+
+def _first_positive(*values: Any) -> float | None:
+    for val in values:
+        f = _finite_float(val)
+        if f is not None and f > 0:
+            return f
+    return None
+
+
+def _resolve_air_water_state(
+    merged_header: dict[str, Any],
+    forms_by_code: dict[str, dict[str, Any]],
+    air_data: dict[str, Any],
+) -> tuple[float | None, float | None]:
+    press_ext = ((forms_by_code.get("pressurization") or {}).get("extracted_data") or {}).get(
+        "pressurization"
+    ) or {}
+    fill_ext = ((forms_by_code.get("filling") or {}).get("extracted_data") or {}).get(
+        "filling"
+    ) or {}
+    pt_mon = ((forms_by_code.get("pressure_test") or {}).get("extracted_data") or {}).get(
+        "monitoring"
+    ) or {}
+
+    temp_c = _first_finite(
+        air_data.get("temperature_c"),
+        press_ext.get("temp_c"),
+        fill_ext.get("max_temp_c"),
+        pt_mon.get("pipe_start_c"),
+    )
+    pressure_bar = _first_positive(
+        air_data.get("pressure_bar"),
+        merged_header.get("test_pressure_bar"),
+        merged_header.get("monitored_pressure_bar"),
+        press_ext.get("p_max_bar"),
+        press_ext.get("max_pressure_bar"),
+        fill_ext.get("max_pressure_bar"),
+        merged_header.get("design_pressure_bar"),
+    )
+    return temp_c, pressure_bar
+
+
+def _resolve_pressure_water_state(
+    merged_header: dict[str, Any],
+    forms_by_code: dict[str, dict[str, Any]],
+    pr_acc: dict[str, Any],
+    pr_mon: dict[str, Any],
+) -> tuple[float | None, float | None]:
+    press_ext = ((forms_by_code.get("pressurization") or {}).get("extracted_data") or {}).get(
+        "pressurization"
+    ) or {}
+    fill_ext = ((forms_by_code.get("filling") or {}).get("extracted_data") or {}).get(
+        "filling"
+    ) or {}
+
+    t_start = _finite_float(pr_mon.get("pipe_start_c"))
+    t_end = _finite_float(pr_mon.get("pipe_end_c"))
+    t_mean = (t_start + t_end) / 2.0 if t_start is not None and t_end is not None else None
+    temp_c = _first_finite(
+        pr_acc.get("temperature_c"),
+        t_mean,
+        t_start,
+        press_ext.get("temp_c"),
+        fill_ext.get("max_temp_c"),
+    )
+
+    p_start = _first_positive(pr_mon.get("p_start_bar"))
+    p_end = _first_positive(pr_mon.get("p_end_bar"))
+    p_mean = (p_start + p_end) / 2.0 if p_start is not None and p_end is not None else None
+    pressure_bar = _first_positive(
+        pr_acc.get("pressure_bar"),
+        p_mean,
+        p_start,
+        merged_header.get("test_pressure_bar"),
+        merged_header.get("monitored_pressure_bar"),
+        press_ext.get("p_max_bar"),
+        merged_header.get("design_pressure_bar"),
+    )
+    return temp_c, pressure_bar
+
+
 def evaluate_section_calculations(
     merged_header: dict[str, Any],
     forms_by_code: dict[str, dict[str, Any]],
@@ -2503,15 +2590,29 @@ def evaluate_section_calculations(
     }
     vpa = air_data.get("vpa_m3")
     vp_rep = air_data.get("vp_m3")
-    a_air = air_data.get("a_micro_per_bar")
+    a_air_form = _finite_float(air_data.get("a_micro_per_bar"))
+    air_t, air_p = _resolve_air_water_state(merged_header, forms_by_code, air_data)
+    calc_a_air: float | None = None
+    if air_t is not None and air_p is not None:
+        try:
+            calc_a_air = calculate_water_compressibility_a(air_t, air_p)
+        except ValidationError:
+            calc_a_air = None
+    effective_a_air = calc_a_air if calc_a_air is not None else a_air_form
+    a_air_source = (
+        "program"
+        if calc_a_air is not None
+        else ("form_fallback" if a_air_form is not None else None)
+    )
+    calc_vt_m3 = round(pipe.internal_volume_m3, 3) if pipe is not None else None
     k_val_raw = air_data.get("k_factor")
     k_val = 1.02 if k_val_raw is None else k_val_raw
-    if pipe is not None and a_air is not None and vpa is not None:
+    if pipe is not None and effective_a_air is not None and vpa is not None:
         try:
             res = evaluate_air_content_test(
                 AirContentInputs(
                     pipe=pipe,
-                    a_micro_per_bar=float(a_air),
+                    a_micro_per_bar=float(effective_a_air),
                     pressure_rise_bar=1.0,
                     k_factor=float(k_val),
                     actual_added_water_m3=float(vpa),
@@ -2523,10 +2624,16 @@ def evaluate_section_calculations(
                 "passed": res.passed,
                 "vp_m3": round(res.theoretical_added_water_m3, 6),
                 "vpa_m3": round(res.actual_added_water_m3, 6),
+                "vt_m3": calc_vt_m3,
                 "acceptance_limit_m3": round(res.acceptance_limit_m3, 6),
                 "ratio": round(res.ratio, 6),
                 "excess_pct": round(excess, 3),
-                "a_micro_per_bar": float(a_air),
+                "a_micro_per_bar": round(float(effective_a_air), 4),
+                "a_reported_micro_per_bar": a_air_form,
+                "a_source": a_air_source,
+                "vp_source": "program",
+                "state_temp_c": air_t,
+                "state_pressure_bar": air_p,
                 "k_factor": float(k_val),
                 "summary": (
                     f"{'BAŞARILI' if res.passed else 'BAŞARISIZ'}: Vpa={res.actual_added_water_m3:.5f} m³ / "
@@ -2545,14 +2652,48 @@ def evaluate_section_calculations(
             "passed": passed,
             "vp_m3": round(float(vp_rep), 6),
             "vpa_m3": round(float(vpa), 6),
+            "vt_m3": calc_vt_m3,
             "acceptance_limit_m3": round(limit_v, 6),
             "ratio": round(ratio, 6),
             "excess_pct": round(excess, 3),
+            "a_micro_per_bar": round(float(calc_a_air), 4) if calc_a_air is not None else None,
+            "a_reported_micro_per_bar": a_air_form,
+            "a_source": "program" if calc_a_air is not None else None,
+            "vp_source": "form_fallback",
+            "state_temp_c": air_t,
+            "state_pressure_bar": air_p,
             "summary": (
                 f"{'BAŞARILI' if passed else 'BAŞARISIZ'}: Rapor Vpa={float(vpa):.5f} m³ / "
                 f"Vp={float(vp_rep):.5f} m³ (fazla hava %{excess:.2f}; sınır <%6)."
             ),
         }
+    elif pipe is not None and effective_a_air is not None:
+        try:
+            vp_only = evaluate_air_content_test(
+                AirContentInputs(
+                    pipe=pipe,
+                    a_micro_per_bar=float(effective_a_air),
+                    pressure_rise_bar=1.0,
+                    k_factor=float(k_val),
+                    actual_added_water_m3=0.0,
+                )
+            )
+            air_eval = {
+                "status": "pending",
+                "passed": None,
+                "vp_m3": round(vp_only.theoretical_added_water_m3, 6),
+                "vt_m3": calc_vt_m3,
+                "a_micro_per_bar": round(float(effective_a_air), 4),
+                "a_reported_micro_per_bar": a_air_form,
+                "a_source": a_air_source,
+                "vp_source": "program",
+                "state_temp_c": air_t,
+                "state_pressure_bar": air_p,
+                "k_factor": float(k_val),
+                "summary": "Teorik Vp hesaplandı; VpA (ilave su) ölçümü bekleniyor.",
+            }
+        except ValidationError:
+            pass
 
     # 2) Pressure Variation Acceptance evaluation
     pr_acc = ((forms_by_code.get("pressure_acceptance") or {}).get("extracted_data") or {}).get(
@@ -2570,8 +2711,42 @@ def evaluate_section_calculations(
         if pr_acc.get("delta_t_c") is not None
         else pr_mon.get("delta_t_reported_c")
     )
-    a_pres = pr_acc.get("a_micro_per_bar")
-    b_pres = pr_acc.get("b_micro_per_c")
+    a_pres_form = _finite_float(pr_acc.get("a_micro_per_bar"))
+    b_pres_form = _finite_float(pr_acc.get("b_micro_per_c"))
+    pr_t, pr_p = _resolve_pressure_water_state(merged_header, forms_by_code, pr_acc, pr_mon)
+    calc_a_pres: float | None = None
+    calc_beta_w: float | None = None
+    calc_b_pres: float | None = None
+    if pr_t is not None and pr_p is not None:
+        try:
+            calc_a_pres = calculate_water_compressibility_a(pr_t, pr_p)
+            calc_beta_w = calculate_water_thermal_expansion_beta(pr_t, pr_p)
+            calc_b_pres = calculate_b_coefficient(
+                calc_beta_w,
+                DEFAULT_STEEL_ALPHA_MICRO_PER_C,
+                DEFAULT_STEEL_MODEL,
+                temp_c=pr_t,
+            )
+        except ValidationError:
+            calc_a_pres = None
+            calc_beta_w = None
+            calc_b_pres = None
+
+    effective_a_pres = calc_a_pres if calc_a_pres is not None else a_pres_form
+    effective_b_pres = calc_b_pres if calc_b_pres is not None else b_pres_form
+    coeff_source = (
+        "program"
+        if (calc_a_pres is not None and calc_b_pres is not None)
+        else ("form_fallback" if (a_pres_form is not None and b_pres_form is not None) else None)
+    )
+
+    p0_mon = _finite_float(pr_mon.get("p_start_bar"))
+    p1_mon = _finite_float(pr_mon.get("p_end_bar"))
+    pa_from_021 = round(p0_mon - p1_mon, 4) if p0_mon is not None and p1_mon is not None else None
+    t0_mon = _finite_float(pr_mon.get("pipe_start_c"))
+    t1_mon = _finite_float(pr_mon.get("pipe_end_c"))
+    dt_from_021 = round(t0_mon - t1_mon, 3) if t0_mon is not None and t1_mon is not None else None
+
     pt_rep = pr_acc.get("pt_bar")
     pl_bar = float(PRESSURE_VARIATION_ACCEPTANCE_BAR)
     ocr_pl = _finite_float(pr_acc.get("pl_bar"))
@@ -2588,8 +2763,8 @@ def evaluate_section_calculations(
     }
     if (
         pipe is not None
-        and a_pres
-        and b_pres is not None
+        and effective_a_pres
+        and effective_b_pres is not None
         and dt_val is not None
         and pa_val is not None
     ):
@@ -2597,8 +2772,8 @@ def evaluate_section_calculations(
             pressure_res = evaluate_pressure_variation_test(
                 PressureVariationInputs(
                     pipe=pipe,
-                    a_micro_per_bar=float(a_pres),
-                    b_micro_per_c=float(b_pres),
+                    a_micro_per_bar=float(effective_a_pres),
+                    b_micro_per_c=float(effective_b_pres),
                     delta_t_c=float(dt_val),
                     actual_pressure_change_bar=float(pa_val),
                 )
@@ -2610,8 +2785,17 @@ def evaluate_section_calculations(
                 "pt_bar": round(pressure_res.theoretical_pressure_change_bar, 4),
                 "margin_bar": round(pressure_res.margin_bar, 4),
                 "delta_t_c": float(dt_val),
-                "a_micro_per_bar": float(a_pres),
-                "b_micro_per_c": float(b_pres),
+                "a_micro_per_bar": round(float(effective_a_pres), 4),
+                "b_micro_per_c": round(float(effective_b_pres), 4),
+                "a_reported_micro_per_bar": a_pres_form,
+                "b_reported_micro_per_c": b_pres_form,
+                "water_beta_micro_per_c": round(calc_beta_w, 4) if calc_beta_w is not None else None,
+                "coeff_source": coeff_source,
+                "pt_source": "program",
+                "state_temp_c": pr_t,
+                "state_pressure_bar": pr_p,
+                "pa_from_021_bar": pa_from_021,
+                "delta_t_from_021_c": dt_from_021,
                 "pl_bar": pl_bar,
                 "summary": (
                     f"{'BAŞARILI' if pressure_res.passed else 'BAŞARISIZ'}: PA={pressure_res.actual_pressure_change_bar:.3f} bar, "
@@ -2630,6 +2814,17 @@ def evaluate_section_calculations(
             "pa_bar": round(float(pa_val), 4),
             "pt_bar": round(float(pt_rep), 4),
             "margin_bar": round(margin, 4),
+            "a_micro_per_bar": round(float(calc_a_pres), 4) if calc_a_pres is not None else None,
+            "b_micro_per_c": round(float(calc_b_pres), 4) if calc_b_pres is not None else None,
+            "a_reported_micro_per_bar": a_pres_form,
+            "b_reported_micro_per_c": b_pres_form,
+            "water_beta_micro_per_c": round(calc_beta_w, 4) if calc_beta_w is not None else None,
+            "coeff_source": "program" if (calc_a_pres is not None and calc_b_pres is not None) else None,
+            "pt_source": "form_fallback",
+            "state_temp_c": pr_t,
+            "state_pressure_bar": pr_p,
+            "pa_from_021_bar": pa_from_021,
+            "delta_t_from_021_c": dt_from_021,
             "pl_bar": pl_bar,
             "summary": (
                 f"{'BAŞARILI' if passed else 'BAŞARISIZ'}: PA={float(pa_val):.3f} bar, "

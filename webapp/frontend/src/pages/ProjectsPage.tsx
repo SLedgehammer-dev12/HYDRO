@@ -14,13 +14,11 @@ import {
   Layers,
   Pencil,
   Plus,
-  Rows3,
-  Ruler,
   Sparkles,
   Trash2,
 } from "lucide-react";
 import { PageHeader } from "../components/layout/PageHeader";
-import { SectionCard, KpiCard } from "../components/ui/Card";
+import { SectionCard } from "../components/ui/Card";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { ConfirmDialog, Modal } from "../components/ui/Dialog";
@@ -464,10 +462,7 @@ export function ProjectsPage() {
         }
         actions={
           <>
-            <Button size="lg" variant="ghost" icon={<Rows3 size={15} />} onClick={() => setTab("geometry")}>
-              Geometri & Saha
-            </Button>
-            <Button size="lg" icon={<Sparkles size={15} />} onClick={() => setSampleModalOpen(true)}>
+            <Button size="lg" variant="ghost" icon={<Sparkles size={15} />} onClick={() => setSampleModalOpen(true)}>
               Örnek Proje Üret
             </Button>
             <Button size="lg" icon={<FileUp size={15} />} onClick={() => setImportModalOpen(true)}>
@@ -480,70 +475,61 @@ export function ProjectsPage() {
         }
       />
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <KpiCard label="Proje" value={num(projects.length, 0)} icon={Building2} hint="Kayıtlı proje sayısı" />
-        <KpiCard label="Toplam kesit" value={num(totalSections, 0)} icon={Layers} hint="Projelere bağlı kesitler" />
-        <KpiCard
-          label="Seçili proje"
-          value={selected ? num(selected.section_count, 0) : "—"}
-          unit={selected ? "kesit" : undefined}
-          icon={FolderOpen}
-          hint={selected?.name ?? "Proje seçin"}
-          tone="info"
-        />
-        <KpiCard
-          label="KP sürekliliği"
-          value={
-            rawSections.length === 0
-              ? "—"
-              : kpContinuity.status === "pass"
-                ? "Uyumlu"
-                : kpContinuity.status === "fail"
-                  ? "Uyuşmazlık"
-                  : "Eksik KP"
-          }
-          icon={GitCompareArrows}
-          tone={
-            rawSections.length === 0
-              ? undefined
-              : kpContinuity.status === "pass"
-                ? "pass"
-                : kpContinuity.status === "fail"
-                  ? "fail"
-                  : "warning"
-          }
-          hint={
-            rawSections.length > 0
-              ? `${rawSections.length} kesit kontrol edildi`
-              : "Kesit eklendiğinde denetlenir"
-          }
-        />
-        <KpiCard
-          label="Σ Section (Boru hattı)"
-          value={
-            rawSections.length === 0 || kpContinuity.totalSectionsLengthM <= 0
-              ? "—"
-              : num(kpContinuity.totalSectionsLengthM, 0)
-          }
-          unit={rawSections.length > 0 && kpContinuity.totalSectionsLengthM > 0 ? "m" : undefined}
-          icon={Ruler}
-          tone={
-            rawSections.length === 0 || kpContinuity.totalSectionsLengthM <= 0
-              ? undefined
-              : kpContinuity.sumMatchesPipeline
-                ? "pass"
-                : "warning"
-          }
-          hint={
-            kpContinuity.pipelineSpanM !== null && kpContinuity.pipelineSpanM > 0
-              ? kpContinuity.sumMatchesPipeline
-                ? `Hat KP aralığı (${num(kpContinuity.pipelineSpanM, 0)} m) ile eşit`
-                : `Hat aralığı (${num(kpContinuity.pipelineSpanM, 0)} m) fark: ${kpContinuity.totalSectionsLengthM - kpContinuity.pipelineSpanM > 0 ? "+" : ""}${num(kpContinuity.totalSectionsLengthM - kpContinuity.pipelineSpanM, 0)} m`
-              : rawSections.length > 0
-                ? `${rawSections.length} kesit uzunluğu toplamı`
-                : "Kesit eklendiğinde toplanır"
-          }
-        />
+      <div className="panel flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-2.5 text-[12px]">
+        <span className="flex items-center gap-1.5 text-[var(--text-muted)]">
+          <Building2 size={14} className="text-[var(--primary)]" aria-hidden />
+          <span>Proje:</span>
+          <strong className="font-mono text-[var(--text)]">{num(projects.length, 0)}</strong>
+        </span>
+        <span className="flex items-center gap-1.5 text-[var(--text-muted)]">
+          <Layers size={14} className="text-[var(--primary)]" aria-hidden />
+          <span>Toplam kesit:</span>
+          <strong className="font-mono text-[var(--text)]">{num(totalSections, 0)}</strong>
+        </span>
+        {selected ? (
+          <span className="flex items-center gap-1.5 text-[var(--text-muted)]">
+            <span>Seçili:</span>
+            <strong className="text-[var(--text)]">{selected.name}</strong>
+            <Badge tone="info">{num(selected.section_count, 0)} kesit</Badge>
+          </span>
+        ) : null}
+        {rawSections.length > 0 ? (
+          <>
+            <span className="flex items-center gap-1.5 text-[var(--text-muted)]">
+              <span>KP sürekliliği:</span>
+              <Badge
+                tone={
+                  kpContinuity.status === "pass"
+                    ? "pass"
+                    : kpContinuity.status === "fail"
+                      ? "fail"
+                      : "warning"
+                }
+              >
+                {kpContinuity.status === "pass"
+                  ? "Uyumlu"
+                  : kpContinuity.status === "fail"
+                    ? "Uyuşmazlık"
+                    : "Eksik KP"}
+              </Badge>
+            </span>
+            {kpContinuity.totalSectionsLengthM > 0 ? (
+              <span className="flex items-center gap-1.5 text-[var(--text-muted)]">
+                <span>Σ Section:</span>
+                <strong className="font-mono text-[var(--text)]">
+                  {num(kpContinuity.totalSectionsLengthM, 0)} m
+                </strong>
+                {kpContinuity.pipelineSpanM !== null && kpContinuity.pipelineSpanM > 0 ? (
+                  <span className="text-[11px] text-[var(--text-faint)]">
+                    ({kpContinuity.sumMatchesPipeline
+                      ? "hatla eşit"
+                      : `fark ${kpContinuity.totalSectionsLengthM - kpContinuity.pipelineSpanM > 0 ? "+" : ""}${num(kpContinuity.totalSectionsLengthM - kpContinuity.pipelineSpanM, 0)} m`})
+                  </span>
+                ) : null}
+              </span>
+            ) : null}
+          </>
+        ) : null}
       </div>
 
       {showProjectScene && selected ? (
@@ -728,36 +714,9 @@ export function ProjectsPage() {
             action={
               <div className="flex flex-wrap items-center gap-1.5">
                 <Button
-                  size="lg"
-                  variant="default"
-                  icon={<Database size={15} />}
-                  disabled={!selected}
-                  onClick={() => setDataCenterOpen(true)}
-                >
-                  Proje Veri Merkezi
-                </Button>
-                <Button
-                  size="lg"
-                  variant={showProjectScene ? "primary" : "default"}
-                  icon={<Layers size={15} />}
-                  disabled={!selected || rawSections.length === 0}
-                  aria-pressed={showProjectScene}
-                  onClick={() => setShowProjectScene((prev) => !prev)}
-                >
-                  3D Birleşik Proje Görünümü
-                </Button>
-                <Button
-                  size="lg"
-                  icon={<FileScan size={15} />}
-                  disabled={!selected}
-                  onClick={openScanDialog}
-                >
-                  Plan-Profil Paftalarından Taslak Üret
-                </Button>
-                <Button
-                  size="lg"
+                  size="sm"
                   variant="primary"
-                  icon={<Plus size={15} />}
+                  icon={<Plus size={13} />}
                   disabled={!selected}
                   onClick={openCreateSectionDialog}
                 >
@@ -776,6 +735,35 @@ export function ProjectsPage() {
               </div>
             }
           >
+            {selected ? (
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="default"
+                  icon={<Database size={13} />}
+                  onClick={() => setDataCenterOpen(true)}
+                >
+                  Proje Veri Merkezi
+                </Button>
+                <Button
+                  size="sm"
+                  variant={showProjectScene ? "primary" : "default"}
+                  icon={<Layers size={13} />}
+                  disabled={rawSections.length === 0}
+                  aria-pressed={showProjectScene}
+                  onClick={() => setShowProjectScene((prev) => !prev)}
+                >
+                  3D Birleşik Proje Görünümü
+                </Button>
+                <Button
+                  size="sm"
+                  icon={<FileScan size={13} />}
+                  onClick={openScanDialog}
+                >
+                  Plan-Profil Paftalarından Taslak Üret
+                </Button>
+              </div>
+            ) : null}
             {selected ? (
               <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
                 <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-2">

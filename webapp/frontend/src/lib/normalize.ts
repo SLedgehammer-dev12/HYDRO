@@ -45,7 +45,14 @@ const asBool = (value: unknown, fallback: boolean): boolean =>
 const A_MODES: AMode[] = ["auto", "table", "manual"];
 const B_SOURCES: BSource[] = ["institutional", "gail", "auto"];
 const STEEL_MODELS: SteelModel[] = ["volumetric", "linear", "volumetric_temperature"];
-const KNOWN_WATER_BACKENDS = new Set(["table_v1", "table_v1_bicubic", "coolprop", "iapws95_dev"]);
+const KNOWN_WATER_BACKENDS = new Set([
+  "table_v1",
+  "table_v1_bicubic",
+  "coolprop",
+  "iapws95_dev",
+  "institutional",
+  "gail",
+]);
 
 const DESKTOP_MODE_MAP: Record<string, AMode> = {
   auto: "auto",
@@ -64,6 +71,11 @@ function resolveWaterBackendOption(raw: unknown): string {
   if (folded === "iapws") return "iapws95_dev";
   if (KNOWN_WATER_BACKENDS.has(trimmed)) return trimmed;
   if (KNOWN_WATER_BACKENDS.has(folded)) return folded;
+  if (folded.startsWith("iapws-if97 region 1 (bicubic)")) return "table_v1_bicubic";
+  if (folded.startsWith("iapws-if97 region 1")) return "table_v1";
+  if (folded.startsWith("iapws-95") || folded === "iapws95") return "coolprop";
+  if (folded.startsWith("kurum içi a/b") || folded.startsWith("kurum ici a/b")) return "institutional";
+  if (folded.startsWith("gail")) return "gail";
   if (folded.startsWith("table interpolation v1 (bicubic)")) return "table_v1_bicubic";
   if (folded.startsWith("table interpolation v1")) return "table_v1";
   if (folded.startsWith("coolprop")) return "coolprop";

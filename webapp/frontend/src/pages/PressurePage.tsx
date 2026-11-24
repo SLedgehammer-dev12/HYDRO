@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AlertTriangle, ArrowLeftRight, ArrowRight, CheckCircle2, Gauge, History, Info, Lock, Sigma } from "lucide-react";
+import { AlertTriangle, ArrowLeftRight, ArrowRight, CheckCircle2, ChevronRight, Gauge, Info, Lock, Sigma } from "lucide-react";
 import { PageHeader } from "../components/layout/PageHeader";
 import { SectionCard, ResultTile } from "../components/ui/Card";
 import { Badge, CoefficientBadge } from "../components/ui/Badge";
@@ -7,7 +7,7 @@ import { Button } from "../components/ui/Button";
 import { NumberField, FieldGrid, ReadonlyValue } from "../components/ui/Field";
 import { DecisionCard } from "../components/ui/DecisionCard";
 import { MarginGauge } from "../components/ui/Gauge";
-import { EmptyState, InlineNotice } from "../components/ui/State";
+import { InlineNotice } from "../components/ui/State";
 import {
   useCalculatePressure,
   useCoefficientA,
@@ -551,29 +551,6 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
               />
             </div>
           </SectionCard>
-
-          <SectionCard
-            title="Geçmiş"
-            description="Bu oturumdaki basınç değişim değerlendirmeleri."
-            icon={History}
-            bodyClassName="pt-2"
-          >
-            {pressureHistory.length === 0 ? (
-              <EmptyState title="Basınç testi kaydı yok" description="İlk değerlendirmeden sonra burada listelenir." icon={History} />
-            ) : (
-              <ul className="space-y-1.5">
-                {pressureHistory.map((entry) => (
-                  <li key={entry.id} className="flex items-start gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-2">
-                    <span className="mt-0.5 font-mono text-[10px] text-[var(--text-faint)]">{relativeTime(entry.at)}</span>
-                    <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--text-muted)]">{entry.summary}</span>
-                    <Badge tone={entry.status === "BASARILI" ? "pass" : entry.status === "BASARISIZ" ? "fail" : "pending"}>
-                      {entry.status}
-                    </Badge>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </SectionCard>
         </div>
 
         <div className="space-y-4">
@@ -636,12 +613,19 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
               </>
             }
           />
+        </div>
+      </div>
 
-          <SectionCard
-            title="B kaynağına göre duyarlılık"
-            description="Aynı T/P ve ΔT/Pa için üç B kaynağının ürettiği Pt."
-            icon={Sigma}
-          >
+      <div className="space-y-3">
+        <details className="disclosure-card">
+          <summary className="disclosure-summary">
+            <ChevronRight size={15} className="disclosure-chevron shrink-0" aria-hidden />
+            <span>B Kaynağı Duyarlılık Analizi</span>
+            <span className="ml-auto text-[11px] font-normal text-[var(--text-faint)]">
+              Kurum içi · GAIL · Otomatik karşılaştırması
+            </span>
+          </summary>
+          <div className="disclosure-body space-y-2">
             {sensitivity.length === 0 ? (
               <p className="text-[11.5px] leading-relaxed text-[var(--text-faint)]">
                 Duyarlılık için geometri, A, ΔT ve Pa gerekli.
@@ -683,14 +667,57 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
                 </table>
               </div>
             )}
-            <p className="mt-2 text-[10px] leading-relaxed text-[var(--text-faint)]">
+            <p className="text-[10px] leading-relaxed text-[var(--text-faint)]">
               Kaynak değişimi B’yi ve dolayısıyla Pt’yi değiştirir; marj hesabı Pa sabitken yeniden
               yapılmalıdır.
             </p>
-          </SectionCard>
-        </div>
+          </div>
+        </details>
+
+        <details className="disclosure-card">
+          <summary className="disclosure-summary">
+            <ChevronRight size={15} className="disclosure-chevron shrink-0" aria-hidden />
+            <span>Basınç Testi Geçmişi</span>
+            <span className="ml-auto text-[11px] font-normal text-[var(--text-faint)]">
+              {pressureHistory.length} kayıt
+            </span>
+          </summary>
+          <div className="disclosure-body">
+            {pressureHistory.length === 0 ? (
+              <p className="text-[11.5px] text-[var(--text-faint)]">
+                Henüz basınç testi kaydı yok. İlk değerlendirmeden sonra burada listelenir.
+              </p>
+            ) : (
+              <ul className="space-y-1.5">
+                {pressureHistory.map((entry) => (
+                  <li key={entry.id} className="flex items-start gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2">
+                    <span className="mt-0.5 font-mono text-[10px] text-[var(--text-faint)]">{relativeTime(entry.at)}</span>
+                    <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--text-muted)]">{entry.summary}</span>
+                    <Badge tone={entry.status === "BASARILI" ? "pass" : entry.status === "BASARISIZ" ? "fail" : "pending"}>
+                      {entry.status}
+                    </Badge>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </details>
+
+        {embedded ? null : (
+          <details className="disclosure-card">
+            <summary className="disclosure-summary">
+              <ChevronRight size={15} className="disclosure-chevron shrink-0" aria-hidden />
+              <span>Saatlik İzleme &amp; Operasyonlar</span>
+              <span className="ml-auto text-[11px] font-normal text-[var(--text-faint)]">
+                Zaman serisi · Pig · Kontrol listesi
+              </span>
+            </summary>
+            <div className="disclosure-body">
+              <OperationsPanel />
+            </div>
+          </details>
+        )}
       </div>
-      {embedded ? null : <OperationsPanel />}
     </div>
   );
 }

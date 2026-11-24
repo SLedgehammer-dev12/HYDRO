@@ -138,10 +138,23 @@ def b_source_payload(result: Any) -> dict[str, Any]:
     )
 
 
+WEB_BACKEND_LABELS: dict[str, str] = {
+    "coolprop": "IAPWS-95",
+    "table_v1": "IAPWS-IF97 Region 1",
+    "table_v1_bicubic": "IAPWS-IF97 Region 1 (Bicubic)",
+    "institutional": "Kurum içi A/B kontrol tablosu (BOTAŞ)",
+    "gail": "GAIL referans tablosu",
+}
+
+
+def web_backend_label(key: str, fallback: str = "") -> str:
+    return WEB_BACKEND_LABELS.get(key, fallback or key)
+
+
 def backend_info_payload(info: Any) -> dict[str, Any]:
     return {
         "key": info.key,
-        "label": info.label,
+        "label": web_backend_label(info.key, info.label),
         "distribution_ready": info.distribution_ready,
         "note": info.note,
     }
@@ -152,6 +165,7 @@ def raise_app(error: AppError) -> None:
 
 
 __all__ = [
+    "WEB_BACKEND_LABELS",
     "backend_info_payload",
     "b_source_payload",
     "build_geometry",
@@ -162,4 +176,5 @@ __all__ = [
     "geometry_response",
     "geometry_summary",
     "raise_app",
+    "web_backend_label",
 ]

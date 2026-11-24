@@ -12,15 +12,12 @@ import {
   Plus,
   Save,
   Sun,
-  Wifi,
-  WifiOff,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, apiErrorMessage } from "../../lib/api";
 import { relativeTime } from "../../lib/format";
 import {
   useCreateSession,
-  useMeta,
   useProjects,
   useSaveSession,
   useSessions,
@@ -28,7 +25,6 @@ import {
 } from "../../hooks/queries";
 import { useAppStore } from "../../store/useAppStore";
 import { toApiInputs } from "../../lib/normalize";
-import { Badge } from "../ui/Badge";
 import { Button, IconButton } from "../ui/Button";
 import { ConfirmDialog } from "../ui/Dialog";
 import { HydroLogo } from "../ui/HydroLogo";
@@ -38,11 +34,9 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
   const tab = useAppStore((state) => state.tab);
   const projectId = useAppStore((state) => state.projectId);
   const sessionName = useAppStore((state) => state.sessionName);
-  const sessionStatus = useAppStore((state) => state.sessionStatus);
   const sessionId = useAppStore((state) => state.sessionId);
   const projectCode = useAppStore((state) => state.projectCode);
   const setProject = useAppStore((state) => state.setProject);
-  const revision = useAppStore((state) => state.revision);
   const dirty = useAppStore((state) => state.dirty);
   const theme = useAppStore((state) => state.theme);
   const backend = useAppStore((state) => state.backend);
@@ -65,7 +59,6 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
 
   const { data: sessions } = useSessions();
   const { data: projects } = useProjects();
-  const { data: meta } = useMeta();
   const { data: updateStatus } = useUpdateStatus();
   const saveSession = useSaveSession();
   const createSession = useCreateSession();
@@ -89,9 +82,6 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
   }, [pickerOpen]);
-
-  const statusTone =
-    sessionStatus === "completed" ? "pass" : sessionStatus === "archived" ? "neutral" : "info";
 
   async function selectSession(id: string) {
     setPickerOpen(false);
@@ -180,37 +170,29 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
           <div className="relative min-w-0" ref={pickerRef}>
             <button
               type="button"
-              className="flex h-9 min-w-0 max-w-[155px] items-center gap-2 rounded-xl border border-[var(--border-strong)] bg-[var(--surface-2)] px-2.5 py-1 text-left transition-colors hover:border-[var(--primary)] hover:bg-[var(--surface-3)] sm:max-w-[380px]"
+              className="flex h-9 min-w-0 max-w-[190px] items-center gap-2 rounded-xl border border-[var(--border-strong)] bg-[var(--surface-2)] px-2.5 py-1 text-left transition-colors hover:border-[var(--primary)] hover:bg-[var(--surface-3)] sm:max-w-[380px]"
               aria-haspopup="listbox"
               aria-expanded={pickerOpen}
               onClick={() => setPickerOpen((value) => !value)}
             >
-              <div className="flex min-w-0 items-center gap-2">
+              <div className="flex min-w-0 items-center gap-1.5">
+                {projectCode ? (
+                  <span className="hidden shrink-0 font-mono text-[11px] font-semibold text-[var(--primary)] sm:inline">
+                    {projectCode}
+                    <span className="ml-1.5 text-[var(--text-faint)]" aria-hidden>
+                      ·
+                    </span>
+                  </span>
+                ) : null}
                 <span className="truncate text-[13.5px] font-bold tracking-[-0.01em] text-[var(--text)]">
                   {switching ? "Yükleniyor…" : sessionName}
                 </span>
-                <Badge tone={statusTone} className="hidden sm:inline-flex">
-                  {sessionStatus === "completed"
-                    ? "Tamamlandı"
-                    : sessionStatus === "archived"
-                      ? "Arşiv"
-                      : sessionStatus === "active"
-                        ? "Aktif"
-                        : "Taslak"}
-                </Badge>
-                <span className="hidden items-center gap-1 whitespace-nowrap text-[10.5px] text-[var(--text-muted)] lg:inline-flex">
-                  {projectCode ? (
-                    <>
-                      <span className="font-mono">{projectCode}</span>
-                      <span aria-hidden>·</span>
-                    </>
-                  ) : null}
-                  <span>rev.{revision}</span>
-                  <span aria-hidden>·</span>
-                  <span className={cn(dirty ? "tone-warning" : "tone-pass")}>
-                    {dirty ? "Kaydedilmedi" : "Kaydedildi"}
+                {dirty ? (
+                  <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] font-semibold tone-warning">
+                    <span className="size-1.5 rounded-full bg-current" aria-hidden />
+                    <span className="hidden md:inline">Kaydedilmedi</span>
                   </span>
-                </span>
+                ) : null}
               </div>
               <ChevronDown size={15} className="shrink-0 text-[var(--text-soft)]" aria-hidden />
             </button>
@@ -307,7 +289,7 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
           <div className="ml-auto flex items-center gap-2">
             <Button
               size="sm"
-              variant="primary"
+              variant={dirty ? "primary" : "default"}
               className="hidden sm:inline-flex"
               icon={saveSession.isPending ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
               disabled={saveSession.isPending}
@@ -330,18 +312,6 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
               {saveSession.isPending ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
             </IconButton>
 
-            <Button
-              size="sm"
-              className="hidden md:inline-flex"
-              icon={<Plus size={15} />}
-              onClick={() => {
-                if (dirty) setConfirmNew(true);
-                else createNew();
-              }}
-            >
-              Yeni Bölüm
-            </Button>
-
             {updateStatus?.update_available && updateStatus.latest_version ? (
               <button
                 type="button"
@@ -353,37 +323,6 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
                 v{updateStatus.latest_version} Güncelle
               </button>
             ) : null}
-
-            <button
-              type="button"
-              className={cn(
-                "badge hidden sm:inline-flex",
-                backend === "online" && sessionApiReady !== false
-                  ? "badge-pass"
-                  : backend === "online"
-                    ? "badge-warning"
-                    : backend === "demo"
-                      ? "badge-warning"
-                      : "badge-pending",
-              )}
-              title={
-                backend === "online" && sessionApiReady === false
-                  ? "Sunucu çalışıyor ancak oturum servisi yanıt vermiyor; yerel veriler kullanılıyor."
-                  : backend === "online"
-                    ? `Sunucu bağlı · sürüm ${meta?.app.version ?? "—"}`
-                    : "Sunucu bağlı değil; yerel hesaplama kullanılıyor. Tıklayınca Ayarlar açılır."
-              }
-              onClick={() => setTab("settings")}
-            >
-              {backend === "online" ? <Wifi size={12} /> : <WifiOff size={12} />}
-              {backend === "online" && sessionApiReady === false
-                ? "Kısmi"
-                : backend === "online"
-                  ? "Bağlı"
-                  : backend === "demo"
-                    ? "Çevrimdışı"
-                    : "Kontrol"}
-            </button>
 
             <IconButton
               label={theme === "dark" ? "Açık temaya geç" : "Koyu temaya geç"}

@@ -27,9 +27,7 @@ import type { BackendMode, BotasFormCode, TabKey } from "../../lib/types";
 import {
   useCheckUpdates,
   useMeta,
-  useSafeSwitchSession,
   useSessionForms,
-  useSessions,
   useUpdateStatus,
 } from "../../hooks/queries";
 import { useAppStore } from "../../store/useAppStore";
@@ -124,9 +122,6 @@ export function Sidebar() {
   const activeFormCode = useAppStore((state) => state.activeFormCode);
   const openForm = useAppStore((state) => state.openForm);
   const sessionId = useAppStore((state) => state.sessionId);
-  const sessionName = useAppStore((state) => state.sessionName);
-  const projectId = useAppStore((state) => state.projectId);
-  const projectName = useAppStore((state) => state.projectName);
   const sidebarOpen = useAppStore((state) => state.sidebarOpen);
   const desktopSidebarOpen = useAppStore((state) => state.desktopSidebarOpen);
   const setSidebarOpen = useAppStore((state) => state.setSidebarOpen);
@@ -135,15 +130,13 @@ export function Sidebar() {
   const sessionApiReady = useAppStore((state) => state.sessionApiReady);
 
   const { data: meta } = useMeta();
-  const { data: projectSessions } = useSessions(projectId);
-  const safeSwitchSession = useSafeSwitchSession();
   const { data: formsPayload } = useSessionForms(sessionId);
   const { data: updateStatus } = useUpdateStatus();
   const checkUpdates = useCheckUpdates();
   const silentCheckFired = useRef(false);
   const mobileDrawerRef = useRef<HTMLDialogElement>(null);
 
-  const [formsExpanded, setFormsExpanded] = useState(() => Boolean(sessionId));
+  const [formsExpanded, setFormsExpanded] = useState(false);
   const [extrasExpanded, setExtrasExpanded] = useState(false);
   const [formFilter, setFormFilter] = useState<FormFilter>("all");
 
@@ -360,53 +353,6 @@ export function Sidebar() {
         </button>
       </div>
 
-      {/* Aktif Proje & Test Bölümü Seçicisi */}
-      <div className="rounded-xl border border-[var(--primary-border)] bg-[color-mix(in_srgb,var(--primary-soft)_38%,var(--surface-2))] p-2.5">
-        <p className="text-[9.5px] font-bold uppercase tracking-[0.11em] text-[var(--primary)]">
-          Aktif Proje &amp; Test Bölümü
-        </p>
-        <p
-          className="mt-0.5 truncate text-[11px] font-semibold text-[var(--text)]"
-          title={projectName || "Proje seçilmedi"}
-        >
-          {projectName || "Genel Çalışma Alanı"}
-        </p>
-        {projectSessions && projectSessions.length > 0 ? (
-          <select
-            aria-label="Aktif Test Bölümü"
-            value={sessionId ?? ""}
-            onChange={(e) => {
-              const nextId = e.target.value;
-              if (nextId && nextId !== sessionId) {
-                safeSwitchSession.switchSession(nextId);
-              }
-            }}
-            className="mt-1.5 h-7 w-full rounded-lg border border-[var(--border)] bg-[var(--canvas)] px-2 text-[11px] font-medium text-[var(--text)] focus:border-[var(--primary)] focus:outline-none"
-          >
-            {!projectSessions.some((s) => s.id === sessionId) && sessionId ? (
-              <option value={sessionId}>{sessionName}</option>
-            ) : null}
-            {projectSessions.map((sec) => (
-              <option key={sec.id} value={sec.id}>
-                {sec.section_meta?.section_no ? `${sec.section_meta.section_no} · ` : ""}
-                {sec.name}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <button
-            type="button"
-            onClick={() => {
-              setTab("projects");
-              setSidebarOpen(false);
-            }}
-            className="mt-1.5 block w-full truncate rounded-lg border border-[var(--border)] bg-[var(--canvas)] px-2 py-1 text-left text-[10.5px] text-[var(--text-muted)] hover:border-[var(--primary)]"
-          >
-            {sessionName || "Kesit seçin →"}
-          </button>
-        )}
-      </div>
-
       <div className="min-h-0 flex-1 space-y-3.5 overflow-y-auto pb-2 pr-0.5 scroll-thin">
         {/* 1. Başlangıç */}
         <div>
@@ -543,45 +489,49 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* Alt Sunucu & Güncelleme Yöneticisi Kartı */}
-      <div className="shrink-0 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-2.5">
-        <div className="flex items-center justify-between gap-2 text-[10.5px] font-semibold text-[var(--text-muted)]">
-          <span className="flex items-center gap-1.5">
-            <BackendDot backend={backend} />
+      {/* Alt Sunucu & Güncelleme Yöneticisi Satırı */}
+      <div className="shrink-0 flex items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-2">
+        <span className="flex min-w-0 items-center gap-1.5 text-[10.5px] font-semibold text-[var(--text-muted)]">
+          <BackendDot backend={backend} />
+          <span className="truncate">
             {backend === "online"
               ? sessionApiReady === false
-                ? "Sunucu kısmi"
-                : "Sunucu bağlı"
+                ? "Kısmi"
+                : "Bağlı"
               : backend === "demo"
-                ? "Çevrimdışı mod"
-                : "Kontrol ediliyor"}
+                ? "Çevrimdışı"
+                : "Kontrol"}
           </span>
-          <span className="font-mono text-[10px]">v{meta?.app.version ?? "2.0.0"}</span>
-        </div>
+          <span className="font-mono text-[10px] text-[var(--text-faint)]">
+            · v{meta?.app.version ?? "2.0.0"}
+          </span>
+        </span>
         <button
           type="button"
           onClick={() => {
             setUpdateModalOpen(true);
             setSidebarOpen(false);
           }}
+          title={
+            updateStatus?.update_available && updateStatus.latest_version
+              ? `Yeni sürüm v${updateStatus.latest_version} mevcut`
+              : "Güncelleme Yöneticisi"
+          }
           className={cn(
-            "mt-2 flex w-full items-center justify-between rounded-lg border px-2 py-1 text-[10.5px] font-semibold transition-colors",
+            "inline-flex shrink-0 items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-semibold transition-colors",
             updateStatus?.update_available
               ? "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success)]"
               : "border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)] hover:border-[var(--primary)] hover:text-[var(--text)]",
           )}
         >
-          <span className="flex items-center gap-1.5">
-            {updateStatus?.update_available ? (
-              <ArrowUpCircle size={12} aria-hidden />
-            ) : (
-              <RefreshCw size={11} aria-hidden />
-            )}
-            {updateStatus?.update_available && updateStatus.latest_version
-              ? `Yeni sürüm v${updateStatus.latest_version}`
-              : "Güncelleme Yöneticisi"}
-          </span>
-          <span>İncele →</span>
+          {updateStatus?.update_available ? (
+            <ArrowUpCircle size={11} aria-hidden />
+          ) : (
+            <RefreshCw size={10} aria-hidden />
+          )}
+          {updateStatus?.update_available && updateStatus.latest_version
+            ? `v${updateStatus.latest_version}`
+            : "Güncelle"}
         </button>
       </div>
     </nav>

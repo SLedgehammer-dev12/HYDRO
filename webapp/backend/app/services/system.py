@@ -53,6 +53,7 @@ from ..desktop_labels import (
     SIGN_CONVENTION,
     SPEC_NOTES,
 )
+from ..domain_adapter import web_backend_label
 
 UPTIME_START = time.monotonic()
 APP_VERSION_SHORT = APP_VERSION
@@ -64,11 +65,27 @@ def _backend_payloads() -> list[dict[str, Any]]:
         rows.append(
             {
                 "key": info.key,
-                "label": info.label,
+                "label": web_backend_label(info.key, info.label),
                 "distribution_ready": info.distribution_ready,
                 "note": info.note,
             }
         )
+    rows.extend(
+        [
+            {
+                "key": "institutional",
+                "label": web_backend_label("institutional"),
+                "distribution_ready": True,
+                "note": "Kurum içi BOTAŞ A/B kontrol tablosu (1–25 °C / 30–120 bar; A anomalileri onarılır).",
+            },
+            {
+                "key": "gail",
+                "label": web_backend_label("gail"),
+                "distribution_ready": True,
+                "note": "GAIL referans tablosu (A ve B doğrudan tablodan okunur).",
+            },
+        ]
+    )
     return rows
 
 

@@ -36,20 +36,22 @@ import {
   downloadBlob,
   reportFileName,
 } from "../lib/report";
-import type { AMode, BackendComparisonItem, BSource } from "../lib/types";
+import type { AMode, BackendComparisonItem } from "../lib/types";
 import { cn } from "../lib/utils";
 
-const A_MODES: Array<{ value: AMode; label: string; note: string }> = [
-  { value: "auto", label: "Otomatik", note: "Su özelliği backend'inden hesaplanır." },
-  { value: "table", label: "Tablo", note: "Referans tablosundan A okunur (onarım uygulanır)." },
+const A_MODES: Array<{ value: Exclude<AMode, "table">; label: string; note: string }> = [
+  { value: "auto", label: "Otomatik", note: "Seçili su özelliği backend'i veya referans tablodan hesaplanır." },
   { value: "manual", label: "Manuel", note: "Kullanıcı değeri; aralık kontrolü yapılır." },
 ];
 
-const B_SOURCES: Array<{ value: BSource; label: string; note: string }> = [
-  { value: "institutional", label: "Kurum içi", note: "Varsayılan · BOTAŞ A/B kontrol tablosu" },
-  { value: "gail", label: "GAIL", note: "GAIL referans tablosu" },
-  { value: "auto", label: "Otomatik", note: "β − çelik genleşmesi" },
+const B_MODES: Array<{ value: "auto" | "manual"; label: string; note: string }> = [
+  { value: "auto", label: "Otomatik", note: "Seçili su özelliği backend'i (EOS veya referans tablo) kullanılır." },
+  { value: "manual", label: "Manuel", note: "Kullanıcı B değeri doğrudan testlerde kullanılır." },
 ];
+
+function isTableBackend(key: string): key is "institutional" | "gail" {
+  return key === "institutional" || key === "gail";
+}
 
 function formatSignedDelta(value: number | null): string {
   if (value === null || Math.abs(value) < 5e-7) return "—";
@@ -77,6 +79,7 @@ export function CoefficientsPage() {
   const [aError, setAError] = useState<string | null>(null);
   const [bError, setBError] = useState<string | null>(null);
   const [bStale, setBStale] = useState(false);
+  const [bMode, setBMode] = useState<"auto" | "manual">("auto");
   const [compareError, setCompareError] = useState<string | null>(null);
   const [backendCompareError, setBackendCompareError] = useState<string | null>(null);
 
@@ -99,6 +102,11 @@ export function CoefficientsPage() {
 
   const institutional = referenceTables?.items.find((table) => table.key === "institutional");
   const gail = referenceTables?.items.find((table) => table.key === "gail");
+  const bBackendValue =
+    inputs.modes.pressure_b_source === "auto"
+      ? activeWaterBackend
+      : inputs.modes.pressure_b_source;
+  const bUsesTable = isTableBackend(bBackendValue);
 
   function markAStale(target?: "air" | "pressure") {
     const coeffs = results.coefficients;
@@ -120,11 +128,22 @@ export function CoefficientsPage() {
   }
 
   function updateWaterBackend(backendKey: string) {
-    patchInputs({ water_backend: backendKey });
+    const nextBSource = isTableBackend(backendKey) ? backendKey : "auto";
+    patchInputs({
+      water_backend: backendKey,
+      modes: {
+        ...(aTarget === "air" ? { air_a_mode: "auto" } : { pressure_a_mode: "auto" }),
+        pressure_b_source: nextBSource,
+        pressure_b_reference:
+          backendKey === "institutional"
+            ? "BOTAŞ referans tablosu - aktif T/P"
+            : backendKey === "gail"
+              ? "GAIL referans tablosu - aktif T/P"
+              : "",
+      },
+    });
     markAStale();
-    if (inputs.modes.pressure_b_source === "auto") {
-      setBStale(true);
-    }
+    setBStale(true);
   }
 
   function setContextValues(temperature: number | null, pressure: number | null) {
@@ -166,32 +185,6 @@ export function CoefficientsPage() {
       pushToast("info", "Manuel A", "Manuel modda değer doğrudan kullanılır; hesap çalıştırılmaz.");
       return;
     }
-    if (aMode === "table") {
-      tablePoint.mutate(
-        {
-          table: (aTarget === "air" ? inputs.modes.air_a_reference : inputs.modes.pressure_a_reference).includes("GAIL")
-            ? "gail"
-            : "institutional",
-          temperature_c: context.temperature_c,
-          pressure_bar: context.pressure_bar,
-        },
-        {
-          onSuccess: ({ data }) => {
-            setAValue(data.a_micro_per_bar);
-            pushToast(
-              "success",
-              "A tablodan okundu",
-              `${fmt.a(data.a_micro_per_bar)}${data.repaired ? " · onarılmış hücre" : ""}`,
-            );
-          },
-          onError: (error) => {
-            setAError(error.message);
-            pushToast("error", "A okunamadı", error.message);
-          },
-        },
-      );
-      return;
-    }
     coefficientA.mutate(
       {
         temperature_c: context.temperature_c,
@@ -203,7 +196,7 @@ export function CoefficientsPage() {
           setAValue(data.a_micro_per_bar);
           pushToast(
             "success",
-            "A katsayısı hesaplandı",
+            data.state === "reference" ? "A tablodan okundu" : "A katsayısı hesaplandı",
             `${fmt.a(data.a_micro_per_bar)} · ${data.backend.label}`,
           );
         },
@@ -217,15 +210,22 @@ export function CoefficientsPage() {
 
   function computeB() {
     setBError(null);
+    if (bMode === "manual") {
+      pushToast("info", "Manuel B", "Manuel modda girilen B değeri doğrudan kullanılır.");
+      return;
+    }
     if (inputs.pressure.temperature_c === null || inputs.pressure.pressure_bar === null) {
       const msg = "Sıcaklık ve basınç girilmelidir.";
       setBError(msg);
       pushToast("error", "B hesaplanamadı", msg);
       return;
     }
+    const effectiveBSource = isTableBackend(activeWaterBackend)
+      ? activeWaterBackend
+      : inputs.modes.pressure_b_source;
     coefficientB.mutate(
       {
-        source: inputs.modes.pressure_b_source,
+        source: effectiveBSource,
         temperature_c: inputs.pressure.temperature_c,
         pressure_bar: inputs.pressure.pressure_bar,
         steel_alpha_micro_per_c: inputs.helper.steel_alpha_micro_per_c,
@@ -417,7 +417,7 @@ export function CoefficientsPage() {
                   key={mode.value}
                   type="button"
                   className="seg-btn"
-                  aria-pressed={aMode === mode.value}
+                  aria-pressed={mode.value === "auto" ? aMode !== "manual" : aMode === "manual"}
                   title={mode.note}
                   onClick={() => setAModeValue(mode.value)}
                 >
@@ -427,25 +427,7 @@ export function CoefficientsPage() {
             </div>
           </div>
 
-          {aMode === "table" ? (
-            <div className="mt-3">
-              <SelectField
-                label="Referans tablosu"
-                value={aTarget === "air" ? inputs.modes.air_a_reference : inputs.modes.pressure_a_reference}
-                onChange={(value) => {
-                  if (aTarget === "air") patchInputs({ modes: { air_a_reference: value } });
-                  else patchInputs({ modes: { pressure_a_reference: value } });
-                }}
-                options={(referenceTables?.items ?? []).map((table) => ({
-                  value: table.option_label,
-                  label: `${table.label} · ${table.temperature.min}–${table.temperature.max} °C`,
-                }))}
-                placeholder="Tablo seçin"
-              />
-            </div>
-          ) : null}
-
-          {aMode === "auto" ? (
+          {aMode !== "manual" ? (
             <div className="mt-3">
               <SelectField
                 label="Su özelliği backend'i"
@@ -481,7 +463,7 @@ export function CoefficientsPage() {
               size="lg"
               variant="primary"
               icon={<Sigma size={15} />}
-              loading={coefficientA.isPending || tablePoint.isPending}
+              loading={coefficientA.isPending}
               onClick={computeA}
             >
               A’yı hazırla
@@ -499,11 +481,11 @@ export function CoefficientsPage() {
             <ResultTile
               label="Backend"
               value={
-                <span className="text-[13px]">{aResult?.backend.key ?? (aMode === "table" ? "referans tablo" : aMode === "manual" ? "manuel" : activeWaterBackend)}</span>
+                <span className="text-[13px]">{aResult?.backend.key ?? (aMode === "manual" ? "manuel" : activeWaterBackend)}</span>
               }
               hint={
                 aResult?.backend.label ??
-                (aMode === "table" ? "Onarım bilgisi aşağıda" : "API coefficients/a")
+                (isTableBackend(activeWaterBackend) ? "Referans tablo backend'i" : "API coefficients/a")
               }
             />
           </div>
@@ -518,45 +500,29 @@ export function CoefficientsPage() {
 
         <SectionCard
           title="B — basınç değişim katsayısı"
-          description="Varsayılan kurum içi tablodur. Otomatik modda β − 3α (hacimsel) kullanılır."
+          description="Otomatik modda seçilen su özelliği backend'i (EOS veya referans tablo) kullanılır."
           icon={Sparkles}
-          action={<CoefficientBadge state={bBadgeState} />}
+          action={<CoefficientBadge state={bMode === "manual" ? "manual" : bBadgeState} />}
         >
-          <div className="mb-3 seg-control" role="group" aria-label="B kaynağı">
-            {B_SOURCES.map((source) => (
-              <button
-                key={source.value}
-                type="button"
-                className="seg-btn"
-                aria-pressed={inputs.modes.pressure_b_source === source.value}
-                title={source.note}
-                onClick={() => {
-                  setBStale(true);
-                  patchInputs({
-                    modes: {
-                      pressure_b_source: source.value,
-                      pressure_b_reference:
-                        source.value === "gail"
-                          ? "GAIL referans tablosu - aktif T/P"
-                          : source.value === "institutional"
-                            ? "BOTAŞ referans tablosu - aktif T/P"
-                            : "",
-                    },
-                    pressure: { b_micro_per_c: null },
-                  });
-                }}
-              >
-                {source.label}
-              </button>
-            ))}
+          <div className="mb-3">
+            <span className="field-label">B modu</span>
+            <div className="mt-1.5 seg-control" role="group" aria-label="B modu">
+              {B_MODES.map((mode) => (
+                <button
+                  key={mode.value}
+                  type="button"
+                  className="seg-btn"
+                  aria-pressed={bMode === mode.value}
+                  title={mode.note}
+                  onClick={() => setBMode(mode.value)}
+                >
+                  {mode.label}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <p className="text-[10.5px] leading-relaxed text-[var(--text-faint)]">
-            {B_SOURCES.find((source) => source.value === inputs.modes.pressure_b_source)?.note}
-            {inputs.modes.pressure_b_source !== "auto" ? " · Tablo B değeri ham hücreden alınır." : ""}
-          </p>
-
-          <FieldGrid cols={2} className="mt-3">
+          <FieldGrid cols={2}>
             <NumberField
               label="Su sıcaklığı (B)"
               unit="°C"
@@ -579,76 +545,102 @@ export function CoefficientsPage() {
             />
           </FieldGrid>
 
-          <div className="mt-3 grid grid-cols-2 gap-3">
-            <SelectField
-              label="Çelik modeli"
-              value={inputs.modes.steel_model}
-              onChange={(value) => {
-                setBStale(true);
-                patchInputs({
-                  modes: { steel_model: value as typeof inputs.modes.steel_model },
-                });
-              }}
-              options={STEEL_MODEL_OPTIONS.map((model) => ({
-                value: model.value,
-                label: model.label,
-              }))}
-              disabled={inputs.modes.pressure_b_source !== "auto"}
-              help={
-                inputs.modes.pressure_b_source === "auto"
-                  ? STEEL_MODEL_OPTIONS.find((model) => model.value === inputs.modes.steel_model)?.note
-                  : "Yalnızca otomatik kaynakta etkilidir."
-              }
-            />
-            <NumberField
-              label="Çelik α"
-              unit="10⁻⁶/°C"
-              value={inputs.helper.steel_alpha_micro_per_c}
-              onChange={(value) => {
-                setBStale(true);
-                patchInputs({ helper: { steel_alpha_micro_per_c: value ?? 12 } });
-              }}
-              min={0.1}
-              disabled={inputs.modes.pressure_b_source !== "auto"}
-              help="Karbon çelik varsayılanı 12,0."
-            />
-          </div>
+          {bMode === "auto" ? (
+            <>
+              <div className="mt-3">
+                <SelectField
+                  label="Su özelliği backend'i (B)"
+                  value={bBackendValue}
+                  onChange={updateWaterBackend}
+                  options={(meta?.water_backends ?? []).map((backend) => ({
+                    value: backend.key,
+                    label: `${backend.label}${backend.distribution_ready ? "" : " (dağıtım dışı)"}`,
+                  }))}
+                  help={
+                    bUsesTable
+                      ? "Tablo B değeri çelik genleşmesini içerir (ham hücre)."
+                      : "EOS/Grid seçiliyken β otomatik hesaplanır; α çelik modeline göre düşülür."
+                  }
+                />
+              </div>
 
-          <div className="mt-2 grid gap-2 sm:grid-cols-2">
-            <SelectField
-              label="Çelik preset"
-              value={inputs.modes.steel_preset}
-              onChange={(value) => {
-                const preset = STEEL_PRESETS.find((item) => item.label === value);
-                setBStale(true);
-                patchInputs({
-                  modes: { steel_preset: value },
-                  helper: {
-                    steel_alpha_micro_per_c:
-                      preset?.value ?? inputs.helper.steel_alpha_micro_per_c,
-                  },
-                });
-              }}
-              options={STEEL_PRESETS.map((preset) => ({ value: preset.label, label: preset.label }))}
-            />
-            {inputs.modes.pressure_b_source === "auto" ? (
-              <SelectField
-                label="Su özelliği backend'i (auto β)"
-                value={activeWaterBackend}
-                onChange={updateWaterBackend}
-                options={(meta?.water_backends ?? []).map((backend) => ({
-                  value: backend.key,
-                  label: `${backend.label}${backend.distribution_ready ? "" : " (dağıtım dışı)"}`,
-                }))}
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <SelectField
+                  label="Çelik modeli"
+                  value={inputs.modes.steel_model}
+                  onChange={(value) => {
+                    setBStale(true);
+                    patchInputs({
+                      modes: { steel_model: value as typeof inputs.modes.steel_model },
+                    });
+                  }}
+                  options={STEEL_MODEL_OPTIONS.map((model) => ({
+                    value: model.value,
+                    label: model.label,
+                  }))}
+                  disabled={bUsesTable}
+                  help={
+                    !bUsesTable
+                      ? STEEL_MODEL_OPTIONS.find((model) => model.value === inputs.modes.steel_model)?.note
+                      : "EOS/Grid backend'inde etkilidir."
+                  }
+                />
+                <NumberField
+                  label="Çelik α"
+                  unit="10⁻⁶/°C"
+                  value={inputs.helper.steel_alpha_micro_per_c}
+                  onChange={(value) => {
+                    setBStale(true);
+                    patchInputs({ helper: { steel_alpha_micro_per_c: value ?? 12 } });
+                  }}
+                  min={0.1}
+                  disabled={bUsesTable}
+                  help="Karbon çelik varsayılanı 12,0."
+                />
+              </div>
+
+              <div className="mt-2">
+                <SelectField
+                  label="Çelik preset"
+                  value={inputs.modes.steel_preset}
+                  disabled={bUsesTable}
+                  onChange={(value) => {
+                    const preset = STEEL_PRESETS.find((item) => item.label === value);
+                    setBStale(true);
+                    patchInputs({
+                      modes: { steel_preset: value },
+                      helper: {
+                        steel_alpha_micro_per_c:
+                          preset?.value ?? inputs.helper.steel_alpha_micro_per_c,
+                      },
+                    });
+                  }}
+                  options={STEEL_PRESETS.map((preset) => ({ value: preset.label, label: preset.label }))}
+                />
+              </div>
+            </>
+          ) : (
+            <div className="mt-3">
+              <NumberField
+                label="Manuel B"
+                unit="10⁻⁶/°C"
+                value={inputs.pressure.b_micro_per_c}
+                onChange={(value) => {
+                  setBStale(false);
+                  patchInputs({ pressure: { b_micro_per_c: value } });
+                }}
+                help="Aralık: −200…+500. Değer doğrudan basınç değişimi testinde kullanılır."
               />
-            ) : null}
-          </div>
+            </div>
+          )}
 
           <div className="mt-3 flex items-center justify-between gap-2">
             <span className="text-[10.5px] text-[var(--text-faint)]">
-              {inputs.modes.pressure_b_source === "auto"
-                ? "β otomatik hesaplanır; α çelik modeline göre düşülür."
-                : "Tablo aralığı: kurum içi 1–25 °C / 30–120 bar."}
+              {bMode === "manual"
+                ? "Manuel modda hesap çalışmaz."
+                : bUsesTable
+                  ? "Tablo aralığı: kurum içi 1–25 °C / 30–120 bar."
+                  : "β otomatik hesaplanır; α çelik modeline göre düşülür."}
             </span>
             <Button
               size="lg"
@@ -673,7 +665,12 @@ export function CoefficientsPage() {
                     : "pass"
                   : undefined
               }
-              hint={bResult?.label ?? B_SOURCES.find((s) => s.value === inputs.modes.pressure_b_source)?.note}
+              hint={
+                bMode === "manual"
+                  ? "Manuel değer"
+                  : bResult?.label ??
+                    meta?.water_backends.find((item) => item.key === bBackendValue)?.label
+              }
             />
             <ResultTile
               label="Su β"
@@ -684,7 +681,7 @@ export function CoefficientsPage() {
                   ? "info"
                   : undefined
               }
-              hint="Otomatik kaynakta dolar"
+              hint="EOS/Grid backend'inde dolar"
             />
           </div>
 
@@ -692,20 +689,17 @@ export function CoefficientsPage() {
             <div className="mt-3">
               <InlineNotice tone="danger" title="B hesaplanamadı" icon={AlertTriangle}>
                 <p>{bError}</p>
-                {inputs.modes.pressure_b_source !== "auto" && bTemp !== null && bTemp < 1 ? (
+                {bUsesTable && bTemp !== null && bTemp < 1 ? (
                   <Button
                     size="sm"
                     variant="default"
                     className="mt-2"
                     onClick={() => {
                       setBError(null);
-                      patchInputs({
-                        modes: { pressure_b_source: "auto", pressure_b_reference: "" },
-                        pressure: { b_micro_per_c: null },
-                      });
+                      updateWaterBackend("table_v1");
                     }}
                   >
-                    Otomatik β − 3α kaynağına geç
+                    IAPWS-IF97 Region 1 (β − 3α) backend'ine geç
                   </Button>
                 ) : null}
               </InlineNotice>

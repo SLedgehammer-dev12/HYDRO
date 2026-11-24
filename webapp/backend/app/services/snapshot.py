@@ -92,6 +92,18 @@ def resolve_backend_key(label: str | None) -> str | None:
             return key
     if folded == "iapws":
         return "iapws95_dev" if "iapws95_dev" in labels else None
+    web_aliases = {
+        "iapws-95": "coolprop",
+        "iapws-if97 region 1": "table_v1",
+        "iapws-if97 region 1 (bicubic)": "table_v1_bicubic",
+        "institutional": "institutional",
+        "kurum içi a/b kontrol tablosu (botaş)": "institutional",
+        "kurum ici a/b kontrol tablosu": "institutional",
+        "gail": "gail",
+        "gail referans tablosu": "gail",
+    }
+    if folded in web_aliases:
+        return web_aliases[folded]
     for key, value in sorted(labels.items(), key=lambda item: len(item[1]), reverse=True):
         if folded.startswith(value.casefold()):
             return key

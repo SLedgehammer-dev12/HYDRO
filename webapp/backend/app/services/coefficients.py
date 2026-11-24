@@ -6,9 +6,11 @@ import logging
 from typing import Any
 
 from ..core.errors import error_from_domain
-from ..domain_adapter import b_source_payload, backend_info_payload
+from ..domain_adapter import b_source_payload, backend_info_payload, web_backend_label
 
 logger = logging.getLogger("hydro.web.coefficients")
+
+REFERENCE_TABLE_BACKENDS = {"institutional", "gail"}
 
 
 def _reraise(exc: BaseException, **kwargs: Any) -> None:
@@ -16,6 +18,26 @@ def _reraise(exc: BaseException, **kwargs: Any) -> None:
 
 
 def coefficient_a(temperature_c: float, pressure_bar: float, backend: str | None) -> dict[str, Any]:
+    if backend in REFERENCE_TABLE_BACKENDS:
+        point = coefficient_table(
+            table=backend,
+            temperature_c=temperature_c,
+            pressure_bar=pressure_bar,
+            repair_anomalies=True,
+        )
+        return {
+            "a_micro_per_bar": point["a_micro_per_bar"],
+            "temperature_c": temperature_c,
+            "pressure_bar": pressure_bar,
+            "backend": {
+                "key": backend,
+                "label": web_backend_label(backend, point["table_label"]),
+                "distribution_ready": True,
+                "note": point["repair_note"] or point["source_note"],
+            },
+            "state": "reference",
+        }
+
     from hidrostatik_test.domain.water_properties import (
         get_default_water_property_backend,
         get_water_property_backend,
@@ -49,17 +71,23 @@ def coefficient_b(
 ) -> dict[str, Any]:
     from hidrostatik_test.domain import resolve_b_value
 
+    effective_source = source
+    effective_backend = backend
+    if source == "auto" and backend in REFERENCE_TABLE_BACKENDS:
+        effective_source = backend
+        effective_backend = None
+
     try:
         result = resolve_b_value(
-            source,
+            effective_source,
             temp_c=temperature_c,
             pressure_bar=pressure_bar,
             steel_alpha_micro_per_c=steel_alpha_micro_per_c,
             steel_model=steel_model,
-            backend=backend,
+            backend=effective_backend,
         )
     except Exception as exc:
-        _reraise(exc, reference_table_hint=source in {"institutional", "gail"})
+        _reraise(exc, reference_table_hint=effective_source in REFERENCE_TABLE_BACKENDS)
     return b_source_payload(result)
 
 
@@ -73,13 +101,14 @@ def coefficient_compare(
 ) -> dict[str, Any]:
     from hidrostatik_test.domain import compare_b_sources
 
+    effective_backend = None if backend in REFERENCE_TABLE_BACKENDS else backend
     try:
         comparison = compare_b_sources(
             temp_c=temperature_c,
             pressure_bar=pressure_bar,
             steel_alpha_micro_per_c=steel_alpha_micro_per_c,
             steel_model=steel_model,
-            backend=backend,
+            backend=effective_backend,
         )
     except Exception as exc:
         _reraise(exc, reference_table_hint=True)

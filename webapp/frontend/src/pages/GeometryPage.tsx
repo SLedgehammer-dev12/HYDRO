@@ -151,6 +151,16 @@ export function GeometryPage() {
   const setSegments = useAppStore((state) => state.setSegments);
   const setTab = useAppStore((state) => state.setTab);
   const pushToast = useAppStore((state) => state.pushToast);
+  const pendingScrollTarget = useAppStore((state) => state.pendingScrollTarget);
+
+  const [geoTab, setGeoTab] = useState<"pipe" | "profile" | "field">(() =>
+    pendingScrollTarget === "sahne-3d" || pendingScrollTarget === "saha" ? "field" : "pipe",
+  );
+  useEffect(() => {
+    if (pendingScrollTarget === "sahne-3d" || pendingScrollTarget === "saha") {
+      setGeoTab("field");
+    }
+  }, [pendingScrollTarget]);
 
   const { pipes, grades } = useCatalog();
   const { data: meta } = useMeta();
@@ -334,7 +344,7 @@ export function GeometryPage() {
       <PageHeader
         kicker="Geometri & Saha"
         title="Kesit, segmentler, kotlar ve saha profili"
-        description="Segment listesi doluysa tek kesit alanları yok sayılır; hat, segmentlerin zincirleme toplamından hesaplanır."
+        description="Boru kesiti, kot profili ve 3D saha kontrollerini aşağıdaki sekmelerden yönetin."
         meta={
           <>
             <Badge tone={sections.length ? "pass" : "warning"}>
@@ -370,9 +380,32 @@ export function GeometryPage() {
         }
       />
 
-      <SectionIdentityCard />
+      <div className="tabs" role="tablist" aria-label="Geometri ve saha görünümleri">
+        {(
+          [
+            ["pipe", "Boru & Segmentler"],
+            ["profile", "Kot & Grafikler"],
+            ["field", "3D Saha & Kontroller"],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={geoTab === key}
+            className="tab"
+            onClick={() => setGeoTab(key)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1.15fr_1fr]">
+      {geoTab === "pipe" ? (
+        <>
+          <SectionIdentityCard />
+
+          <div className="grid gap-4 xl:grid-cols-[1.15fr_1fr]">
         <SectionCard
           title="Katalogdan seç"
           description="ASME B36.10 NPS ve schedule seçimi dış çap / et kalınlığını doldurur."
@@ -757,32 +790,42 @@ export function GeometryPage() {
               icon={GitCompareArrows}
               title={`Segment Denetimi: ${segmentSummary.headline}`}
             >
-              {segmentSummary.issues.map((issue, i) => (
-                <p key={`${issue}-${i}`} className="mt-1 text-[10.5px] leading-snug text-[var(--text-muted)]">
-                  {issue}
-                </p>
-              ))}
-            </InlineNotice>
-          </div>
-        ) : segmentSummary.hasSegments ? (
-          <div className="mt-3 flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-[11.5px]">
-            <CheckCircle2 size={13} className="tone-pass shrink-0" aria-hidden />
-            <span className="text-[var(--text)]">
-              {segmentSummary.headline}
-              {segmentSummary.deltaLengthM !== null &&
-                segmentSummary.deltaLengthM !== 0 &&
-                segmentSummary.deltaLengthM !== null && (
-                  <>
-                    (ΔKP:{segmentSummary.deltaLengthM > 0 ? "+" : ""}{num(segmentSummary.deltaLengthM, 0)} m)
-                  </>
-                )}
-            </span>
-          </div>
-        ) : null}
-      </SectionCard>
+            {segmentSummary.issues.map((issue, i) => (
+              <p key={`${issue}-${i}`} className="mt-1 text-[10.5px] leading-snug text-[var(--text-muted)]">
+                {issue}
+              </p>
+            ))}
+          </InlineNotice>
+        </div>
+      ) : segmentSummary.hasSegments ? (
+        <div className="mt-3 flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-[11.5px]">
+          <CheckCircle2 size={13} className="tone-pass shrink-0" aria-hidden />
+          <span className="text-[var(--text)]">
+            {segmentSummary.headline}
+            {segmentSummary.deltaLengthM !== null &&
+              segmentSummary.deltaLengthM !== 0 &&
+              segmentSummary.deltaLengthM !== null && (
+                <>
+                  (ΔKP:{segmentSummary.deltaLengthM > 0 ? "+" : ""}{num(segmentSummary.deltaLengthM, 0)} m)
+                </>
+              )}
+          </span>
+        </div>
+      ) : null}
+    </SectionCard>
 
-      <SectionCard
-        title="Test bölümü profili"
+    {!geometry ? (
+      <InlineNotice tone="warning" title="Hesap için geometri gerekli" icon={ClipboardList}>
+        Tek kesit veya en az bir geçerli segment girildiğinde toplamlar ve doğrulama etkinleşir.
+      </InlineNotice>
+    ) : null}
+  </>
+) : null}
+
+{geoTab === "profile" ? (
+  <>
+    <SectionCard
+      title="Test bölümü profili"
         description="Kotlar, dizayn basıncı, malzeme ve Location Class basınç penceresini belirler."
         icon={Mountain}
         action={
@@ -918,15 +961,11 @@ export function GeometryPage() {
         </SectionCard>
       </div>
 
-      {!geometry ? (
-        <InlineNotice tone="warning" title="Hesap için geometri gerekli" icon={ClipboardList}>
-          Tek kesit veya en az bir geçerli segment girildiğinde toplamlar ve doğrulama etkinleşir.
-        </InlineNotice>
+          <SiteSurveyPanel totalLength={totalLength} />
+        </>
       ) : null}
 
-      <SiteSurveyPanel totalLength={totalLength} />
-
-      <FieldPage embedded />
+      {geoTab === "field" ? <FieldPage embedded /> : null}
 
       <ConfirmDialog
         open={confirmClearSegments}

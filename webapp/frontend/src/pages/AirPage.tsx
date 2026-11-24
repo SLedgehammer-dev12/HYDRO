@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowRight, CheckCircle2, Gauge, History, Lock, Sigma, Wind } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, Gauge, Lock, Sigma, Wind } from "lucide-react";
 import { PageHeader } from "../components/layout/PageHeader";
 import { SectionCard, ResultTile } from "../components/ui/Card";
 import { Badge, CoefficientBadge } from "../components/ui/Badge";
@@ -6,12 +6,12 @@ import { Button } from "../components/ui/Button";
 import { NumberField, SelectField, FieldGrid, ReadonlyValue } from "../components/ui/Field";
 import { DecisionCard } from "../components/ui/DecisionCard";
 import { RatioGauge } from "../components/ui/Gauge";
-import { InlineNotice, EmptyState } from "../components/ui/State";
+import { InlineNotice } from "../components/ui/State";
 import {
   useCalculateAir,
   useCoefficientA,
+  useMeta,
   useSaveTestResult,
-  useTablePoint,
 } from "../hooks/queries";
 import { useAppStore } from "../store/useAppStore";
 import { useEvaluateShortcut } from "../hooks/useEvaluateShortcut";
@@ -30,12 +30,13 @@ export function AirPage({ embedded = false }: { embedded?: boolean } = {}) {
 
   const calculateAir = useCalculateAir();
   const coefficientA = useCoefficientA();
-  const tablePoint = useTablePoint();
+  const { data: meta } = useMeta();
   const saveResult = useSaveTestResult();
   useEvaluateShortcut(evaluate);
 
   const air = results.air;
   const mode = inputs.modes.air_a_mode;
+  const activeWaterBackend = inputs.water_backend || meta?.water_backends[0]?.key || "table_v1";
   const geometry = results.geometry ?? geometryForInputs(inputs);
   const sections = sectionsFromInputs(inputs);
   const aValue = inputs.air.a_micro_per_bar;
@@ -128,36 +129,20 @@ export function AirPage({ embedded = false }: { embedded?: boolean } = {}) {
       pushToast("info", "Manuel A", "Manuel modda A değeri doğrudan kullanılır.");
       return;
     }
-    if (mode === "table") {
-      tablePoint.mutate(
-        {
-          table: inputs.modes.air_a_reference.includes("GAIL") ? "gail" : "institutional",
-          temperature_c: inputs.air.temperature_c,
-          pressure_bar: effectivePressure,
-        },
-        {
-          onSuccess: ({ data }) => {
-            patchInputs({ air: { a_micro_per_bar: data.a_micro_per_bar } });
-            pushToast(
-              "success",
-              "A tablodan alındı",
-              `${fmt.a(data.a_micro_per_bar)}${data.repaired ? " · onarılmış hücre" : ""}`,
-            );
-          },
-        },
-      );
-      return;
-    }
     coefficientA.mutate(
       {
         temperature_c: inputs.air.temperature_c,
         pressure_bar: effectivePressure,
-        backend: inputs.water_backend || "table_v1",
+        backend: activeWaterBackend,
       },
       {
         onSuccess: ({ data }) => {
           patchInputs({ air: { a_micro_per_bar: data.a_micro_per_bar } });
-          pushToast("success", "A hesaplandı", fmt.a(data.a_micro_per_bar));
+          pushToast(
+            "success",
+            data.state === "reference" ? "A tablodan alındı" : "A hesaplandı",
+            `${fmt.a(data.a_micro_per_bar)} · ${data.backend.label}`,
+          );
         },
       },
     );
@@ -272,31 +257,31 @@ export function AirPage({ embedded = false }: { embedded?: boolean } = {}) {
             <div className="mt-3">
               <span className="field-label">A modu</span>
               <div className="mt-1.5 seg-control" role="group" aria-label="A modu">
-                {(["auto", "table", "manual"] as const).map((option) => (
+                {(["auto", "manual"] as const).map((option) => (
                   <button
                     key={option}
                     type="button"
                     className="seg-btn"
-                    aria-pressed={mode === option}
+                    aria-pressed={option === "auto" ? mode !== "manual" : mode === "manual"}
                     onClick={() => patchInputs({ modes: { air_a_mode: option } })}
                   >
-                    {option === "auto" ? "Otomatik" : option === "table" ? "Tablo" : "Manuel"}
+                    {option === "auto" ? "Otomatik" : "Manuel"}
                   </button>
                 ))}
               </div>
             </div>
 
-            {mode === "table" ? (
+            {mode !== "manual" ? (
               <div className="mt-3">
                 <SelectField
-                  label="A referans tablosu"
-                  value={inputs.modes.air_a_reference}
-                  onChange={(value) => patchInputs({ modes: { air_a_reference: value } })}
-                  options={[
-                    { value: "BOTAŞ referans tablosu - aktif T/P", label: "BOTAŞ referans tablosu - aktif T/P" },
-                    { value: "GAIL referans tablosu - aktif T/P", label: "GAIL referans tablosu - aktif T/P" },
-                  ]}
-                  placeholder="Referans tablo seçin"
+                  label="Su özelliği backend'i"
+                  value={activeWaterBackend}
+                  onChange={(value) => patchInputs({ water_backend: value })}
+                  options={(meta?.water_backends ?? []).map((backend) => ({
+                    value: backend.key,
+                    label: `${backend.label}${backend.distribution_ready ? "" : " (dağıtım dışı)"}`,
+                  }))}
+                  placeholder="Backend seçin"
                 />
               </div>
             ) : null}
@@ -311,7 +296,7 @@ export function AirPage({ embedded = false }: { embedded?: boolean } = {}) {
                 help={
                   mode === "manual"
                     ? "Manuel mod: 1,0 – 200,0"
-                    : "Otomatik/tablo modunda salt okunur; A’yı hazırla ile doldurun."
+                    : "Otomatik modda salt okunur; A’yı hazırla ile doldurun."
                 }
                 min={1}
                 max={200}
@@ -320,7 +305,7 @@ export function AirPage({ embedded = false }: { embedded?: boolean } = {}) {
                 size="sm"
                 variant="default"
                 icon={<Sigma size={12} />}
-                loading={coefficientA.isPending || tablePoint.isPending}
+                loading={coefficientA.isPending}
                 disabled={mode === "manual"}
                 onClick={prepareA}
               >
@@ -406,29 +391,6 @@ export function AirPage({ embedded = false }: { embedded?: boolean } = {}) {
               <ResultTile label="Segment" value={geometry ? num(geometry.section_count, 0) : "—"} unit="kesit" />
             </div>
           </SectionCard>
-
-          <SectionCard
-            title="Geçmiş"
-            description="Bu oturumdaki hava testi değerlendirmeleri."
-            icon={History}
-            bodyClassName="pt-2"
-          >
-            {airHistory.length === 0 ? (
-              <EmptyState title="Hava testi kaydı yok" description="İlk değerlendirmeden sonra burada listelenir." icon={History} />
-            ) : (
-              <ul className="space-y-1.5">
-                {airHistory.map((entry) => (
-                  <li key={entry.id} className="flex items-start gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-2">
-                    <span className="mt-0.5 font-mono text-[10px] text-[var(--text-faint)]">{relativeTime(entry.at)}</span>
-                    <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--text-muted)]">{entry.summary}</span>
-                    <Badge tone={entry.status === "BASARILI" ? "pass" : entry.status === "BASARISIZ" ? "fail" : "pending"}>
-                      {entry.status}
-                    </Badge>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </SectionCard>
         </div>
 
         <div className="space-y-4">
@@ -486,13 +448,23 @@ export function AirPage({ embedded = false }: { embedded?: boolean } = {}) {
               </>
             }
           />
+        </div>
+      </div>
 
-          <SectionCard
-            title="Katsayı özeti"
-            description="A değeri ve kaynağı."
-            icon={Sigma}
-            action={<CoefficientBadge state={mode === "manual" ? "manual" : mode === "table" ? "reference" : "computed"} />}
-          >
+      <div className="space-y-3">
+        <details className="disclosure-card">
+          <summary className="disclosure-summary">
+            <ChevronRight size={15} className="disclosure-chevron shrink-0" aria-hidden />
+            <span>A Katsayısı Özeti &amp; Kaynak</span>
+            <span className="ml-auto text-[11px] font-normal text-[var(--text-faint)]">
+              A = {num(aValue, 4)} · {mode === "auto" ? "Backend hesabı" : mode === "table" ? "Referans tablo" : "Manuel"}
+            </span>
+          </summary>
+          <div className="disclosure-body space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11.5px] text-[var(--text-muted)]">A değeri ve kaynağı</span>
+              <CoefficientBadge state={mode === "manual" ? "manual" : mode === "table" ? "reference" : "computed"} />
+            </div>
             <div className="grid grid-cols-2 gap-2">
               <ResultTile label="A" value={num(aValue, 6)} unit="10⁻⁶/bar" />
               <ResultTile
@@ -506,7 +478,7 @@ export function AirPage({ embedded = false }: { embedded?: boolean } = {}) {
               />
             </div>
             {results.tablePoint ? (
-              <p className="mt-2 text-[10.5px] leading-relaxed text-[var(--text-muted)]">
+              <p className="text-[10.5px] leading-relaxed text-[var(--text-muted)]">
                 Son tablo okuması: A = {fmt.a(results.tablePoint.a_micro_per_bar)} · B ={" "}
                 {fmt.b(results.tablePoint.b_micro_per_c)}
                 {results.tablePoint.repaired ? " (onarılmış)" : ""}
@@ -515,8 +487,37 @@ export function AirPage({ embedded = false }: { embedded?: boolean } = {}) {
             <InlineNotice tone="info" title="Birim" icon={Sigma}>
               A değeri 10⁻⁶/bar ölçeğindedir; 44,97 değeri 44,97 × 10⁻⁶ /bar anlamına gelir.
             </InlineNotice>
-          </SectionCard>
-        </div>
+          </div>
+        </details>
+
+        <details className="disclosure-card">
+          <summary className="disclosure-summary">
+            <ChevronRight size={15} className="disclosure-chevron shrink-0" aria-hidden />
+            <span>Hava Testi Geçmişi</span>
+            <span className="ml-auto text-[11px] font-normal text-[var(--text-faint)]">
+              {airHistory.length} kayıt
+            </span>
+          </summary>
+          <div className="disclosure-body">
+            {airHistory.length === 0 ? (
+              <p className="text-[11.5px] text-[var(--text-faint)]">
+                Henüz hava testi kaydı yok. İlk değerlendirmeden sonra burada listelenir.
+              </p>
+            ) : (
+              <ul className="space-y-1.5">
+                {airHistory.map((entry) => (
+                  <li key={entry.id} className="flex items-start gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2">
+                    <span className="mt-0.5 font-mono text-[10px] text-[var(--text-faint)]">{relativeTime(entry.at)}</span>
+                    <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--text-muted)]">{entry.summary}</span>
+                    <Badge tone={entry.status === "BASARILI" ? "pass" : entry.status === "BASARISIZ" ? "fail" : "pending"}>
+                      {entry.status}
+                    </Badge>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </details>
       </div>
     </div>
   );

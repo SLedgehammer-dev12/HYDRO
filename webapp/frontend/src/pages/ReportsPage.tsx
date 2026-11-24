@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
+  ChevronRight,
   ClipboardCopy,
   Download,
   FileJson,
@@ -70,6 +71,7 @@ export function ReportsPage() {
   const importDesktopSnapshot = useImportDesktopSnapshot();
 
   const [generatedAt, setGeneratedAt] = useState(() => new Date());
+  const [reportTab, setReportTab] = useState<"export" | "backup">("export");
   const [busy, setBusy] = useState<Format | null>(null);
   const [includeRawOcr, setIncludeRawOcr] = useState(false);
   const [snapshotBusy, setSnapshotBusy] = useState(false);
@@ -330,101 +332,193 @@ export function ReportsPage() {
         }
       />
 
-      <div className="grid gap-4 xl:grid-cols-[1fr_1.35fr]">
+      <div className="tabs" role="tablist" aria-label="Rapor ve yedekleme görünümleri">
+        {(
+          [
+            ["export", "Resmî Rapor & İndir"],
+            ["backup", "Yedekleme & Geçmiş"],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={reportTab === key}
+            className="tab"
+            onClick={() => setReportTab(key)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {reportTab === "export" ? (
+        <div className="grid gap-4 xl:grid-cols-[1.1fr_1fr]">
+          <div className="space-y-4">
+            <SectionCard
+              title="Rapor kimliği"
+              description="Boş bırakılabilir; boş alanlar raporda “—” görünür."
+              icon={FileText}
+            >
+              <div className="grid grid-cols-2 gap-3">
+                <TextField
+                  label="Rapor no"
+                  value={inputs.report.report_no}
+                  onChange={(value) => patchInputs({ report: { report_no: value } })}
+                  placeholder="BOT-2026-0142"
+                  maxLength={60}
+                />
+                <TextField
+                  label="Operatör"
+                  value={inputs.report.operator}
+                  onChange={(value) => patchInputs({ report: { operator: value } })}
+                  placeholder="Ad Soyad"
+                  maxLength={80}
+                />
+                <TextField
+                  label="Tarih"
+                  value={inputs.report.date}
+                  onChange={(value) => patchInputs({ report: { date: value } })}
+                  placeholder="YYYY-AA-GG"
+                  help={inputs.report.date ? `Raporda: ${dateOnly(inputs.report.date)}` : "ISO tarih (YYYY-AA-GG)"}
+                />
+                <TextField
+                  label="Bölüm no"
+                  value={inputs.report.section_id}
+                  onChange={(value) => patchInputs({ report: { section_id: value } })}
+                  placeholder="12-13"
+                  maxLength={40}
+                />
+              </div>
+            </SectionCard>
+
+            <SectionCard title="Dışa aktarma" description="Resmî PDF, Excel veya TXT çıktısı oluşturun." icon={Download}>
+              <label className="mb-3 flex cursor-pointer items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-[11.5px] text-[var(--text-soft)]">
+                <input
+                  type="checkbox"
+                  className="accent-[var(--primary)]"
+                  checked={includeRawOcr}
+                  onChange={(event) => setIncludeRawOcr(event.target.checked)}
+                />
+                <span>Ham OCR özetini rapora ekle (include_raw_ocr)</span>
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {(Object.keys(FORMAT_META) as Format[]).map((format) => {
+                  const Icon = FORMAT_META[format].icon;
+                  const officialDisabled = format !== "txt" && (isOffline || !sessionId);
+                  return (
+                    <button
+                      key={format}
+                      type="button"
+                      className="flex flex-col items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-2 py-3 transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-3)] disabled:opacity-50"
+                      disabled={busy !== null || officialDisabled}
+                      title={officialDisabled ? "Çevrimdışı/demo modda kapalı" : undefined}
+                      onClick={() => void exportReport(format)}
+                    >
+                      <span className="grid size-8 place-items-center rounded-lg border border-[var(--border)] bg-[var(--surface)]">
+                        <Icon size={15} aria-hidden />
+                      </span>
+                      <span className="text-[11.5px] font-semibold">{FORMAT_META[format].label}</span>
+                      <span className="text-[9.5px] text-[var(--text-faint)]">
+                        {busy === format ? "Hazırlanıyor…" : officialDisabled ? "Çevrimdışı kapalı" : "İndir"}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </SectionCard>
+          </div>
+
+          <div className="space-y-4">
+            <SectionCard
+              title="İçerik durumu"
+              description="Boş bölümler raporda “Kaydedilecek sonuç yok” olarak görünür."
+              icon={History}
+            >
+              <ul className="grid gap-1.5">
+                {sectionsStatus.map((section) => (
+                  <li
+                    key={section.label}
+                    className="flex items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1.5"
+                  >
+                    <span className="flex items-center gap-1.5 text-[11px]">
+                      <span className={section.ready ? "status-dot tone-pass" : "status-dot tone-pending"} aria-hidden />
+                      {section.label}
+                    </span>
+                    <span className="max-w-[55%] truncate text-right font-mono text-[10px] text-[var(--text-faint)]">{section.detail}</span>
+                  </li>
+                ))}
+              </ul>
+            </SectionCard>
+
+            <details className="disclosure-card">
+              <summary className="disclosure-summary">
+                <ChevronRight size={15} className="disclosure-chevron shrink-0" aria-hidden />
+                <span>TXT Önizleme</span>
+                <span className="ml-auto text-[11px] font-normal text-[var(--text-faint)]">
+                  {reportText.split("\n").length} satır · {generatedAt.toLocaleTimeString("tr-TR")}
+                </span>
+              </summary>
+              <div className="disclosure-body space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-faint)]">
+                    <span className="chip">{new Blob([reportText]).size} bayt</span>
+                    <span className="chip">{reportText.split("\n").length} satır</span>
+                    <span>Oluşturma: {generatedAt.toLocaleTimeString("tr-TR")}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <IconButton label="Önizlemeyi yenile" onClick={() => setGeneratedAt(new Date())}>
+                      <RefreshCw size={14} />
+                    </IconButton>
+                    <IconButton label="Rapor metnini kopyala" onClick={() => void copyPreview()}>
+                      <ClipboardCopy size={14} />
+                    </IconButton>
+                  </div>
+                </div>
+                <pre className="scroll-thin max-h-[440px] overflow-auto rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3.5 font-mono text-[10.5px] leading-relaxed text-[var(--text-soft)] whitespace-pre-wrap">
+                  {reportText}
+                </pre>
+              </div>
+            </details>
+
+            <details className="disclosure-card">
+              <summary className="disclosure-summary">
+                <ChevronRight size={15} className="disclosure-chevron shrink-0" aria-hidden />
+                <span>Rapor Kapsamı</span>
+                <span className="ml-auto text-[11px] font-normal text-[var(--text-faint)]">
+                  {meta.spec.code}
+                </span>
+              </summary>
+              <div className="disclosure-body">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {[
+                    ["Başlık", meta.app.version],
+                    ["Boru kesiti", results.geometry ? `${num(results.geometry.section_count, 0)} kesit` : "—"],
+                    ["Hava", results.air?.decision.status ?? "—"],
+                    ["Basınç", results.pressure?.decision.status ?? "—"],
+                    ["Profil", results.profile?.decision.status ?? "—"],
+                    ["Pig", results.pig?.status ?? "—"],
+                    ["Checklist", `${CHECK_DEFINITIONS.filter((c) => inputs.checks[c.key]).length}/11`],
+                    ["Şartname", meta.spec.code],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2">
+                      <p className="text-[9.5px] uppercase tracking-wide text-[var(--text-faint)]">{label}</p>
+                      <p className="mt-0.5 truncate font-mono text-[11px]">{value}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </details>
+          </div>
+        </div>
+      ) : (
         <div className="space-y-4">
           <SectionCard
-            title="Rapor kimliği"
-            description="Boş bırakılabilir; boş alanlar raporda “—” görünür."
-            icon={FileText}
+            title="Masaüstü Snapshot (JSON)"
+            description="Masaüstü sürümüyle uyumlu JSON yedek indirin veya mevcut/yeni kesite aktarın."
+            icon={FileJson}
           >
-            <div className="grid grid-cols-2 gap-3">
-              <TextField
-                label="Rapor no"
-                value={inputs.report.report_no}
-                onChange={(value) => patchInputs({ report: { report_no: value } })}
-                placeholder="BOT-2026-0142"
-                maxLength={60}
-              />
-              <TextField
-                label="Operatör"
-                value={inputs.report.operator}
-                onChange={(value) => patchInputs({ report: { operator: value } })}
-                placeholder="Ad Soyad"
-                maxLength={80}
-              />
-              <TextField
-                label="Tarih"
-                value={inputs.report.date}
-                onChange={(value) => patchInputs({ report: { date: value } })}
-                placeholder="YYYY-AA-GG"
-                help={inputs.report.date ? `Raporda: ${dateOnly(inputs.report.date)}` : "ISO tarih (YYYY-AA-GG)"}
-              />
-              <TextField
-                label="Bölüm no"
-                value={inputs.report.section_id}
-                onChange={(value) => patchInputs({ report: { section_id: value } })}
-                placeholder="12-13"
-                maxLength={40}
-              />
-            </div>
-          </SectionCard>
-
-          <SectionCard
-            title="İçerik durumu"
-            description="Boş bölümler raporda “Kaydedilecek sonuç yok” olarak görünür."
-            icon={History}
-          >
-            <ul className="grid gap-1.5">
-              {sectionsStatus.map((section) => (
-                <li
-                  key={section.label}
-                  className="flex items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1.5"
-                >
-                  <span className="flex items-center gap-1.5 text-[11px]">
-                    <span className={section.ready ? "status-dot tone-pass" : "status-dot tone-pending"} aria-hidden />
-                    {section.label}
-                  </span>
-                  <span className="max-w-[55%] truncate text-right font-mono text-[10px] text-[var(--text-faint)]">{section.detail}</span>
-                </li>
-              ))}
-            </ul>
-          </SectionCard>
-
-          <SectionCard title="Dışa aktarma" description="PDF, Excel ve TXT biçimleri." icon={Download}>
-            <label className="mb-2.5 flex cursor-pointer items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-[11.5px] text-[var(--text-soft)]">
-              <input
-                type="checkbox"
-                className="accent-[var(--primary)]"
-                checked={includeRawOcr}
-                onChange={(event) => setIncludeRawOcr(event.target.checked)}
-              />
-              <span>Ham OCR özetini rapora ekle (include_raw_ocr)</span>
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              {(Object.keys(FORMAT_META) as Format[]).map((format) => {
-                const Icon = FORMAT_META[format].icon;
-                const officialDisabled = format !== "txt" && (isOffline || !sessionId);
-                return (
-                  <button
-                    key={format}
-                    type="button"
-                    className="flex flex-col items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-2 py-3 transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-3)] disabled:opacity-50"
-                    disabled={busy !== null || officialDisabled}
-                    title={officialDisabled ? "Çevrimdışı/demo modda kapalı" : undefined}
-                    onClick={() => void exportReport(format)}
-                  >
-                    <span className="grid size-8 place-items-center rounded-lg border border-[var(--border)] bg-[var(--surface)]">
-                      <Icon size={15} aria-hidden />
-                    </span>
-                    <span className="text-[11.5px] font-semibold">{FORMAT_META[format].label}</span>
-                    <span className="text-[9.5px] text-[var(--text-faint)]">
-                      {busy === format ? "Hazırlanıyor…" : officialDisabled ? "Çevrimdışı kapalı" : "İndir"}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-            <div className="mt-3 space-y-2">
+            <div className="space-y-2.5">
               <div className="seg-control" role="group" aria-label="Snapshot uygulama modu">
                 <button
                   type="button"
@@ -492,9 +586,7 @@ export function ReportsPage() {
                   if (file) importSnapshotAsNewSession(file);
                 }}
               />
-            </div>
-            {lastMapping ? (
-              <div className="mt-3">
+              {lastMapping ? (
                 <InlineNotice
                   tone={
                     lastMapping.mapping.warnings.length > 0 ||
@@ -523,153 +615,108 @@ export function ReportsPage() {
                     ) : null}
                   </div>
                 </InlineNotice>
-              </div>
-            ) : null}
-            <InlineNotice tone="info" title="Masaüstü uyumu">
-              Snapshot <code className="font-mono text-[10.5px]">schema_version: 1</code> biçimindedir;
-              mevcut kesite birleştirebilir veya{" "}
-              <code className="font-mono text-[10.5px]">POST /api/import/desktop-snapshot</code> ile
-              doğrudan yeni kesit oluşturabilirsiniz.
-            </InlineNotice>
-          </SectionCard>
-        </div>
-
-        <div className="space-y-4">
-          <SectionCard
-            title="TXT önizleme"
-            description="Sunucu raporuyla aynı bölüm sırası; salt okunur."
-            icon={FileText}
-            action={
-              <>
-                <IconButton label="Önizlemeyi yenile" onClick={() => setGeneratedAt(new Date())}>
-                  <RefreshCw size={14} />
-                </IconButton>
-                <IconButton label="Rapor metnini kopyala" onClick={() => void copyPreview()}>
-                  <ClipboardCopy size={14} />
-                </IconButton>
-              </>
-            }
-          >
-            <div className="mb-2 flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-faint)]">
-              <span className="chip">{new Blob([reportText]).size} bayt</span>
-              <span className="chip">{reportText.split("\n").length} satır</span>
-              <span>Oluşturma: {generatedAt.toLocaleTimeString("tr-TR")}</span>
+              ) : null}
+              <InlineNotice tone="info" title="Masaüstü uyumu">
+                Snapshot <code className="font-mono text-[10.5px]">schema_version: 1</code> biçimindedir;
+                mevcut kesite birleştirebilir veya{" "}
+                <code className="font-mono text-[10.5px]">POST /api/import/desktop-snapshot</code> ile
+                doğrudan yeni kesit oluşturabilirsiniz.
+              </InlineNotice>
             </div>
-            <pre className="scroll-thin max-h-[560px] overflow-auto rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3.5 font-mono text-[10.5px] leading-relaxed text-[var(--text-soft)] whitespace-pre-wrap">
-              {reportText}
-            </pre>
           </SectionCard>
 
-          <SectionCard
-            title="Dışa aktarma geçmişi"
-            description="Bu tarayıcıdaki Test Bölümü indirmeleri."
-            icon={History}
-            action={<Badge tone="neutral">{exports.length} kayıt</Badge>}
-          >
-            {exports.length === 0 ? (
-              <EmptyState title="Henüz dışa aktarma yok" description="İlk indirmeden sonra format, dosya adı, boyut ve zaman burada listelenir." icon={Download} />
-            ) : (
-              <ul className="space-y-1.5">
-                {exports.map((entry) => (
-                  <li key={entry.id} className="flex items-center gap-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-2">
-                    <span className="grid size-7 place-items-center rounded-md border border-[var(--border)] bg-[var(--surface)]">
-                      {entry.format === "xlsx" ? <FileSpreadsheet size={13} /> : <FileText size={13} />}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[11px] font-medium">{entry.filename}</p>
-                      <p className="text-[9.5px] text-[var(--text-faint)]">
-                        {entry.format.toUpperCase()} · {fmt.bytes(entry.size)} · {relativeTime(entry.at)}
-                      </p>
-                    </div>
-                    {entry.demo ? <Badge tone="warning">yerel</Badge> : <Badge tone="pass">sunucu</Badge>}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </SectionCard>
-
-          <SectionCard
-            title="Test Bölümü geçmişi"
-            description="Son Test Bölümleri ve test durumları."
-            icon={History}
-            action={
-              <Button size="sm" variant="ghost" icon={<ArrowRight size={12} />} onClick={() => setTab("settings")}>
-                Bölüm yönetimi
-              </Button>
-            }
-          >
-            <div className="table-wrap scroll-thin">
-              <table className="data">
-                <caption>Bu çalışma alanındaki Test Bölümleri</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Test Bölümü</th>
-                    <th scope="col">Durum</th>
-                    <th scope="col" className="num">Rev.</th>
-                    <th scope="col">Güncelleme</th>
-                    <th scope="col"><span className="sr-only">Aç</span></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(sessions ?? []).map((session) => (
-                    <tr key={session.id}>
-                      <td>
-                        <span className="font-medium text-[var(--text)]">{session.name}</span>
-                        {session.name === currentName ? <Badge tone="info" className="ml-1.5">aktif</Badge> : null}
-                      </td>
-                      <td>
-                        <Badge tone={session.status === "completed" ? "pass" : session.status === "draft" ? "pending" : "info"}>
-                          {session.status}
-                        </Badge>
-                      </td>
-                      <td className="num">{session.revision}</td>
-                      <td className="text-[10.5px] text-[var(--text-faint)]">{relativeTime(session.updated_at)}</td>
-                      <td className="text-right">
-                        <button
-                          type="button"
-                          className="link-button"
-                          disabled={safeSwitchSession.isPending}
-                          onClick={() => safeSwitchSession.switchSession(session.id)}
-                        >
-                          Aç
-                        </button>
-                      </td>
-                    </tr>
+          <div className="grid gap-4 xl:grid-cols-2">
+            <SectionCard
+              title="Dışa aktarma geçmişi"
+              description="Bu tarayıcıdaki Test Bölümü indirmeleri."
+              icon={History}
+              action={<Badge tone="neutral">{exports.length} kayıt</Badge>}
+            >
+              {exports.length === 0 ? (
+                <EmptyState title="Henüz dışa aktarma yok" description="İlk indirmeden sonra format, dosya adı, boyut ve zaman burada listelenir." icon={Download} />
+              ) : (
+                <ul className="space-y-1.5">
+                  {exports.map((entry) => (
+                    <li key={entry.id} className="flex items-center gap-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-2">
+                      <span className="grid size-7 place-items-center rounded-md border border-[var(--border)] bg-[var(--surface)]">
+                        {entry.format === "xlsx" ? <FileSpreadsheet size={13} /> : <FileText size={13} />}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[11px] font-medium">{entry.filename}</p>
+                        <p className="text-[9.5px] text-[var(--text-faint)]">
+                          {entry.format.toUpperCase()} · {fmt.bytes(entry.size)} · {relativeTime(entry.at)}
+                        </p>
+                      </div>
+                      {entry.demo ? <Badge tone="warning">yerel</Badge> : <Badge tone="pass">sunucu</Badge>}
+                    </li>
                   ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <Button size="sm" variant="ghost" icon={<FileJson size={12} />} onClick={() => setTab("settings")}>
-                Snapshot ayarları
-              </Button>
-              <Button size="sm" variant="ghost" icon={<ScanLine size={12} />} onClick={() => setTab("ocr")}>
-                OCR karşılaştırması
-              </Button>
-            </div>
-          </SectionCard>
-        </div>
-      </div>
+                </ul>
+              )}
+            </SectionCard>
 
-      <SectionCard title="Rapor kapsamı" description="Hangi bölümlerin sunucu raporuna dahil olduğu." icon={FileText}>
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-          {[
-            ["Başlık", meta.app.version],
-            ["Boru kesiti", results.geometry ? `${num(results.geometry.section_count, 0)} kesit` : "—"],
-            ["Hava", results.air?.decision.status ?? "—"],
-            ["Basınç", results.pressure?.decision.status ?? "—"],
-            ["Profil", results.profile?.decision.status ?? "—"],
-            ["Pig", results.pig?.status ?? "—"],
-            ["Checklist", `${CHECK_DEFINITIONS.filter((c) => inputs.checks[c.key]).length}/11`],
-            ["Şartname", meta.spec.code],
-          ].map(([label, value]) => (
-            <div key={label} className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-2">
-              <p className="text-[9.5px] uppercase tracking-wide text-[var(--text-faint)]">{label}</p>
-              <p className="mt-0.5 truncate font-mono text-[11px]">{value}</p>
-            </div>
-          ))}
+            <SectionCard
+              title="Test Bölümü geçmişi"
+              description="Son Test Bölümleri ve test durumları."
+              icon={History}
+              action={
+                <Button size="sm" variant="ghost" icon={<ArrowRight size={12} />} onClick={() => setTab("settings")}>
+                  Bölüm yönetimi
+                </Button>
+              }
+            >
+              <div className="table-wrap scroll-thin">
+                <table className="data">
+                  <caption>Bu çalışma alanındaki Test Bölümleri</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">Test Bölümü</th>
+                      <th scope="col">Durum</th>
+                      <th scope="col" className="num">Rev.</th>
+                      <th scope="col">Güncelleme</th>
+                      <th scope="col"><span className="sr-only">Aç</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(sessions ?? []).map((session) => (
+                      <tr key={session.id}>
+                        <td>
+                          <span className="font-medium text-[var(--text)]">{session.name}</span>
+                          {session.name === currentName ? <Badge tone="info" className="ml-1.5">aktif</Badge> : null}
+                        </td>
+                        <td>
+                          <Badge tone={session.status === "completed" ? "pass" : session.status === "draft" ? "pending" : "info"}>
+                            {session.status}
+                          </Badge>
+                        </td>
+                        <td className="num">{session.revision}</td>
+                        <td className="text-[10.5px] text-[var(--text-faint)]">{relativeTime(session.updated_at)}</td>
+                        <td className="text-right">
+                          <button
+                            type="button"
+                            className="link-button"
+                            disabled={safeSwitchSession.isPending}
+                            onClick={() => safeSwitchSession.switchSession(session.id)}
+                          >
+                            Aç
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button size="sm" variant="ghost" icon={<FileJson size={12} />} onClick={() => setTab("settings")}>
+                  Snapshot ayarları
+                </Button>
+                <Button size="sm" variant="ghost" icon={<ScanLine size={12} />} onClick={() => setTab("ocr")}>
+                  OCR karşılaştırması
+                </Button>
+              </div>
+            </SectionCard>
+          </div>
         </div>
-      </SectionCard>
+      )}
     </div>
   );
 }

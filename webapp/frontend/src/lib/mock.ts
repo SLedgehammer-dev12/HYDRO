@@ -89,21 +89,33 @@ export const DEMO_META: MetaResponse = {
   water_backends: [
     {
       key: "table_v1",
-      label: "Table Interpolation v1",
+      label: "IAPWS-IF97 Region 1",
       distribution_ready: true,
       note: "0-40 °C, 1-150 bar · bilinear",
     },
     {
       key: "table_v1_bicubic",
-      label: "Table Interpolation v1 (Bicubic)",
+      label: "IAPWS-IF97 Region 1 (Bicubic)",
       distribution_ready: true,
       note: "0-40 °C, 1-150 bar · bicubic",
     },
     {
       key: "coolprop",
-      label: "CoolProp EOS",
+      label: "IAPWS-95",
       distribution_ready: true,
       note: "Varsayılan (kuruluysa)",
+    },
+    {
+      key: "institutional",
+      label: "Kurum içi A/B kontrol tablosu (BOTAŞ)",
+      distribution_ready: true,
+      note: "1–25 °C / 30–120 bar · A anomalileri onarılır",
+    },
+    {
+      key: "gail",
+      label: "GAIL referans tablosu",
+      distribution_ready: true,
+      note: "Referans tablo (A ve B doğrudan okunur)",
     },
   ],
   b_sources: [
@@ -663,6 +675,28 @@ export function geometryForInputs(inputs: AppInputs): GeometryResponse | null {
 }
 
 export function computeA(inputs: CoefficientARequest): CoefficientAResponse {
+  if (inputs.backend === "institutional" || inputs.backend === "gail") {
+    const t = clamp(inputs.temperature_c, 1, inputs.backend === "gail" ? 30 : 25);
+    const p = clamp(inputs.pressure_bar, 30, 120);
+    const val =
+      inputs.backend === "institutional"
+        ? 44.972 - 0.012 * (p - 80) + 0.13 * (t - 20)
+        : 44.9 - 0.012 * (p - 80) + 0.13 * (t - 20);
+    return {
+      a_micro_per_bar: round(val, 6),
+      temperature_c: inputs.temperature_c,
+      pressure_bar: inputs.pressure_bar,
+      backend: {
+        key: inputs.backend,
+        label:
+          inputs.backend === "institutional"
+            ? "Kurum içi A/B kontrol tablosu (BOTAŞ)"
+            : "GAIL referans tablosu",
+        distribution_ready: true,
+      },
+      state: "reference",
+    };
+  }
   const temperature = clamp(inputs.temperature_c, 0, 40);
   const pressure = clamp(inputs.pressure_bar, 1, 150);
   const normalizedA = 44.971994 - 0.0125 * (pressure - 80) + 0.135 * (temperature - 20);
@@ -674,10 +708,10 @@ export function computeA(inputs: CoefficientARequest): CoefficientAResponse {
       key: inputs.backend ?? "table_v1",
       label:
         inputs.backend === "coolprop"
-          ? "CoolProp EOS"
+          ? "IAPWS-95"
           : inputs.backend === "table_v1_bicubic"
-            ? "Table Interpolation v1 (Bicubic)"
-            : "Table Interpolation v1",
+            ? "IAPWS-IF97 Region 1 (Bicubic)"
+            : "IAPWS-IF97 Region 1",
       distribution_ready: true,
     },
     state: "computed",
@@ -695,7 +729,12 @@ export function computeB(inputs: CoefficientBRequest): BSourceResult {
   const p = inputs.pressure_bar;
   const beta = estimateWaterBeta(t, p);
 
-  if (inputs.source === "auto") {
+  const effectiveSource =
+    inputs.source === "auto" && (inputs.backend === "institutional" || inputs.backend === "gail")
+      ? inputs.backend
+      : inputs.source;
+
+  if (effectiveSource === "auto") {
     const alpha = inputs.steel_alpha_micro_per_c;
     let effective = 3 * alpha;
     if (inputs.steel_model === "linear") effective = alpha;
@@ -721,7 +760,7 @@ export function computeB(inputs: CoefficientBRequest): BSourceResult {
     };
   }
 
-  const institutional = inputs.source === "institutional";
+  const institutional = effectiveSource === "institutional";
   const value = institutional
     ? 188.661 + 0.35 * (t - 20) - 0.01 * (p - 80)
     : 184.03 + 0.3 * (t - 20) - 0.008 * (p - 80);
@@ -1066,21 +1105,21 @@ export function computeBackendComparison(
     pressure_bar: pressureBar,
     items: [
       {
-        backend: { key: "table_v1", label: "Table Interpolation v1", distribution_ready: true },
+        backend: { key: "table_v1", label: "IAPWS-IF97 Region 1", distribution_ready: true },
         a_micro_per_bar: base.a_micro_per_bar,
         beta_micro_per_c: beta,
         density_kg_per_m3: computeDensity(temperatureC, pressureBar),
         error: null,
       },
       {
-        backend: { key: "table_v1_bicubic", label: "Table Interpolation v1 (Bicubic)", distribution_ready: true },
+        backend: { key: "table_v1_bicubic", label: "IAPWS-IF97 Region 1 (Bicubic)", distribution_ready: true },
         a_micro_per_bar: round(base.a_micro_per_bar + 0.000004, 6),
         beta_micro_per_c: round(beta + 0.00012, 6),
         density_kg_per_m3: computeDensity(temperatureC, pressureBar),
         error: null,
       },
       {
-        backend: { key: "coolprop", label: "CoolProp EOS", distribution_ready: true },
+        backend: { key: "coolprop", label: "IAPWS-95", distribution_ready: true },
         a_micro_per_bar: round(base.a_micro_per_bar - 0.000001, 6),
         beta_micro_per_c: round(beta - 0.00005, 6),
         density_kg_per_m3: computeDensity(temperatureC, pressureBar),

@@ -214,3 +214,60 @@ def test_backend_comparison_sanitizes_unexpected_errors(client, monkeypatch):
     assert "secret" not in table["error"]
     assert "/internal/path" not in table["error"]
     assert "beklenmeyen" in table["error"]
+
+
+def test_web_backend_labels_and_reference_table_backends(client):
+    meta = client.get("/api/meta").json()
+    by_key = {item["key"]: item for item in meta["water_backends"]}
+    assert by_key["table_v1"]["label"] == "IAPWS-IF97 Region 1"
+    assert by_key["coolprop"]["label"] == "IAPWS-95"
+    assert by_key["institutional"]["label"] == "Kurum içi A/B kontrol tablosu (BOTAŞ)"
+    assert by_key["gail"]["label"] == "GAIL referans tablosu"
+
+    res_inst_a = client.post(
+        "/api/coefficients/a",
+        json={"temperature_c": 20.0, "pressure_bar": 80.0, "backend": "institutional"},
+    )
+    assert res_inst_a.status_code == 200
+    body_inst_a = res_inst_a.json()
+    assert body_inst_a["backend"]["key"] == "institutional"
+    assert body_inst_a["state"] == "reference"
+
+    res_gail_a = client.post(
+        "/api/coefficients/a",
+        json={"temperature_c": 20.0, "pressure_bar": 80.0, "backend": "gail"},
+    )
+    assert res_gail_a.status_code == 200
+    assert res_gail_a.json()["backend"]["key"] == "gail"
+
+    res_inst_b = client.post(
+        "/api/coefficients/b",
+        json={
+            "source": "auto",
+            "temperature_c": 20.0,
+            "pressure_bar": 80.0,
+            "steel_alpha_micro_per_c": 12.0,
+            "steel_model": "volumetric",
+            "backend": "institutional",
+        },
+    )
+    assert res_inst_b.status_code == 200
+    body_inst_b = res_inst_b.json()
+    assert body_inst_b["source"] == "institutional"
+    assert body_inst_b["b_micro_per_c"] == 188.661
+
+    res_gail_b = client.post(
+        "/api/coefficients/b",
+        json={
+            "source": "auto",
+            "temperature_c": 20.0,
+            "pressure_bar": 80.0,
+            "steel_alpha_micro_per_c": 12.0,
+            "steel_model": "volumetric",
+            "backend": "gail",
+        },
+    )
+    assert res_gail_b.status_code == 200
+    body_gail_b = res_gail_b.json()
+    assert body_gail_b["source"] == "gail"
+    assert body_gail_b["b_micro_per_c"] == 184.03

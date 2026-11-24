@@ -20,6 +20,7 @@ from app.services.dossier import (
     fold_tr,
     normalize_section_no,
 )
+from app.services.form_details import evaluate_all_form_findings
 
 from hidrostatik_test.services.report_ocr import MAX_OCR_PAGES, PageText
 
@@ -2316,3 +2317,88 @@ def test_wrapped_elevasyon_headers_and_tilted_scan_monitoring_row_realignment():
     sec_f = res_freeze["sections"][0]
     assert sec_f["present_forms"][0]["extracted_data"]["monitoring"]["min_temp_c"] == 0.0
     assert sec_f["check_details"]["ambient_temp"]["status"] == "failed"
+
+
+def test_acceptance_forms_compute_independent_a_b_and_flag_form_deviations():
+    header = {
+        "outside_diameter_mm": 406.4,
+        "wall_thickness_mm": 8.74,
+        "length_m": 1000.0,
+        "test_pressure_bar": 80.0,
+    }
+    # Deliberately skewed form values: A=60 (real @ 15C, 80bar is ~45.79), B=250 (real is ~130.5)
+    forms = {
+        "filling": {
+            "form_code": "filling",
+            "status": "filled",
+            "extracted_data": {"filling": {"max_temp_c": 15.0, "max_pressure_bar": 80.0}},
+        },
+        "pressure_test": {
+            "form_code": "pressure_test",
+            "status": "filled",
+            "extracted_data": {
+                "monitoring": {
+                    "pipe_start_c": 15.0,
+                    "pipe_end_c": 15.0,
+                    "p_start_bar": 80.0,
+                    "p_end_bar": 79.95,
+                }
+            },
+        },
+        "air_acceptance": {
+            "form_code": "air_acceptance",
+            "status": "filled",
+            "extracted_data": {
+                "air_acceptance": {
+                    "a_micro_per_bar": 60.0,
+                    "k_factor": 1.02,
+                    "vp_m3": 0.015,
+                    "vpa_m3": 0.0085,
+                    "vt_m3": 100.0,
+                }
+            },
+        },
+        "pressure_acceptance": {
+            "form_code": "pressure_acceptance",
+            "status": "filled",
+            "extracted_data": {
+                "pressure_acceptance": {
+                    "a_micro_per_bar": 60.0,
+                    "b_micro_per_c": 250.0,
+                    "delta_t_c": 1.0,
+                    "pa_bar": 1.80,
+                    "pt_bar": 3.50,
+                }
+            },
+        },
+    }
+
+    calcs = evaluate_section_calculations(header, forms)
+    air_c = calcs["air"]
+    pres_c = calcs["pressure"]
+
+    # Program MUST compute A & B independently of the skewed form numbers
+    assert air_c["a_source"] == "program"
+    assert air_c["vp_source"] == "program"
+    assert air_c["a_micro_per_bar"] == pytest.approx(45.7868, abs=0.2)
+    assert air_c["a_reported_micro_per_bar"] == pytest.approx(60.0)
+    assert air_c["vp_m3"] != pytest.approx(0.015, abs=1e-4)
+
+    assert pres_c["coeff_source"] == "program"
+    assert pres_c["pt_source"] == "program"
+    assert pres_c["a_micro_per_bar"] == pytest.approx(45.7868, abs=0.2)
+    assert pres_c["b_micro_per_c"] == pytest.approx(130.5128, abs=1.0)
+    assert pres_c["pt_bar"] != pytest.approx(3.50, abs=0.1)
+    assert pres_c["pa_from_021_bar"] == pytest.approx(0.05, abs=1e-4)
+    assert pres_c["delta_t_from_021_c"] == pytest.approx(0.0, abs=1e-4)
+
+    findings = evaluate_all_form_findings(header, forms, calcs, {})
+    air_codes = {f["code"]: f for f in findings["air_acceptance"]}
+    pres_codes = {f["code"]: f for f in findings["pressure_acceptance"]}
+
+    assert air_codes["air_a_match"]["status"] == "warning"
+    assert air_codes["air_vp_match"]["status"] == "warning"
+    assert air_codes["air_vt_match"]["status"] == "warning"
+    assert pres_codes["pa_a_match"]["status"] == "warning"
+    assert pres_codes["pa_b_match"]["status"] == "warning"
+    assert pres_codes["pa_pt_match"]["status"] == "warning"

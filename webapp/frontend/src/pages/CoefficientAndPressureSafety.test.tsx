@@ -34,14 +34,14 @@ describe("Slice 5 UI safety, B=0, 0 C notice, and Tilk/Tson derivation", () => {
           pressure_bar: 80,
           items: [
             {
-              backend: { key: "table_v1", label: "Table Interpolation v1", distribution_ready: true },
+              backend: { key: "table_v1", label: "IAPWS-IF97 Region 1", distribution_ready: true },
               a_micro_per_bar: 46.1,
               beta_micro_per_c: -10,
               density_kg_per_m3: 1003.4,
               error: null,
             },
             {
-              backend: { key: "coolprop", label: "CoolProp EOS", distribution_ready: true },
+              backend: { key: "coolprop", label: "IAPWS-95", distribution_ready: true },
               a_micro_per_bar: null,
               beta_micro_per_c: null,
               density_kg_per_m3: null,

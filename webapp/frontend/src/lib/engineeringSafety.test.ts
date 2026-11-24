@@ -126,7 +126,7 @@ describe("Slice 5 engineering safety & coefficient regressions", () => {
     defaults.air.ambient_temperature_c = 1.5;
     defaults.field.ambient_temperature_c = 1.5;
     const snap = buildSnapshot(defaults, { source: "live" }, DEMO_META);
-    expect(snap.water_backend_option).toBe("Table Interpolation v1 (Bicubic)");
+    expect(snap.water_backend_option).toBe("IAPWS-IF97 Region 1 (Bicubic)");
     expect((snap.modes as Record<string, unknown>).air_a_mode).toBe("Otomatik");
     expect((snap.modes as Record<string, unknown>).pressure_b_source).toBe(
       "Kurum ici tablo (varsayilan)",
@@ -164,14 +164,14 @@ describe("Slice 5 engineering safety & coefficient regressions", () => {
       pressure_bar: 50,
       items: [
         {
-          backend: { key: "table_v1", label: "Table Interpolation v1", distribution_ready: true },
+          backend: { key: "table_v1", label: "IAPWS-IF97 Region 1", distribution_ready: true },
           a_micro_per_bar: 46.1,
           beta_micro_per_c: 99.6,
           density_kg_per_m3: 1001.8,
           error: null,
         },
         {
-          backend: { key: "coolprop", label: "CoolProp EOS", distribution_ready: true },
+          backend: { key: "coolprop", label: "IAPWS-95", distribution_ready: true },
           a_micro_per_bar: 46.2,
           beta_micro_per_c: 99.9,
           density_kg_per_m3: 1001.9,
@@ -188,7 +188,7 @@ describe("Slice 5 engineering safety & coefficient regressions", () => {
     };
 
     const txt = buildReportText(inputs, { source: "live", backendCompare: comparison }, DEMO_META);
-    expect(txt).toContain("CoolProp EOS (coolprop)");
+    expect(txt).toContain("IAPWS-95 (coolprop)");
     expect(txt).toContain("UYARI (10.1)");
     expect(txt).toContain("Başlangıç Tilk");
     expect(txt).toContain("Bitiş Tson");
@@ -196,16 +196,16 @@ describe("Slice 5 engineering safety & coefficient regressions", () => {
 
     const cmpTxt = buildBackendComparisonReportText(comparison, "coolprop", DEMO_META);
     expect(cmpTxt).toContain("SU ÖZELLİĞİ BACKEND KARŞILAŞTIRMA RAPORU");
-    expect(cmpTxt).toContain("* CoolProp EOS");
+    expect(cmpTxt).toContain("* IAPWS-95");
     expect(cmpTxt).toContain("HATA: Backend kurulu degil");
 
     const cmpCsv = buildBackendComparisonCsv(comparison, "coolprop");
     expect(cmpCsv).toContain("backend_key,backend_label,active");
-    expect(cmpCsv).toContain("coolprop,CoolProp EOS,true");
+    expect(cmpCsv).toContain("coolprop,IAPWS-95,true");
     expect(cmpCsv).toContain("Backend kurulu degil");
 
     const snap = buildSnapshot(inputs, { source: "live" }, DEMO_META);
-    expect(snap.water_backend_option).toBe("CoolProp EOS");
+    expect(snap.water_backend_option).toBe("IAPWS-95");
     expect(snap.report).toEqual(inputs.report);
   });
 });

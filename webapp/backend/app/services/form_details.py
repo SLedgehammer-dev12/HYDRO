@@ -1522,7 +1522,7 @@ def evaluate_all_form_findings(
                 )
             rep_vp = _finite(air_raw.get("vp_m3"))
             calc_vp = _finite(air_calc.get("vp_m3"))
-            if rep_vp and calc_vp and calc_vp > 0:
+            if air_calc.get("vp_source") == "program" and rep_vp and calc_vp and calc_vp > 0:
                 vp_dev = abs(rep_vp - calc_vp) / calc_vp * 100.0
                 items.append(
                     _mk_finding(
@@ -1533,6 +1533,41 @@ def evaluate_all_form_findings(
                         "BOT-FRM-020 Çapraz Kontrol",
                         expected=f"{calc_vp:.5f} m³",
                         actual=f"{rep_vp:.5f} m³",
+                    )
+                )
+            rep_a = _finite(air_raw.get("a_micro_per_bar"))
+            calc_a = _finite(air_calc.get("a_micro_per_bar"))
+            if (
+                air_calc.get("a_source") == "program"
+                and rep_a is not None
+                and calc_a is not None
+                and calc_a > 0
+            ):
+                a_dev = abs(rep_a - calc_a) / calc_a * 100.0
+                items.append(
+                    _mk_finding(
+                        "air_a_match",
+                        "Rapordaki A Katsayısı ile Program Hesabı Karşılaştırması",
+                        "passed" if a_dev <= 2.0 else "warning",
+                        f"Raporda A={rep_a:.3f}, program hesabı A={calc_a:.3f} ×10⁻⁶/bar (sapma %{a_dev:.2f}).",
+                        "BOT-FRM-020 Çapraz Kontrol",
+                        expected=f"{calc_a:.3f}",
+                        actual=f"{rep_a:.3f}",
+                    )
+                )
+            rep_vt = _finite(air_raw.get("vt_m3"))
+            calc_vt = _finite(air_calc.get("vt_m3"))
+            if rep_vt is not None and calc_vt is not None and calc_vt > 0:
+                vt_dev = abs(rep_vt - calc_vt) / calc_vt * 100.0
+                items.append(
+                    _mk_finding(
+                        "air_vt_match",
+                        "Rapordaki Vt Hacmi ile Geometri Hesabı Karşılaştırması",
+                        "passed" if vt_dev <= 1.0 else "warning",
+                        f"Raporda Vt={rep_vt:.2f} m³, program hesabı Vt={calc_vt:.2f} m³ (sapma %{vt_dev:.2f}).",
+                        "BOT-FRM-020 Geometri Kontrolü",
+                        expected=f"{calc_vt:.2f} m³",
+                        actual=f"{rep_vt:.2f} m³",
                     )
                 )
 
@@ -1587,7 +1622,7 @@ def evaluate_all_form_findings(
             pr_raw = ext.get("pressure_acceptance") or {}
             rep_pt = _finite(pr_raw.get("pt_bar"))
             calc_pt = _finite(pres_calc.get("pt_bar"))
-            if rep_pt is not None and calc_pt is not None:
+            if pres_calc.get("pt_source") == "program" and rep_pt is not None and calc_pt is not None:
                 ok_pt = abs(rep_pt - calc_pt) <= 0.05
                 items.append(
                     _mk_finding(
@@ -1598,6 +1633,46 @@ def evaluate_all_form_findings(
                         "BOT-FRM-022 Formül Doğrulaması",
                         expected=f"{calc_pt:+.3f} bar",
                         actual=f"{rep_pt:+.3f} bar",
+                    )
+                )
+            rep_a = _finite(pr_raw.get("a_micro_per_bar"))
+            calc_a = _finite(pres_calc.get("a_micro_per_bar"))
+            if (
+                pres_calc.get("coeff_source") == "program"
+                and rep_a is not None
+                and calc_a is not None
+                and calc_a > 0
+            ):
+                a_dev = abs(rep_a - calc_a) / calc_a * 100.0
+                items.append(
+                    _mk_finding(
+                        "pa_a_match",
+                        "Rapordaki A Katsayısı ile Program Hesabı Karşılaştırması",
+                        "passed" if a_dev <= 2.0 else "warning",
+                        f"Raporda A={rep_a:.3f}, program hesabı A={calc_a:.3f} ×10⁻⁶/bar (sapma %{a_dev:.2f}).",
+                        "BOT-FRM-022 Çapraz Kontrol",
+                        expected=f"{calc_a:.3f}",
+                        actual=f"{rep_a:.3f}",
+                    )
+                )
+            rep_b = _finite(pr_raw.get("b_micro_per_c"))
+            calc_b = _finite(pres_calc.get("b_micro_per_c"))
+            if (
+                pres_calc.get("coeff_source") == "program"
+                and rep_b is not None
+                and calc_b is not None
+            ):
+                b_tol = max(5.0, abs(calc_b) * 0.05)
+                ok_b = abs(rep_b - calc_b) <= b_tol
+                items.append(
+                    _mk_finding(
+                        "pa_b_match",
+                        "Rapordaki B Katsayısı ile Program Hesabı Karşılaştırması",
+                        "passed" if ok_b else "warning",
+                        f"Raporda B={rep_b:.2f}, program hesabı B={calc_b:.2f} ×10⁻⁶/K (fark {abs(rep_b - calc_b):.2f}).",
+                        "BOT-FRM-022 Çapraz Kontrol",
+                        expected=f"{calc_b:.2f}",
+                        actual=f"{rep_b:.2f}",
                     )
                 )
 

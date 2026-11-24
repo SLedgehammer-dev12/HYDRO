@@ -1431,3 +1431,66 @@ input:not([type="checkbox"]):not([type="radio"]):not(.visually-hidden) {
     margin: 0;
   }
 }
+
+/* ---------- Progressive Disclosure (<details>) ---------- */
+
+.disclosure-card {
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.disclosure-summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  transition: background-color 0.15s ease;
+}
+
+.disclosure-summary::-webkit-details-marker {
+  display: none;
+}
+
+.disclosure-summary:hover {
+  background: var(--surface-3);
+}
+
+.disclosure-chevron {
+  transition: transform 0.2s ease;
+  color: var(--text-muted);
+}
+
+.disclosure-card[open] > .disclosure-summary .disclosure-chevron {
+  transform: rotate(90deg);
+}
+
+.disclosure-card[open] > .disclosure-summary {
+  border-bottom: 1px solid var(--border);
+}
+
+.disclosure-body {
+  padding: 16px;
+}
+
+.disclosure-card::details-content {
+  interpolate-size: allow-keywords;
+  overflow: clip;
+  contain: layout;
+}
+
+.disclosure-card:not([open])::details-content {
+  block-size: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .disclosure-card::details-content {
+    transition: block-size 0.24s ease-in-out, content-visibility 0.24s ease-in-out allow-discrete, display 0.24s ease-in-out allow-discrete;
+  }
+}
