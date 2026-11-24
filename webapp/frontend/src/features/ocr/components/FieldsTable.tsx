@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import clsx from "clsx";
-import { Pencil, RotateCcw } from "lucide-react";
+import { Pencil, RotateCcw, Sparkles } from "lucide-react";
 import { confidenceTier, formatConfidence, formatUnit, formatValue } from "../format";
 import type { FlatField } from "../fields";
+import type { SuggestedFix } from "../types";
 import { TONE_BADGE_CLASSES, confidenceTone, type Tone } from "./tone";
 
 const TIER_LABEL = {
@@ -44,6 +45,7 @@ export interface FieldsTableProps {
   fields: FlatField[];
   selected: Set<string>;
   edits: Record<string, string>;
+  suggestedFixes?: SuggestedFix[];
   onToggle: (key: string, checked: boolean) => void;
   onEdit: (key: string, value: string | null) => void;
 }
@@ -52,9 +54,14 @@ export default function FieldsTable({
   fields,
   selected,
   edits,
+  suggestedFixes = [],
   onToggle,
   onEdit,
 }: FieldsTableProps) {
+  const fixesByField = new Map(suggestedFixes.map((fix) => [fix.field, fix]));
+  const pendingFixes = suggestedFixes.filter(
+    (fix) => !Object.prototype.hasOwnProperty.call(edits, fix.field),
+  );
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -105,6 +112,19 @@ export default function FieldsTable({
         </p>
       </div>
 
+      {pendingFixes.length > 0 ? (
+        <div
+          role="note"
+          className="flex items-center gap-2 border-b border-[var(--warning-border)] bg-[var(--warning-bg)] px-4 py-2 text-[11px] text-[var(--warning)]"
+        >
+          <Sparkles size={13} aria-hidden="true" className="shrink-0" />
+          <span>
+            Olası OCR ondalık hatası tespit edildi ({pendingFixes.length} alan) — önerileri tek tıkla
+            uygulayıp onaylayabilirsiniz.
+          </span>
+        </div>
+      ) : null}
+
       <div className="overflow-x-auto">
         <table className="w-full min-w-[860px] border-collapse text-left text-xs">
           <caption className="sr-only">
@@ -142,6 +162,7 @@ export default function FieldsTable({
               const tier = confidenceTier(item.field.confidence);
               const edited = Object.prototype.hasOwnProperty.call(edits, key);
               const editing = editingKey === key;
+              const fix = fixesByField.get(key);
               const displayed = edited
                 ? edits[key]
                 : formatValue(item.field.value, key, item.field.unit);
@@ -202,35 +223,49 @@ export default function FieldsTable({
                         className="numeric w-full min-w-[110px] rounded-md border border-[var(--warning-border)] bg-[var(--surface-2)] px-2 py-1 text-xs text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
                       />
                     ) : (
-                      <div className="flex items-center gap-1.5">
-                        <span
-                          className={clsx(
-                            "numeric font-medium",
-                            edited ? "text-[var(--warning)]" : "text-[var(--text)]",
-                            tier === "critical" && !edited && "text-[var(--danger)]",
-                            tier === "low" && !edited && "text-[var(--warning)]",
-                          )}
-                        >
-                          {displayed === "" ? "—" : displayed}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => beginEdit(item)}
-                          className="rounded p-1 text-[var(--text-faint)] transition hover:bg-[var(--surface-raised)] hover:text-[var(--primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
-                          aria-label={`${item.descriptor.label} değerini düzelt`}
-                          title="Değeri düzelt"
-                        >
-                          <Pencil size={12} aria-hidden="true" />
-                        </button>
-                        {edited ? (
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={clsx(
+                              "numeric font-medium",
+                              edited ? "text-[var(--warning)]" : "text-[var(--text)]",
+                              tier === "critical" && !edited && "text-[var(--danger)]",
+                              tier === "low" && !edited && "text-[var(--warning)]",
+                            )}
+                          >
+                            {displayed === "" ? "—" : displayed}
+                          </span>
                           <button
                             type="button"
-                            onClick={() => onEdit(key, null)}
-                            className="rounded p-1 text-[var(--warning)] transition hover:bg-[var(--surface-raised)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
-                            aria-label={`${item.descriptor.label} elle düzeltmesini geri al`}
-                            title="Elle düzeltmeyi geri al"
+                            onClick={() => beginEdit(item)}
+                            className="rounded p-1 text-[var(--text-faint)] transition hover:bg-[var(--surface-raised)] hover:text-[var(--primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
+                            aria-label={`${item.descriptor.label} değerini düzelt`}
+                            title="Değeri düzelt"
                           >
-                            <RotateCcw size={12} aria-hidden="true" />
+                            <Pencil size={12} aria-hidden="true" />
+                          </button>
+                          {edited ? (
+                            <button
+                              type="button"
+                              onClick={() => onEdit(key, null)}
+                              className="rounded p-1 text-[var(--warning)] transition hover:bg-[var(--surface-raised)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
+                              aria-label={`${item.descriptor.label} elle düzeltmesini geri al`}
+                              title="Elle düzeltmeyi geri al"
+                            >
+                              <RotateCcw size={12} aria-hidden="true" />
+                            </button>
+                          ) : null}
+                        </div>
+                        {!edited && fix ? (
+                          <button
+                            type="button"
+                            onClick={() => onEdit(key, String(fix.suggested_value))}
+                            title={fix.reason}
+                            aria-label={`${item.descriptor.label} için ${fix.suggested_value} önerisini uygula`}
+                            className="mt-1 inline-flex items-center gap-1 rounded border border-[var(--warning-border)] bg-[var(--warning-bg)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--warning)] transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
+                          >
+                            <Sparkles size={10} aria-hidden="true" />
+                            <span>Öneri: {fix.suggested_value} · Uygula</span>
                           </button>
                         ) : null}
                       </div>

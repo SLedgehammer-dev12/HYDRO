@@ -17,6 +17,7 @@ from hidrostatik_test.services.updater import UpdateError
 from .. import db as db_module
 from .. import schemas
 from ..core import security
+from ..core.auth import ROLE_ADMIN, require_role
 from ..core.config import Settings
 from ..core.errors import AppError, validation_error
 from ..core.metrics import METRICS
@@ -28,6 +29,7 @@ from ..services import db_admin as db_admin_service
 from ..services import sessions as session_service
 from ..services import system as system_service
 from ..services.web_updater import WEB_UPDATE_MANAGER, get_web_runtime_context
+from .auth import consume_two_person_approval
 from .deps import Workspace, get_settings, get_workspace
 
 router = APIRouter(tags=["system"])
@@ -87,6 +89,10 @@ def _require_same_origin(request: Request, settings: Settings) -> None:
 def _require_local_admin(request: Request, settings: Settings) -> None:
     if request.method.upper() not in _SAFE_METHODS:
         _require_same_origin(request, settings)
+
+    if settings.has_enforced_auth:
+        require_role(request, ROLE_ADMIN)
+        return
 
     admin_token = request.headers.get("X-Hydro-Admin-Token", "").strip()
     configured_token = (settings.local_admin_token or "").strip()
@@ -373,6 +379,30 @@ async def restore_db_backup(
                     field="backup_filename",
                 ) from exc
             backup_filename = parsed.backup_filename
+
+        if settings.has_enforced_auth:
+            from ..services import audit as audit_service
+
+            with db_module.session_scope() as approval_db:
+                approval = consume_two_person_approval(
+                    approval_db,
+                    workspace.hash,
+                    action="db_restore",
+                    target_id=backup_filename or "upload",
+                )
+                audit_service.record(
+                    approval_db,
+                    action="db.restore_approved",
+                    entity_type="database",
+                    entity_id=backup_filename or "upload",
+                    workspace_hash=workspace.hash,
+                    actor=workspace.actor,
+                    after={
+                        "requested_by": approval.requested_by,
+                        "approved_by": approval.approved_by,
+                        "approval_id": approval.id,
+                    },
+                )
 
         return json_safe(
             db_admin_service.restore_db_backup(

@@ -218,6 +218,14 @@ export interface OcrAnalysisMetrics {
   critical_confidence_fields: number;
 }
 
+export interface SuggestedFix {
+  field: string;
+  label: string;
+  current_value: number;
+  suggested_value: number;
+  reason: string;
+}
+
 /** `GET /api/ocr/analyses/{id}` yanıtı (durum alanları opsiyoneldir). */
 export interface OcrAnalysisResult {
   id: string;
@@ -232,6 +240,7 @@ export interface OcrAnalysisResult {
   discrepancies?: Discrepancy[];
   issues?: ValidationIssue[];
   warnings?: string[];
+  suggested_fixes?: SuggestedFix[];
   approved_fields?: Record<string, ApprovedField> | null;
   dossier?: OcrDossierView | null;
   progress?: { stage: string; elapsed_s: number } | null;

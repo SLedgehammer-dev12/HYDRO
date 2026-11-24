@@ -140,6 +140,15 @@ class Settings:
     ocr_max_concurrency: int = 1
     ocr_worker_mode: str = "inline"
     auth_mode: str = "none"
+    auth_session_secret: str = ""
+    auth_cookie_secure: bool = False
+    auth_session_ttl_s: int = 28800
+    auth_idle_timeout_s: int = 3600
+    oidc_issuer: str = ""
+    oidc_client_id: str = ""
+    oidc_client_secret: str = ""
+    oidc_redirect_uri: str = ""
+    oidc_role_claim: str = "role"
     allow_remote: bool = False
     allow_workspace_claim: bool = False
     local_admin_token: str = ""
@@ -189,7 +198,13 @@ class Settings:
 
     @property
     def has_enforced_auth(self) -> bool:
-        # Application-level auth middleware is not implemented yet; arbitrary HYDRO_AUTH_MODE values must remain fail-closed.
+        mode = self.auth_mode.strip().lower()
+        if mode == "oidc":
+            return bool(
+                self.auth_session_secret.strip()
+                and self.oidc_issuer.strip()
+                and self.oidc_client_id.strip()
+            )
         return False
 
     @classmethod
@@ -220,6 +235,15 @@ class Settings:
                 else "inline"
             ),
             auth_mode=_env("HYDRO_AUTH_MODE") or "none",
+            auth_session_secret=_env("HYDRO_AUTH_SESSION_SECRET") or "",
+            auth_cookie_secure=_env_bool("HYDRO_AUTH_COOKIE_SECURE", False),
+            auth_session_ttl_s=max(300, _env_int("HYDRO_AUTH_SESSION_TTL_S", 28800)),
+            auth_idle_timeout_s=max(60, _env_int("HYDRO_AUTH_IDLE_TIMEOUT_S", 3600)),
+            oidc_issuer=_env("HYDRO_OIDC_ISSUER") or "",
+            oidc_client_id=_env("HYDRO_OIDC_CLIENT_ID") or "",
+            oidc_client_secret=_env("HYDRO_OIDC_CLIENT_SECRET") or "",
+            oidc_redirect_uri=_env("HYDRO_OIDC_REDIRECT_URI") or "",
+            oidc_role_claim=_env("HYDRO_OIDC_ROLE_CLAIM") or "role",
             allow_remote=_env_bool("HYDRO_ALLOW_REMOTE", False),
             allow_workspace_claim=_env_bool("HYDRO_ALLOW_WORKSPACE_CLAIM", False),
             local_admin_token=_env("HYDRO_LOCAL_ADMIN_TOKEN") or "",

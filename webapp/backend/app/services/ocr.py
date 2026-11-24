@@ -25,6 +25,7 @@ from hidrostatik_test.services.report_ocr import (
     ocr_engine_details,
     ocr_status,
     pdf_rasterizer_status,
+    suggest_field_fixes_from_report_dict,
 )
 
 from .. import db as db_module
@@ -766,6 +767,7 @@ def detail_payload(db: OrmSession, analysis: OcrAnalysis) -> dict[str, Any]:
         "warnings": analysis.warnings or [],
         "issues": analysis.issues or [],
         "discrepancies": analysis.discrepancies or [],
+        "suggested_fixes": [],
         "approved_fields": analysis.approved_fields,
         "error": _error_payload(analysis),
         "created_at": iso_z(analysis.created_at),
@@ -786,6 +788,7 @@ def detail_payload(db: OrmSession, analysis: OcrAnalysis) -> dict[str, Any]:
     }
     if analysis.status == "succeeded":
         base["report"] = analysis.report
+        base["suggested_fixes"] = suggest_field_fixes_from_report_dict(analysis.report)
         base["filename"] = attachment.filename if attachment is not None else None
         base["used_ocr"] = analysis.source in {"ocr", "mixed"}
         base["dossier"] = dossier_service.build_dossier_view(db, analysis)

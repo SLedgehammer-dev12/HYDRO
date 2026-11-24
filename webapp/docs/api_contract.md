@@ -2241,11 +2241,18 @@ export interface ApiError {
 ## 16. Otomatik Üretilen OpenAPI Uç Envanteri
 
 <!-- generated:openapi-inventory:start -->
-> OpenAPI `info.version=2.1.0` · **88** path / **102** operasyon (`sync_api_inventory` ile üretildi).
+> OpenAPI `info.version=2.1.0` · **94** path / **109** operasyon (`sync_api_inventory` ile üretildi).
 
 | Metot | Yol | Özet / Operation ID |
 | --- | --- | --- |
 | `GET` | `/api/` | Api Index |
+| `GET` | `/api/approvals` | List Approvals |
+| `POST` | `/api/approvals` | Create Approval Request |
+| `POST` | `/api/approvals/{approval_id}/decide` | Decide Approval Request |
+| `GET` | `/api/auth/callback` | Oidc Callback |
+| `GET` | `/api/auth/login` | Oidc Login |
+| `POST` | `/api/auth/logout` | Auth Logout |
+| `GET` | `/api/auth/me` | Auth Me |
 | `POST` | `/api/calculations/air-content` | Air Content |
 | `POST` | `/api/calculations/depressurization` | Depressurization |
 | `POST` | `/api/calculations/discharge` | Discharge |

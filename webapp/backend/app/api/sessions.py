@@ -20,6 +20,7 @@ from ..services import reports as report_service
 from ..services import scene as scene_service
 from ..services import sessions as session_service
 from ..services import snapshot as snapshot_service
+from .auth import consume_two_person_approval
 from .deps import Workspace, get_settings, get_workspace
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -212,14 +213,44 @@ def update_session(
     response: Response,
     if_match: str | None = Header(default=None, alias="If-Match"),
     db: OrmSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
     workspace: Workspace = Depends(get_workspace),
 ) -> dict:
     session = session_service.get_session(db, session_id, workspace.hash)
     expected = parse_if_match(if_match)
     changes = payload.model_dump(exclude_unset=True)
+    finalizing = (
+        settings.has_enforced_auth
+        and changes.get("status") == "final"
+        and session.status != "final"
+    )
+    approval = None
+    if finalizing:
+        approval = consume_two_person_approval(
+            db,
+            workspace.hash,
+            action="session_finalize",
+            target_id=session_id,
+        )
     session = session_service.update_session(
         db, session, changes=changes, expected_revision=expected
     )
+    if approval is not None:
+        audit.record(
+            db,
+            action="session.finalized",
+            entity_type="session",
+            entity_id=session.id,
+            session_id=session.id,
+            workspace_hash=workspace.hash,
+            actor=workspace.actor,
+            after={
+                "requested_by": approval.requested_by,
+                "approved_by": approval.approved_by,
+                "approval_id": approval.id,
+            },
+        )
+        db.commit()
     _etag(response, session.revision)
     return json_safe(session_service.serialize_session(session))
 

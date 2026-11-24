@@ -1458,6 +1458,7 @@ export default function OcrPage() {
                             fields={fields}
                             selected={selectedFields}
                             edits={edits}
+                            suggestedFixes={result.suggested_fixes}
                             onToggle={toggleField}
                             onEdit={editField}
                           />

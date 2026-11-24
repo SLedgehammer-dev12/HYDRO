@@ -4192,6 +4192,30 @@ _SUGGESTED_FIX_RANGES: Final[dict[str, tuple[float, float, tuple[float, ...], st
 }
 
 
+def _suggest_fix_for_numeric_value(key: str, raw_val: Any) -> SuggestedFix | None:
+    spec = _SUGGESTED_FIX_RANGES.get(key)
+    if spec is None:
+        return None
+    if isinstance(raw_val, bool) or not isinstance(raw_val, (int, float)):
+        return None
+    val = float(raw_val)
+    if not math.isfinite(val):
+        return None
+    lo, hi, divisors, reason = spec
+    if lo <= val <= hi:
+        return None
+    candidates = [round(val / div, 4) for div in divisors if lo <= (val / div) <= hi]
+    if len(candidates) != 1:
+        return None
+    return SuggestedFix(
+        field=key,
+        label=FIELD_LABELS.get(key, key),
+        current_value=val,
+        suggested_value=candidates[0],
+        reason=reason,
+    )
+
+
 def suggest_field_fixes(report: HydrotestReport) -> list[SuggestedFix]:
     """Detect likely OCR decimal-point drops against physical domain ranges.
 
@@ -4201,29 +4225,31 @@ def suggest_field_fixes(report: HydrotestReport) -> list[SuggestedFix]:
 
     suggestions: list[SuggestedFix] = []
     for key, extracted in report.iter_fields():
-        spec = _SUGGESTED_FIX_RANGES.get(key)
-        if spec is None:
-            continue
-        raw_val = extracted.value
-        if isinstance(raw_val, bool) or not isinstance(raw_val, (int, float)):
-            continue
-        val = float(raw_val)
-        if not math.isfinite(val):
-            continue
-        lo, hi, divisors, reason = spec
-        if lo <= val <= hi:
-            continue
-        candidates = [round(val / div, 4) for div in divisors if lo <= (val / div) <= hi]
-        if len(candidates) == 1:
-            suggestions.append(
-                SuggestedFix(
-                    field=key,
-                    label=FIELD_LABELS.get(key, key),
-                    current_value=val,
-                    suggested_value=candidates[0],
-                    reason=reason,
-                )
-            )
+        fix = _suggest_fix_for_numeric_value(key, extracted.value)
+        if fix is not None:
+            suggestions.append(fix)
+    return suggestions
+
+
+def suggest_field_fixes_from_report_dict(
+    report_dict: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Compute non-destructive OCR decimal-fix suggestions from a serialized report dict."""
+
+    if not isinstance(report_dict, Mapping):
+        return []
+    suggestions: list[dict[str, Any]] = []
+    for key in _SUGGESTED_FIX_RANGES:
+        node: Any = report_dict
+        for part in key.split("."):
+            if not isinstance(node, Mapping) or part not in node:
+                node = None
+                break
+            node = node[part]
+        raw_val = node.get("value") if isinstance(node, Mapping) else node
+        fix = _suggest_fix_for_numeric_value(key, raw_val)
+        if fix is not None:
+            suggestions.append(fix.to_dict())
     return suggestions
 
 
@@ -4360,6 +4386,7 @@ __all__ = [
     "parse_report",
     "pdf_rasterizer_status",
     "suggest_field_fixes",
+    "suggest_field_fixes_from_report_dict",
     "validate_input_path",
     "vision_available",
     "windows_ocr_available",

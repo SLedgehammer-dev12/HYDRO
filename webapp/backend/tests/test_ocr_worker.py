@@ -162,3 +162,60 @@ def test_reclaim_expired_leases_and_cancel_requested(tmp_path: Path):
             assert failed_row.error_code == "worker_lease_expired"
     finally:
         db.dispose_database()
+
+
+def test_ocr_detail_payload_includes_suggested_fixes(tmp_path: Path):
+    db_file = tmp_path / "suggest_ocr.db"
+    settings = Settings(
+        database_url=f"sqlite:///{db_file.as_posix()}",
+        data_dir=tmp_path / "data",
+        frontend_dist=tmp_path / "dist",
+    )
+    db.dispose_database()
+    db.configure_database(settings.database_url)
+    db.init_db()
+    ws_hash = security.workspace_hash("suggest-ws")
+
+    try:
+        with db.session_scope() as s:
+            att = Attachment(
+                id=new_uuid(),
+                workspace_id_hash=ws_hash,
+                session_id=None,
+                filename="scan.pdf",
+                stored_path="scan.pdf",
+                mime="application/pdf",
+                size_bytes=10,
+                sha256="deadbeef",
+                kind="report_pdf",
+            )
+            s.add(att)
+            s.flush()
+
+            row = OcrAnalysis(
+                id="ana-suggest-1",
+                workspace_id_hash=ws_hash,
+                attachment_id=att.id,
+                status="succeeded",
+                source="ocr",
+                report={
+                    "air_test": {
+                        "a": {"value": 4497.0, "confidence": 0.9},
+                        "k": {"value": 102.0, "confidence": 0.85},
+                    },
+                    "pressure_test": {
+                        "t_final": {"value": 16.2, "confidence": 0.95},
+                    },
+                },
+            )
+            s.add(row)
+            s.commit()
+
+            detail = ocr_service.detail_payload(s, row)
+            fixes = detail.get("suggested_fixes") or []
+            by_field = {item["field"]: item for item in fixes}
+            assert set(by_field) == {"air_test.a", "air_test.k"}
+            assert by_field["air_test.a"]["suggested_value"] == 44.97
+            assert by_field["air_test.k"]["suggested_value"] == 1.02
+    finally:
+        db.dispose_database()

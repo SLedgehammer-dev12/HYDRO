@@ -31,6 +31,9 @@ from hidrostatik_test import APP_VERSION
 
 from . import db
 from .api import (
+    auth as auth_router,
+)
+from .api import (
     calculations as calculations_router,
 )
 from .api import (
@@ -58,6 +61,13 @@ from .api import (
     system as system_router,
 )
 from .api.deps import Workspace
+from .core.auth import (
+    SESSION_COOKIE_NAME,
+    AuthPrincipal,
+    issue_session_cookie,
+    parse_session_cookie,
+    set_session_cookie,
+)
 from .core.context import set_request_context
 from .core.errors import (
     REQUEST_ID_HEADER,
@@ -73,6 +83,17 @@ logger = logging.getLogger("hydro.web")
 
 API_PREFIX = "/api"
 _LOOPBACK_HOST_HEADERS = frozenset({"127.0.0.1", "localhost", "::1"})
+_PUBLIC_AUTH_PATHS = frozenset(
+    {
+        f"{API_PREFIX}/health",
+        f"{API_PREFIX}/meta",
+        f"{API_PREFIX}/meta/spec",
+        f"{API_PREFIX}/auth/me",
+        f"{API_PREFIX}/auth/login",
+        f"{API_PREFIX}/auth/callback",
+        f"{API_PREFIX}/auth/logout",
+    }
+)
 _DOCS_PATHS = frozenset({"/docs", "/redoc", "/openapi.json"})
 _CSP_POLICY = (
     "default-src 'self'; "
@@ -176,12 +197,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request_id = _sanitize_request_id(request.headers.get(REQUEST_ID_HEADER))
         hashed = workspace_hash(raw_workspace)
         request.state.request_id = request_id
-        request.state.workspace = Workspace(
-            raw=raw_workspace, hash=hashed, actor=actor_for(raw_workspace)
-        )
-        set_request_context(request_id, hashed, actor_for(raw_workspace))
+        request.state.principal: AuthPrincipal | None = None
+        actor = actor_for(raw_workspace)
 
         path = request.url.path
+        needs_cookie_refresh = False
+        if resolved.has_enforced_auth:
+            parsed_auth = parse_session_cookie(
+                request.cookies.get(SESSION_COOKIE_NAME),
+                resolved,
+            )
+            if parsed_auth is not None:
+                principal, needs_cookie_refresh = parsed_auth
+                request.state.principal = principal
+                raw_workspace = principal.workspace or f"user:{principal.sub}"
+                hashed = workspace_hash(raw_workspace)
+                actor = principal.actor
+
+        request.state.workspace = Workspace(raw=raw_workspace, hash=hashed, actor=actor)
+        set_request_context(request_id, hashed, actor)
+
         client_host = (request.client.host if request.client else "").strip().lower()
         host_name = normalize_host_header(request.headers.get("host"))
         allowed_hosts: set[str] | None = None
@@ -205,6 +240,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
                 _apply_security_headers(denied, path, request_id, raw_workspace)
                 return denied
+
+        if (
+            resolved.has_enforced_auth
+            and request.method != "OPTIONS"
+            and path.startswith(f"{API_PREFIX}/")
+            and path not in _PUBLIC_AUTH_PATHS
+            and request.state.principal is None
+        ):
+            unauth = JSONResponse(
+                status_code=401,
+                content={
+                    "code": "authentication_required",
+                    "message": "Bu islem icin kimlik dogrulamasi (oturum) gereklidir.",
+                    "details": {},
+                    "request_id": request_id,
+                },
+            )
+            _apply_security_headers(unauth, path, request_id, raw_workspace)
+            return unauth
 
         content_type = request.headers.get("content-type", "").lower()
         if request.method in {"POST", "PUT", "PATCH"} and "multipart/form-data" not in content_type:
@@ -266,6 +320,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         elif path.startswith(f"{API_PREFIX}/") and "cache-control" not in response.headers:
             response.headers["Cache-Control"] = "no-store"
+        if (
+            needs_cookie_refresh
+            and request.state.principal is not None
+            and path != f"{API_PREFIX}/auth/logout"
+        ):
+            set_session_cookie(
+                response,
+                issue_session_cookie(request.state.principal, resolved),
+                resolved,
+            )
         return response
 
     app.add_middleware(GZipMiddleware, minimum_size=1000)
@@ -290,6 +354,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_exception_handlers(app)
 
     app.include_router(system_router.router, prefix=API_PREFIX)
+    app.include_router(auth_router.router, prefix=API_PREFIX)
     app.include_router(catalog_router.router, prefix=API_PREFIX)
     app.include_router(coefficients_router.router, prefix=API_PREFIX)
     app.include_router(calculations_router.router, prefix=API_PREFIX)

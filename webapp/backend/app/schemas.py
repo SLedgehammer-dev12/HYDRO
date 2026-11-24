@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 B_SOURCE = Literal["institutional", "gail", "auto"]
 STEEL_MODEL = Literal["volumetric", "linear", "volumetric_temperature"]
-SESSION_STATUS = Literal["draft", "active", "completed", "archived"]
+SESSION_STATUS = Literal["draft", "active", "completed", "archived", "final"]
 TEST_TYPE = Literal[
     "air",
     "pressure",
@@ -551,8 +551,22 @@ class MappingProfileUpdate(StrictWriteModel):
     mapping: dict[str, Any] | None = None
 
 
+class ApprovalCreateRequest(StrictWriteModel):
+    action: Literal["session_finalize", "db_restore"]
+    target_id: str = Field(min_length=1, max_length=200)
+    reason: str = Field(default="", max_length=500)
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class ApprovalDecisionRequest(StrictWriteModel):
+    decision: Literal["approved", "rejected"]
+    note: str = Field(default="", max_length=500)
+
+
 __all__ = [
     "AirContentRequest",
+    "ApprovalCreateRequest",
+    "ApprovalDecisionRequest",
     "BackendComparisonRequest",
     "CoefficientARequest",
     "CoefficientBRequest",
