@@ -1563,5 +1563,97 @@ class SpreadsheetExtractionTests(unittest.TestCase):
             self.assertEqual(ocr._resolve_vision_languages("tur+eng"), ["tr-TR", "en-US"])
 
 
+class DocumentReadingImprovementsTests(unittest.TestCase):
+    def test_hybrid_pdf_ocrs_only_sparse_pages(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            pdf_path = Path(tmp_dir) / "hybrid.pdf"
+            pdf_path.write_bytes(b"%PDF-1.4\n%fake\n")
+
+            digital_p1 = ocr.PageText(
+                page_number=1,
+                text="HYDROSTATIC TEST REPORT\nReport No: BOT-HYB-01\nTest Pressure: 80 bar\n",
+                source=ocr.TEXT_SOURCE_LAYER,
+            )
+            sparse_p2 = ocr.PageText(page_number=2, text="", source=ocr.TEXT_SOURCE_LAYER)
+            ocr_p2 = ocr.PageText(
+                page_number=2,
+                text="Basinc degisim testi\nA: 44.97 micro/bar\nB: 185.2 micro/K",
+                source=ocr.TEXT_SOURCE_OCR,
+                confidence=0.92,
+            )
+
+            with (
+                mock.patch.object(ocr, "_extract_pdf_text", return_value=[digital_p1, sparse_p2]),
+                mock.patch.object(ocr, "_ocr_prerequisites_available", return_value=True),
+                mock.patch.object(ocr, "_ocr_single_pdf_page", return_value=ocr_p2) as single_mock,
+            ):
+                pages = ocr.extract_text(pdf_path)
+                result = ocr.analyze_report(pdf_path)
+
+            self.assertEqual(single_mock.call_count, 2)
+            self.assertEqual(pages[0].source, ocr.TEXT_SOURCE_LAYER)
+            self.assertEqual(pages[1].source, ocr.TEXT_SOURCE_OCR)
+            self.assertEqual(result.source, "mixed")
+            self.assertTrue(result.used_ocr)
+            self.assertIsNotNone(result.report.pressure_test.a)
+            self.assertAlmostEqual(result.report.pressure_test.a.as_float(), 44.97)
+
+    @unittest.skipUnless(HAVE_PIL, "Pillow yok: goruntu on isleme testi atlandi")
+    def test_preprocess_image_and_orientation_retry(self) -> None:
+        from PIL import Image
+
+        rgb = Image.new("RGB", (60, 40), color=(200, 200, 200))
+        processed = ocr._preprocess_image_for_ocr(rgb)
+        self.assertIsInstance(processed, Image.Image)
+        self.assertEqual(processed.mode, "L")
+
+        def _fake_tess(img: Any, *, language: str | None = None) -> tuple[str, float | None, str]:
+            if img.size == (40, 60):
+                return ("Test Basinci: 96.5 bar\nA: 44.97\nB: 185.2", 0.94, "")
+            return ("", 0.1, "")
+
+        with mock.patch.object(ocr, "_run_tesseract", side_effect=_fake_tess):
+            text, conf, warn = ocr._ocr_image_with_orientation_retry(rgb, "tesseract")
+
+        self.assertIn("96.5", text)
+        self.assertAlmostEqual(conf, 0.94)
+        self.assertIn("90°", warn)
+
+    def test_pdfplumber_table_extraction_preserves_columns_without_duplication(self) -> None:
+        rows = ocr._format_pdfplumber_tables(
+            [
+                [
+                    ["A", "44.97", None],
+                    ["", None],
+                    ["K", "1.02"],
+                ]
+            ]
+        )
+        self.assertEqual(rows, ["A  44.97", "K  1.02"])
+
+    def test_suggest_field_fixes_detects_decimal_drop_and_ignores_valid(self) -> None:
+        report = HydrotestReport(
+            air_test=AirTestFields(
+                a=ExtractedField(value=4497.0),
+                k=ExtractedField(value=102.0),
+            ),
+            pressure_test=PressureTestFields(
+                t_initial=ExtractedField(value=684.0),
+                t_final=ExtractedField(value=16.2),
+                b=ExtractedField(value=1852.0),
+            ),
+        )
+        fixes = ocr.suggest_field_fixes(report)
+        by_field = {fix.field: fix for fix in fixes}
+        self.assertEqual(
+            set(by_field),
+            {"air_test.a", "air_test.k", "pressure_test.t_initial", "pressure_test.b"},
+        )
+        self.assertAlmostEqual(by_field["air_test.a"].suggested_value, 44.97)
+        self.assertAlmostEqual(by_field["air_test.k"].suggested_value, 1.02)
+        self.assertAlmostEqual(by_field["pressure_test.t_initial"].suggested_value, 6.84)
+        self.assertAlmostEqual(by_field["pressure_test.b"].suggested_value, 185.2)
+
+
 if __name__ == "__main__":
     unittest.main()

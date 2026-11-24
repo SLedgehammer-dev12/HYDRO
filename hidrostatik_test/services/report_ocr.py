@@ -135,6 +135,8 @@ MAX_PDF_PAGES: Final[int] = 200
 MAX_OCR_PAGES: Final[int] = 200
 #: Metin katmani bu karakter sayisinin altindaysa OCR denenir.
 MIN_TEXT_LAYER_CHARS: Final[int] = 40
+#: Karma (hibrit) PDF'lerde tek bir sayfanin bos/taranmis sayilma esigi.
+MIN_PAGE_TEXT_CHARS: Final[int] = 25
 #: Regex/veri isleme icin metin uzunlugu siniri.
 MAX_TEXT_CHARS: Final[int] = 2_000_000
 #: OCR goruntusunun yeniden olceklenme esigi (piksel).
@@ -229,6 +231,26 @@ class Discrepancy:
 
 
 @dataclass(frozen=True)
+class SuggestedFix:
+    """Fiziksel aralik kontrolune dayali, otomatik uygulanmayan duzeltme onerisi."""
+
+    field: str
+    label: str
+    current_value: float
+    suggested_value: float
+    reason: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "field": self.field,
+            "label": self.label,
+            "current_value": self.current_value,
+            "suggested_value": self.suggested_value,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
 class OcrAnalysisResult:
     """UI/CLI icin tek bir rapor analizinin tam sonucu."""
 
@@ -243,6 +265,7 @@ class OcrAnalysisResult:
     warnings: tuple[str, ...] = ()
     needs_human_review: bool = True
     pages: tuple[PageText, ...] = ()
+    suggested_fixes: tuple[SuggestedFix, ...] = ()
 
     @property
     def used_ocr(self) -> bool:
@@ -265,6 +288,7 @@ class OcrAnalysisResult:
             "issues": [issue.to_dict() for issue in self.issues],
             "report": self.report.to_dict(),
             "discrepancies": [item.to_dict() for item in self.discrepancies],
+            "suggested_fixes": [fix.to_dict() for fix in self.suggested_fixes],
         }
 
 
@@ -354,6 +378,33 @@ def extract_text(
             deadline_monotonic=deadline_monotonic,
         )
         if _text_char_count(pages) >= MIN_TEXT_LAYER_CHARS:
+            sparse_indices = [
+                idx
+                for idx, page in enumerate(pages)
+                if len(re.sub(r"\s+", "", page.text)) < MIN_PAGE_TEXT_CHARS
+            ]
+            if sparse_indices and _ocr_prerequisites_available():
+                merged_pages = list(pages)
+                for idx in sparse_indices[: _max_ocr_pages()]:
+                    try:
+                        ocr_page = _ocr_single_pdf_page(
+                            resolved,
+                            idx,
+                            language=language,
+                            cancel_event=cancel_event,
+                            deadline_monotonic=deadline_monotonic,
+                        )
+                    except ReportOcrError as exc:
+                        if exc.code in {ERROR_CANCELLED, ERROR_TIMEOUT}:
+                            raise
+                        continue
+                    if ocr_page is None:
+                        continue
+                    old_non_ws = len(re.sub(r"\s+", "", merged_pages[idx].text))
+                    new_non_ws = len(re.sub(r"\s+", "", ocr_page.text))
+                    if new_non_ws > old_non_ws:
+                        merged_pages[idx] = ocr_page
+                return merged_pages
             return pages
 
         if not _ocr_prerequisites_available():
@@ -899,6 +950,25 @@ def _extract_pdf_text_with_pypdf(
         ) from exc
 
 
+def _format_pdfplumber_tables(tables: Sequence[Sequence[Sequence[Any]]] | None) -> list[str]:
+    """Flatten pdfplumber extracted tables into alignment-preserving lines."""
+
+    formatted_rows: list[str] = []
+    if not tables:
+        return formatted_rows
+    for table in tables:
+        if not table:
+            continue
+        for row in table:
+            if not row:
+                continue
+            cells = [re.sub(r"\s+", " ", str(cell)).strip() for cell in row if cell is not None]
+            non_empty = [cell for cell in cells if cell]
+            if non_empty:
+                formatted_rows.append("  ".join(non_empty))
+    return formatted_rows
+
+
 def _extract_pdf_text_with_pdfplumber(
     path: Path,
     *,
@@ -914,9 +984,32 @@ def _extract_pdf_text_with_pdfplumber(
             pages: list[PageText] = []
             for index in range(page_count):
                 _check_ocr_abort(cancel_event, deadline_monotonic)
-                pages.append(
-                    PageText(page_number=index + 1, text=pdf.pages[index].extract_text() or "")
-                )
+                page_obj = pdf.pages[index]
+                raw_text = page_obj.extract_text() or ""
+                table_lines: list[str] = []
+                try:
+                    table_lines = _format_pdfplumber_tables(page_obj.extract_tables() or [])
+                except Exception:
+                    table_lines = []
+                combined_text = raw_text
+                if table_lines:
+                    existing_norm = {
+                        re.sub(r"\s+", " ", ln).strip().lower()
+                        for ln in raw_text.splitlines()
+                        if ln.strip()
+                    }
+                    missing_rows = [
+                        row
+                        for row in table_lines
+                        if re.sub(r"\s+", " ", row).strip().lower() not in existing_norm
+                    ]
+                    if missing_rows:
+                        combined_text = (
+                            f"{raw_text.rstrip()}\n" + "\n".join(missing_rows)
+                            if raw_text.strip()
+                            else "\n".join(missing_rows)
+                        )
+                pages.append(PageText(page_number=index + 1, text=combined_text))
             return pages
     except ReportOcrError:
         raise
@@ -1845,6 +1938,106 @@ def _render_pdf_pages(path: Path) -> list[Any]:
     return list(_iter_rendered_pdf_pages(path, max_pages=_max_ocr_pages(), dpi=200))
 
 
+def _preprocess_image_for_ocr(image: Any) -> Any:
+    """Apply lightweight contrast normalization and mild sharpening for noisy scans."""
+
+    try:
+        from PIL import Image, ImageFilter, ImageOps
+    except ImportError:
+        return image
+    if not isinstance(image, Image.Image):
+        return image
+    gray = image.convert("L") if image.mode != "L" else image
+    enhanced = ImageOps.autocontrast(gray, cutoff=1)
+    return enhanced.filter(ImageFilter.SHARPEN)
+
+
+def _ocr_image_with_orientation_retry(
+    image: Any,
+    engine: str,
+    *,
+    language: str | None = None,
+) -> tuple[str, float | None, str]:
+    """Run selected OCR engine and retry 90/270 deg if text is sparse or low-confidence."""
+
+    def _run_engine(target: Any) -> tuple[str, float | None, str]:
+        if engine == "windows_ocr":
+            return _run_windows_ocr(target, language=language)
+        if engine == "vision":
+            return _run_vision(target, language=language)
+        return _run_tesseract(target, language=language)
+
+    best_text, best_conf, best_warn = _run_engine(image)
+    non_ws = len(re.sub(r"\s+", "", best_text))
+    needs_retry = non_ws < MIN_PAGE_TEXT_CHARS or (best_conf is not None and best_conf < 0.45)
+    if not needs_retry:
+        return best_text, best_conf, best_warn
+
+    try:
+        from PIL import Image
+    except ImportError:
+        return best_text, best_conf, best_warn
+    if not isinstance(image, Image.Image):
+        return best_text, best_conf, best_warn
+
+    def _score(txt: str, conf: float | None) -> float:
+        return (conf if conf is not None else 0.5) * min(len(re.sub(r"\s+", "", txt)), 500)
+
+    best_score = _score(best_text, best_conf)
+    best_angle: int | None = None
+    for angle in (90, 270):
+        rotated = image.rotate(-angle, expand=True)
+        cand_text, cand_conf, cand_warn = _run_engine(rotated)
+        cand_non_ws = len(re.sub(r"\s+", "", cand_text))
+        cand_score = _score(cand_text, cand_conf)
+        if cand_non_ws >= MIN_PAGE_TEXT_CHARS and cand_score > best_score * 1.25:
+            best_text, best_conf, best_warn = cand_text, cand_conf, cand_warn
+            best_score = cand_score
+            best_angle = angle
+
+    if best_angle is not None:
+        best_warn = _join_warning(best_warn, f"Sayfa otomatik {best_angle}° dondurulerek okundu.")
+    return best_text, best_conf, best_warn
+
+
+def _ocr_single_pdf_page(
+    path: Path,
+    page_index: int,
+    *,
+    language: str | None = None,
+    cancel_event: threading.Event | None = None,
+    deadline_monotonic: float | None = None,
+) -> PageText | None:
+    """OCR a single PDF page (used for selective hybrid PDF fallback)."""
+
+    _check_ocr_abort(cancel_event, deadline_monotonic)
+    engine = _resolve_ocr_engine()
+    if engine not in {"windows_ocr", "vision", "tesseract"}:
+        return None
+    rendered = list(
+        _iter_rendered_pdf_pages(
+            path,
+            start_page=page_index,
+            max_pages=1,
+            dpi=200,
+        )
+    )
+    if not rendered:
+        return None
+    _check_ocr_abort(cancel_event, deadline_monotonic)
+    preprocessed = _preprocess_image_for_ocr(rendered[0])
+    text, confidence, warning = _ocr_image_with_orientation_retry(
+        preprocessed, engine, language=language
+    )
+    return PageText(
+        page_number=page_index + 1,
+        text=text,
+        source=TEXT_SOURCE_OCR,
+        confidence=confidence,
+        warning=warning,
+    )
+
+
 def _ocr_pdf_pages(
     path: Path,
     *,
@@ -1879,7 +2072,10 @@ def _ocr_pdf_pages(
         _iter_rendered_pdf_pages(path, max_pages=_max_ocr_pages(), dpi=200)
     ):
         _check_ocr_abort(cancel_event, deadline_monotonic)
-        text, confidence, warning = _run_tesseract(image, language=language)
+        preprocessed = _preprocess_image_for_ocr(image)
+        text, confidence, warning = _ocr_image_with_orientation_retry(
+            preprocessed, "tesseract", language=language
+        )
         pages.append(
             PageText(
                 page_number=index + 1,
@@ -1905,7 +2101,10 @@ def _ocr_pdf_pages_with_vision(
         _iter_rendered_pdf_pages(path, max_pages=_max_ocr_pages(), dpi=200)
     ):
         _check_ocr_abort(cancel_event, deadline_monotonic)
-        text, confidence, warning = _run_vision(image, language=language)
+        preprocessed = _preprocess_image_for_ocr(image)
+        text, confidence, warning = _ocr_image_with_orientation_retry(
+            preprocessed, "vision", language=language
+        )
         pages.append(
             PageText(
                 page_number=index + 1,
@@ -1931,7 +2130,10 @@ def _ocr_pdf_pages_with_windows_ocr(
         _iter_rendered_pdf_pages(path, max_pages=_max_ocr_pages(), dpi=200)
     ):
         _check_ocr_abort(cancel_event, deadline_monotonic)
-        text, confidence, warning = _run_windows_ocr(image, language=language)
+        preprocessed = _preprocess_image_for_ocr(image)
+        text, confidence, warning = _ocr_image_with_orientation_retry(
+            preprocessed, "windows_ocr", language=language
+        )
         pages.append(
             PageText(
                 page_number=index + 1,
@@ -1994,12 +2196,10 @@ def ocr_pdf_page_rotated(
 def _ocr_image_page(path: Path, *, language: str | None = None) -> PageText:
     image = _load_image(path)
     engine = _resolve_ocr_engine()
-    if engine == "windows_ocr":
-        text, confidence, warning = _run_windows_ocr(image, language=language)
-    elif engine == "vision":
-        text, confidence, warning = _run_vision(image, language=language)
-    elif engine == "tesseract":
-        text, confidence, warning = _run_tesseract(image, language=language)
+    if engine in {"windows_ocr", "vision", "tesseract"}:
+        text, confidence, warning = _ocr_image_with_orientation_retry(
+            image, engine, language=language
+        )
     else:
         has_ocr_pkg = (
             importlib.util.find_spec("pytesseract") is not None
@@ -2075,7 +2275,7 @@ def _load_image(path: Path) -> Any:
                 (grayscale.width * scale, grayscale.height * scale),
                 Image.Resampling.LANCZOS,
             )
-    return grayscale
+    return _preprocess_image_for_ocr(grayscale)
 
 
 def _choose_tesseract_language(language: str | None = None) -> tuple[str, str]:
@@ -3940,6 +4140,93 @@ def has_blocking_discrepancies(discrepancies: Sequence[Discrepancy]) -> bool:
     return any(item.is_blocking for item in discrepancies)
 
 
+_SUGGESTED_FIX_RANGES: Final[dict[str, tuple[float, float, tuple[float, ...], str]]] = {
+    "air_test.a": (
+        25.0,
+        75.0,
+        (10.0, 100.0, 1000.0),
+        "A katsayisi icin beklenen aralik 25-75 (10^-6/bar); ondalik nokta kaybi olabilir.",
+    ),
+    "pressure_test.a": (
+        25.0,
+        75.0,
+        (10.0, 100.0, 1000.0),
+        "A katsayisi icin beklenen aralik 25-75 (10^-6/bar); ondalik nokta kaybi olabilir.",
+    ),
+    "air_test.k": (
+        0.90,
+        1.15,
+        (10.0, 100.0, 1000.0),
+        "K katsayisi icin beklenen aralik 0.90-1.15; ondalik nokta kaybi olabilir.",
+    ),
+    "pressure_test.t_initial": (
+        -5.0,
+        50.0,
+        (10.0, 100.0),
+        "Test sicakligi icin beklenen aralik -5..50 °C; ondalik nokta kaybi olabilir.",
+    ),
+    "pressure_test.t_final": (
+        -5.0,
+        50.0,
+        (10.0, 100.0),
+        "Test sicakligi icin beklenen aralik -5..50 °C; ondalik nokta kaybi olabilir.",
+    ),
+    "pressure_test.b": (
+        50.0,
+        450.0,
+        (10.0, 100.0),
+        "B katsayisi icin beklenen aralik 50-450 (10^-6/°C); ondalik nokta kaybi olabilir.",
+    ),
+    "test_pressure_bar": (
+        5.0,
+        250.0,
+        (10.0, 100.0),
+        "Test basinci icin beklenen aralik 5-250 bar; ondalik nokta kaybi olabilir.",
+    ),
+    "max_operating_pressure_bar": (
+        5.0,
+        250.0,
+        (10.0, 100.0),
+        "MAOP icin beklenen aralik 5-250 bar; ondalik nokta kaybi olabilir.",
+    ),
+}
+
+
+def suggest_field_fixes(report: HydrotestReport) -> list[SuggestedFix]:
+    """Detect likely OCR decimal-point drops against physical domain ranges.
+
+    Degerler otomatik olarak degistirilmez; kullanici onayina sunulmak
+    uzere ``SuggestedFix`` onerileri uretilir.
+    """
+
+    suggestions: list[SuggestedFix] = []
+    for key, extracted in report.iter_fields():
+        spec = _SUGGESTED_FIX_RANGES.get(key)
+        if spec is None:
+            continue
+        raw_val = extracted.value
+        if isinstance(raw_val, bool) or not isinstance(raw_val, (int, float)):
+            continue
+        val = float(raw_val)
+        if not math.isfinite(val):
+            continue
+        lo, hi, divisors, reason = spec
+        if lo <= val <= hi:
+            continue
+        candidates = [round(val / div, 4) for div in divisors if lo <= (val / div) <= hi]
+        if len(candidates) == 1:
+            suggestions.append(
+                SuggestedFix(
+                    field=key,
+                    label=FIELD_LABELS.get(key, key),
+                    current_value=val,
+                    suggested_value=candidates[0],
+                    reason=reason,
+                )
+            )
+    return suggestions
+
+
 # ---------------------------------------------------------------------------
 # Tek giris noktasi
 # ---------------------------------------------------------------------------
@@ -3979,10 +4266,18 @@ def analyze_report(
     )
 
     issues = tuple(validate_report(report))
+    suggested_fixes = tuple(suggest_field_fixes(report))
     warnings = list(report.warnings)
     for issue in issues:
         if issue.message not in warnings:
             warnings.append(issue.message)
+    for fix in suggested_fixes:
+        fix_msg = (
+            f"Olasi OCR ondalik hatasi ({fix.label}): "
+            f"{fix.current_value:g} -> {fix.suggested_value:g} onerisi."
+        )
+        if fix_msg not in warnings:
+            warnings.append(fix_msg)
 
     discrepancies: tuple[Discrepancy, ...] = ()
     if calculated is not None:
@@ -4018,6 +4313,7 @@ def analyze_report(
         warnings=tuple(warnings),
         needs_human_review=True,
         pages=tuple(pages),
+        suggested_fixes=suggested_fixes,
     )
 
 
@@ -4044,6 +4340,7 @@ __all__ = [
     "ReportOcrError",
     "SPREADSHEET_EXTENSIONS",
     "SUPPORTED_EXTENSIONS",
+    "SuggestedFix",
     "TEXT_SOURCE_SPREADSHEET",
     "analyze_report",
     "clear_ocr_probe_cache",
@@ -4062,6 +4359,7 @@ __all__ = [
     "parse_number",
     "parse_report",
     "pdf_rasterizer_status",
+    "suggest_field_fixes",
     "validate_input_path",
     "vision_available",
     "windows_ocr_available",

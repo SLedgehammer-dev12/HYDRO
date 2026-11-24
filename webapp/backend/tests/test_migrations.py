@@ -166,7 +166,7 @@ def test_fresh_upgrade_matches_orm_metadata_zero_drift(tmp_path: Path):
     try:
         engine = db.configure_database(f"sqlite:///{db_file.as_posix()}")
         rev = db.init_db()
-        assert rev == "0003"
+        assert rev == migrations_runner.HEAD_REVISION
         tables = set(inspect(engine).get_table_names())
         assert _ALL_APP_TABLES.issubset(tables)
         assert "alembic_version" in tables
@@ -190,7 +190,7 @@ def test_0003_drops_exact_7_duplicate_indexes_and_preserves_surviving_7(tmp_path
             assert dup_idx in idxs
             assert surviving_idx in idxs
 
-        rev2 = migrations_runner.run_migrations(engine, target="head")
+        rev2 = migrations_runner.run_migrations(engine, target="0003")
         assert rev2 == "0003"
         for table, dup_idx, surviving_idx in _DUPLICATE_PAIRS:
             idxs = _sqlite_indexes(db_file, table)
@@ -205,7 +205,10 @@ def test_0003_downgrade_and_reupgrade_preserves_data(tmp_path: Path):
     db.dispose_database()
     try:
         engine = db.configure_database(f"sqlite:///{db_file.as_posix()}")
-        assert migrations_runner.run_migrations(engine, target="head") == "0003"
+        assert (
+            migrations_runner.run_migrations(engine, target="head")
+            == migrations_runner.HEAD_REVISION
+        )
         seeded = _seed_all_tables(db.get_sessionmaker())
 
         assert migrations_runner.downgrade_migrations(engine, "0002") == "0002"
@@ -219,7 +222,10 @@ def test_0003_downgrade_and_reupgrade_preserves_data(tmp_path: Path):
             assert s.get(SectionForm, "form-1").form_code == "test_data"
             assert s.get(AuditEvent, "aud-1").action == "test.seed"
 
-        assert migrations_runner.run_migrations(engine, target="head") == "0003"
+        assert (
+            migrations_runner.run_migrations(engine, target="head")
+            == migrations_runner.HEAD_REVISION
+        )
         for table, dup_idx, _surviving in _DUPLICATE_PAIRS:
             assert dup_idx not in _sqlite_indexes(db_file, table)
     finally:
@@ -262,7 +268,10 @@ def test_0002_baseline_fk_table_creation_order_and_downgrade_base(tmp_path: Path
         migrations_runner.downgrade_migrations(engine, "base")
         remaining = set(inspect(engine).get_table_names()) - {"alembic_version"}
         assert remaining == set()
-        assert migrations_runner.run_migrations(engine, target="head") == "0003"
+        assert (
+            migrations_runner.run_migrations(engine, target="head")
+            == migrations_runner.HEAD_REVISION
+        )
         assert _ALL_APP_TABLES.issubset(set(inspect(engine).get_table_names()))
     finally:
         db.dispose_database()
@@ -343,8 +352,8 @@ def test_legacy_bridge_matrix(tmp_path: Path, case: str):
             db.dispose_database()
 
         db.configure_database(url)
-        assert db.init_db() == "0003"
-        assert db.current_schema_version() == "0003"
+        assert db.init_db() == migrations_runner.HEAD_REVISION
+        assert db.current_schema_version() == migrations_runner.HEAD_REVISION
 
         for table, dup_idx, surviving_idx in _DUPLICATE_PAIRS:
             idxs = _sqlite_indexes(db_file, table)
@@ -608,7 +617,7 @@ def test_restore_db_backup_future_revision_and_broken_fk_roll_back_422(tmp_path:
         assert live_proj_id in ids
         health = tc.get("/api/health").json()
         assert health["db"]["ok"] is True
-        assert health["db"]["migration"] == "0003"
+        assert health["db"]["migration"] == migrations_runner.HEAD_REVISION
         assert (
             tc.post("/api/projects", headers=ws, json={"name": "Sonraki Kayit"}).status_code == 201
         )
@@ -651,7 +660,7 @@ def test_restore_db_backup_from_legacy_0002_upgrades_to_0003(tmp_path: Path):
         assert res.status_code == 200
         body = res.json()
         assert body["restored"] is True
-        assert body["stats"]["schema_migration"] == "0003"
+        assert body["stats"]["schema_migration"] == migrations_runner.HEAD_REVISION
         projects = tc.get("/api/projects", headers={"X-Session-ID": "ws-old"}).json()["items"]
         assert any(p["id"] == "p-old" for p in projects)
     finally:
@@ -668,9 +677,9 @@ def test_idempotent_init_db_cwd_independent_and_preserves_loggers(tmp_path: Path
     db.dispose_database()
     try:
         db.configure_database("sqlite:///:memory:")
-        assert db.init_db() == "0003"
-        assert db.init_db() == "0003"
-        assert db.init_db() == "0003"
+        assert db.init_db() == migrations_runner.HEAD_REVISION
+        assert db.init_db() == migrations_runner.HEAD_REVISION
+        assert db.init_db() == migrations_runner.HEAD_REVISION
         assert app_logger.disabled is False
         assert dummy_handler in app_logger.handlers
     finally:

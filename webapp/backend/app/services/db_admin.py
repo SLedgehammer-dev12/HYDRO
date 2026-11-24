@@ -462,6 +462,46 @@ def create_db_backup(settings: Settings, *, reason: str = "manual") -> dict[str,
     }
 
 
+def prune_old_backups(
+    settings: Settings,
+    *,
+    keep_last: int = 10,
+    max_age_days: int = 30,
+) -> dict[str, Any]:
+    """Prune stale backup files while always keeping at least ``keep_last`` newest backups."""
+
+    root = _backups_dir(settings)
+    if not root.exists():
+        return {"kept": 0, "removed": [], "remaining": 0}
+
+    keep_n = max(1, int(keep_last))
+    cutoff_ts = utcnow().timestamp() - max(1, int(max_age_days)) * 86_400.0
+    files = sorted(
+        (p for p in root.iterdir() if p.is_file() and p.suffix == ".db"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+
+    removed: list[str] = []
+    for idx, path in enumerate(files):
+        if idx < keep_n:
+            continue
+        try:
+            st = path.stat()
+            if st.st_mtime < cutoff_ts:
+                path.unlink()
+                removed.append(path.name)
+        except OSError:
+            continue
+
+    remaining = max(0, len(files) - len(removed))
+    return {
+        "kept": min(len(files), keep_n),
+        "removed": removed,
+        "remaining": remaining,
+    }
+
+
 def _validate_sqlite_backup_file(path: Path) -> None:
     if not path.exists():
         head = b""
@@ -948,6 +988,7 @@ __all__ = [
     "list_db_backups",
     "list_trash",
     "list_workspaces",
+    "prune_old_backups",
     "purge_trash_item",
     "resolve_backup_path",
     "restore_db_backup",

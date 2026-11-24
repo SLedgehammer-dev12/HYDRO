@@ -138,6 +138,7 @@ class Settings:
     tesseract_cmd: str = ""
     ocr_timeout_s: int = 600
     ocr_max_concurrency: int = 1
+    ocr_worker_mode: str = "inline"
     auth_mode: str = "none"
     allow_remote: bool = False
     allow_workspace_claim: bool = False
@@ -213,6 +214,11 @@ class Settings:
             tesseract_cmd=_env("HYDRO_TESSERACT_CMD") or "",
             ocr_timeout_s=_env_int("HYDRO_OCR_TIMEOUT_S", 600),
             ocr_max_concurrency=max(1, min(_env_int("HYDRO_OCR_MAX_CONCURRENCY", 1), 4)),
+            ocr_worker_mode=(
+                "external"
+                if (_env("HYDRO_OCR_WORKER_MODE") or "").lower() == "external"
+                else "inline"
+            ),
             auth_mode=_env("HYDRO_AUTH_MODE") or "none",
             allow_remote=_env_bool("HYDRO_ALLOW_REMOTE", False),
             allow_workspace_claim=_env_bool("HYDRO_ALLOW_WORKSPACE_CLAIM", False),

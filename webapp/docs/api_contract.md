@@ -2235,3 +2235,116 @@ export interface ApiError {
   - **BOTAŞ Saha Formları (`/api/forms/*`, `/api/sessions/{id}/forms/*`):** 16 form kataloğu, form okuma/güncelleme (`ETag` / `If-Match` revizyon korumalı), zaman serisi senkronizasyonu.
   - **Sistem & Veritabanı Yönetimi (`/api/system/*`, `/api/update/*`):** `db-stats`, `db-backup`, `db-backups`, `db-restore` (dosya veya yedek adı), `db-maintenance`, `trash`, `workspaces`, `claim-workspace` ve kendi kendini güncelleme uçları (`X-Hydro-Admin-Token` destekli).
   - **İçe Aktarma (`/api/import/*`, `/api/survey/*`):** masaüstü JSON snapshot, masaüstü SQLite (`.db`) önizleme/içe aktarma, saha kot/etüd tablosu ayrıştırma ve DWG/DXF CAD okuyucu durumu.
+
+---
+
+## 16. Otomatik Üretilen OpenAPI Uç Envanteri
+
+<!-- generated:openapi-inventory:start -->
+> OpenAPI `info.version=2.1.0` · **88** path / **102** operasyon (`sync_api_inventory` ile üretildi).
+
+| Metot | Yol | Özet / Operation ID |
+| --- | --- | --- |
+| `GET` | `/api/` | Api Index |
+| `POST` | `/api/calculations/air-content` | Air Content |
+| `POST` | `/api/calculations/depressurization` | Depressurization |
+| `POST` | `/api/calculations/discharge` | Discharge |
+| `POST` | `/api/calculations/geometry` | Geometry |
+| `POST` | `/api/calculations/pig-speed` | Pig Speed |
+| `POST` | `/api/calculations/pressure-hold` | Pressure Hold |
+| `POST` | `/api/calculations/pressure-profile` | Pressure Profile |
+| `POST` | `/api/calculations/pressure-variation` | Pressure Variation |
+| `POST` | `/api/calculations/pressurization` | Pressurization |
+| `POST` | `/api/calculations/pressurization-ramp` | Pressurization Ramp |
+| `POST` | `/api/calculations/thermal-balance` | Thermal Balance |
+| `POST` | `/api/calculations/water-density` | Water Density |
+| `GET` | `/api/catalog/grades` | Grades |
+| `GET` | `/api/catalog/pipes` | Pipes |
+| `GET` | `/api/catalog/pipes/{nps}/schedules` | Pipe Schedules |
+| `GET` | `/api/catalog/reference-tables` | Reference Tables |
+| `POST` | `/api/coefficients/a` | Coefficient A |
+| `POST` | `/api/coefficients/b` | Coefficient B |
+| `POST` | `/api/coefficients/backend-comparison` | Backend Comparison |
+| `POST` | `/api/coefficients/compare` | Coefficient Compare |
+| `POST` | `/api/coefficients/reference-compare` | Reference Compare |
+| `POST` | `/api/coefficients/table` | Coefficient Table |
+| `GET` | `/api/health` | Health |
+| `POST` | `/api/import/desktop-db` | Import Desktop Db |
+| `POST` | `/api/import/desktop-snapshot` | Import Desktop Snapshot |
+| `GET` | `/api/meta` | Meta |
+| `GET` | `/api/meta/spec` | Meta Spec |
+| `GET` | `/api/ocr/analyses` | List Analyses |
+| `GET` | `/api/ocr/analyses/{analysis_id}` | Get Analysis |
+| `POST` | `/api/ocr/analyses/{analysis_id}/apply` | Apply Analysis |
+| `POST` | `/api/ocr/analyses/{analysis_id}/approve` | Approve Analysis |
+| `POST` | `/api/ocr/analyses/{analysis_id}/cancel` | Cancel Analysis |
+| `POST` | `/api/ocr/analyses/{analysis_id}/commit-dossier` | Commit Dossier |
+| `POST` | `/api/ocr/analyze` | Analyze |
+| `GET` | `/api/ocr/mapping-profiles` | List Mapping Profiles |
+| `POST` | `/api/ocr/mapping-profiles` | Create Mapping Profile |
+| `GET` | `/api/ocr/mapping-profiles/{profile_id}` | Get Mapping Profile |
+| `PUT` | `/api/ocr/mapping-profiles/{profile_id}` | Update Mapping Profile |
+| `DELETE` | `/api/ocr/mapping-profiles/{profile_id}` | Delete Mapping Profile |
+| `GET` | `/api/ocr/status` | Status |
+| `GET` | `/api/projects` | List Projects |
+| `POST` | `/api/projects` | Create Project |
+| `POST` | `/api/projects/generate-sample` | Generate Sample Project |
+| `POST` | `/api/projects/import-archive` | Import Project Archive |
+| `POST` | `/api/projects/plan-profile/commit` | Commit Plan Profile |
+| `POST` | `/api/projects/plan-profile/scan` | Scan Plan Profile |
+| `GET` | `/api/projects/{project_id}` | Get Project |
+| `PUT` | `/api/projects/{project_id}` | Update Project |
+| `DELETE` | `/api/projects/{project_id}` | Delete Project |
+| `GET` | `/api/projects/{project_id}/archive` | Export Project Archive |
+| `POST` | `/api/projects/{project_id}/clone` | Clone Project |
+| `GET` | `/api/projects/{project_id}/dataset` | Get Project Dataset |
+| `POST` | `/api/projects/{project_id}/export` | Export Project Dataset |
+| `POST` | `/api/projects/{project_id}/generate-sections` | Generate Project Sections |
+| `GET` | `/api/projects/{project_id}/scene` | Get Project Scene |
+| `POST` | `/api/projects/{project_id}/sections/batch` | Create Sections Batch |
+| `POST` | `/api/projects/{project_id}/sync-forms` | Sync Project Forms |
+| `POST` | `/api/reports/export` | Export Report |
+| `GET` | `/api/sessions` | List Sessions |
+| `POST` | `/api/sessions` | Create Session |
+| `GET` | `/api/sessions/{session_id}` | Get Session |
+| `PUT` | `/api/sessions/{session_id}` | Update Session |
+| `DELETE` | `/api/sessions/{session_id}` | Delete Session |
+| `GET` | `/api/sessions/{session_id}/audit` | Audit Events |
+| `POST` | `/api/sessions/{session_id}/duplicate` | Duplicate Session |
+| `GET` | `/api/sessions/{session_id}/export` | Export Session |
+| `GET` | `/api/sessions/{session_id}/forms` | Get Session Forms |
+| `GET` | `/api/sessions/{session_id}/forms/{form_code}` | Get Single Session Form |
+| `PUT` | `/api/sessions/{session_id}/forms/{form_code}` | Update Session Form |
+| `POST` | `/api/sessions/{session_id}/forms/{form_code}/scan` | Scan Single Form |
+| `GET` | `/api/sessions/{session_id}/results` | List Results |
+| `POST` | `/api/sessions/{session_id}/results` | Create Result |
+| `GET` | `/api/sessions/{session_id}/scene` | Scene |
+| `GET` | `/api/sessions/{session_id}/snapshot` | Get Snapshot |
+| `POST` | `/api/sessions/{session_id}/snapshot` | Apply Snapshot |
+| `GET` | `/api/sessions/{session_id}/summary` | Summary |
+| `GET` | `/api/sessions/{session_id}/time-series` | List Time Series |
+| `POST` | `/api/sessions/{session_id}/time-series` | Add Time Series |
+| `DELETE` | `/api/sessions/{session_id}/time-series` | Clear Time Series |
+| `POST` | `/api/sessions/{session_id}/time-series/batch` | Batch Add Time Series |
+| `GET` | `/api/sessions/{session_id}/time-series/summary` | Time Series Summary |
+| `POST` | `/api/sessions/{session_id}/time-series/sync-form` | Sync Time Series Form |
+| `DELETE` | `/api/sessions/{session_id}/time-series/{record_id}` | Delete Time Series |
+| `GET` | `/api/stats` | Stats |
+| `POST` | `/api/system/db-backup` | Create Db Backup |
+| `GET` | `/api/system/db-backups` | List Db Backups |
+| `GET` | `/api/system/db-backups/{filename}` | Download Db Backup |
+| `POST` | `/api/system/db-maintenance` | Run Db Maintenance |
+| `POST` | `/api/system/db-restore` | Restore Db Backup |
+| `GET` | `/api/system/db-stats` | Get Db Stats |
+| `GET` | `/api/system/metrics` | Get System Metrics |
+| `GET` | `/api/system/trash` | List Trash |
+| `POST` | `/api/system/trash/restore` | Restore Trash Item |
+| `DELETE` | `/api/system/trash/{entity_type}/{entity_id}` | Purge Trash Item |
+| `GET` | `/api/system/workspaces` | List Db Workspaces |
+| `POST` | `/api/system/workspaces/claim` | Claim Db Workspace |
+| `POST` | `/api/update/apply` | Update Apply |
+| `POST` | `/api/update/check` | Update Check |
+| `POST` | `/api/update/download` | Update Download |
+| `GET` | `/api/update/download/file` | Update Download File |
+| `GET` | `/api/update/status` | Update Status |
+<!-- generated:openapi-inventory:end -->

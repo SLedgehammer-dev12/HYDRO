@@ -41,6 +41,29 @@ services:
   #   volumes:
   #     - hydro-db:/var/lib/postgresql/data
   #   restart: unless-stopped
+  #
+  # Kalici dis OCR iscisi icin (Postgres veya paylasilan diskle):
+  #   web servisinde HYDRO_OCR_WORKER_MODE: "external" tanimlayip asagidaki isciyi acin:
+  # ocr-worker:
+  #   image: hydro-web:local
+  #   command: ["python", "-m", "app.worker.ocr", "--poll-interval", "1.0"]
+  #   environment:
+  #     HYDRO_DATA_DIR: "/data"
+  #     HYDRO_DATABASE_URL: "postgresql+psycopg://hydro:${POSTGRES_PASSWORD:?required}@db:5432/hydro"
+  #     HYDRO_OCR_WORKER_MODE: "external"
+  #     HOME: "/tmp"
+  #   volumes:
+  #     - hydro-data:/data
+  #   read_only: true
+  #   tmpfs:
+  #     - /tmp
+  #   cap_drop:
+  #     - ALL
+  #   security_opt:
+  #     - no-new-privileges:true
+  #   depends_on:
+  #     - db
+  #   restart: unless-stopped
 
 volumes:
   hydro-data:

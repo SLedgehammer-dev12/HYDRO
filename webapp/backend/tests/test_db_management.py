@@ -51,7 +51,7 @@ def test_legacy_0001_schema_migrates_to_0002(tmp_path: Path):
     with TestClient(app) as tc:
         health = tc.get("/api/health").json()
         assert health["db"]["ok"] is True
-        assert health["db"]["migration"] == "0003"
+        assert health["db"]["migration"] == db.CURRENT_MIGRATION
 
     conn = sqlite3.connect(str(db_file))
     cols = {row[1] for row in conn.execute("PRAGMA table_info(projects)").fetchall()}
@@ -65,7 +65,7 @@ def test_legacy_0001_schema_migrates_to_0002(tmp_path: Path):
     alembic_revs = [
         row[0] for row in conn.execute("SELECT version_num FROM alembic_version").fetchall()
     ]
-    assert alembic_revs == ["0003"]
+    assert alembic_revs == [db.CURRENT_MIGRATION]
     conn.close()
     db.dispose_database()
 
@@ -504,7 +504,7 @@ def test_db_backup_restore_and_admin_guard(headers, tmp_path: Path):
         assert stats_res.status_code == 200
         stats_body = stats_res.json()
         assert stats_body["is_sqlite"] is True
-        assert stats_body["schema_migration"] == "0003"
+        assert stats_body["schema_migration"] == db.CURRENT_MIGRATION
         assert stats_body["table_counts"]["projects"] >= 1
 
         bkp_res = file_client.post(
@@ -662,3 +662,42 @@ def test_trash_restore_purge_and_maintenance(client, headers, settings):
     assert not orphan_file.exists()
     assert not export_temp.exists()
     assert stored_b.path.exists()
+
+
+def test_prune_old_backups_and_backup_drill(tmp_path: Path):
+    import os
+    import time
+
+    from app.services import db_admin
+
+    from scripts.backup_drill import run_backup_drill
+
+    settings = Settings(
+        database_url=f"sqlite:///{(tmp_path / 'drill_data' / 'hydro_web.db').as_posix()}",
+        data_dir=tmp_path / "drill_data",
+        frontend_dist=tmp_path / "dist",
+    )
+    drill_res = run_backup_drill(settings.data_dir)
+    assert drill_res["status"] == "ok"
+    assert drill_res["rto_ms"] >= 0
+
+    backups_dir = settings.data_dir / "backups"
+    backups_dir.mkdir(parents=True, exist_ok=True)
+    # Create 5 synthetic backup files; oldest 2 are older than 40 days
+    created_files: list[Path] = []
+    now = time.time()
+    for i in range(5):
+        p = backups_dir / f"hydro_synthetic_{i}.db"
+        p.write_bytes(b"SQLite format 3\x00" + b"\x00" * 16)
+        age_s = (45 - i * 10) * 86_400 if i < 2 else (5 - i) * 86_400
+        ts = now - age_s
+        os.utime(p, (ts, ts))
+        created_files.append(p)
+
+    # Keep newest 3 backups; prune files older than 30 days beyond keep_last=3
+    pruned = db_admin.prune_old_backups(settings, keep_last=3, max_age_days=30)
+    assert pruned["kept"] == 3
+    assert set(pruned["removed"]) == {"hydro_synthetic_0.db", "hydro_synthetic_1.db"}
+    assert not created_files[0].exists()
+    assert not created_files[1].exists()
+    assert created_files[2].exists()

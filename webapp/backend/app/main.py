@@ -112,12 +112,15 @@ def _apply_security_headers(response, path: str, request_id: str, raw_workspace:
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     s = app.state.settings
-    try:
-        recovered = OCR_QUEUE.recover_interrupted_jobs(db.get_sessionmaker())
-    except Exception:
-        recovered = 0
-    if recovered:
-        logger.warning("Marked %d stale queued/running OCR jobs as worker_interrupted", recovered)
+    if getattr(s, "ocr_worker_mode", "inline") == "inline":
+        try:
+            recovered = OCR_QUEUE.recover_interrupted_jobs(db.get_sessionmaker())
+        except Exception:
+            recovered = 0
+        if recovered:
+            logger.warning(
+                "Marked %d stale queued/running OCR jobs as worker_interrupted", recovered
+            )
     if not s.has_enforced_auth and not s.is_loopback_host:
         logger.warning(
             "SECURITY WARNING: HYDRO Web running without enforced app auth on host=%s. "

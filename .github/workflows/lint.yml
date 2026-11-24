@@ -57,6 +57,10 @@ jobs:
         run: |
           PYTHONPATH=webapp/backend:. python -m app.tools.dump_openapi --check
 
+      - name: Verify OpenAPI inventory in api_contract.md
+        run: |
+          PYTHONPATH=webapp/backend:. python3 -m app.tools.sync_api_inventory --check
+
       # UI katmani henuz tam tipli degil; rapor uret ama is akisini durdurma.
       - name: Run mypy (full, informational)
         continue-on-error: true
@@ -110,6 +114,9 @@ jobs:
 
       - name: API contract check
         run: npm run check:api
+
+      - name: API TypeScript types check
+        run: npm run check:api-types
 
       - name: Dependency audit (high/critical)
         run: npm audit --omit=dev --audit-level=high

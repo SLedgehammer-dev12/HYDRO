@@ -183,7 +183,14 @@ def main(argv: list[str] | None = None) -> int:
             ROOT,
             py_backend_env,
         ),
+        (
+            "api-inventory-check",
+            [sys.executable, "-m", "app.tools.sync_api_inventory", "--check"],
+            ROOT,
+            py_backend_env,
+        ),
         ("frontend-check-api", ["npm", "run", "check:api"], FRONTEND_DIR, None),
+        ("frontend-api-types", ["npm", "run", "check:api-types"], FRONTEND_DIR, None),
     ]
 
     full_steps: list[tuple[str, list[str], Path, dict[str, str] | None]] = [

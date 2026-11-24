@@ -15,7 +15,7 @@ from sqlalchemy import Engine, inspect, text
 from sqlalchemy.engine import Connection
 
 BASELINE_REVISION = "0002"
-HEAD_REVISION = "0003"
+HEAD_REVISION = "0004"
 POSTGRES_ADVISORY_LOCK_KEY = 748291043
 
 logger = logging.getLogger("hydro.web.migrations")

@@ -582,12 +582,10 @@ def enqueue_upload(
             )
         return analysis, True, est
 
-    session_factory = db_module.get_sessionmaker()
-    analysis_id = analysis.id
-    stored_path = stored.path
-    stored_filename = stored.filename
-    aliases = _profile_aliases(profile)
-    timeout_s = float(settings.ocr_timeout_s)
+    analysis.job_payload = json_safe({"calculated": calculated, "language": language})
+    analysis.cancel_requested = False
+    db.commit()
+    db.refresh(analysis)
 
     counts = _queue_counts(db, workspace_hash)
     est_wait = OCR_QUEUE.estimate_wait_seconds(
@@ -595,6 +593,15 @@ def enqueue_upload(
         running=counts["running"],
         size_bytes=stored.size_bytes,
     )
+    if getattr(settings, "ocr_worker_mode", "inline") == "external":
+        return analysis, False, est_wait
+
+    session_factory = db_module.get_sessionmaker()
+    analysis_id = analysis.id
+    stored_path = stored.path
+    stored_filename = stored.filename
+    aliases = _profile_aliases(profile)
+    timeout_s = float(settings.ocr_timeout_s)
 
     def _mark_cancelled_if_needed(wdb: OrmSession, row: OcrAnalysis) -> None:
         row.status = "cancelled"
@@ -867,7 +874,9 @@ def cancel_analysis(db: OrmSession, analysis: OcrAnalysis) -> dict[str, Any]:
             details={"status": analysis.status},
         )
     OCR_QUEUE.cancel(analysis.id)
+    analysis.cancel_requested = True
     analysis.status = "cancelled"
+    analysis.lease_until = None
     analysis.finished_at = utcnow()
     audit.record(
         db,

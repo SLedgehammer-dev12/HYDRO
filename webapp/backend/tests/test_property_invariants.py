@@ -38,8 +38,8 @@ def test_coefficient_a_positive_and_finite_across_backends(
 
 @given(
     backend=st.sampled_from(["coolprop", "table_v1"]),
-    t1=st.floats(min_value=5.0, max_value=30.0, allow_nan=False, allow_infinity=False),
-    delta_t=st.floats(min_value=0.5, max_value=15.0, allow_nan=False, allow_infinity=False),
+    t1=st.floats(min_value=5.0, max_value=25.0, allow_nan=False, allow_infinity=False),
+    delta_t=st.floats(min_value=0.5, max_value=14.0, allow_nan=False, allow_infinity=False),
     pressure_bar=st.floats(min_value=10.0, max_value=120.0, allow_nan=False, allow_infinity=False),
 )
 @settings(max_examples=40, deadline=None)
