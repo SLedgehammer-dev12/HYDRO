@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import math
 import tempfile
 import tkinter as tk
@@ -176,8 +177,33 @@ class DownloadDialogTkTests(unittest.TestCase):
         )
 
     def tearDown(self) -> None:
-        self.dialog._close_dialog()
-        self.root.destroy()
+        dialog = getattr(self, "dialog", None)
+        if dialog is not None:
+            poll_job = getattr(dialog, "_poll_job", None)
+            if poll_job is not None:
+                try:
+                    dialog._dialog.after_cancel(poll_job)
+                except tk.TclError:
+                    pass
+                dialog._poll_job = None
+            dialog._close_dialog()
+        root = getattr(self, "root", None)
+        if root is not None:
+            try:
+                root.update_idletasks()
+            except tk.TclError:
+                pass
+            try:
+                root.quit()
+            except tk.TclError:
+                pass
+            try:
+                root.destroy()
+            except tk.TclError:
+                pass
+        self.dialog = None  # type: ignore[assignment]
+        self.root = None  # type: ignore[assignment]
+        gc.collect()
 
     def test_dialog_enqueues_and_starts_task(self) -> None:
         self.assertEqual(len(self.manager.enqueued), 1)

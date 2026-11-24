@@ -160,6 +160,7 @@ export default function OcrPage() {
   const [profileDetailError, setProfileDetailError] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
+  const unmountRef = useRef(false);
   const startedAtRef = useRef(0);
   const resultHeadingRef = useRef<HTMLHeadingElement>(null);
   const errorRef = useRef<HTMLDivElement>(null);
@@ -170,6 +171,7 @@ export default function OcrPage() {
   const activeSessionId = useAppStore((s) => s.sessionId);
   const setStoreProject = useAppStore((s) => s.setProject);
   const setStoreTab = useAppStore((s) => s.setTab);
+  const setActiveOcrJob = useAppStore((s) => s.setActiveOcrJob);
   const pushToast = useAppStore((s) => s.pushToast);
 
   const projectsQuery = useProjects();
@@ -306,10 +308,12 @@ export default function OcrPage() {
   }, []);
 
   useEffect(() => {
+    unmountRef.current = false;
     void loadStatus();
     void loadHistory();
     void loadProfiles();
     return () => {
+      unmountRef.current = true;
       abortRef.current?.abort();
     };
   }, [loadStatus, loadHistory, loadProfiles]);
@@ -490,6 +494,11 @@ export default function OcrPage() {
         controller.signal,
       );
       setJobId(job.analysis_id);
+      setActiveOcrJob({
+        id: job.analysis_id,
+        fileName: file.name,
+        stage: job.status === "queued" ? "Kuyrukta" : "Analiz ediliyor",
+      });
       setStage("extract");
       setStageNote(
         job.reused
@@ -503,6 +512,13 @@ export default function OcrPage() {
         signal: controller.signal,
         timeoutMs: (serverTimeoutS + 30) * 1000,
         onProgress: (info) => {
+          const label =
+            info.status === "queued" ? "Kuyrukta" : serverStageLabel(info.stage);
+          setActiveOcrJob({
+            id: job.analysis_id,
+            fileName: file.name,
+            stage: label,
+          });
           setStage(mapServerStage(info.stage));
           setStageNote(
             info.status === "queued"
@@ -511,6 +527,7 @@ export default function OcrPage() {
           );
         },
       });
+      setActiveOcrJob(null);
       if (final.status === "succeeded") {
         applyResult({ ...final, reused: Boolean(job.reused) }, false);
         if (statusError) {
@@ -524,9 +541,13 @@ export default function OcrPage() {
       }
     } catch (caught) {
       if (isAbortError(caught) || controller.signal.aborted) {
-        setPhase("idle");
-        setStageNote("Analiz iptal edildi.");
+        if (!unmountRef.current) {
+          setActiveOcrJob(null);
+          setPhase("idle");
+          setStageNote("Analiz iptal edildi.");
+        }
       } else {
+        setActiveOcrJob(null);
         setError(toOcrApiError(caught));
         setPhase("error");
       }
@@ -542,6 +563,7 @@ export default function OcrPage() {
     if (jobId) {
       void cancelOcrAnalysis(jobId).catch(() => undefined);
     }
+    setActiveOcrJob(null);
     setPhase("idle");
     setStageNote("Analiz iptal edildi.");
   };

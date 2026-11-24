@@ -102,3 +102,43 @@ jobs:
         run: |
           python -m coverage run --source=webapp/backend/app -m pytest webapp/backend/tests -q
           python -m coverage report --fail-under=80
+
+  web-postgres-tests:
+    name: Web Backend PostgreSQL Runtime (py3.12 / ubuntu-latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: hydro
+          POSTGRES_USER: hydro
+          POSTGRES_PASSWORD: hydro_ci_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U hydro -d hydro"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: 'pip'
+
+      - name: Install Python + PostgreSQL driver dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt -r webapp/requirements-web.txt "psycopg[binary]>=3.2,<4"
+
+      - name: Run PostgreSQL Alembic & CRUD smoke suite
+        env:
+          HYDRO_TEST_POSTGRES_URL: postgresql+psycopg://hydro:hydro_ci_password@127.0.0.1:5432/hydro
+        run: |
+          python -m pytest webapp/backend/tests/test_postgres_runtime.py -q

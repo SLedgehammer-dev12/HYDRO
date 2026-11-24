@@ -53,6 +53,10 @@ jobs:
         run: |
           mypy --ignore-missing-imports webapp/backend/app
 
+      - name: Verify OpenAPI contract
+        run: |
+          PYTHONPATH=webapp/backend:. python -m app.tools.dump_openapi --check
+
       # UI katmani henuz tam tipli degil; rapor uret ama is akisini durdurma.
       - name: Run mypy (full, informational)
         continue-on-error: true
@@ -103,3 +107,6 @@ jobs:
 
       - name: Bundle budget check
         run: npm run check:bundle
+
+      - name: API contract check
+        run: npm run check:api

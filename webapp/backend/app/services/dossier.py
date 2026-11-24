@@ -2789,7 +2789,9 @@ def evaluate_section_calculations(
                 "b_micro_per_c": round(float(effective_b_pres), 4),
                 "a_reported_micro_per_bar": a_pres_form,
                 "b_reported_micro_per_c": b_pres_form,
-                "water_beta_micro_per_c": round(calc_beta_w, 4) if calc_beta_w is not None else None,
+                "water_beta_micro_per_c": round(calc_beta_w, 4)
+                if calc_beta_w is not None
+                else None,
                 "coeff_source": coeff_source,
                 "pt_source": "program",
                 "state_temp_c": pr_t,
@@ -2819,7 +2821,9 @@ def evaluate_section_calculations(
             "a_reported_micro_per_bar": a_pres_form,
             "b_reported_micro_per_c": b_pres_form,
             "water_beta_micro_per_c": round(calc_beta_w, 4) if calc_beta_w is not None else None,
-            "coeff_source": "program" if (calc_a_pres is not None and calc_b_pres is not None) else None,
+            "coeff_source": "program"
+            if (calc_a_pres is not None and calc_b_pres is not None)
+            else None,
             "pt_source": "form_fallback",
             "state_temp_c": pr_t,
             "state_pressure_bar": pr_p,

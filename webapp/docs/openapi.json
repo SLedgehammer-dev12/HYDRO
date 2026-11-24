@@ -1094,6 +1094,7 @@
         "type": "object"
       },
       "OcrApplyRequest": {
+        "additionalProperties": false,
         "properties": {
           "fields": {
             "anyOf": [
@@ -1130,6 +1131,7 @@
         "type": "object"
       },
       "OcrApproveField": {
+        "additionalProperties": false,
         "properties": {
           "approved": {
             "default": true,
@@ -1160,6 +1162,7 @@
         "type": "object"
       },
       "OcrApproveRequest": {
+        "additionalProperties": false,
         "properties": {
           "approve_all": {
             "default": false,
@@ -1628,6 +1631,7 @@
         "type": "object"
       },
       "ProjectCloneRequest": {
+        "additionalProperties": false,
         "properties": {
           "code": {
             "anyOf": [
@@ -1667,6 +1671,7 @@
         "type": "object"
       },
       "ProjectCreate": {
+        "additionalProperties": false,
         "properties": {
           "client": {
             "anyOf": [
@@ -1769,6 +1774,7 @@
         "type": "object"
       },
       "ProjectExportRequest": {
+        "additionalProperties": false,
         "properties": {
           "format": {
             "default": "xlsx",
@@ -1786,6 +1792,7 @@
         "type": "object"
       },
       "ProjectGenerateSectionsRequest": {
+        "additionalProperties": false,
         "properties": {
           "base_elevation_m": {
             "default": 200.0,
@@ -1934,6 +1941,7 @@
         "type": "object"
       },
       "ProjectSyncFormsRequest": {
+        "additionalProperties": false,
         "properties": {
           "form_codes": {
             "anyOf": [
@@ -1960,6 +1968,7 @@
         "type": "object"
       },
       "ProjectUpdate": {
+        "additionalProperties": false,
         "properties": {
           "client": {
             "anyOf": [
@@ -2101,6 +2110,7 @@
         "type": "object"
       },
       "ReportExportRequest": {
+        "additionalProperties": false,
         "properties": {
           "checklist": {
             "items": {
@@ -2153,6 +2163,7 @@
         "type": "object"
       },
       "ResultCreate": {
+        "additionalProperties": false,
         "properties": {
           "payload": {
             "additionalProperties": true,
@@ -2185,6 +2196,7 @@
         "type": "object"
       },
       "SampleProjectGenerateRequest": {
+        "additionalProperties": false,
         "properties": {
           "code": {
             "anyOf": [
@@ -2219,6 +2231,11 @@
               }
             ],
             "title": "Name"
+          },
+          "reuse_existing": {
+            "default": true,
+            "title": "Reuse Existing",
+            "type": "boolean"
           },
           "scenario": {
             "default": "mixed",
@@ -2402,6 +2419,7 @@
         "type": "object"
       },
       "SessionCreate": {
+        "additionalProperties": false,
         "properties": {
           "inputs": {
             "anyOf": [
@@ -2455,6 +2473,7 @@
         "type": "object"
       },
       "SessionDuplicate": {
+        "additionalProperties": false,
         "properties": {
           "name": {
             "anyOf": [
@@ -2473,6 +2492,7 @@
         "type": "object"
       },
       "SessionUpdate": {
+        "additionalProperties": false,
         "properties": {
           "inputs": {
             "anyOf": [
@@ -2554,6 +2574,7 @@
         "type": "object"
       },
       "SnapshotApply": {
+        "additionalProperties": false,
         "properties": {
           "mode": {
             "default": "merge",
@@ -2639,6 +2660,7 @@
         "type": "object"
       },
       "TimeSeriesBatchCreate": {
+        "additionalProperties": false,
         "properties": {
           "mode": {
             "default": "append",
@@ -2733,6 +2755,7 @@
         "type": "object"
       },
       "TimeSeriesSyncFormRequest": {
+        "additionalProperties": false,
         "properties": {
           "base_date": {
             "anyOf": [
@@ -2861,6 +2884,7 @@
         "type": "object"
       },
       "WorkspaceClaimRequest": {
+        "additionalProperties": false,
         "properties": {
           "source_workspace_hash": {
             "maxLength": 64,

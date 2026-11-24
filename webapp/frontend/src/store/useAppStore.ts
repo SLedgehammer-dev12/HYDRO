@@ -76,6 +76,7 @@ export interface AppStore {
   tourActive: boolean;
   tourStep: number;
   tourSampleProjectId: string | null;
+  activeOcrJob: { id: string; fileName: string; stage: string } | null;
 
   backend: BackendMode;
   health: HealthResponse | null;
@@ -136,6 +137,7 @@ export interface AppStore {
   startTour: (sampleProjectId?: string | null) => void;
   setTourStep: (step: number) => void;
   endTour: () => void;
+  setActiveOcrJob: (job: { id: string; fileName: string; stage: string } | null) => void;
 
   addHistory: (entry: Omit<HistoryEntry, "id" | "at"> & { at?: string }) => void;
   addExport: (entry: Omit<ExportEntry, "id" | "at"> & { at?: string }) => void;
@@ -177,6 +179,7 @@ export const useAppStore = create<AppStore>()(
       tourActive: false,
       tourStep: 0,
       tourSampleProjectId: null,
+      activeOcrJob: null,
 
       backend: "checking",
       health: null,
@@ -397,6 +400,7 @@ export const useAppStore = create<AppStore>()(
         }),
       setTourStep: (tourStep) => set({ tourStep: Math.max(0, tourStep) }),
       endTour: () => set({ tourActive: false, tourStep: 0, tourSampleProjectId: null }),
+      setActiveOcrJob: (activeOcrJob) => set({ activeOcrJob }),
 
       addHistory: (entry) =>
         set((state) => ({

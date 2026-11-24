@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEMO_META } from "../../lib/mock";
 import { useAppStore } from "../../store/useAppStore";
+import { TopBar } from "../../components/layout/TopBar";
 import OcrPage from "./OcrPage";
 
 const mockAnalyzeOcr = vi.fn();
@@ -47,7 +48,7 @@ vi.mock("../../hooks/queries", async () => {
 describe("OcrPage unmount cleanup (F10) and dynamic server timeout (F11)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useAppStore.setState({ backend: "online", sessionId: null });
+    useAppStore.setState({ backend: "online", sessionId: null, activeOcrJob: null, tab: "ocr" });
   });
 
   it("passes (ocr_timeout_s + 30)s to waitForAnalysis and aborts polling on unmount without cancelling server job", async () => {
@@ -96,5 +97,33 @@ describe("OcrPage unmount cleanup (F10) and dynamic server timeout (F11)", () =>
 
     expect(capturedSignal?.aborted).toBe(true);
     expect(mockCancelOcrAnalysis).not.toHaveBeenCalled();
+    expect(useAppStore.getState().activeOcrJob?.id).toBe("job-123");
+  });
+
+  it("displays background OCR indicator in TopBar outside OCR tab and cancels job on dismiss", async () => {
+    mockCancelOcrAnalysis.mockResolvedValue({ id: "job-456", status: "cancelled" });
+    useAppStore.setState({
+      tab: "projects",
+      activeOcrJob: { id: "job-456", fileName: "form.pdf", stage: "Analiz ediliyor" },
+    });
+
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={qc}>
+        <TopBar onOpenHelp={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByTestId("topbar-ocr-indicator")).toBeInTheDocument();
+    expect(screen.getByText(/OCR çalışıyor/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Arka plan OCR analizini iptal et/i }));
+
+    await waitFor(() => {
+      expect(mockCancelOcrAnalysis).toHaveBeenCalledWith("job-456");
+    });
+    expect(useAppStore.getState().activeOcrJob).toBeNull();
   });
 });

@@ -12,9 +12,9 @@
 
 | Alan | Durum | Kanıt |
 | --- | --- | --- |
-| Masaüstü uygulaması | Çalışıyor, kararlı (`hidrostatik_test/ui/*` kapsam dışı tutuldu) | `tests.test_report_ocr` 76 unittest OK (`skipped=1`; tam paket: 733 test keşfedildi, Tk diyalog sınıfı hariç **725 OK**, sınıf tek başına **16 OK**) |
-| Web backend (FastAPI) | Çalışıyor | 253 pytest PASS (Alembic `0003`, `SAWarning=0`, `%83` kapsam ≥ `%80` kapısı), 87 OpenAPI path / 101 operation (`openapi.json`), 50 dosyada `mypy` temiz |
-| Web frontend (React 19) | Çalışıyor | `npm run check:api` (74/87 yol), `npm run lint` (0 hata, `jsx-a11y`), `npm test` (63 Vitest / 21 dosya), `npm run typecheck` + `npm run build` + `check:bundle` PASS (`148,3 kB` gzip ilk yükleme JS), `verify-tabs.mjs` 12/12 PASS |
+| Masaüstü uygulaması | Çalışıyor, kararlı (`hidrostatik_test/ui/*` kapsam dışı tutuldu) | `tests.test_report_ocr` 76 unittest OK (`skipped=1`); tam paket `python3 -m unittest discover`: **733 OK** (`skipped=1`, Tk teardown düzeltildi) |
+| Web backend (FastAPI) | Çalışıyor | **255 pytest PASS** (1 skipped: Postgres CI-only, Alembic `0003`, `SAWarning=0`, `%83` kapsam ≥ `%80` kapısı), 87 OpenAPI path / 101 operation (`openapi.json`), 50 dosyada `mypy` temiz |
+| Web frontend (React 19) | Çalışıyor | `npm run check:api` (74/87 yol), `npm run lint` (0 hata, `jsx-a11y`), `npm test` (**67 Vitest / 21 dosya**), `npm run typecheck` + `npm run build` + `check:bundle` PASS (**`148,8 kB`** gzip ilk yükleme JS), `verify-tabs.mjs` **12/12 PASS** |
 | Program İkon & Marka Sistemi | Hazır | Boru kesiti + su dalgası + manometre ikonu (`tools/generate_icons.py`, `assets/icons/*`, `webapp/frontend/public/*`, `<HydroLogo />`, PyInstaller/Inno Setup/Tkinter) |
 | Web Güncelleme Yöneticisi | Çalışıyor | `/api/update/*`, SHA-256 + fail-closed Ed25519 `.sig` doğrulama, `UpdateManagerModal`, macOS `.dmg` / Win `.exe`/`.zip` kurulum |
 | BOTAŞ Test Bölümü Formları | Çalışıyor | Seçenek 1 sol menü (`015`..`023`, `KUR-001`, `KUR-002` + 5 ek), `SectionFormPage`, `rows`/`pig_runs`/`findings`, tekil OCR, `020`/`022` gömülü hesaplama ve `023` (`BOT-FRM-CDB-001-024`) Şartname 16–17 çift yönlü entegrasyonu |
@@ -27,7 +27,7 @@
 | OCR rapor kontrolü | Çalışıyor (Vision + Excel) | `ocrmac`, `.xlsx`/`.xls`, `commit-dossier` proje/bölüm kaydı, tekil onay/uygulama |
 | Docker / dağıtım | Hazır | `webapp/Dockerfile`, `docker-compose.yml`, `.github/workflows/release.yml` |
 
-**Durum:** MVP, performans/güvenlik ön sertleştirmesi, Alembic şema göçü (`0003`), 3D gerçek kot profili/saha ekipmanı (`profile_points[]`/`equipment[]`), Şartname 10.1 `+2 °C` / negatif `B`/`beta_water` / `water_backend` karşılaştırma + rapor kimliği iyileştirmeleri, masaüstü JSON snapshot içe aktarma UI'sı + `409 revision_conflict` fark çözümleme modalı, Şartname Bölüm 12 & 15 zaman serili termal dengeleme / 24 saatlik test kayıt modeli (`TimeSeriesPanel`, `TimeSeriesChart`, Form `018`/`021`) ve segment bazlı SMYS/malzeme kalitesi desteği (`PipeSection.smys_mpa`/`material_grade`) tamam. Kalan işler kurumsal Auth/OIDC/RBAC kararı, `psycopg` Postgres runtime testi ve kurum onayı bekleyen veri/saha formu işleridir.
+**Durum:** MVP, performans/güvenlik ön sertleştirmesi, Alembic şema göçü (`0003`), 3D gerçek kot profili/saha ekipmanı (`profile_points[]`/`equipment[]`), Şartname 10.1 `+2 °C` / negatif `B`/`beta_water` / `water_backend` karşılaştırma + rapor kimliği iyileştirmeleri, masaüstü JSON snapshot içe aktarma UI'sı + `409 revision_conflict` fark çözümleme modalı, Şartname Bölüm 12 & 15 zaman serili termal dengeleme / 24 saatlik test kayıt modeli (`TimeSeriesPanel`, `TimeSeriesChart`, Form `018`/`021`), segment bazlı SMYS/malzeme kalitesi desteği (`PipeSection.smys_mpa`/`material_grade`) ve canlı denetim (`analysis_report_v4.md` F18–F29) iyileştirmeleri tamamlandı. Kalan işler kurumsal Auth/OIDC/RBAC kararı ve kurum onayı bekleyen veri/saha formu işleridir.
 
 ---
 
@@ -125,20 +125,22 @@ Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen iş
 - [x] Web güvenlik & dağıtım sertleştirmesi (geriye dönük uyumlu): fail-closed `HYDRO_AUTH_MODE` bağlanma kapısı + `desktop_launcher.py` `validate_bind_security`, harici `/theme-init.js` + CSP + `X-Content-Type-Options`/`X-Frame-Options`/`COOP`/`CORP`/`Cache-Control: no-store`, `Host` DNS-rebinding kapısı, `/api/update/*` yerel yönetici + same-origin/proxy başlık kapısı, akışlı dosya boyutu sınırı (`stream_upload_to_tempfile`; eski `read_upload_bounded` artık kullanılmıyor), bellek-içi `RateLimiter` (`429 Retry-After`), maskelenmiş DB logları ve `Dockerfile`/`docker-compose.yml`/CI düzeltmeleri.
 - [x] Alembic üretim migrasyonu (`migrations/versions/0002_baseline.py` → `0003_drop_duplicate_indexes.py`, `migrations_runner.py`, legacy `0001`/`0002` köprüsü, SQLite FK/Postgres advisory lock koruması, geri alınabilir `restore_db_backup`, `HYDRO_AUTO_MIGRATE`, `HydroWeb.spec` paketlemesi).
 - [ ] Auth / OIDC + iki kişi onay kuralı (MVP'de anonim `X-Session-ID`).
-- [ ] Postgres runtime testi (kod uyumlu, `psycopg` kurulu değil).
-- [x] Frontend birim testleri, kod bölme & paket bütçesi (`check:bundle` ≤ `200 kB` gzip kapısı, rota/Recharts/3D lazy-loading, Vite 8 Rolldown chunk bölmesi, `GZipMiddleware` + HTML `no-cache` bfcache uyumu + `verify-tabs.mjs`; güncel: **63 Vitest / 21 dosya**, `150,1 kB` ilk JS gzip).
+- [x] Postgres runtime testi (`test_postgres_runtime.py` + `web-postgres-tests` CI `postgres:16-alpine` + `psycopg[binary]` işi; yerel ortamda `HYDRO_TEST_POSTGRES_URL` yokken atlanır).
+- [x] Frontend birim testleri, kod bölme & paket bütçesi (`check:bundle` ≤ `200 kB` gzip kapısı, rota/Recharts/3D lazy-loading, Vite 8 Rolldown chunk bölmesi, `GZipMiddleware` + HTML `no-cache` bfcache uyumu + `verify-tabs.mjs`; güncel: **67 Vitest / 21 dosya**, `148,8 kB` ilk JS gzip).
 - [x] 3D gerçek veri: `profile_points[]` / `equipment[]` girdileri (`SiteSurveyPanel.tsx`, `buildSceneData()`, `build_scene()`, `build_project_scene()`, yoksa açık yaklaşık sahne + uyarı bayrakları).
 
-**v2.0.0 canlı denetiminden (docs/analysis_report_v4.md) açık işler:**
+**v2.1.0 canlı denetiminden (`docs/analysis_report_v4.md` F18–F29) kapatılan işler:**
 
-- [ ] Rehberli tur <1024 px fallback: hedef gizliyse mobil çekmeceyi aç veya sabit konumlu popover'a düş; `GuidedTour.test.tsx`'e dar görünüm senaryosu ekle (v4 F18).
-- [ ] `POST /api/projects/generate-sample` için rate limit + aynı `code` ile tekrar kullanım/otomatik son ek; onboarding "mevcut demo varsa aç" kontrolü (v4 F19).
-- [ ] Onboarding kısmi hatasında oluşan demo projeyi temizle veya ID'yi tur boyunca sakla (v4 F20).
-- [ ] Yazma modellerini (`SessionCreate`, `ProjectCreate`, `ResultCreate`, `TimeSeriesBatchCreate`, `SnapshotApply`, `OcrApplyRequest`) `StrictWriteModel`'e taşı (v4 F21).
-- [ ] CI'ya `dump_openapi --check`, `check:api` ve `verify-tabs.mjs` adımlarını ekle; `api_contract.md`'yi gerçek 87 path / 101 operation yüzeyiyle eşitle (v4 F22).
-- [ ] OCR sekmesinden ayrılınca sunucu işi için görünür arka plan durumu veya `cancelOcrAnalysis` kararı (v4 F24).
-- [ ] Tk diyalog testlerini ayrı süreç/job'a al; `Tcl_AsyncDelete` sıralama çökmesini gider (v4 F25).
-- [ ] Yardım menüsündeki "Rehberli Demo Turu"nu onboarding ile birleştir (örnek proje üret) veya "İş akışı turu" olarak yeniden adlandır (v4 F26).
+- [x] `ruff format` uygulandı (`dossier.py`, `form_details.py`, `153` dosya biçimli, F28).
+- [x] `verify-tabs.mjs` Dashboard beklentisi v2.1.0 4 adımlı ilerleme çubuğuna güncellendi (`12/12 PASS`, F29).
+- [x] Rehberli tur `<1024 px` fallback (`data-anchor="fallback"` + sabit konum + `GuidedTour.test.tsx` dar görünüm testi, F18).
+- [x] `POST /api/projects/generate-sample` için `5/dk` hız sınırı + `reuse_existing` / tekilleştirilmiş `-2` son eki (F19).
+- [x] Onboarding kısmi hatasında yeni demo proje `deleteProject` ile temizleniyor (`useStartDemoTour.ts`, F20).
+- [x] Yazma istek modelleri `StrictWriteModel`'e taşındı (`extra="forbid"`, F21).
+- [x] CI'ya `dump_openapi --check` ve `npm run check:api` eklendi; `api_contract.md` §13.5 güncellendi (F22).
+- [x] OCR sekmesinden çıkınca arka planda süren iş için `TopBar` göstergesi ve iptal düğmesi eklendi (F24).
+- [x] Tk diyalog test teardown'u düzeltildi (`tests.test_download_dialog` `update_idletasks`/`quit`/`destroy` + `gc.collect()` → **733 OK**, F25).
+- [x] Yardım menüsü `"Rehberli Demo Turunu Başlat"` düğmesi `useStartDemoTour` ile onboarding akışına birleştirildi (F26).
 
 ### 4.2 Domain / masaüstü (P1–P2, `tasks/todo.md`)
 
@@ -181,28 +183,24 @@ Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen iş
 
 ```bash
 # Lint & tip denetimi
-python3 -m ruff check . && python3 -m ruff format --check .     # PASS
+python3 -m ruff check . && python3 -m ruff format --check . # PASS (153 dosya biçimli)
 python3 -m mypy hidrostatik_test/domain/                       # Success: no issues found (14 files)
 python3 -m mypy --ignore-missing-imports webapp/backend/app    # Success: no issues found (50 files)
 
 # Web backend (Alembic + API + OpenAPI sözleşmesi + domain parity + %80 kapsam kapısı)
-python3 -m coverage run --source=webapp/backend/app -m pytest webapp/backend/tests -q -W default::sqlalchemy.exc.SAWarning
-python3 -m coverage report --fail-under=80                     # 253 passed (SAWarning yok), %83 kapsam
+python3 -m pytest webapp/backend/tests -q -W default::sqlalchemy.exc.SAWarning  # 255 passed, 1 skipped (Postgres CI-only; SAWarning yok)
 
 # OCR/PDF servis birim testleri
 python3 -m unittest tests.test_report_ocr                      # 76 tests OK (skipped=1)
 
-# Masaüstü tam paket (Tk diyalog sınıfı ayrı süreçte; v4 denetimi)
-python3 -m unittest tests.test_ui_workflow                  # 119 tests OK
-python3 -m unittest tests.test_download_dialog              # 16 tests OK
-# Tam koşu: 733 test keşfedilir; sıralamaya bağlı Tcl_AsyncDelete nedeniyle
-# DownloadDialogTkTests dışlandığında 725 OK (skipped=1). Ayrıntı: docs/analysis_report_v4.md §3.
+# Masaüstü tam paket
+python3 -m unittest discover -s tests -p "test_*.py"          # 733 OK (skipped=1, Tk teardown düzeltildi)
 
 # Masaüstü paketli Web self-test
 python3 webapp/desktop_launcher.py --self-test                 # SELF_TEST_OK
 
 # Frontend sözleşme, derleme, lint, paket bütçesi & test
-cd webapp/frontend && npm run check:api && npm run lint && npm test && npm run typecheck && npm run build && npm run check:bundle  # PASS (63 Vitest / 21 dosya, 148,3 kB gzip)
+cd webapp/frontend && npm run check:api && npm run lint && npm test && npm run typecheck && npm run build && npm run check:bundle  # PASS (67 Vitest / 21 dosya, 148,8 kB gzip)
 
 # Sekme + BOTAŞ Form Ağacı & 020/022/023 Gömülü Hesaplama & Güncelleme Yöneticisi smoke (port 8099, izole DB)
 cd webapp/frontend && HYDRO_APP_URL=http://127.0.0.1:8099 \

@@ -2153,6 +2153,31 @@ export interface ApiError {
 
 ---
 
+## 13.5 Ek Üç Grupları (Projeler, Formlar, Zaman Serisi, Sistem & Güncelleme)
+
+### `POST /api/projects/generate-sample`
+- **İstek (`StrictWriteModel`):** `{"scenario": "passing"|"mixed"|"failing", "section_count": 1..6, "name"?: string, "code"?: string, "include_time_series"?: boolean, "include_forms"?: boolean, "reuse_existing"?: boolean}` (varsayılan `reuse_existing: true`).
+- **Yanıt 201:** `{"project": ProjectSummary, "sections": SessionListItem[], "reused": boolean}`. Aynı `code` + workspace için `reuse_existing=true` mevcut projeyi döner (`reused: true`), `reuse_existing=false` otomatik `-2`, `-3` son eki üretir.
+- **Limit:** `5 istek / 60 sn` (`429 rate_limited`).
+
+### `/api/forms` & `/api/sessions/{id}/forms/{form_code}`
+- `GET /api/forms/catalog` tüm BOTAŞ test bölümü formlarını (`015`–`023`, `KUR-001/002` + ekler) ve alan şemalarını döner.
+- `GET /api/sessions/{id}/forms/{form_code}` form kaydını ve güncel revizyon için `ETag: "<revision>"` başlığını döner.
+- `PUT /api/sessions/{id}/forms/{form_code}` (`SectionFormUpdateRequest`, `StrictWriteModel`) `If-Match` veya gövde `revision` ile iyimser eşzamanlılık denetler; çakışmada `409 revision_conflict` + `details.current` döner.
+
+### `POST /api/sessions/{id}/time-series/batch` & `POST /api/sessions/{id}/time-series/sync-form`
+- `time-series/batch` (`TimeSeriesBatchCreate`, `StrictWriteModel`, max `1000` kayıt): saatlik basınç/sıcaklık zaman serisi kayıtlarını `append` veya `replace` modunda kaydeder ve Şartname Bölüm 12/15 4 saatlik pencere/24 saatlik dengeleme değerlendirmesini döner.
+- `time-series/sync-form` (`TimeSeriesSyncFormRequest`, `StrictWriteModel`): `leak_stabilization` (`018`) veya `pressure_test` (`021`) formuyla zaman serisi arasında `from_form` / `to_form` çift yönlü senkronizasyon yapar.
+
+### `/api/system/*` (`db-stats`, `db-backup`, `db-backups`, `db-restore`, `db-maintenance`, `trash`, `workspaces`)
+- Ağ dışı (`0.0.0.0`) dağıtımlarda yönetim uçları `X-Hydro-Admin-Token` doğrulaması gerektirir (`403 forbidden`).
+- `POST /api/system/db-restore` canlı DB motoru değişimi sırasında gelen istekleri kısa süreliğine `503 db_restoring` (`Retry-After: 2`) ile bekletir.
+
+### `/api/update/status`, `/api/update/check`, `/api/update/install`
+- GitHub Releases (`HYDRO` + fallback `Programlar`) üzerinden sürüm kontrolü, `.sha256.txt` + Ed25519 `.sig` doğrulaması (`truststore` + `certifi` TLS) ve paketli masaüstünde kurulum akışını yürütür.
+
+---
+
 ## 14. Hata kodu kataloğu
 
 | Kod | HTTP | Anlam | `details` |

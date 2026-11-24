@@ -849,3 +849,74 @@ def test_slice4_db_restore_maintenance_barrier_returns_503_retry_after(tmp_path:
             assert recovered.status_code == 200
     finally:
         db.dispose_database()
+
+
+def test_generate_sample_project_deduplicates_and_enforces_rate_limit(tmp_path: Path):
+    from app.core.rate_limit import RATE_LIMITER
+
+    RATE_LIMITER.reset()
+    s = Settings(
+        host="127.0.0.1",
+        data_dir=tmp_path / "sample_rl",
+        database_url=f"sqlite:///{tmp_path / 'sample_rl' / 'hydro.db'}",
+        rate_limit_enabled=True,
+    )
+    app = create_app(s)
+    ws_headers = {"X-Session-ID": "sample-rl-ws"}
+    try:
+        with TestClient(app) as tc:
+            first = tc.post(
+                "/api/projects/generate-sample",
+                headers=ws_headers,
+                json={"scenario": "mixed", "section_count": 2, "code": "DEMO-TUR"},
+            )
+            assert first.status_code == 201, first.text
+            first_body = first.json()
+            assert first_body["reused"] is False
+
+            second = tc.post(
+                "/api/projects/generate-sample",
+                headers=ws_headers,
+                json={"scenario": "mixed", "section_count": 2, "code": "DEMO-TUR"},
+            )
+            assert second.status_code == 201, second.text
+            second_body = second.json()
+            assert second_body["reused"] is True
+            assert second_body["project"]["id"] == first_body["project"]["id"]
+
+            # Consume remaining requests in 5/min bucket -> 6th fails with 429
+            for _ in range(3):
+                r = tc.post(
+                    "/api/projects/generate-sample",
+                    headers=ws_headers,
+                    json={"scenario": "passing", "section_count": 1},
+                )
+                assert r.status_code == 201
+            limited = tc.post(
+                "/api/projects/generate-sample",
+                headers=ws_headers,
+                json={"scenario": "passing", "section_count": 1},
+            )
+            assert limited.status_code == 429
+            assert limited.json()["code"] == "rate_limited"
+    finally:
+        RATE_LIMITER.reset()
+        db.dispose_database()
+
+
+def test_strict_write_models_reject_unknown_fields_via_http(client, headers):
+    bad_sess = client.post(
+        "/api/sessions",
+        headers=headers,
+        json={"name": "Typo Test", "smysMpa": 999},
+    )
+    assert bad_sess.status_code == 422
+    assert bad_sess.json()["code"] == "validation_error"
+
+    bad_sample = client.post(
+        "/api/projects/generate-sample",
+        headers=headers,
+        json={"unexpected_field": True},
+    )
+    assert bad_sample.status_code == 422
+    assert bad_sample.json()["code"] == "validation_error"

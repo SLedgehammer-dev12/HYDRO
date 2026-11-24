@@ -9,7 +9,7 @@ Dal: `main` (`v2.1.0`)
 
 | Alan | Durum | Kanit |
 | --- | --- | --- |
-| Backend API | Calisiyor | 87 OpenAPI path (101 operation, `openapi.json`), 253 pytest (`%83` kapsam, Alembic `0003`), 50 backend dosyada `mypy` temiz |
+| Backend API | Calisiyor | 87 OpenAPI path (101 operation, `openapi.json`), **255 pytest** (1 skipped: Postgres CI-only; `%83` kapsam, Alembic `0003`), 50 backend dosyada `mypy` temiz |
 | Frontend kabuk | Calisiyor | 9 sekme (Projeler & Kesitler, birlesik Geometri & Saha, son sekmede birlesik Katsayilar & Detay), responsive, tema |
 | Hesaplamalar | Parity | A/B, hava, basinc, profil, pig, pressurization, termal denge |
 | Proje & Kesit DB | Calisiyor | `projects` + `sessions.project_id` + `inputs.section_meta`, kesit siralama/acma/kopyalama/silme |
@@ -23,10 +23,10 @@ Dal: `main` (`v2.1.0`)
 ## Dogrulama
 
 ```bash
-python3 -m coverage run --source=webapp/backend/app -m pytest webapp/backend/tests -q  # 253 passed (%83 kapsam)
-python3 -m unittest discover -s tests -p "test_*.py"  # 733 test keşfi; Tk diyalog sınıfı hariç 725 OK (skipped=1)
-cd webapp/frontend && npm run check:api && npm run lint && npm test && npm run typecheck && npm run build && npm run check:bundle  # PASS (63 Vitest / 21 dosya, 148,3 kB gzip)
-cd webapp/frontend && HYDRO_APP_URL=http://127.0.0.1:8099 node scripts/verify-tabs.mjs  # 12/12 PASS (önceki canlı kontrol)
+python3 -m pytest webapp/backend/tests -q  # 255 passed, 1 skipped (Postgres CI-only)
+python3 -m unittest discover -s tests -p "test_*.py"  # 733 OK (skipped=1)
+cd webapp/frontend && npm run check:api && npm run lint && npm test && npm run typecheck && npm run build && npm run check:bundle  # PASS (67 Vitest / 21 dosya, 148,8 kB gzip)
+cd webapp/frontend && HYDRO_APP_URL=http://127.0.0.1:8099 node scripts/verify-tabs.mjs  # 12/12 PASS
 ```
 
 Canli smoke:

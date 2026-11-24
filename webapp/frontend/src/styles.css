@@ -1415,13 +1415,21 @@ input:not([type="checkbox"]):not([type="radio"]):not(.visually-hidden) {
 }
 
 @supports (position-area: right center) {
-  .hydro-tour-popover {
+  .hydro-tour-popover:not([data-anchor="fallback"]) {
     inset: auto;
     margin: 0 0 0 0.75rem;
     position-anchor: --hydro-tour-anchor;
     position-area: right center;
     position-try-fallbacks: flip-inline, flip-block, flip-block flip-inline;
   }
+}
+
+.hydro-tour-popover[data-anchor="fallback"] {
+  position: fixed;
+  inset: auto 0.75rem 1rem 0.75rem;
+  margin: 0 auto;
+  position-anchor: none;
+  position-area: none;
 }
 
 @supports not (position-area: right center) {

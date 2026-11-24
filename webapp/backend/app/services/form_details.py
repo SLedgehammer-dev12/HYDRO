@@ -1622,7 +1622,11 @@ def evaluate_all_form_findings(
             pr_raw = ext.get("pressure_acceptance") or {}
             rep_pt = _finite(pr_raw.get("pt_bar"))
             calc_pt = _finite(pres_calc.get("pt_bar"))
-            if pres_calc.get("pt_source") == "program" and rep_pt is not None and calc_pt is not None:
+            if (
+                pres_calc.get("pt_source") == "program"
+                and rep_pt is not None
+                and calc_pt is not None
+            ):
                 ok_pt = abs(rep_pt - calc_pt) <= 0.05
                 items.append(
                     _mk_finding(

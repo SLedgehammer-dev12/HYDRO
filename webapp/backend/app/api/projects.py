@@ -54,10 +54,13 @@ def create_project(
 
 @router.post("/generate-sample", status_code=201)
 def generate_sample_project(
+    request: Request,
     payload: schemas.SampleProjectGenerateRequest,
     db: OrmSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
     workspace: Workspace = Depends(get_workspace),
 ) -> dict:
+    enforce_rate_limit(request, settings, bucket="project_generate_sample", limit=5, window_s=60.0)
     return json_safe(
         project_data_service.generate_sample_project(
             db,
@@ -68,6 +71,7 @@ def generate_sample_project(
             code=payload.code,
             include_time_series=payload.include_time_series,
             include_forms=payload.include_forms,
+            reuse_existing=payload.reuse_existing,
         )
     )
 

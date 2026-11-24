@@ -6,6 +6,24 @@ import { useAppStore } from "../../store/useAppStore";
 import { Button } from "../ui/Button";
 import { GUIDED_TOUR_STEPS } from "./tourSteps";
 
+function findVisibleTourAnchor(selector: string): HTMLElement | null {
+  const isDesktop =
+    typeof window.matchMedia === "function" ? window.matchMedia("(min-width: 1024px)").matches : true;
+  if (!isDesktop) return null;
+
+  const candidates = document.querySelectorAll<HTMLElement>(selector);
+  for (const el of candidates) {
+    const style = window.getComputedStyle(el);
+    if (style.display === "none" || style.visibility === "hidden") continue;
+    if (typeof el.checkVisibility === "function" && !el.checkVisibility()) continue;
+    const rect = el.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      return el;
+    }
+  }
+  return null;
+}
+
 export function GuidedTourOverlay() {
   const tourActive = useAppStore((state) => state.tourActive);
   const tourStep = useAppStore((state) => state.tourStep);
@@ -21,6 +39,7 @@ export function GuidedTourOverlay() {
   const primaryActionRef = useRef<HTMLButtonElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const [cleaningSample, setCleaningSample] = useState(false);
+  const [anchorFallback, setAnchorFallback] = useState(false);
 
   const clampedIndex = Math.max(0, Math.min(tourStep, GUIDED_TOUR_STEPS.length - 1));
   const step = GUIDED_TOUR_STEPS[clampedIndex];
@@ -47,22 +66,43 @@ export function GuidedTourOverlay() {
     }
   }, [endTour]);
 
-  /* Adım değiştiğinde ilgili sekmeye geç ve hedef öğeyi CSS anchor + vurgu ile işaretle */
+  /* Adım değiştiğinde ilgili sekmeye geç ve görünür hedef öğeyi CSS anchor + vurgu ile işaretle */
   useEffect(() => {
-    if (!tourActive) return;
+    if (!tourActive) {
+      setAnchorFallback(false);
+      return;
+    }
     setTab(step.tab);
 
-    const anchorTarget = document.querySelector(step.targetSelector) as HTMLElement | null;
-    if (anchorTarget) {
-      anchorTarget.classList.add("tour-highlight-target");
-      anchorTarget.style.setProperty("anchor-name", "--hydro-tour-anchor");
-    }
+    let currentAnchor: HTMLElement | null = null;
+    const clearAnchor = () => {
+      if (currentAnchor) {
+        currentAnchor.classList.remove("tour-highlight-target");
+        currentAnchor.style.removeProperty("anchor-name");
+        currentAnchor = null;
+      }
+    };
+    const syncAnchor = () => {
+      const next = findVisibleTourAnchor(step.targetSelector);
+      if (next !== currentAnchor) {
+        clearAnchor();
+        if (next) {
+          next.classList.add("tour-highlight-target");
+          next.style.setProperty("anchor-name", "--hydro-tour-anchor");
+          currentAnchor = next;
+        }
+      }
+      setAnchorFallback(!next);
+    };
+
+    syncAnchor();
+    const rafId = window.requestAnimationFrame(syncAnchor);
+    window.addEventListener("resize", syncAnchor);
 
     return () => {
-      if (anchorTarget) {
-        anchorTarget.classList.remove("tour-highlight-target");
-        anchorTarget.style.removeProperty("anchor-name");
-      }
+      window.cancelAnimationFrame(rafId);
+      window.removeEventListener("resize", syncAnchor);
+      clearAnchor();
     };
   }, [tourActive, step, setTab]);
 
@@ -132,6 +172,7 @@ export function GuidedTourOverlay() {
     <dialog
       ref={popoverRef}
       {...({ popover: "manual" } as Record<string, unknown>)}
+      data-anchor={anchorFallback ? "fallback" : "anchored"}
       aria-labelledby="hydro-tour-title"
       className="hydro-tour-popover"
     >

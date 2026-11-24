@@ -1182,6 +1182,7 @@ def generate_sample_project(
     code: str | None = None,
     include_time_series: bool = True,
     include_forms: bool = True,
+    reuse_existing: bool = True,
 ) -> dict[str, Any]:
     """Create a complete physics-accurate sample pipeline project in DB for demos/testing."""
 
@@ -1196,7 +1197,62 @@ def generate_sample_project(
     test_date = utcnow().strftime("%Y-%m-%d")
 
     proj_name = (name or "").strip() or f"Örnek BOTAŞ Hattı ({scenario.upper()})"
-    proj_code = (code or "").strip() or f"SMP-{uuid.uuid4().hex[:5].upper()}"
+    explicit_code = (code or "").strip()
+    proj_code = explicit_code or f"SMP-{uuid.uuid4().hex[:5].upper()}"
+
+    if explicit_code:
+        existing = (
+            db.execute(
+                select(Project)
+                .where(
+                    Project.workspace_id_hash == workspace_hash,
+                    Project.deleted_at.is_(None),
+                    Project.code == explicit_code,
+                )
+                .order_by(Project.updated_at.desc())
+            )
+            .scalars()
+            .first()
+        )
+        if existing is not None:
+            if reuse_existing:
+                existing_sessions = list(
+                    db.execute(
+                        select(HydroSession)
+                        .where(
+                            HydroSession.project_id == existing.id,
+                            HydroSession.workspace_id_hash == workspace_hash,
+                            HydroSession.deleted_at.is_(None),
+                        )
+                        .order_by(HydroSession.created_at.asc())
+                    )
+                    .scalars()
+                    .all()
+                )
+                return {
+                    "project": project_service.serialize_project(existing, len(existing_sessions)),
+                    "sections": [session_service.session_brief(s) for s in existing_sessions],
+                    "reused": True,
+                }
+            used_codes = set(
+                db.execute(
+                    select(Project.code).where(
+                        Project.workspace_id_hash == workspace_hash,
+                        Project.deleted_at.is_(None),
+                        Project.code.like(f"{explicit_code}%"),
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            suffix_num = 2
+            while True:
+                suffix = f"-{suffix_num}"
+                candidate = f"{explicit_code[: 64 - len(suffix)]}{suffix}"
+                if candidate not in used_codes:
+                    proj_code = candidate
+                    break
+                suffix_num += 1
 
     project = project_service.create_project(
         db,
@@ -1724,6 +1780,7 @@ def generate_sample_project(
     return {
         "project": project_service.serialize_project(project, len(created_sessions)),
         "sections": [session_service.session_brief(s) for s in created_sessions],
+        "reused": False,
     }
 
 

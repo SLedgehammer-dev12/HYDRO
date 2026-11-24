@@ -193,10 +193,10 @@ async function main() {
     for (const [route, expectedTitle, expectedPage = route] of ROUTES) {
       const hash = route === "dashboard" ? "#/" : `#/${route}`;
       await evaluate(`location.hash = ${JSON.stringify(hash)}`);
-      let state = { dataPage: null, h1: "", greeting: false };
+      let state = { dataPage: null, h1: "", dashboardStepper: false };
       let okPage = false;
       let okTitle = false;
-      let okGreeting = false;
+      let okDashboard = false;
       const deadline = Date.now() + 3_500;
       while (Date.now() <= deadline) {
         state = await evaluate(`(() => {
@@ -206,20 +206,20 @@ async function main() {
           return {
             dataPage: page ? page.getAttribute("data-page") : null,
             h1: h1 ? h1.textContent.trim() : "",
-            greeting: main ? main.textContent.includes("Denetimli Hidrostatik Test İş Akışı") : false,
+            dashboardStepper: Boolean(main && main.querySelector('[aria-label="Test değerlendirme adımları"]')),
           };
         })()`);
         okPage = state.dataPage === expectedPage;
         okTitle = expectedTitle ? state.h1.includes(expectedTitle) : state.h1.length > 0;
-        okGreeting = route === "dashboard" ? state.greeting : !state.greeting;
-        if (okPage && okTitle && okGreeting) break;
+        okDashboard = route === "dashboard" ? state.dashboardStepper : !state.dashboardStepper;
+        if (okPage && okTitle && okDashboard) break;
         await SLEEP(50);
       }
-      if (!okPage || !okTitle || !okGreeting) {
-        failures.push({ route, expectedPage, expectedTitle, ...state, okPage, okTitle, okGreeting });
+      if (!okPage || !okTitle || !okDashboard) {
+        failures.push({ route, expectedPage, expectedTitle, ...state, okPage, okTitle, okDashboard });
       }
       console.log(
-        `${okPage && okTitle && okGreeting ? "PASS" : "FAIL"}  ${route.padEnd(20)} ${state.h1}`,
+        `${okPage && okTitle && okDashboard ? "PASS" : "FAIL"}  ${route.padEnd(20)} ${state.h1}`,
       );
     }
 

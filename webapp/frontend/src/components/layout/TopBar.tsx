@@ -12,6 +12,7 @@ import {
   Plus,
   Save,
   Sun,
+  X,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, apiErrorMessage } from "../../lib/api";
@@ -55,6 +56,8 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
   const applySessionInputs = useAppStore((state) => state.applySessionInputs);
   const resetSession = useAppStore((state) => state.resetSession);
   const setUpdateModalOpen = useAppStore((state) => state.setUpdateModalOpen);
+  const activeOcrJob = useAppStore((state) => state.activeOcrJob);
+  const setActiveOcrJob = useAppStore((state) => state.setActiveOcrJob);
   const pushToast = useAppStore((state) => state.pushToast);
 
   const { data: sessions } = useSessions();
@@ -287,6 +290,37 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
           </div>
 
           <div className="ml-auto flex items-center gap-2">
+            {activeOcrJob && tab !== "ocr" ? (
+              <div
+                className="inline-flex items-center gap-1 rounded-full border border-[color-mix(in_srgb,var(--primary)_38%,var(--border))] bg-[color-mix(in_srgb,var(--primary)_12%,var(--surface-2))] py-0.5 pl-2.5 pr-1 text-[11px] font-semibold text-[var(--primary)]"
+                data-testid="topbar-ocr-indicator"
+              >
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1.5 hover:underline"
+                  title={`${activeOcrJob.fileName} — ${activeOcrJob.stage} (OCR sekmesine git)`}
+                  onClick={() => setTab("ocr")}
+                >
+                  <Loader2 size={12} className="animate-spin" aria-hidden />
+                  <span>OCR çalışıyor</span>
+                </button>
+                <button
+                  type="button"
+                  aria-label="Arka plan OCR analizini iptal et"
+                  className="rounded-full p-0.5 text-[var(--primary)] hover:bg-[var(--surface-3)]"
+                  onClick={() => {
+                    const jobId = activeOcrJob.id;
+                    setActiveOcrJob(null);
+                    void import("../../features/ocr/ocrApi")
+                      .then(({ cancelOcrAnalysis }) => cancelOcrAnalysis(jobId))
+                      .catch(() => undefined);
+                  }}
+                >
+                  <X size={12} aria-hidden />
+                </button>
+              </div>
+            ) : null}
+
             <Button
               size="sm"
               variant={dirty ? "primary" : "default"}

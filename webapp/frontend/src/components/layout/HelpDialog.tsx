@@ -1,6 +1,6 @@
 import { Compass } from "lucide-react";
 import { useMeta, useSpec } from "../../hooks/queries";
-import { useAppStore } from "../../store/useAppStore";
+import { useStartDemoTour } from "../onboarding/useStartDemoTour";
 import { Modal } from "../ui/Dialog";
 import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
@@ -25,7 +25,7 @@ const STATUSES: Array<{ label: string; tone: "pending" | "warning" | "pass" | "f
 export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { data: meta } = useMeta();
   const { data: spec } = useSpec();
-  const startTour = useAppStore((state) => state.startTour);
+  const { startDemoTour, loadingDemo } = useStartDemoTour();
 
   return (
     <Modal
@@ -39,16 +39,17 @@ export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
           <div>
             <p className="text-xs font-bold text-[var(--text)]">Etkileşimli Rehberli Tur</p>
             <p className="text-[11px] text-[var(--text-muted)]">
-              5 adımda temel iş akışını tekrar gözden geçirin.
+              5 adımda temel iş akışını örnek projeyle tekrar gözden geçirin.
             </p>
           </div>
           <Button
             size="sm"
             variant="primary"
             icon={<Compass size={13} />}
+            loading={loadingDemo}
             onClick={() => {
               onClose();
-              startTour(null);
+              void startDemoTour();
             }}
           >
             Rehberli Demo Turunu Başlat
@@ -96,13 +97,13 @@ export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
           <h3 className="eyebrow">İşaret sözleşmesi</h3>
           <div className="mt-2 space-y-1 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-3 text-[11.5px] leading-relaxed text-[var(--text-muted)]">
             <p className="font-mono text-[var(--text-soft)]">
-              {spec?.sign_convention.delta_t ?? "ΔT = Tilk - Tson"}
+              {spec?.sign_convention?.delta_t ?? "ΔT = Tilk - Tson"}
             </p>
-            <p className="font-mono text-[var(--text-soft)]">{spec?.sign_convention.pa ?? "Pa = Pilk - Pson"}</p>
+            <p className="font-mono text-[var(--text-soft)]">{spec?.sign_convention?.pa ?? "Pa = Pilk - Pson"}</p>
             <p>
               Kabul kuralları:{" "}
-              <span className="font-mono">{spec?.acceptance_rules.air.text ?? "Vpa < 1.06 x Vp"}</span> ·{" "}
-              <span className="font-mono">{spec?.acceptance_rules.pressure.text ?? "(Pa - Pt) <= 0.3 bar"}</span>
+              <span className="font-mono">{spec?.acceptance_rules?.air?.text ?? "Vpa < 1.06 x Vp"}</span> ·{" "}
+              <span className="font-mono">{spec?.acceptance_rules?.pressure?.text ?? "(Pa - Pt) <= 0.3 bar"}</span>
             </p>
             <p>Hidrolik kot hesabında 15 °C su yoğunluğu (999,1 kg/m³) kullanılır.</p>
           </div>
@@ -110,8 +111,8 @@ export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
 
         <section>
           <h3 className="eyebrow">Şartname</h3>
-          <p className="mt-1 text-[12px] font-medium">{meta?.spec.code}</p>
-          <p className="text-[11px] text-[var(--text-faint)]">{meta?.spec.title}</p>
+          <p className="mt-1 text-[12px] font-medium">{meta?.spec?.code}</p>
+          <p className="text-[11px] text-[var(--text-faint)]">{meta?.spec?.title}</p>
           <p className="mt-2 text-[10.5px] leading-relaxed text-[var(--text-faint)]">
             Nihai karar ASME B31.8 ve proje prosedürü ile birlikte değerlendirilmelidir. OCR çıktısı
             resmi kabul değildir; yetkili personel onayı zorunludur.

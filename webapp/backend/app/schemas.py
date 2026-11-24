@@ -267,14 +267,14 @@ class WaterDensityRequest(StrictWriteModel):
 # ---------------------------------------------------------------------------
 
 
-class SessionCreate(StrictModel):
+class SessionCreate(StrictWriteModel):
     name: str | None = Field(default=None, max_length=200)
     project_id: str | None = None
     inputs: dict[str, Any] | None = None
     wizard_state: dict[str, Any] | None = None
 
 
-class SessionUpdate(StrictModel):
+class SessionUpdate(StrictWriteModel):
     name: str | None = Field(default=None, max_length=200)
     project_id: str | None = None
     status: SESSION_STATUS | None = None
@@ -286,7 +286,7 @@ class SessionUpdate(StrictModel):
 PROJECT_STATUS = Literal["active", "completed", "archived"]
 
 
-class ProjectCreate(StrictModel):
+class ProjectCreate(StrictWriteModel):
     name: str = Field(min_length=1, max_length=200)
     code: str | None = Field(default=None, max_length=64)
     client: str | None = Field(default=None, max_length=200)
@@ -298,7 +298,7 @@ class ProjectCreate(StrictModel):
     description: str | None = None
 
 
-class ProjectUpdate(StrictModel):
+class ProjectUpdate(StrictWriteModel):
     name: str | None = Field(default=None, max_length=200)
     code: str | None = Field(default=None, max_length=64)
     client: str | None = Field(default=None, max_length=200)
@@ -326,11 +326,11 @@ class ProjectSummary(StrictModel):
     updated_at: str | None = None
 
 
-class ProjectExportRequest(StrictModel):
+class ProjectExportRequest(StrictWriteModel):
     format: Literal["xlsx", "pdf", "csv", "json"] = "xlsx"
 
 
-class ProjectGenerateSectionsRequest(StrictModel):
+class ProjectGenerateSectionsRequest(StrictWriteModel):
     total_length_m: float = Field(gt=0, le=500_000)
     start_kp_m: float = Field(default=0.0, ge=0, le=2_000_000)
     max_section_length_m: float = Field(default=12_000.0, ge=100, le=20_000)
@@ -348,27 +348,28 @@ class ProjectGenerateSectionsRequest(StrictModel):
     initialize_forms: bool = True
 
 
-class ProjectSyncFormsRequest(StrictModel):
+class ProjectSyncFormsRequest(StrictWriteModel):
     overwrite_existing: bool = False
     form_codes: list[str] | None = Field(default=None, max_length=20)
 
 
-class SampleProjectGenerateRequest(StrictModel):
+class SampleProjectGenerateRequest(StrictWriteModel):
     scenario: Literal["passing", "mixed", "failing"] = "mixed"
     section_count: int = Field(default=3, ge=1, le=6)
     name: str | None = Field(default=None, max_length=200)
     code: str | None = Field(default=None, max_length=64)
     include_time_series: bool = True
     include_forms: bool = True
+    reuse_existing: bool = True
 
 
-class ProjectCloneRequest(StrictModel):
+class ProjectCloneRequest(StrictWriteModel):
     name: str | None = Field(default=None, max_length=200)
     code: str | None = Field(default=None, max_length=64)
     mode: Literal["template", "full"] = "template"
 
 
-class WorkspaceClaimRequest(StrictModel):
+class WorkspaceClaimRequest(StrictWriteModel):
     source_workspace_hash: str = Field(min_length=8, max_length=64)
     source_workspace_key: str | None = Field(default=None, min_length=1, max_length=256)
 
@@ -448,11 +449,11 @@ class PlanProfileCommitRequest(StrictModel):
     sections: list[DraftSectionIn] = Field(min_length=1, max_length=100)
 
 
-class SessionDuplicate(StrictModel):
+class SessionDuplicate(StrictWriteModel):
     name: str | None = Field(default=None, max_length=200)
 
 
-class ResultCreate(StrictModel):
+class ResultCreate(StrictWriteModel):
     test_type: TEST_TYPE
     payload: dict[str, Any] = Field(default_factory=dict)
 
@@ -461,20 +462,20 @@ class TimeSeriesCreate(_TimeSeriesRecordBase):
     source: str = Field(default="manual", min_length=1, max_length=16)
 
 
-class TimeSeriesBatchCreate(StrictModel):
+class TimeSeriesBatchCreate(StrictWriteModel):
     records: list[TimeSeriesCreate] = Field(min_length=1, max_length=1000)
     mode: Literal["append", "replace"] = "append"
     source: str | None = Field(default=None, min_length=1, max_length=16)
 
 
-class TimeSeriesSyncFormRequest(StrictModel):
+class TimeSeriesSyncFormRequest(StrictWriteModel):
     form_code: Literal["leak_stabilization", "pressure_test"]
     direction: Literal["from_form", "to_form"] = "from_form"
     mode: Literal["append", "replace"] = "replace"
     base_date: str | None = Field(default=None, max_length=32)
 
 
-class SnapshotApply(StrictModel):
+class SnapshotApply(StrictWriteModel):
     snapshot: dict[str, Any]
     mode: Literal["merge", "replace"] = "merge"
 
@@ -484,7 +485,7 @@ class SnapshotApply(StrictModel):
 # ---------------------------------------------------------------------------
 
 
-class ReportExportRequest(StrictModel):
+class ReportExportRequest(StrictWriteModel):
     format: Literal["pdf", "xlsx", "txt"]
     title: str = "Hidrostatik Test Degerlendirme Raporu"
     metadata: dict[str, str] = Field(default_factory=dict)
@@ -498,19 +499,19 @@ class ReportExportRequest(StrictModel):
 # ---------------------------------------------------------------------------
 
 
-class OcrApproveField(StrictModel):
+class OcrApproveField(StrictWriteModel):
     value: float | str | None = None
     unit: str = ""
     approved: bool = True
 
 
-class OcrApproveRequest(StrictModel):
+class OcrApproveRequest(StrictWriteModel):
     fields: dict[str, OcrApproveField] = Field(default_factory=dict)
     approve_all: bool = False
     reviewer_note: str = Field(default="", max_length=2000)
 
 
-class OcrApplyRequest(StrictModel):
+class OcrApplyRequest(StrictWriteModel):
     session_id: str | None = None
     fields: list[str] | None = None
     overwrite: bool = False

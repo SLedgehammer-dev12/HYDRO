@@ -1,78 +1,14 @@
-import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, Compass, FolderPlus, Sparkles, X } from "lucide-react";
-import { api } from "../../lib/api";
-import { hydrateSessionResults } from "../../hooks/queries";
 import { useAppStore } from "../../store/useAppStore";
 import { Button } from "../ui/Button";
+import { useStartDemoTour } from "./useStartDemoTour";
 
 export function OnboardingWelcomeCard() {
-  const backend = useAppStore((state) => state.backend);
   const setTab = useAppStore((state) => state.setTab);
-  const setProject = useAppStore((state) => state.setProject);
-  const applySessionInputs = useAppStore((state) => state.applySessionInputs);
-  const setSessionMeta = useAppStore((state) => state.setSessionMeta);
-  const markSaved = useAppStore((state) => state.markSaved);
   const setOnboardingDismissed = useAppStore((state) => state.setOnboardingDismissed);
-  const startTour = useAppStore((state) => state.startTour);
   const pushToast = useAppStore((state) => state.pushToast);
 
-  const queryClient = useQueryClient();
-  const [loadingDemo, setLoadingDemo] = useState(false);
-
-  async function handleStartDemoTour() {
-    if (backend !== "online") {
-      pushToast(
-        "info",
-        "Yerel demo ile rehberli tur başlatıldı",
-        "Sunucu bağlı olmadığı için yerleşik demo verileriyle 5 adımlı tur açılıyor.",
-      );
-      startTour(null);
-      return;
-    }
-
-    setLoadingDemo(true);
-    try {
-      const generated = await api.generateSampleProject({
-        scenario: "mixed",
-        section_count: 2,
-        name: "Demo Boru Hattı (Rehber)",
-        code: "DEMO-TUR",
-        include_time_series: true,
-        include_forms: true,
-      });
-      const firstSection = generated.sections[0];
-      setProject({
-        id: generated.project.id,
-        name: generated.project.name,
-        code: generated.project.code,
-      });
-      if (firstSection) {
-        const session = await api.session(firstSection.id);
-        applySessionInputs(session.inputs);
-        setSessionMeta({
-          id: session.id,
-          name: session.name,
-          status: session.status,
-          revision: session.revision,
-        });
-        markSaved(session.revision);
-        void hydrateSessionResults(session.id);
-      }
-      void queryClient.invalidateQueries({ queryKey: ["projects"] });
-      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
-      startTour(generated.project.id);
-    } catch {
-      pushToast(
-        "warning",
-        "Örnek proje oluşturulamadı; yerel demo verileriyle devam ediliyor",
-        "İstediğiniz zaman Projeler & Kesitler ekranından yeni örnek proje açabilirsiniz.",
-      );
-      startTour(null);
-    } finally {
-      setLoadingDemo(false);
-    }
-  }
+  const { startDemoTour, loadingDemo } = useStartDemoTour();
 
   function handleOwnProject() {
     setOnboardingDismissed(true);
@@ -124,7 +60,7 @@ export function OnboardingWelcomeCard() {
           variant="primary"
           icon={<Compass size={14} />}
           loading={loadingDemo}
-          onClick={() => void handleStartDemoTour()}
+          onClick={() => void startDemoTour()}
         >
           Rehberli Demo Turunu Başlat
         </Button>

@@ -923,12 +923,15 @@ export const api = {
     }),
 
   generateSampleProject: (body: import("./types").SampleProjectPayload, signal?: AbortSignal) =>
-    apiFetch<{ project: Project; sections: SessionListItem[] }>("/projects/generate-sample", {
-      method: "POST",
-      body,
-      signal,
-      timeoutMs: 60_000,
-    }),
+    apiFetch<{ project: Project; sections: SessionListItem[]; reused?: boolean }>(
+      "/projects/generate-sample",
+      {
+        method: "POST",
+        body,
+        signal,
+        timeoutMs: 60_000,
+      },
+    ),
 
   cloneProject: (
     projectId: string,

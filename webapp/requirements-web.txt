@@ -18,5 +18,6 @@ httpx>=0.27,<1
 # SQLite varsayilan; async kullanmak isterseniz (opsiyonel):
 # aiosqlite>=0.20,<1
 #
-# Postgres (uretim) icin:
+# Postgres (uretim) icin CI'da psycopg[binary]>=3.2,<4 ile dogrulanir:
+#   pip install "psycopg[binary]>=3.2,<4"
 # psycopg[binary]>=3.2,<4
