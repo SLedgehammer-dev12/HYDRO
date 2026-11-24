@@ -1550,3 +1550,37 @@ export interface TimeSeriesSyncFormResponse {
   summary: TimeSeriesSummary;
   session?: Session;
 }
+
+export interface AuthUser {
+  sub: string;
+  email: string;
+  name: string;
+  role: "operator" | "supervisor" | "admin" | string;
+  workspace?: string | null;
+}
+
+export interface AuthMeResponse {
+  auth_mode: string;
+  enforced_auth: boolean;
+  authenticated: boolean;
+  user: AuthUser | null;
+}
+
+export type ApprovalAction = "session_finalize" | "db_restore";
+export type ApprovalStatus = "pending" | "approved" | "rejected" | "consumed";
+
+export interface ApprovalRequestItem {
+  id: string;
+  action: ApprovalAction;
+  target_id: string;
+  status: ApprovalStatus;
+  requested_by: string;
+  requested_role: string;
+  approved_by: string | null;
+  approved_role: string | null;
+  reason: string;
+  decision_note: string;
+  created_at: string;
+  decided_at: string | null;
+  consumed_at: string | null;
+}

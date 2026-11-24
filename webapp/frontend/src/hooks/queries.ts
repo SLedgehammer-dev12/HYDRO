@@ -2214,3 +2214,94 @@ export function useThermalBalance() {
     mutationFn: (records) => api.thermalBalance(records),
   });
 }
+
+/* ------------------------------------------------------------------ */
+/* Kimlik Doğrulama ve İki Kişi Onayı (R4)                            */
+/* ------------------------------------------------------------------ */
+
+const OFFLINE_AUTH_ME: import("../lib/types").AuthMeResponse = {
+  auth_mode: "none",
+  enforced_auth: false,
+  authenticated: false,
+  user: null,
+};
+
+export function useAuthMe() {
+  const backend = useAppStore((state) => state.backend);
+  return useQuery<import("../lib/types").AuthMeResponse>({
+    queryKey: ["auth", "me"],
+    enabled: backend === "online",
+    retry: false,
+    staleTime: 60_000,
+    queryFn: async ({ signal }) => {
+      try {
+        return await api.authMe(signal);
+      } catch {
+        return OFFLINE_AUTH_ME;
+      }
+    },
+  });
+}
+
+export function useApprovals() {
+  const backend = useAppStore((state) => state.backend);
+  return useQuery<import("../lib/types").ApprovalRequestItem[]>({
+    queryKey: ["approvals"],
+    enabled: backend === "online",
+    retry: false,
+    staleTime: 15_000,
+    queryFn: async ({ signal }) => {
+      try {
+        const res = await api.listApprovals(undefined, signal);
+        return res.items ?? [];
+      } catch {
+        return [];
+      }
+    },
+  });
+}
+
+export function useCreateApproval() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    import("../lib/types").ApprovalRequestItem,
+    Error,
+    { action: import("../lib/types").ApprovalAction; target_id: string; reason?: string }
+  >({
+    mutationFn: (body) => api.createApproval(body),
+    onSuccess: (created) => {
+      void queryClient.invalidateQueries({ queryKey: ["approvals"] });
+      useAppStore
+        .getState()
+        .pushToast("success", "Onay talebi oluşturuldu", `${created.action} (${created.target_id})`);
+    },
+    onError: (error) => {
+      useAppStore.getState().pushToast("error", "Onay talebi oluşturulamadı", error.message);
+    },
+  });
+}
+
+export function useDecideApproval() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    import("../lib/types").ApprovalRequestItem,
+    Error,
+    { approvalId: string; decision: "approved" | "rejected"; note?: string }
+  >({
+    mutationFn: ({ approvalId, decision, note }) =>
+      api.decideApproval(approvalId, { decision, note }),
+    onSuccess: (updated) => {
+      void queryClient.invalidateQueries({ queryKey: ["approvals"] });
+      useAppStore
+        .getState()
+        .pushToast(
+          updated.status === "approved" ? "success" : "info",
+          updated.status === "approved" ? "Talep onaylandı" : "Talep reddedildi",
+          `${updated.action} (${updated.target_id})`,
+        );
+    },
+    onError: (error) => {
+      useAppStore.getState().pushToast("error", "Onay işlemi başarısız", error.message);
+    },
+  });
+}

@@ -1087,4 +1087,55 @@ export const api = {
       signal,
       timeoutMs: 60_000,
     }),
+
+  /* ---------------------------------------------------------------- */
+  /* Kimlik Doğrulama (OIDC) ve İki Kişi Onayı (R4)                   */
+  /* ---------------------------------------------------------------- */
+
+  authMe: (signal?: AbortSignal) =>
+    apiFetch<import("./types").AuthMeResponse>("/auth/me", { signal, timeoutMs: 5_000 }),
+
+  authLogout: (signal?: AbortSignal) =>
+    apiFetch<{ ok: boolean }>("/auth/logout", { method: "POST", signal }),
+
+  listApprovals: (
+    params?: { status?: string; action?: string },
+    signal?: AbortSignal,
+  ) => {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set("status", params.status);
+    if (params?.action) qs.set("action", params.action);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return apiFetch<{ items: import("./types").ApprovalRequestItem[] }>(`/approvals${suffix}`, {
+      signal,
+    });
+  },
+
+  createApproval: (
+    body: {
+      action: import("./types").ApprovalAction;
+      target_id: string;
+      reason?: string;
+    },
+    signal?: AbortSignal,
+  ) =>
+    apiFetch<import("./types").ApprovalRequestItem>("/approvals", {
+      method: "POST",
+      body,
+      signal,
+    }),
+
+  decideApproval: (
+    approvalId: string,
+    body: { decision: "approved" | "rejected"; note?: string },
+    signal?: AbortSignal,
+  ) =>
+    apiFetch<import("./types").ApprovalRequestItem>(
+      `/approvals/${encodeURIComponent(approvalId)}/decide`,
+      {
+        method: "POST",
+        body,
+        signal,
+      },
+    ),
 };

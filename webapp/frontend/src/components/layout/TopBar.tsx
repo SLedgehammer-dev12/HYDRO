@@ -5,6 +5,8 @@ import {
   ChevronDown,
   HelpCircle,
   Loader2,
+  LogIn,
+  LogOut,
   Menu,
   Moon,
   PanelRightClose,
@@ -12,12 +14,14 @@ import {
   Plus,
   Save,
   Sun,
+  UserCheck,
   X,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, apiErrorMessage } from "../../lib/api";
 import { relativeTime } from "../../lib/format";
 import {
+  useAuthMe,
   useCreateSession,
   useProjects,
   useSaveSession,
@@ -69,6 +73,7 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
   const { data: sessions } = useSessions();
   const { data: projects } = useProjects();
   const { data: updateStatus } = useUpdateStatus();
+  const { data: authMe } = useAuthMe();
   const saveSession = useSaveSession();
   const createSession = useCreateSession();
   const queryClient = useQueryClient();
@@ -360,6 +365,45 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
             >
               {saveSession.isPending ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
             </IconButton>
+
+            {authMe?.enforced_auth ? (
+              authMe.authenticated && authMe.user ? (
+                <div
+                  className="hidden items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--surface-2)] py-0.5 pl-2.5 pr-1 text-[11px] font-medium text-[var(--text-soft)] md:inline-flex"
+                  data-testid="topbar-auth-pill"
+                >
+                  <UserCheck size={12} aria-hidden />
+                  <span className="max-w-[120px] truncate">
+                    {authMe.user.name || authMe.user.sub}
+                  </span>
+                  <span className="rounded bg-[var(--surface-3)] px-1 text-[10px] uppercase">
+                    {authMe.user.role}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="Oturumu kapat"
+                    title="Çıkış"
+                    className="rounded-full p-0.5 text-[var(--text-faint)] hover:bg-[var(--surface-3)] hover:text-[var(--text)]"
+                    onClick={() => {
+                      void api
+                        .authLogout()
+                        .then(() => queryClient.invalidateQueries({ queryKey: ["auth", "me"] }))
+                        .catch(() => undefined);
+                    }}
+                  >
+                    <LogOut size={12} aria-hidden />
+                  </button>
+                </div>
+              ) : (
+                <a
+                  href="/api/auth/login"
+                  className="hidden items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1 text-[11px] font-medium text-[var(--text)] hover:bg-[var(--surface-3)] md:inline-flex"
+                >
+                  <LogIn size={12} aria-hidden />
+                  <span>Giriş</span>
+                </a>
+              )
+            ) : null}
 
             {updateStatus?.update_available && updateStatus.latest_version ? (
               <button
