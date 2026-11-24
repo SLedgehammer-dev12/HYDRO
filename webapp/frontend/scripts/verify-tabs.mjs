@@ -22,6 +22,25 @@ import path from "node:path";
 const APP_URL = process.env.HYDRO_APP_URL ?? "http://127.0.0.1:5173";
 const CDP_PORT = Number(process.env.CDP_PORT ?? 9223);
 const SLEEP = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const USE_MATRIX = process.argv.includes("--matrix");
+const RUN_E2E = !process.argv.includes("--no-e2e") && process.env.HYDRO_E2E !== "0";
+
+function parseViewports() {
+  const raw = process.env.VERIFY_VIEWPORTS || (USE_MATRIX ? "375x812,768x1024,1440x900" : "1440x900");
+  return raw
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((spec) => {
+      const [wStr, hStr] = spec.split("x");
+      const width = Number(wStr);
+      const height = Number(hStr);
+      if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+        throw new Error(`Geçersiz viewport tanımı: ${spec}`);
+      }
+      return { width, height, label: `${width}x${height}` };
+    });
+}
 
 const ROUTES = [
   ["projects", "Proje kayıtları ve kesit envanteri", "projects"],
@@ -186,41 +205,128 @@ async function main() {
 
     await send("Page.enable");
     await send("Runtime.enable");
+    await send("Emulation.enable").catch(() => undefined);
     await send("Page.navigate", { url: `${APP_URL}/#/` });
     await SLEEP(1_800);
 
+    const viewports = parseViewports();
     const failures = [];
-    for (const [route, expectedTitle, expectedPage = route] of ROUTES) {
-      const hash = route === "dashboard" ? "#/" : `#/${route}`;
-      await evaluate(`location.hash = ${JSON.stringify(hash)}`);
-      let state = { dataPage: null, h1: "", dashboardStepper: false };
-      let okPage = false;
-      let okTitle = false;
-      let okDashboard = false;
-      const deadline = Date.now() + 3_500;
-      while (Date.now() <= deadline) {
-        state = await evaluate(`(() => {
-          const main = document.querySelector("main");
-          const page = main ? main.querySelector("[data-page]") : null;
-          const h1 = main ? main.querySelector("h1") : null;
-          return {
-            dataPage: page ? page.getAttribute("data-page") : null,
-            h1: h1 ? h1.textContent.trim() : "",
-            dashboardStepper: Boolean(main && main.querySelector('[aria-label="Test değerlendirme adımları"]')),
-          };
-        })()`);
-        okPage = state.dataPage === expectedPage;
-        okTitle = expectedTitle ? state.h1.includes(expectedTitle) : state.h1.length > 0;
-        okDashboard = route === "dashboard" ? state.dashboardStepper : !state.dashboardStepper;
-        if (okPage && okTitle && okDashboard) break;
-        await SLEEP(50);
+    for (const vp of viewports) {
+      await send("Emulation.setDeviceMetricsOverride", {
+        width: vp.width,
+        height: vp.height,
+        deviceScaleFactor: 1,
+        mobile: vp.width < 768,
+      });
+      await SLEEP(120);
+
+      for (const [route, expectedTitle, expectedPage = route] of ROUTES) {
+        const hash = route === "dashboard" ? "#/" : `#/${route}`;
+        await evaluate(`location.hash = ${JSON.stringify(hash)}`);
+        let state = { dataPage: null, h1: "", dashboardStepper: false, overflowX: 0 };
+        let okPage = false;
+        let okTitle = false;
+        let okDashboard = false;
+        let okOverflow = false;
+        const deadline = Date.now() + 3_500;
+        while (Date.now() <= deadline) {
+          state = await evaluate(`(() => {
+            const main = document.querySelector("main");
+            const page = main ? main.querySelector("[data-page]") : null;
+            const h1 = main ? main.querySelector("h1") : null;
+            return {
+              dataPage: page ? page.getAttribute("data-page") : null,
+              h1: h1 ? h1.textContent.trim() : "",
+              dashboardStepper: Boolean(main && main.querySelector('[aria-label="Test değerlendirme adımları"]')),
+              overflowX: Math.max(0, document.documentElement.scrollWidth - window.innerWidth),
+            };
+          })()`);
+          okPage = state.dataPage === expectedPage;
+          okTitle = expectedTitle ? state.h1.includes(expectedTitle) : state.h1.length > 0;
+          okDashboard = route === "dashboard" ? state.dashboardStepper : !state.dashboardStepper;
+          okOverflow = state.overflowX <= 4;
+          if (okPage && okTitle && okDashboard && okOverflow) break;
+          await SLEEP(50);
+        }
+        if (!okPage || !okTitle || !okDashboard || !okOverflow) {
+          failures.push({
+            viewport: vp.label,
+            route,
+            expectedPage,
+            expectedTitle,
+            ...state,
+            okPage,
+            okTitle,
+            okDashboard,
+            okOverflow,
+          });
+        }
+        console.log(
+          `${okPage && okTitle && okDashboard && okOverflow ? "PASS" : "FAIL"}  [${vp.label}] ${route.padEnd(20)} ${state.h1} (overflowX=${state.overflowX})`,
+        );
       }
-      if (!okPage || !okTitle || !okDashboard) {
-        failures.push({ route, expectedPage, expectedTitle, ...state, okPage, okTitle, okDashboard });
+    }
+
+    if (RUN_E2E) {
+      const e2eResult = await evaluate(`(async () => {
+        const ws = "verify-e2e-" + Date.now().toString(36);
+        let projectId = null;
+        try {
+          const genRes = await fetch("/api/projects/generate-sample", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Session-ID": ws },
+            body: JSON.stringify({
+              scenario: "mixed",
+              section_count: 1,
+              code: "VERIFY-E2E",
+              name: "E2E Doğrulama Projesi",
+              reuse_existing: false,
+            }),
+          });
+          if (!genRes.ok) {
+            return { ok: false, step: "generate-sample", status: genRes.status };
+          }
+          const gen = await genRes.json();
+          projectId = gen.project?.id ?? null;
+          const sessionId = gen.sections?.[0]?.id ?? null;
+          if (!projectId || !sessionId) {
+            return { ok: false, step: "sample-payload", projectId, sessionId };
+          }
+
+          localStorage.setItem("hydro-workspace-id", ws);
+          location.hash = "#/forms/air_test";
+          await new Promise((r) => setTimeout(r, 400));
+          const formsPage = document.querySelector('main [data-page="forms"]');
+
+          location.hash = "#/reports";
+          await new Promise((r) => setTimeout(r, 400));
+          const reportsPage = document.querySelector('main [data-page="reports"]');
+
+          if (!formsPage || !reportsPage) {
+            return {
+              ok: false,
+              step: "route-render",
+              hasForms: Boolean(formsPage),
+              hasReports: Boolean(reportsPage),
+            };
+          }
+          return { ok: true, code: gen.project.code, sessionId };
+        } finally {
+          if (projectId) {
+            await fetch("/api/projects/" + encodeURIComponent(projectId), {
+              method: "DELETE",
+              headers: { "X-Session-ID": ws },
+            }).catch(() => {});
+          }
+        }
+      })()`);
+
+      if (!e2eResult?.ok) {
+        failures.push({ route: "e2e-happy-path", ...e2eResult });
+        console.log(`FAIL  [e2e]        happy-path           ${JSON.stringify(e2eResult)}`);
+      } else {
+        console.log(`PASS  [e2e]        happy-path           ${e2eResult.code} -> air_test -> reports`);
       }
-      console.log(
-        `${okPage && okTitle && okDashboard ? "PASS" : "FAIL"}  ${route.padEnd(20)} ${state.h1}`,
-      );
     }
 
     socket.close();

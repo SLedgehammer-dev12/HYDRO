@@ -8,7 +8,9 @@ Alembic via :mod:`app.migrations_runner`.
 
 from __future__ import annotations
 
+import logging
 import threading
+import time
 from contextlib import contextmanager
 from typing import Iterator
 
@@ -17,6 +19,10 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from . import migrations_runner
+from .core.metrics import METRICS
+
+_logger = logging.getLogger("hydro.db")
+SLOW_QUERY_THRESHOLD_MS = 200.0
 
 CURRENT_MIGRATION = migrations_runner.HEAD_REVISION
 
@@ -89,6 +95,23 @@ def _install_sqlite_pragmas(engine: Engine, *, memory: bool) -> None:
             cursor.close()
 
 
+def _install_slow_query_listener(engine: Engine) -> None:
+    @event.listens_for(engine, "before_cursor_execute")
+    def _before_cursor_execute(conn, cursor, statement, parameters, context, executemany):  # noqa: ANN001
+        conn.info.setdefault("_hydro_query_starts", []).append(time.perf_counter())
+
+    @event.listens_for(engine, "after_cursor_execute")
+    def _after_cursor_execute(conn, cursor, statement, parameters, context, executemany):  # noqa: ANN001
+        starts = conn.info.get("_hydro_query_starts")
+        if not starts:
+            return
+        elapsed_ms = (time.perf_counter() - starts.pop()) * 1000.0
+        if elapsed_ms >= SLOW_QUERY_THRESHOLD_MS:
+            METRICS.record_slow_query()
+            compact_sql = " ".join(str(statement or "").split())[:200]
+            _logger.warning("slow_sql elapsed_ms=%.1f sql=%s", elapsed_ms, compact_sql)
+
+
 def configure_database(database_url: str) -> Engine:
     """(Re)create the global engine for ``database_url``."""
 
@@ -109,6 +132,7 @@ def configure_database(database_url: str) -> Engine:
     engine = create_engine(database_url, **kwargs)
     if _is_sqlite(database_url):
         _install_sqlite_pragmas(engine, memory=_is_memory(database_url))
+    _install_slow_query_listener(engine)
 
     _engine = engine
     _session_factory = sessionmaker(

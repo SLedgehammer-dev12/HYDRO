@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createEmptyInputs } from "../../lib/mock";
 import { useAppStore } from "../../store/useAppStore";
 import { HelpDialog } from "../layout/HelpDialog";
+import { TopBar } from "../layout/TopBar";
 import { GuidedTourOverlay } from "./GuidedTourOverlay";
 import { OnboardingWelcomeCard } from "./OnboardingWelcomeCard";
 
@@ -304,5 +305,23 @@ describe("Opt-in Onboarding Welcome Card & 5-step Guided Demo Tour", () => {
       HTMLDialogElement.prototype.showModal = origShowModal;
       HTMLDialogElement.prototype.close = origClose;
     }
+  });
+
+  it("shows DEMO badge in TopBar for demo projects", () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    useAppStore.setState({
+      projectId: "proj-demo-1",
+      projectCode: "DEMO-TUR",
+      tourSampleProjectId: "proj-demo-1",
+    });
+
+    render(
+      <QueryClientProvider client={qc}>
+        <TopBar onOpenHelp={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    const badge = screen.getByTestId("topbar-demo-badge");
+    expect(badge).toHaveTextContent("DEMO");
   });
 });

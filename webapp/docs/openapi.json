@@ -7302,6 +7302,53 @@
         ]
       }
     },
+    "/api/system/metrics": {
+      "get": {
+        "operationId": "get_system_metrics_api_system_metrics_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "prometheus"
+              ],
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Get System Metrics Api System Metrics Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get System Metrics",
+        "tags": [
+          "system"
+        ]
+      }
+    },
     "/api/system/trash": {
       "get": {
         "operationId": "list_trash_api_system_trash_get",

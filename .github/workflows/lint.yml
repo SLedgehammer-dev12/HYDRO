@@ -110,3 +110,6 @@ jobs:
 
       - name: API contract check
         run: npm run check:api
+
+      - name: Dependency audit (high/critical)
+        run: npm audit --omit=dev --audit-level=high

@@ -46,8 +46,15 @@ def test_resolve_worker_count_clamps_sqlite_and_allows_postgres(capsys):
     assert clamped == 1
     assert "SQLite" in captured.err
 
-    pg_workers = run_web.resolve_worker_count(
+    pg_default = run_web.resolve_worker_count(
         "postgresql+psycopg://hydro:secret@db:5432/hydro", "4"
+    )
+    assert pg_default == 1
+
+    pg_workers = run_web.resolve_worker_count(
+        "postgresql+psycopg://hydro:secret@db:5432/hydro",
+        "4",
+        allow_unsafe_multiworker=True,
     )
     assert pg_workers == 4
 

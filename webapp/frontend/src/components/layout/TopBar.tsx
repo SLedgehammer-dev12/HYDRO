@@ -56,9 +56,15 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
   const applySessionInputs = useAppStore((state) => state.applySessionInputs);
   const resetSession = useAppStore((state) => state.resetSession);
   const setUpdateModalOpen = useAppStore((state) => state.setUpdateModalOpen);
+  const tourSampleProjectId = useAppStore((state) => state.tourSampleProjectId);
   const activeOcrJob = useAppStore((state) => state.activeOcrJob);
   const setActiveOcrJob = useAppStore((state) => state.setActiveOcrJob);
   const pushToast = useAppStore((state) => state.pushToast);
+
+  const isDemoProject = Boolean(
+    (projectCode && projectCode.toUpperCase().startsWith("DEMO-")) ||
+      (projectId && projectId === tourSampleProjectId),
+  );
 
   const { data: sessions } = useSessions();
   const { data: projects } = useProjects();
@@ -179,6 +185,15 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
               onClick={() => setPickerOpen((value) => !value)}
             >
               <div className="flex min-w-0 items-center gap-1.5">
+                {isDemoProject ? (
+                  <span
+                    className="badge badge-info hidden shrink-0 sm:inline-flex"
+                    data-testid="topbar-demo-badge"
+                    title="Rehberli demo projesi"
+                  >
+                    DEMO
+                  </span>
+                ) : null}
                 {projectCode ? (
                   <span className="hidden shrink-0 font-mono text-[11px] font-semibold text-[var(--primary)] sm:inline">
                     {projectCode}

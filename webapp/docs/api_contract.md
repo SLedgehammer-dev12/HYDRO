@@ -2169,8 +2169,9 @@ export interface ApiError {
 - `time-series/batch` (`TimeSeriesBatchCreate`, `StrictWriteModel`, max `1000` kayıt): saatlik basınç/sıcaklık zaman serisi kayıtlarını `append` veya `replace` modunda kaydeder ve Şartname Bölüm 12/15 4 saatlik pencere/24 saatlik dengeleme değerlendirmesini döner.
 - `time-series/sync-form` (`TimeSeriesSyncFormRequest`, `StrictWriteModel`): `leak_stabilization` (`018`) veya `pressure_test` (`021`) formuyla zaman serisi arasında `from_form` / `to_form` çift yönlü senkronizasyon yapar.
 
-### `/api/system/*` (`db-stats`, `db-backup`, `db-backups`, `db-restore`, `db-maintenance`, `trash`, `workspaces`)
-- Ağ dışı (`0.0.0.0`) dağıtımlarda yönetim uçları `X-Hydro-Admin-Token` doğrulaması gerektirir (`403 forbidden`).
+### `/api/system/*` (`metrics`, `db-stats`, `db-backup`, `db-backups`, `db-restore`, `db-maintenance`, `trash`, `workspaces`)
+- Ağ dışı (`0.0.0.0`) dağıtımlarda veya `local_admin_token` tanımlandığında yönetim uçları `X-Hydro-Admin-Token` doğrulaması gerektirir (`403 admin_token_required`).
+- `GET /api/system/metrics?format=json|prometheus` istek sayacı/p50/p95 gecikmesi, 4xx/5xx sayıları, yavaş SQL sayacı (`> 200 ms`), OCR kuyruğu derinliği (`queued`/`running`) ve DB/Alembic bilgisini döner.
 - `POST /api/system/db-restore` canlı DB motoru değişimi sırasında gelen istekleri kısa süreliğine `503 db_restoring` (`Retry-After: 2`) ile bekletir.
 
 ### `/api/update/status`, `/api/update/check`, `/api/update/install`

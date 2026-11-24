@@ -51,16 +51,54 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-dev.txt
 
-      # Tkinter tabanli UI testleri Linux'ta sanal ekran ister.
-      - name: Run tests under Xvfb (Linux)
+      # Tkinter tabanli UI testleri izole surecte kosulur (Tcl_AsyncDelete korumasi).
+      - name: Run non-Tk desktop tests under Xvfb (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          TMP_RUNNER="$(mktemp --suffix=.py)"
+          trap 'rm -f "$TMP_RUNNER"' EXIT
+          cat <<'PY' > "$TMP_RUNNER"
+          import pathlib, sys, unittest
+          loader = unittest.TestLoader()
+          suites = [
+              loader.discover("tests", pattern=p.name)
+              for p in sorted(pathlib.Path("tests").glob("test_*.py"))
+              if p.name != "test_download_dialog.py"
+          ]
+          res = unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(suites))
+          sys.exit(0 if res.wasSuccessful() else 1)
+          PY
+          xvfb-run --auto-servernum python -m coverage run "$TMP_RUNNER"
+
+      - name: Run isolated Tk dialog tests under Xvfb (Linux)
         if: runner.os == 'Linux'
         run: |
-          xvfb-run --auto-servernum python -m coverage run -m unittest discover -s tests -p "test_*.py" -v
+          xvfb-run --auto-servernum python -X dev -X faulthandler -m coverage run -a -m unittest tests.test_download_dialog -v
 
-      - name: Run tests (macOS / Windows)
+      - name: Run non-Tk desktop tests (macOS / Windows)
+        if: runner.os != 'Linux'
+        shell: bash
+        run: |
+          TMP_RUNNER="$(mktemp --suffix=.py)"
+          trap 'rm -f "$TMP_RUNNER"' EXIT
+          cat <<'PY' > "$TMP_RUNNER"
+          import pathlib, sys, unittest
+          loader = unittest.TestLoader()
+          suites = [
+              loader.discover("tests", pattern=p.name)
+              for p in sorted(pathlib.Path("tests").glob("test_*.py"))
+              if p.name != "test_download_dialog.py"
+          ]
+          res = unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(suites))
+          sys.exit(0 if res.wasSuccessful() else 1)
+          PY
+          python -m coverage run "$TMP_RUNNER"
+
+      - name: Run isolated Tk dialog tests (macOS / Windows)
         if: runner.os != 'Linux'
         run: |
-          python -m coverage run -m unittest discover -s tests -p "test_*.py" -v
+          python -X dev -X faulthandler -m coverage run -a -m unittest tests.test_download_dialog -v
 
       - name: Coverage report and XML
         run: |
@@ -142,3 +180,62 @@ jobs:
           HYDRO_TEST_POSTGRES_URL: postgresql+psycopg://hydro:hydro_ci_password@127.0.0.1:5432/hydro
         run: |
           python -m pytest webapp/backend/tests/test_postgres_runtime.py -q
+
+  web-browser-smoke:
+    name: Web Real-Browser Tab Smoke (py3.12 + Chrome)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: 'pip'
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: webapp/frontend/package-lock.json
+
+      - name: Install Python & frontend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r webapp/requirements-web.txt
+          npm --prefix webapp/frontend ci
+          npm --prefix webapp/frontend run build
+
+      - name: Ensure Chrome / Chromium is available
+        run: |
+          if ! command -v google-chrome >/dev/null && ! command -v chromium >/dev/null && ! command -v chromium-browser >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq chromium-browser || sudo apt-get install -y -qq chromium
+          fi
+
+      - name: Run 12-tab real browser smoke test
+        run: |
+          TMP_DATA="$(mktemp -d)"
+          echo "TMP_DATA=$TMP_DATA" >> "$GITHUB_ENV"
+          HYDRO_DATA_DIR="$TMP_DATA" python webapp/run_web.py --host 127.0.0.1 --port 8099 >"$TMP_DATA/server.log" 2>&1 &
+          SRV_PID=$!
+          trap 'kill "$SRV_PID" 2>/dev/null || true' EXIT
+          for i in $(seq 1 40); do
+            if curl -sf http://127.0.0.1:8099/api/health >/dev/null; then
+              break
+            fi
+            sleep 0.5
+          done
+          HYDRO_APP_URL=http://127.0.0.1:8099 node webapp/frontend/scripts/verify-tabs.mjs
+
+      - name: Upload smoke server log on failure
+        if: failure() && env.TMP_DATA != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-browser-smoke-log
+          path: ${{ env.TMP_DATA }}/server.log
+          if-no-files-found: ignore
+          retention-days: 7

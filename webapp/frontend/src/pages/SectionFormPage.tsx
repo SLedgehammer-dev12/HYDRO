@@ -28,6 +28,11 @@ import {
 } from "../hooks/queries";
 import { useAppStore } from "../store/useAppStore";
 import { FormBodyEditor } from "../features/forms/FormBodyEditor";
+import {
+  clearFormDraft,
+  loadFormDraft,
+  saveFormDraft,
+} from "../features/forms/formDraftStorage";
 import { OperationsPanel } from "../features/operations/OperationsPanel";
 import { AirPage } from "./AirPage";
 import { PressurePage } from "./PressurePage";
@@ -107,6 +112,7 @@ export function SectionFormPage() {
   const [draftData, setDraftData] = useState<Record<string, unknown>>({});
   const [dirty, setDirty] = useState(false);
   const [showDetailCalc, setShowDetailCalc] = useState(false);
+  const [restoredDraftAt, setRestoredDraftAt] = useState<string | null>(null);
   const [pendingNavCode, setPendingNavCode] = useState<BotasFormCode | null>(null);
   const [conflictInfo, setConflictInfo] = useState<{
     currentRevision: number;
@@ -145,8 +151,11 @@ export function SectionFormPage() {
     return () => window.removeEventListener("hydro:save", onGlobalSave);
   }, []);
 
-  /* Form veya kesit değişince sunucudaki güncel veriyi forma yükle */
+  /* Form veya kesit değişince sunucudaki güncel veriyi (veya eşleşen yerel taslağı) forma yükle */
   useEffect(() => {
+    if (!isDemoOrOffline && sessionId && !payload) {
+      return;
+    }
     const targetKey = `${sessionId}::${spec.code}`;
     const contextChanged = loadedTargetRef.current !== targetKey;
     if (!contextChanged && dirtyRef.current) {
@@ -154,16 +163,54 @@ export function SectionFormPage() {
     }
     loadedTargetRef.current = targetKey;
     const latestRecord = formRecordRef.current;
+    const serverRevision = latestRecord?.revision ?? 0;
+
+    if (!isDemoOrOffline && sessionId && contextChanged) {
+      const savedDraft = loadFormDraft(sessionId, spec.code);
+      if (
+        savedDraft &&
+        (savedDraft.baseRevision === serverRevision || savedDraft.baseRevision === null)
+      ) {
+        setDraftDate(savedDraft.formDate);
+        setDraftData(savedDraft.extractedData);
+        setDirty(true);
+        setRestoredDraftAt(savedDraft.savedAt);
+        setConflictInfo(null);
+        setShowDetailCalc(false);
+        setPendingNavCode(null);
+        return;
+      }
+      if (savedDraft) {
+        clearFormDraft(sessionId, spec.code);
+      }
+    }
+
     const ext = latestRecord?.extracted_data ? structuredClone(latestRecord.extracted_data) : {};
     setDraftDate(latestRecord?.form_date || "");
     setDraftData(ext);
     setDirty(false);
+    setRestoredDraftAt(null);
     setConflictInfo(null);
     if (contextChanged) {
       setShowDetailCalc(false);
       setPendingNavCode(null);
     }
-  }, [sessionId, spec.code, formRecord?.revision, formRecord?.updated_at]);
+  }, [sessionId, spec.code, isDemoOrOffline, payload, formRecord?.revision, formRecord?.updated_at]);
+
+  /* Kaydedilmemiş form düzenlemelerini 1 sn debounce ile yerel taslak olarak sakla (R7) */
+  useEffect(() => {
+    if (!dirty || isDemoOrOffline || !sessionId) return;
+    const baseRevision = formRecordRef.current?.revision ?? 0;
+    const timer = window.setTimeout(() => {
+      saveFormDraft(sessionId, spec.code, {
+        formDate: draftDate,
+        extractedData: draftData,
+        baseRevision,
+        savedAt: new Date().toISOString(),
+      });
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [dirty, isDemoOrOffline, sessionId, spec.code, draftDate, draftData]);
 
   /* Alt + Sol/Sağ Ok ile formlar arasında hızlı geçiş */
   useEffect(() => {
@@ -259,6 +306,8 @@ export function SectionFormPage() {
       },
       {
         onSuccess: () => {
+          if (sessionId) clearFormDraft(sessionId, spec.code);
+          setRestoredDraftAt(null);
           setDirty(false);
           setConflictInfo(null);
           onSaved?.();
@@ -281,6 +330,8 @@ export function SectionFormPage() {
   }
 
   async function handleReloadFromServer() {
+    if (sessionId) clearFormDraft(sessionId, spec.code);
+    setRestoredDraftAt(null);
     if (conflictInfo?.serverForm) {
       const ext = conflictInfo.serverForm.extracted_data
         ? structuredClone(conflictInfo.serverForm.extracted_data)
@@ -550,6 +601,33 @@ export function SectionFormPage() {
                 Değişikliklerimle Üzerine Yaz
               </Button>
             </div>
+          </div>
+        </InlineNotice>
+      ) : null}
+
+      {restoredDraftAt ? (
+        <InlineNotice tone="info" title="Yerel taslak geri yüklendi">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span>
+              Kaydedilmemiş değişiklikleriniz yerel taslaktan ({dateTime(restoredDraftAt)}) geri
+              yüklendi.
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                if (sessionId) clearFormDraft(sessionId, spec.code);
+                const ext = formRecord?.extracted_data
+                  ? structuredClone(formRecord.extracted_data)
+                  : {};
+                setDraftDate(formRecord?.form_date || "");
+                setDraftData(ext);
+                setDirty(false);
+                setRestoredDraftAt(null);
+              }}
+            >
+              Taslağı temizle
+            </Button>
           </div>
         </InlineNotice>
       ) : null}

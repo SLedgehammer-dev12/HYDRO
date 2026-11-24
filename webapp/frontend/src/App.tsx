@@ -116,6 +116,7 @@ export default function App() {
   const updateModalOpen = useAppStore((state) => state.updateModalOpen);
   const revisionConflict = useAppStore((state) => state.revisionConflict);
   const tourActive = useAppStore((state) => state.tourActive);
+  const dirty = useAppStore((state) => state.dirty);
   const backend = useAppStore((state) => state.backend);
   const sessionId = useAppStore((state) => state.sessionId);
   const applySessionInputs = useAppStore((state) => state.applySessionInputs);
@@ -136,6 +137,17 @@ export default function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
+
+  /* Kaydedilmemiş değişikliklerde tarayıcı sekmesini kapatma koruması (R7) */
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty]);
 
   /* Hash yönlendirme */
   useEffect(() => {

@@ -463,6 +463,9 @@ export const useAppStore = create<AppStore>()(
           exports: [],
           toasts: [],
           tab: "projects",
+          tourActive: false,
+          tourStep: 0,
+          tourSampleProjectId: null,
         });
       },
     }),
@@ -514,6 +517,9 @@ export const useAppStore = create<AppStore>()(
         theme: state.theme,
         rightPanelOpen: state.rightPanelOpen,
         onboardingDismissed: state.onboardingDismissed,
+        tourActive: state.tourActive,
+        tourStep: state.tourStep,
+        tourSampleProjectId: state.tourSampleProjectId,
       }),
       /**
        * Eski sürümlerden gelen `inputs` şeması eksik olabilir (ör. `section_meta`).

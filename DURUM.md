@@ -113,6 +113,8 @@ Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen iş
 
 ## 4. Yapılacaklar
 
+Önceliklendirilmiş ürün/mimari yatırım listesi: [`docs/improvement_recommendations_v1.md`](docs/improvement_recommendations_v1.md) (R1–R18; P0: CI E2E + release gate + kalıcı OCR kuyruğu + Auth/OIDC).
+
 ### 4.1 Web / üretim sertleştirmesi (P1)
 
 - [x] OCR mapping profile `pre_extract` / `post_map` uygulanması (`pre_extract`: ek etiket adları; `post_map`: hedef yol geçersiz kılma).
@@ -244,7 +246,8 @@ docker compose -f webapp/docker-compose.yml up --build
 | `docs/spec/report_forms.md` | Resmî form envanteri, gerçek saha değerleri, OCR kalibrasyonu |
 | `docs/ui_ergonomics.md` | Masaüstü ergonomi kararları |
 | `docs/codebase_map.md` | Üretilen kod haritası |
-| `docs/analysis_report_v4.md` | 23 Kasım 2026 canlı denetim raporu (`v2.0.0`): F1–F27 durum tablosu, ölçümler, yol haritası |
+| `docs/analysis_report_v4.md` | 23–24 Kasım 2026 canlı denetim raporu (`v2.0.0` → `v2.1.0`): F1–F29 durum tablosu, ölçümler, yol haritası |
+| `docs/improvement_recommendations_v1.md` | 24 Kasım 2026 iyileştirme önerileri: R1–R18 öncelik matrisi, 90 günlük plan, KPI'lar |
 | `webapp/docs/implementation_status.md` | Web uygulaması durumu ve doğrulama |
 | `webapp/docs/parity_matrix.md` | Masaüstü↔web parity matrisi, 28 maddelik eksik listesi |
 | `webapp/docs/api_contract.md` | API sözleşmesi |

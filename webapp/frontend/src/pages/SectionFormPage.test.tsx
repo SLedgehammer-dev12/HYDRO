@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../lib/api";
 import type { SectionFormRecord, SessionFormsResponse } from "../lib/types";
+import { clearFormDraft, saveFormDraft } from "../features/forms/formDraftStorage";
 import { useAppStore } from "../store/useAppStore";
 import { SectionFormPage } from "./SectionFormPage";
 
@@ -67,6 +68,7 @@ function makeFormsPayload(revision: number, notes: string): SessionFormsResponse
 describe("SectionFormPage optimistic concurrency (F1)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearFormDraft("sess-1", "cleaning");
     useAppStore.setState({
       backend: "online",
       sessionId: "sess-1",
@@ -134,5 +136,33 @@ describe("SectionFormPage optimistic concurrency (F1)", () => {
     });
     // Force overwrite sends server's current_revision (3)
     expect(mockUpdateSessionForm.mock.calls[1][3]).toBe(3);
+  });
+
+  it("restores matching local draft on mount and clears it when discarded (R7)", async () => {
+    mockSessionForms.mockResolvedValue(makeFormsPayload(2, "Sunucu notu"));
+    saveFormDraft("sess-1", "cleaning", {
+      formDate: "2026-11-24",
+      extractedData: { notes: "Yerel taslak notu" },
+      baseRevision: 2,
+      savedAt: "2026-11-24T12:00:00Z",
+    });
+
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={qc}>
+        <SectionFormPage />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText(/Yerel taslak geri yüklendi/i)).toBeTruthy();
+    expect(screen.getByDisplayValue("2026-11-24")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /Taslağı temizle/i }));
+    await waitFor(() => {
+      expect(screen.queryByText(/Yerel taslak geri yüklendi/i)).toBeNull();
+    });
+    expect(screen.getByDisplayValue("2026-11-23")).toBeTruthy();
   });
 });

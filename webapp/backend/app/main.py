@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 import uuid
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
@@ -22,6 +23,7 @@ from .core.config import (
     normalize_host_header,
     safe_database_url,
 )
+from .core.metrics import METRICS
 
 ensure_repo_on_path()
 
@@ -239,11 +241,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             _apply_security_headers(restoring_resp, path, request_id, raw_workspace)
             return restoring_resp
 
+        req_started = time.perf_counter()
         try:
             response = await call_next(request)
         finally:
             if track_db:
                 db.exit_request()
+        if path.startswith(f"{API_PREFIX}/"):
+            METRICS.record_request(
+                response.status_code,
+                (time.perf_counter() - req_started) * 1000.0,
+            )
         _apply_security_headers(response, path, request_id, raw_workspace)
         if "text/html" in response.headers.get("content-type", ""):
             response.headers["Cache-Control"] = "no-cache"

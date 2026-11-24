@@ -17,6 +17,7 @@ import {
   YAxis,
 } from "recharts";
 import type { AppInputs, PressureProfileResponse, ResultBundle } from "../../lib/types";
+import { downsampleLttb } from "../../lib/downsample";
 import { num } from "../../lib/format";
 import { PUMP_LABELS } from "../../lib/constants";
 
@@ -519,10 +520,27 @@ export function TimeSeriesChart({
     );
   }
 
+  const MAX_CHART_POINTS = 2000;
+  const downsampled = ordered.length > MAX_CHART_POINTS;
+  const displayData = downsampled
+    ? downsampleLttb(
+        ordered,
+        MAX_CHART_POINTS,
+        (_point, index) => index,
+        (point) => point.pressure,
+      )
+    : ordered;
+
   return (
-    <div className={className} style={{ height }}>
-      <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={ordered} margin={{ top: 10, right: 12, left: -16, bottom: 0 }}>
+    <div className={`flex flex-col ${className ?? ""}`} style={{ height }}>
+      {downsampled ? (
+        <p className="mb-1 shrink-0 text-[10px] text-[var(--text-faint)]">
+          Büyük veri seti ({ordered.length} nokta) performans için {MAX_CHART_POINTS} noktaya örneklendi.
+        </p>
+      ) : null}
+      <div className="min-h-0 flex-1">
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={displayData} margin={{ top: 10, right: 12, left: -16, bottom: 0 }}>
           <CartesianGrid stroke="var(--grid-line)" vertical={false} />
           <XAxis
             dataKey="label"
@@ -556,7 +574,7 @@ export function TimeSeriesChart({
             name="Basınç (bar)"
             stroke="var(--chart-1)"
             strokeWidth={2}
-            dot={ordered.length <= 36 ? { r: 2.5 } : false}
+            dot={displayData.length <= 36 ? { r: 2.5 } : false}
             connectNulls
             isAnimationActive={false}
           />
@@ -568,12 +586,13 @@ export function TimeSeriesChart({
             stroke="var(--chart-3)"
             strokeWidth={1.8}
             strokeDasharray="4 3"
-            dot={ordered.length <= 36 ? { r: 2 } : false}
+            dot={displayData.length <= 36 ? { r: 2 } : false}
             connectNulls
             isAnimationActive={false}
           />
         </ComposedChart>
-      </ResponsiveContainer>
+        </ResponsiveContainer>
+      </div>
     </div>
   );
 }

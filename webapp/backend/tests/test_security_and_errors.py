@@ -920,3 +920,62 @@ def test_strict_write_models_reject_unknown_fields_via_http(client, headers):
     )
     assert bad_sample.status_code == 422
     assert bad_sample.json()["code"] == "validation_error"
+
+
+def test_resolve_worker_count_enforces_single_worker_by_default(monkeypatch):
+    import webapp.run_web as run_web
+
+    monkeypatch.delenv("HYDRO_ALLOW_UNSAFE_MULTIWORKER", raising=False)
+    assert run_web.resolve_worker_count("sqlite:///:memory:", "4") == 1
+    assert run_web.resolve_worker_count("postgresql+psycopg://u:p@h/db", "4") == 1
+    assert (
+        run_web.resolve_worker_count(
+            "postgresql+psycopg://u:p@h/db",
+            "4",
+            allow_unsafe_multiworker=True,
+        )
+        == 4
+    )
+
+
+def test_system_metrics_json_prometheus_and_admin_guard(tmp_path: Path):
+    from app.core.metrics import METRICS
+
+    METRICS.reset()
+    s = Settings(
+        host="127.0.0.1",
+        data_dir=tmp_path / "metrics_data",
+        database_url=f"sqlite:///{tmp_path / 'metrics_data' / 'hydro.db'}",
+        local_admin_token="secret-metrics-token",
+    )
+    app = create_app(s)
+    try:
+        with TestClient(app) as tc:
+            assert tc.get("/api/health").status_code == 200
+
+            denied = tc.get("/api/system/metrics")
+            assert denied.status_code == 403
+            assert denied.json()["code"] == "admin_token_required"
+
+            ok_json = tc.get(
+                "/api/system/metrics",
+                headers={"X-Hydro-Admin-Token": "secret-metrics-token"},
+            )
+            assert ok_json.status_code == 200, ok_json.text
+            body = ok_json.json()
+            assert body["requests_total"] >= 2
+            assert "p95_ms" in body
+            assert "slow_queries_total" in body
+            assert body["database"]["dialect"] == "sqlite"
+
+            ok_prom = tc.get(
+                "/api/system/metrics",
+                params={"format": "prometheus"},
+                headers={"X-Hydro-Admin-Token": "secret-metrics-token"},
+            )
+            assert ok_prom.status_code == 200
+            assert "text/plain" in ok_prom.headers.get("content-type", "")
+            assert "hydro_http_requests_total" in ok_prom.text
+    finally:
+        METRICS.reset()
+        db.dispose_database()

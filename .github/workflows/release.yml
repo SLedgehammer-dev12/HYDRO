@@ -56,6 +56,9 @@ jobs:
             exit 1
           fi
 
+      - name: Verify cross-file version parity (release_gate)
+        run: python3 scripts/release_gate.py --version-only
+
   # Guncelleme paketleri imzasiz yayinlanmaz: secret yoksa tum release zinciri
   # daha build baslamadan acik bir mesajla durur.
   signing_key_check:

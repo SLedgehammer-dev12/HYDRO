@@ -78,8 +78,13 @@ def validate_bind_security(settings) -> str | None:  # noqa: ANN001
     return _validate_bind_security(settings)
 
 
-def resolve_worker_count(database_url: str, raw_workers: str | None = None) -> int:
-    """Parse HYDRO_WEB_WORKERS and force single-worker execution on SQLite."""
+def resolve_worker_count(
+    database_url: str,
+    raw_workers: str | None = None,
+    *,
+    allow_unsafe_multiworker: bool | None = None,
+) -> int:
+    """Parse HYDRO_WEB_WORKERS and enforce single-worker mode until distributed queues/limits exist."""
 
     workers = 1
     if raw_workers is not None and raw_workers.strip():
@@ -92,6 +97,17 @@ def resolve_worker_count(database_url: str, raw_workers: str | None = None) -> i
         print(
             "  UYARI     : SQLite ve surec-ici OCR kuyrugu aktif oldugu icin "
             "HYDRO_WEB_WORKERS=1 degerine sabitlendi.",
+            file=sys.stderr,
+        )
+        return 1
+    if allow_unsafe_multiworker is None:
+        allow_unsafe_multiworker = os.environ.get(
+            "HYDRO_ALLOW_UNSAFE_MULTIWORKER", ""
+        ).strip().lower() in {"1", "true", "yes"}
+    if workers > 1 and not allow_unsafe_multiworker:
+        print(
+            "  UYARI     : Surec-ici OCR kuyrugu ve RateLimiter coklu worker'da paylasilmaz; "
+            "HYDRO_WEB_WORKERS=1 sabitlendi (gecersiz kilmak icin HYDRO_ALLOW_UNSAFE_MULTIWORKER=1).",
             file=sys.stderr,
         )
         return 1

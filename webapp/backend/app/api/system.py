@@ -7,19 +7,23 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Body, Depends, Query, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from pydantic import ValidationError
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session as OrmSession
 
 from hidrostatik_test.services.updater import UpdateError
 
+from .. import db as db_module
 from .. import schemas
 from ..core import security
 from ..core.config import Settings
 from ..core.errors import AppError, validation_error
+from ..core.metrics import METRICS
 from ..core.rate_limit import enforce_rate_limit
 from ..core.timeutil import json_safe
 from ..db import get_db
+from ..models import OcrAnalysis
 from ..services import db_admin as db_admin_service
 from ..services import sessions as session_service
 from ..services import system as system_service
@@ -445,6 +449,51 @@ def run_db_maintenance(
             clean_exports=payload.clean_exports,
             clean_orphan_uploads=payload.clean_orphan_uploads,
         )
+    )
+
+
+@router.get("/system/metrics")
+def get_system_metrics(
+    request: Request,
+    format: Literal["json", "prometheus"] = Query(default="json"),
+    db_sess: OrmSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Any:
+    _require_local_admin(request, settings)
+    queued_ocr = int(
+        db_sess.execute(
+            select(func.count()).select_from(OcrAnalysis).where(OcrAnalysis.status == "queued")
+        ).scalar_one()
+        or 0
+    )
+    running_ocr = int(
+        db_sess.execute(
+            select(func.count()).select_from(OcrAnalysis).where(OcrAnalysis.status == "running")
+        ).scalar_one()
+        or 0
+    )
+    snapshot = METRICS.snapshot()
+    dialect = db_module.get_engine().dialect.name
+    migration = db_module.current_schema_version()
+
+    if format == "prometheus":
+        body = METRICS.render_prometheus(
+            {
+                "hydro_ocr_queue_queued": float(queued_ocr),
+                "hydro_ocr_queue_running": float(running_ocr),
+            }
+        )
+        return PlainTextResponse(
+            content=body,
+            media_type="text/plain; version=0.0.4; charset=utf-8",
+        )
+
+    return json_safe(
+        {
+            **snapshot,
+            "ocr_queue": {"queued": queued_ocr, "running": running_ocr},
+            "database": {"dialect": dialect, "migration": migration},
+        }
     )
 
 
