@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.1.0 - 2026-11-24
+
+### Added & Changed
+
+- **Sadeleştirilmiş Çalışma Alanı (Faz 1–3, `PageHeader.tsx`, `TopBar.tsx`, `Sidebar.tsx`, `DashboardPage.tsx`, `GeometryPage.tsx`, `AirPage.tsx`, `PressurePage.tsx`, `ReportsPage.tsx`, `ProjectsPage.tsx`)**:
+  - Üst başlık ve gezinme çubukları inceltildi, sol form ağacı varsayılan kapalı hale getirildi ve `Dashboard` 4 ana katmanla sadeleştirildi.
+  - `Geometri & Saha` (`3` sekme) ve `Raporlar` (`2` sekme) sekmeli yapıya geçirildi; ikincil paneller `AirPage`, `PressurePage` ve `DashboardPage` üzerinde katlanabilir `<details>` alanlarına alındı; `ProjectsPage` başlık taşması giderildi.
+- **Birleştirilmiş Su Özelliği Backendleri & Referans Tabloları (`domain_adapter.py`, `coefficients.py`, `system.py`, `snapshot.py`, `CoefficientsPage.tsx`, `AirPage.tsx`)**:
+  - Otomatik su özelliği backend adlandırması `IAPWS-95` (`coolprop`) ve `IAPWS-IF97 Region 1` (`table_v1`) olarak güncellendi; A ve B referans tabloları (`BOTAŞ / Kurumsal Tablo`, `GAIL Referans Tablosu`) doğrudan `Otomatik` backend seçicisi altında seçilebilir ve hesaplanabilir hale getirildi.
+
+### Fixed
+
+- **020 / 022 Kabul Formlarında Bağımsız Hesap & Okunan/Hesaplanan Ayrımı (`dossier.py`, `form_details.py`, `AcceptanceFormEditor.tsx`)**:
+  - `Hava İçerik Testi (020)` ve `Basınç Testi (022)` kabul formlarında `A`, `B`, `Vp` ve `PT` değerleri taratılan form katsayısını kopyalamak yerine `(T, P)` koşullarından bağımsız hesaplanacak şekilde düzeltildi; `air_a_match`, `air_vt_match`, `pa_a_match` ve `pa_b_match` sapma bulguları eklendi; editör `2a. Okunan Girdi Değerleri` ve `2b. Hesaplanan Değerler` olarak ayrıldı.
+
 ## 2.0.0 - 2026-11-23
 
 ### Added

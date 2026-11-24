@@ -181,7 +181,7 @@ export function UpdateManagerModal() {
               Yüklü Sürüm
             </span>
             <p className="mt-1 font-mono text-base font-bold text-[var(--text)]">
-              v{status?.current_version ?? "2.0.0"}
+              v{status?.current_version ?? "2.1.0"}
             </p>
             <p className="mt-0.5 text-[10.5px] text-[var(--text-muted)]">
               {status?.runtime.frozen ? "Paketli Masaüstü (HydroWeb)" : "Kaynak / Web Sunucu Modu"}

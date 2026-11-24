@@ -136,7 +136,7 @@ Mevcut kod:
 - Oturumlari SQLite ve JSON olarak kaydedip geri yukleyebilir; PDF/Excel rapor uretir
 - Windows `.zip` ve macOS `.dmg` paketleri icin SHA-256 dogrulamali self-update akisina sahiptir
 - `HYDRO` repo ayrisma gecisi icin legacy `Programlar` release kaynagina fallback destekler
-- 251 web backend pytest testi (`%83` web kapsamı, CI `--fail-under=80` kapısı), 61 frontend Vitest testi (`20` dosya) ve `tests.test_report_ocr` (76 unittest, 1 skipped; önceki tam masaüstü paketi: 723 unittest) ile dogrulanir
+- 253 web backend pytest testi (`%83` web kapsamı, CI `--fail-under=80` kapısı), 63 frontend Vitest testi (`21` dosya) ve `tests.test_report_ocr` (76 unittest, 1 skipped; Tk diyalog sınıfı hariç tam masaüstü paketi: 725 unittest OK) ile dogrulanir
 
 Mevcut kod henuz sunlari tam modellememektedir:
 

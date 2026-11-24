@@ -1,17 +1,18 @@
-# Neler Yeni — HYDRO v2.0.0 (What's New)
+# Neler Yeni — HYDRO v2.1.0 (What's New)
 
-**Sürüm:** `v2.0.0` (`hidrostatik-test-v2.0.0`)  
-**Tarih:** 2026-11-23
+**Sürüm:** `v2.1.0` (`hidrostatik-test-v2.1.0`)  
+**Tarih:** 2026-11-24
 
 ---
 
-### 1. Sadeleştirilmiş & İçgüdüsel Yeni Arayüz
-- **3 Fazlı Mühendislik Menüsü:** Sol gezinme **Başlangıç**, **Denetim & Hesap** ve **Çıktı & Araçlar** gruplarıyla sadeleştirildi; `Katsayılar` ve `Ayarlar` katlanabilir **Gelişmiş & Ayarlar** alanına alındı (`Alt+1..9` kısayolları korundu).
-- **Daha Geniş Çalışma Alanı & 4 Adımlı İlerleme:** Çift sabit üst çubuk yığılması kaldırıldı (`DecisionStrip` yalnızca hesap ve form sekmelerinde görünür), sağ panel isteğe bağlı hale getirildi ve **Dashboard** üzerinde doğrudan tıklanabilir **4 adımlı ilerleme çubuğu** eklendi.
+### 1. Faz 1–3 Arayüz Sadeleştirmesi
+- **Daha Temiz Kabuk & Dashboard:** Üst barlar inceltildi, sol form ağacı varsayılan kapalı hale getirildi ve `Dashboard` 4 katmana indirildi.
+- **Sekmeli Sayfalar & Katlanabilir Detaylar:** `Geometri & Saha` (`3` sekme) ve `Raporlar` (`2` sekme) düzenlendi; `Hava Testi` ve `Basınç Testi` sayfalarındaki ikincil bloklar katlanabilir alanlara taşındı; `Projeler` başlık taşması düzeltildi.
 
-### 2. İlk Kullanım Rehberi & 5 Adımlı Demo Turu
-- **Kullanıcı Onaylı Başlangıç Kartı:** İlk açılışta ekranı kilitlemeden **"Rehberli Demo Turunu Başlat"**, **"Kendi Projemle Başla"** veya **"Şimdi değil"** seçeneklerini sunar.
-- **Etkileşimli Demo Turu:** Tek tıkla örnek boru hattı projesi oluşturarak **Proje → Geometri & 3D → OCR → Hava/Basınç Testi → Raporlar** adımlarını uygulamalı tanıtır; tur sonunda örnek projeyi tek tıkla tutabilir veya temizleyebilirsiniz (`?` Yardım penceresinden dilediğiniz zaman tekrar açılır).
+### 2. 020 / 022 Kabul Formlarında Bağımsız Program Hesabı
+- `Hava İçerik Testi (020)` ve `Basınç Testi (022)` formlarında `A`, `B`, `Vp` ve `PT` değerleri formdan okunan katsayıları yansıtmak yerine `(T, P)` girdilerinden bağımsız hesaplanır.
+- Değerlendirme paneli **2a. Okunan Girdi Değerleri** ve **2b. Hesaplanan Değerler** olarak ikiye ayrıldı; taranan form değerleriyle karşılaştırma bulguları (`air_a_match`, `air_vt_match`, `pa_a_match`, `pa_b_match`) eklendi.
 
-### 3. Altyapı, TLS Güvenilirliği & Şartname Uyumu
-- Şartname 12, 14.1–14.3, 15, 16 ve 17 operasyon/zaman serisi modelleri, segment bazlı SMYS, `include_raw_ocr` rapor eki, form `If-Match`/`409` eşzamanlılık koruması, Docker `X-Hydro-Admin-Token` ve macOS/Windows `truststore` + `certifi` güncelleyici TLS sertifika doğrulaması dahildir.
+### 3. Birleşik Su Özelliği Backendleri (`IAPWS-95` / `IAPWS-IF97 Region 1` / Referans Tabloları)
+- `CoolProp EOS` → **`IAPWS-95`**, `Table Interpolation v1` → **`IAPWS-IF97 Region 1`** olarak adlandırıldı.
+- `BOTAŞ / Kurumsal Tablo` ve `GAIL Referans Tablosu` hem A hem B katsayıları için doğrudan `Otomatik` backend seçimi altında hesaplama motoru olarak çalıştırılabilir hale getirildi.

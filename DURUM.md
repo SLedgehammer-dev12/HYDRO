@@ -2,9 +2,9 @@
 
 > Tek kaynak özet. Ayrıntı için "Ayrıntılı notlar" bölümündeki dosyalara bakın.
 >
-> **Son güncelleme:** 2026-11-23
-> **Dal:** `main` (`v2.0.0` — Sadeleştirilmiş 3 Fazlı Arayüz, Rehberli Demo Turu, TLS & Web v3 Sertleştirmesi)
-> **Son commit:** `hidrostatik-test-v2.0.0` arayüz sadeleştirmesi, 5 adımlı rehberli demo turu ve sürüm yükseltmesi
+> **Son güncelleme:** 2026-11-24
+> **Dal:** `main` (`v2.1.0` — Faz 1–3 Sadeleştirme, 020/022 Bağımsız Hesap & Birleşik IAPWS-95 / IAPWS-IF97 Backendleri)
+> **Son commit:** `hidrostatik-test-v2.1.0` arayüz sadeleştirmesi, 020/022 bağımsız kabul hesapları ve birleşik su özelliği backendleri
 
 ---
 
@@ -12,13 +12,13 @@
 
 | Alan | Durum | Kanıt |
 | --- | --- | --- |
-| Masaüstü uygulaması | Çalışıyor, kararlı (`hidrostatik_test/ui/*` kapsam dışı tutuldu) | `tests.test_report_ocr` 76 unittest OK (`skipped=1`; önceki tam masaüstü koşusu: 723 unittest) |
-| Web backend (FastAPI) | Çalışıyor | 251 pytest PASS (Alembic `0003`, `SAWarning=0`, `%83` kapsam ≥ `%80` kapısı), 87 OpenAPI path / 101 operation (`openapi.json`), 50 dosyada `mypy` temiz |
-| Web frontend (React 19) | Çalışıyor | `npm run check:api` (74/87 yol), `npm run lint` (0 hata, `jsx-a11y`), `npm test` (63 Vitest / 21 dosya), `npm run typecheck` + `npm run build` + `check:bundle` PASS (`150,1 kB` gzip ilk yükleme JS), `verify-tabs.mjs` 12/12 PASS |
+| Masaüstü uygulaması | Çalışıyor, kararlı (`hidrostatik_test/ui/*` kapsam dışı tutuldu) | `tests.test_report_ocr` 76 unittest OK (`skipped=1`; tam paket: 733 test keşfedildi, Tk diyalog sınıfı hariç **725 OK**, sınıf tek başına **16 OK**) |
+| Web backend (FastAPI) | Çalışıyor | 253 pytest PASS (Alembic `0003`, `SAWarning=0`, `%83` kapsam ≥ `%80` kapısı), 87 OpenAPI path / 101 operation (`openapi.json`), 50 dosyada `mypy` temiz |
+| Web frontend (React 19) | Çalışıyor | `npm run check:api` (74/87 yol), `npm run lint` (0 hata, `jsx-a11y`), `npm test` (63 Vitest / 21 dosya), `npm run typecheck` + `npm run build` + `check:bundle` PASS (`148,3 kB` gzip ilk yükleme JS), `verify-tabs.mjs` 12/12 PASS |
 | Program İkon & Marka Sistemi | Hazır | Boru kesiti + su dalgası + manometre ikonu (`tools/generate_icons.py`, `assets/icons/*`, `webapp/frontend/public/*`, `<HydroLogo />`, PyInstaller/Inno Setup/Tkinter) |
 | Web Güncelleme Yöneticisi | Çalışıyor | `/api/update/*`, SHA-256 + fail-closed Ed25519 `.sig` doğrulama, `UpdateManagerModal`, macOS `.dmg` / Win `.exe`/`.zip` kurulum |
 | BOTAŞ Test Bölümü Formları | Çalışıyor | Seçenek 1 sol menü (`015`..`023`, `KUR-001`, `KUR-002` + 5 ek), `SectionFormPage`, `rows`/`pig_runs`/`findings`, tekil OCR, `020`/`022` gömülü hesaplama ve `023` (`BOT-FRM-CDB-001-024`) Şartname 16–17 çift yönlü entegrasyonu |
-| Bağımsız Web paketleme | Hazır (`v2.0.0`) | `HydroWeb.spec`, `build_web_dmg.sh` (`arm64`, taranmış PDF `--self-test` PASS), `build_web_exe.ps1` (WinRT `Windows.Media.Ocr` + `Windows.Data.Pdf`) + `installer/hydro_web.iss` |
+| Bağımsız Web paketleme | Hazır (`v2.1.0`) | `HydroWeb.spec`, `build_web_dmg.sh` (`arm64`, taranmış PDF `--self-test` PASS), `build_web_exe.ps1` (WinRT `Windows.Media.Ocr` + `Windows.Data.Pdf`) + `installer/hydro_web.iss` |
 | Kurumsal Windows OCR/PDF | Çalışıyor | Süreç-içi `Windows.Media.Ocr` + `Windows.Data.Pdf`, Proxy-bypass `127.0.0.1` + `instance_id` doğrulama, SQLite `WAL → DELETE` fallback |
 | Domain parity | Masaüstü ile aynı kaynak | `hidrostatik_test.domain` doğrudan import edilir |
 | Proje / Test Bölümü (Section) DB | Çalışıyor | `projects` + `sessions.project_id` + `inputs.section_meta` |
@@ -122,12 +122,23 @@ Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen iş
 - [x] `.xlsx` / `.xls` test raporlarının doğrudan hücre tabanlı (`source="spreadsheet"`) okunması (`openpyxl` + `xlrd`, magic-byte/ZIP doğrulama).
 - [x] OCR Test Raporu Kontrolü kayıt & hesap hattı (`commit-dossier` liste sözleşmesi, mühendislik hesap paketi & boş `.xls` ayrımı, proje/KP kesit eşleme veya otomatik yeni proje + 11 zorunlu form slotu açma, `profile`/`air`/`pressure`/`pig` `TestResult` kaydı + canlı hidrasyon, tekil rapor onay/uygulama).
 - [x] OCR DB kuyruğu + worker + iptal (`ocr_queue.py` bounded executor, `async_mode`/`Prefer: respond-async` `202` + `estimated_wait_s`, `cancel_event`, `ocr_timeout_s`, parametrik `language`, başlangıç `worker_interrupted` toparlaması).
-- [x] Web güvenlik & dağıtım sertleştirmesi (geriye dönük uyumlu): fail-closed `HYDRO_AUTH_MODE` bağlanma kapısı + `desktop_launcher.py` `validate_bind_security`, harici `/theme-init.js` + CSP + `X-Content-Type-Options`/`X-Frame-Options`/`COOP`/`CORP`/`Cache-Control: no-store`, `Host` DNS-rebinding kapısı, `/api/update/*` yerel yönetici + same-origin/proxy başlık kapısı, akışlı dosya boyutu sınırı (`read_upload_bounded`), bellek-içi `RateLimiter` (`429 Retry-After`), maskelenmiş DB logları ve `Dockerfile`/`docker-compose.yml`/CI düzeltmeleri.
+- [x] Web güvenlik & dağıtım sertleştirmesi (geriye dönük uyumlu): fail-closed `HYDRO_AUTH_MODE` bağlanma kapısı + `desktop_launcher.py` `validate_bind_security`, harici `/theme-init.js` + CSP + `X-Content-Type-Options`/`X-Frame-Options`/`COOP`/`CORP`/`Cache-Control: no-store`, `Host` DNS-rebinding kapısı, `/api/update/*` yerel yönetici + same-origin/proxy başlık kapısı, akışlı dosya boyutu sınırı (`stream_upload_to_tempfile`; eski `read_upload_bounded` artık kullanılmıyor), bellek-içi `RateLimiter` (`429 Retry-After`), maskelenmiş DB logları ve `Dockerfile`/`docker-compose.yml`/CI düzeltmeleri.
 - [x] Alembic üretim migrasyonu (`migrations/versions/0002_baseline.py` → `0003_drop_duplicate_indexes.py`, `migrations_runner.py`, legacy `0001`/`0002` köprüsü, SQLite FK/Postgres advisory lock koruması, geri alınabilir `restore_db_backup`, `HYDRO_AUTO_MIGRATE`, `HydroWeb.spec` paketlemesi).
 - [ ] Auth / OIDC + iki kişi onay kuralı (MVP'de anonim `X-Session-ID`).
 - [ ] Postgres runtime testi (kod uyumlu, `psycopg` kurulu değil).
-- [x] Frontend birim testleri, kod bölme & paket bütçesi (`28` Vitest testi, rota/Recharts/3D lazy-loading, Vite 8 Rolldown chunk bölmesi, `check:bundle` ≤ `200 kB` gzip kapısı, `GZipMiddleware` + HTML `no-cache` bfcache uyumu + `verify-tabs.mjs`).
+- [x] Frontend birim testleri, kod bölme & paket bütçesi (`check:bundle` ≤ `200 kB` gzip kapısı, rota/Recharts/3D lazy-loading, Vite 8 Rolldown chunk bölmesi, `GZipMiddleware` + HTML `no-cache` bfcache uyumu + `verify-tabs.mjs`; güncel: **63 Vitest / 21 dosya**, `150,1 kB` ilk JS gzip).
 - [x] 3D gerçek veri: `profile_points[]` / `equipment[]` girdileri (`SiteSurveyPanel.tsx`, `buildSceneData()`, `build_scene()`, `build_project_scene()`, yoksa açık yaklaşık sahne + uyarı bayrakları).
+
+**v2.0.0 canlı denetiminden (docs/analysis_report_v4.md) açık işler:**
+
+- [ ] Rehberli tur <1024 px fallback: hedef gizliyse mobil çekmeceyi aç veya sabit konumlu popover'a düş; `GuidedTour.test.tsx`'e dar görünüm senaryosu ekle (v4 F18).
+- [ ] `POST /api/projects/generate-sample` için rate limit + aynı `code` ile tekrar kullanım/otomatik son ek; onboarding "mevcut demo varsa aç" kontrolü (v4 F19).
+- [ ] Onboarding kısmi hatasında oluşan demo projeyi temizle veya ID'yi tur boyunca sakla (v4 F20).
+- [ ] Yazma modellerini (`SessionCreate`, `ProjectCreate`, `ResultCreate`, `TimeSeriesBatchCreate`, `SnapshotApply`, `OcrApplyRequest`) `StrictWriteModel`'e taşı (v4 F21).
+- [ ] CI'ya `dump_openapi --check`, `check:api` ve `verify-tabs.mjs` adımlarını ekle; `api_contract.md`'yi gerçek 87 path / 101 operation yüzeyiyle eşitle (v4 F22).
+- [ ] OCR sekmesinden ayrılınca sunucu işi için görünür arka plan durumu veya `cancelOcrAnalysis` kararı (v4 F24).
+- [ ] Tk diyalog testlerini ayrı süreç/job'a al; `Tcl_AsyncDelete` sıralama çökmesini gider (v4 F25).
+- [ ] Yardım menüsündeki "Rehberli Demo Turu"nu onboarding ile birleştir (örnek proje üret) veya "İş akışı turu" olarak yeniden adlandır (v4 F26).
 
 ### 4.2 Domain / masaüstü (P1–P2, `tasks/todo.md`)
 
@@ -166,7 +177,7 @@ Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen iş
 
 ---
 
-## 6. Doğrulama (son çalıştırma: 2026-11-23)
+## 6. Doğrulama (son çalıştırma: 2026-11-24, `v2.1.0`)
 
 ```bash
 # Lint & tip denetimi
@@ -176,19 +187,22 @@ python3 -m mypy --ignore-missing-imports webapp/backend/app    # Success: no iss
 
 # Web backend (Alembic + API + OpenAPI sözleşmesi + domain parity + %80 kapsam kapısı)
 python3 -m coverage run --source=webapp/backend/app -m pytest webapp/backend/tests -q -W default::sqlalchemy.exc.SAWarning
-python3 -m coverage report --fail-under=80                     # 251 passed (SAWarning yok), %83 kapsam
+python3 -m coverage report --fail-under=80                     # 253 passed (SAWarning yok), %83 kapsam
 
 # OCR/PDF servis birim testleri
 python3 -m unittest tests.test_report_ocr                      # 76 tests OK (skipped=1)
 
-# Masaüstü tam paket (önceki baseline koşu)
-python3 -m unittest discover -s tests -p "test_*.py"           # 723 tests OK (skipped=1)
+# Masaüstü tam paket (Tk diyalog sınıfı ayrı süreçte; v4 denetimi)
+python3 -m unittest tests.test_ui_workflow                  # 119 tests OK
+python3 -m unittest tests.test_download_dialog              # 16 tests OK
+# Tam koşu: 733 test keşfedilir; sıralamaya bağlı Tcl_AsyncDelete nedeniyle
+# DownloadDialogTkTests dışlandığında 725 OK (skipped=1). Ayrıntı: docs/analysis_report_v4.md §3.
 
 # Masaüstü paketli Web self-test
 python3 webapp/desktop_launcher.py --self-test                 # SELF_TEST_OK
 
 # Frontend sözleşme, derleme, lint, paket bütçesi & test
-cd webapp/frontend && npm run check:api && npm run lint && npm test && npm run typecheck && npm run build && npm run check:bundle  # PASS (63 Vitest / 21 dosya, 150,1 kB gzip)
+cd webapp/frontend && npm run check:api && npm run lint && npm test && npm run typecheck && npm run build && npm run check:bundle  # PASS (63 Vitest / 21 dosya, 148,3 kB gzip)
 
 # Sekme + BOTAŞ Form Ağacı & 020/022/023 Gömülü Hesaplama & Güncelleme Yöneticisi smoke (port 8099, izole DB)
 cd webapp/frontend && HYDRO_APP_URL=http://127.0.0.1:8099 \
@@ -232,13 +246,14 @@ docker compose -f webapp/docker-compose.yml up --build
 | `docs/spec/report_forms.md` | Resmî form envanteri, gerçek saha değerleri, OCR kalibrasyonu |
 | `docs/ui_ergonomics.md` | Masaüstü ergonomi kararları |
 | `docs/codebase_map.md` | Üretilen kod haritası |
+| `docs/analysis_report_v4.md` | 23 Kasım 2026 canlı denetim raporu (`v2.0.0`): F1–F27 durum tablosu, ölçümler, yol haritası |
 | `webapp/docs/implementation_status.md` | Web uygulaması durumu ve doğrulama |
 | `webapp/docs/parity_matrix.md` | Masaüstü↔web parity matrisi, 28 maddelik eksik listesi |
 | `webapp/docs/api_contract.md` | API sözleşmesi |
 | `webapp/docs/architecture.md` | Web mimarisi |
 | `webapp/docs/ux_plan.md` | UX planı + açık UX kararları |
 | `webapp/docs/decisions.md` | Web karar kaydı |
-| `WHATS_NEW.md` | Sürüm bazlı yenilik özeti (`v2.0.0`) |
+| `WHATS_NEW.md` | Sürüm bazlı yenilik özeti (`v2.1.0`) |
 | `CHANGELOG.md` | Sürüm bazlı yapılanlar |
 
 ---

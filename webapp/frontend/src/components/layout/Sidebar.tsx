@@ -503,7 +503,7 @@ export function Sidebar() {
                 : "Kontrol"}
           </span>
           <span className="font-mono text-[10px] text-[var(--text-faint)]">
-            · v{meta?.app.version ?? "2.0.0"}
+            · v{meta?.app.version ?? "2.1.0"}
           </span>
         </span>
         <button
