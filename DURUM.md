@@ -3,8 +3,8 @@
 > Tek kaynak özet. Ayrıntı için "Ayrıntılı notlar" bölümündeki dosyalara bakın.
 >
 > **Son güncelleme:** 2026-11-24
-> **Dal:** `main` (`v2.1.0` — Faz 1–3 Sadeleştirme, 020/022 Bağımsız Hesap & Birleşik IAPWS-95 / IAPWS-IF97 Backendleri)
-> **Son commit:** `hidrostatik-test-v2.1.0` arayüz sadeleştirmesi, 020/022 bağımsız kabul hesapları ve birleşik su özelliği backendleri
+> **Dal:** `main` (`v2.1.1` — `R1–R18` Kurumsal Güvenlik/Otomasyon + `OCR-1..4` Hibrit Doküman Okuma + CI Sertleştirme)
+> **Son commit:** `hidrostatik-test-v2.1.1` (`R1–R18`, `F18–F29`, `OCR-1..4`, OIDC/RBAC/İki Kişi Onayı, Kalıcı OCR Worker)
 
 ---
 

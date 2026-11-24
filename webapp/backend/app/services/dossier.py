@@ -12,7 +12,7 @@ from collections import Counter
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Sequence, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as OrmSession
@@ -989,7 +989,8 @@ def find_similar_projects(
     ).all()
 
     matches: list[dict[str, Any]] = []
-    for proj, sec_count in rows:
+    for raw_proj, sec_count in rows:
+        proj = cast(Project, raw_proj)
         sim = compute_project_similarity(detected_name, proj.name)
         if sim >= threshold:
             matches.append(
@@ -997,7 +998,7 @@ def find_similar_projects(
                     "id": proj.id,
                     "name": proj.name,
                     "code": proj.code or "",
-                    "section_count": int(sec_count or 0),
+                    "section_count": int(cast(Any, sec_count) or 0),
                     "similarity": sim,
                     "similarity_pct": round(sim * 100.0, 1),
                     "exact_match": sim >= 0.96,

@@ -2241,7 +2241,7 @@ export interface ApiError {
 ## 16. Otomatik Üretilen OpenAPI Uç Envanteri
 
 <!-- generated:openapi-inventory:start -->
-> OpenAPI `info.version=2.1.0` · **94** path / **109** operasyon (`sync_api_inventory` ile üretildi).
+> OpenAPI `info.version=2.1.1` · **94** path / **109** operasyon (`sync_api_inventory` ile üretildi).
 
 | Metot | Yol | Özet / Operation ID |
 | --- | --- | --- |

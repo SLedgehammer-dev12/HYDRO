@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.1.1 - 2026-11-24
+
+### Added & Changed
+
+- **Kurumsal Kimlik Doğrulama, RBAC & İki Kişi Onayı (`R4`, `core/auth.py`, `api/auth.py`, `migrations/0005`, `TopBar.tsx`, `ApprovalsCard.tsx`)**:
+  - OIDC Authorization Code + PKCE (`S256`), HMAC imzalı `HttpOnly; SameSite=Lax` oturum çerezi, idle timeout / sliding yenileme ve `operator < supervisor < admin` RBAC desteği eklendi; `auth_mode="none"` yerel tek kullanıcı kipi korundu.
+  - Oturum nihai işaretleme (`status="final"`) ve veritabanı geri yükleme (`POST /api/system/db-restore`) için kendi isteğini onaylamayı engelleyen iki kişi onayı iş akışı ve `ApprovalsCard` yönetim paneli eklendi.
+- **Kalıcı OCR Kuyruğu & Doküman Okuma İyileştirmeleri (`R3`, `OCR-1..4`, `report_ocr.py`, `worker/ocr.py`, `FieldsTable.tsx`)**:
+  - Harici/çok-worker uyumlu veritabanı tabanlı kalıcı OCR worker (`migrations/0004`, lease/heartbeat/cancel polling) eklendi.
+  - Sayfa bazlı hibrit PDF/OCR geri dönüşü, Pillow kontrast/keskinleştirme ve otomatik `90°`/`270°` yön denemesi, `pdfplumber` tablo hücresi çıkarımı ve arayüzde tek tıkla uygulanabilen alan kurallı ondalık hata önerileri (`suggested_fixes`) eklendi.
+- **Sürüm Kapısı, Gözlemlenebilirlik & Mühendislik Kalitesi (`R1–R18`)**:
+  - Tek komut sürüm kapısı (`scripts/release_gate.py`), Playwright viewport matrisi ve E2E akışları, otomatik form taslağı/kısayollar, LTTB grafik örnekleme, `axe-core` erişilebilirlik testleri, OpenAPI → TypeScript şema senkronu (`gen:api-types`), `api_contract.md` otomatik envanter üretimi ve yedek geri yükleme tatbikatı (`scripts/backup_drill.py`) eklendi.
+
+### Fixed
+
+- **Denetim v4 Bulguları (`F18–F29`) & CI Kapıları**:
+  - Dar ekran demo turu fallback, sıkı şema doğrulama, hız sınırlama, arka plan OCR gösterge/iptal akışı, Tk teardown koruması, `mypy` SQLAlchemy tuple tipleri, CI masaüstü test `sys.path`, `hypothesis` bağımlılığı ve PostgreSQL `/api/health` (`db`) anahtar doğrulaması düzeltildi.
+
 ## 2.1.0 - 2026-11-24
 
 ### Added & Changed

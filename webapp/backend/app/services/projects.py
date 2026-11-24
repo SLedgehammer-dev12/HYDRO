@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session as OrmSession
@@ -167,7 +167,10 @@ def list_projects(
     ).all()
 
     return {
-        "items": [serialize_project(project, count) for project, count in rows],
+        "items": [
+            serialize_project(cast(Project, project), int(cast(Any, count) or 0))
+            for project, count in rows
+        ],
         "total": int(total),
         "limit": limit,
         "offset": offset,

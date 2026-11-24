@@ -34,8 +34,8 @@ def test_postgres_migrations_and_core_crud_flow(tmp_path: Path) -> None:
             health = client.get("/api/health")
             assert health.status_code == 200, health.text
             health_json = health.json()
-            assert health_json["database"]["dialect"] == "postgresql"
-            assert health_json["database"]["migration"] == db.CURRENT_MIGRATION
+            assert health_json["db"]["dialect"] == "postgresql"
+            assert health_json["db"]["migration"] == db.CURRENT_MIGRATION
 
             proj_res = client.post(
                 "/api/projects",

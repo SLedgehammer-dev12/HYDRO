@@ -60,6 +60,7 @@ jobs:
           trap 'rm -f "$TMP_RUNNER"' EXIT
           cat <<'PY' > "$TMP_RUNNER"
           import pathlib, sys, unittest
+          sys.path.insert(0, str(pathlib.Path.cwd()))
           loader = unittest.TestLoader()
           suites = [
               loader.discover("tests", pattern=p.name)
@@ -84,6 +85,7 @@ jobs:
           trap 'rm -f "$TMP_RUNNER"' EXIT
           cat <<'PY' > "$TMP_RUNNER"
           import pathlib, sys, unittest
+          sys.path.insert(0, str(pathlib.Path.cwd()))
           loader = unittest.TestLoader()
           suites = [
               loader.discover("tests", pattern=p.name)
