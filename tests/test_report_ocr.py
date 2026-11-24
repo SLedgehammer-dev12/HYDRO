@@ -1654,6 +1654,102 @@ class DocumentReadingImprovementsTests(unittest.TestCase):
         self.assertAlmostEqual(by_field["pressure_test.t_initial"].suggested_value, 6.84)
         self.assertAlmostEqual(by_field["pressure_test.b"].suggested_value, 185.2)
 
+    @unittest.skipUnless(HAVE_PIL, "Pillow yok: DPI/goruntu iyilestirme testleri atlandi")
+    def test_orientation_retry_handles_180_and_dpi_escalation_improves_low_conf(self) -> None:
+        from PIL import Image
+
+        img = Image.new("L", (120, 80), color=220)
+
+        def _fake_tess(
+            target: Any, *, language: str | None = None
+        ) -> tuple[str, float | None, str]:
+            # Check pixel signature at corner or mock call sequence via size/rotate
+            return ("", 0.2, "")
+
+        # Verify 180 deg recovery via side_effect sequence: 0->empty, 90->empty, 270->empty, 180->full
+        seq = [
+            ("", 0.15, ""),
+            ("", 0.15, ""),
+            ("", 0.15, ""),
+            ("Basinc Testi Rapor No: BOT-180\nTest Basinci: 95 bar", 0.91, ""),
+        ]
+        with mock.patch.object(ocr, "_run_tesseract", side_effect=seq):
+            text, conf, warn = ocr._ocr_image_with_orientation_retry(img, "tesseract")
+        self.assertIn("BOT-180", text)
+        self.assertAlmostEqual(conf, 0.91)
+        self.assertIn("180°", warn)
+
+        # Verify 300 DPI escalation when 200 DPI returns low confidence
+        hi_img = Image.new("L", (180, 120), color=220)
+        with (
+            mock.patch.object(
+                ocr,
+                "_ocr_image_with_orientation_retry",
+                side_effect=[
+                    ("Test Basinci: 95 bar\nA: 44.97", 0.40, ""),
+                    ("Test Basinci: 95 bar\nA: 44.97\nB: 185.2", 0.93, ""),
+                ],
+            ),
+            mock.patch.object(ocr, "_iter_rendered_pdf_pages", return_value=iter([hi_img])) as ren,
+        ):
+            page = ocr._ocr_pdf_page_with_dpi_escalation(Path("dummy.pdf"), 0, img, "tesseract")
+        ren.assert_called_once()
+        self.assertEqual(ren.call_args.kwargs.get("dpi"), 300)
+        self.assertAlmostEqual(page.confidence, 0.93)
+        self.assertIn("300 DPI", page.warning)
+
+    def test_ocr_numeric_and_date_confusion_normalization(self) -> None:
+        self.assertAlmostEqual(ocr.parse_number("44,9O"), 44.9)
+        self.assertAlmostEqual(ocr.parse_number("1,O2"), 1.02)
+        self.assertAlmostEqual(ocr.parse_number("l5.4"), 15.4)
+        self.assertAlmostEqual(ocr.parse_number("B0,5 bar"), 80.5)
+        self.assertAlmostEqual(ocr.parse_number("1e-6"), 1e-6)
+        self.assertEqual(ocr.parse_date("15.ll.2026"), "2026-11-15")
+
+    def test_cross_field_physics_suggested_fixes(self) -> None:
+        report = HydrotestReport(
+            pipe_od_mm=ExtractedField(value=406.4),
+            wall_mm=ExtractedField(value=8.74),
+            pipe_id_mm=ExtractedField(value=350.0),
+            air_test=AirTestFields(
+                vp=ExtractedField(value=10.0),
+                vpa=ExtractedField(value=10.2),
+                ratio=ExtractedField(value=0.2),
+            ),
+            pressure_test=PressureTestFields(
+                t_initial=ExtractedField(value=20.0),
+                t_final=ExtractedField(value=21.5),
+                delta_t=ExtractedField(value=4.5),
+            ),
+        )
+        by_field = {fix.field: fix for fix in ocr.suggest_field_fixes(report)}
+        self.assertEqual(set(by_field), {"pressure_test.delta_t", "pipe_id_mm", "air_test.ratio"})
+        self.assertAlmostEqual(by_field["pressure_test.delta_t"].suggested_value, 1.5)
+        self.assertAlmostEqual(by_field["pipe_id_mm"].suggested_value, 388.92)
+        self.assertAlmostEqual(by_field["air_test.ratio"].suggested_value, 0.02)
+
+        dict_fixes = ocr.suggest_field_fixes_from_report_dict(report.to_dict())
+        self.assertEqual(
+            {item["field"] for item in dict_fixes},
+            {"pressure_test.delta_t", "pipe_id_mm", "air_test.ratio"},
+        )
+
+    @unittest.skipUnless(HAVE_PIL, "Pillow yok: golge/egiklik testi atlandi")
+    def test_shadow_flattening_and_deskew_preserve_clean_grayscale_output(self) -> None:
+        from PIL import Image, ImageDraw
+
+        img = Image.new("RGB", (320, 220), color=(235, 235, 235))
+        draw = ImageDraw.Draw(img)
+        draw.rectangle([0, 0, 160, 220], fill=(110, 110, 110))
+        for y in range(25, 200, 25):
+            draw.rectangle([20, y, 300, y + 6], fill=(30, 30, 30))
+
+        flattened = ocr._normalize_uneven_lighting(img.convert("L"))
+        self.assertEqual(flattened.mode, "L")
+        processed = ocr._preprocess_image_for_ocr(img)
+        self.assertEqual(processed.mode, "L")
+        self.assertEqual(processed.size, img.size)
+
 
 if __name__ == "__main__":
     unittest.main()

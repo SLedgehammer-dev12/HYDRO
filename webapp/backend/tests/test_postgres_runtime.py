@@ -73,7 +73,7 @@ def test_postgres_migrations_and_core_crud_flow(tmp_path: Path) -> None:
             assert sess_res.status_code == 201, sess_res.text
             sess_id = sess_res.json()["id"]
 
-            upd_res = client.patch(
+            upd_res = client.put(
                 f"/api/sessions/{sess_id}",
                 headers=headers,
                 json={"notes": "verified on postgresql"},

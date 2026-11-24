@@ -1313,6 +1313,15 @@ def _select_windows_ocr_engine(
     return None, "", avail
 
 
+def _safe_find_spec(module_name: str) -> Any:
+    """Safely check dotted module availability when top-level namespace pkg is absent."""
+
+    try:
+        return importlib.util.find_spec(module_name)
+    except (ModuleNotFoundError, ValueError):
+        return None
+
+
 def _probe_windows_ocr(
     *, force_refresh: bool = False
 ) -> tuple[bool, str | None, tuple[str, ...], str]:
@@ -1321,8 +1330,8 @@ def _probe_windows_ocr(
     if sys.platform != "win32":
         return False, None, (), ""
     if (
-        importlib.util.find_spec("winrt.windows.media.ocr") is None
-        or importlib.util.find_spec("winrt.windows.globalization") is None
+        _safe_find_spec("winrt.windows.media.ocr") is None
+        or _safe_find_spec("winrt.windows.globalization") is None
         or importlib.util.find_spec("PIL") is None
     ):
         return False, None, (), ""
@@ -1376,8 +1385,8 @@ def windows_pdf_available() -> bool:
     if sys.platform != "win32":
         return False
     if (
-        importlib.util.find_spec("winrt.windows.data.pdf") is None
-        or importlib.util.find_spec("winrt.windows.storage.streams") is None
+        _safe_find_spec("winrt.windows.data.pdf") is None
+        or _safe_find_spec("winrt.windows.storage.streams") is None
     ):
         return False
     try:
@@ -1938,8 +1947,73 @@ def _render_pdf_pages(path: Path) -> list[Any]:
     return list(_iter_rendered_pdf_pages(path, max_pages=_max_ocr_pages(), dpi=200))
 
 
+#: Düşük güvenli taranmış sayfalarda 300 DPI ile yeniden okuma eşiği.
+OCR_LOW_CONFIDENCE_ESCALATE: Final[float] = 0.65
+
+
+def _normalize_uneven_lighting(gray: Any) -> Any:
+    """Flatten strong shadows/uneven lighting typical of site phone photos."""
+
+    try:
+        from PIL import Image, ImageChops, ImageFilter
+    except ImportError:
+        return gray
+    if gray.width < 64 or gray.height < 64:
+        return gray
+    small_w = max(16, gray.width // 8)
+    small_h = max(16, gray.height // 8)
+    bg_small = gray.resize((small_w, small_h), Image.Resampling.BILINEAR).filter(
+        ImageFilter.GaussianBlur(radius=3)
+    )
+    bg = bg_small.resize(gray.size, Image.Resampling.BILINEAR)
+    bg_min, bg_max = bg.getextrema()
+    if (bg_max - bg_min) < 60:
+        return gray
+    return ImageChops.invert(ImageChops.subtract(bg, gray))
+
+
+def _row_projection_variance(gray_small: Any) -> float:
+    w, h = gray_small.size
+    if w <= 0 or h <= 1:
+        return 0.0
+    pixels = list(gray_small.tobytes())
+    row_means = [sum(pixels[r * w : (r + 1) * w]) / w for r in range(h)]
+    overall = sum(row_means) / h
+    return sum((val - overall) ** 2 for val in row_means) / h
+
+
+def _deskew_small_angle(gray: Any) -> Any:
+    """Correct small page tilt (+/- 4 deg) using horizontal row-projection variance."""
+
+    try:
+        from PIL import Image
+    except ImportError:
+        return gray
+    if gray.width < 200 or gray.height < 200:
+        return gray
+    probe_w = min(240, gray.width)
+    probe_h = max(32, int(round(gray.height * (probe_w / gray.width))))
+    probe = gray.resize((probe_w, probe_h), Image.Resampling.BILINEAR)
+    base_var = _row_projection_variance(probe)
+    if base_var <= 0.0:
+        return gray
+    best_angle = 0.0
+    best_var = base_var
+    for angle in (-4.0, -3.0, -2.0, -1.0, 1.0, 2.0, 3.0, 4.0):
+        rotated_probe = probe.rotate(angle, resample=Image.Resampling.BILINEAR, fillcolor=255)
+        var = _row_projection_variance(rotated_probe)
+        if var > best_var:
+            best_var = var
+            best_angle = angle
+    if best_angle != 0.0 and best_var > base_var * 1.12:
+        return gray.rotate(
+            best_angle, resample=Image.Resampling.BICUBIC, expand=False, fillcolor=255
+        )
+    return gray
+
+
 def _preprocess_image_for_ocr(image: Any) -> Any:
-    """Apply lightweight contrast normalization and mild sharpening for noisy scans."""
+    """Apply lighting normalization, small-angle deskew, contrast normalization, and sharpen."""
 
     try:
         from PIL import Image, ImageFilter, ImageOps
@@ -1948,7 +2022,9 @@ def _preprocess_image_for_ocr(image: Any) -> Any:
     if not isinstance(image, Image.Image):
         return image
     gray = image.convert("L") if image.mode != "L" else image
-    enhanced = ImageOps.autocontrast(gray, cutoff=1)
+    lit = _normalize_uneven_lighting(gray)
+    aligned = _deskew_small_angle(lit)
+    enhanced = ImageOps.autocontrast(aligned, cutoff=1)
     return enhanced.filter(ImageFilter.SHARPEN)
 
 
@@ -1958,7 +2034,7 @@ def _ocr_image_with_orientation_retry(
     *,
     language: str | None = None,
 ) -> tuple[str, float | None, str]:
-    """Run selected OCR engine and retry 90/270 deg if text is sparse or low-confidence."""
+    """Run selected OCR engine and retry 90/270/180 deg if text is sparse or low-confidence."""
 
     def _run_engine(target: Any) -> tuple[str, float | None, str]:
         if engine == "windows_ocr":
@@ -1985,7 +2061,7 @@ def _ocr_image_with_orientation_retry(
 
     best_score = _score(best_text, best_conf)
     best_angle: int | None = None
-    for angle in (90, 270):
+    for angle in (90, 270, 180):
         rotated = image.rotate(-angle, expand=True)
         cand_text, cand_conf, cand_warn = _run_engine(rotated)
         cand_non_ws = len(re.sub(r"\s+", "", cand_text))
@@ -1998,6 +2074,75 @@ def _ocr_image_with_orientation_retry(
     if best_angle is not None:
         best_warn = _join_warning(best_warn, f"Sayfa otomatik {best_angle}° dondurulerek okundu.")
     return best_text, best_conf, best_warn
+
+
+def _ocr_pdf_page_with_dpi_escalation(
+    path: Path,
+    page_index: int,
+    initial_image: Any,
+    engine: str,
+    *,
+    language: str | None = None,
+    cancel_event: threading.Event | None = None,
+    deadline_monotonic: float | None = None,
+) -> PageText:
+    """OCR a rendered PDF page and retry at 300 DPI if confidence or density is low."""
+
+    _check_ocr_abort(cancel_event, deadline_monotonic)
+    preprocessed = _preprocess_image_for_ocr(initial_image)
+    text, confidence, warning = _ocr_image_with_orientation_retry(
+        preprocessed, engine, language=language
+    )
+
+    try:
+        from PIL import Image
+
+        is_pil = isinstance(initial_image, Image.Image)
+    except ImportError:
+        is_pil = False
+
+    non_ws = len(re.sub(r"\s+", "", text))
+    should_escalate = is_pil and (
+        non_ws < MIN_PAGE_TEXT_CHARS
+        or (confidence is not None and confidence < OCR_LOW_CONFIDENCE_ESCALATE)
+    )
+    if should_escalate:
+        _check_ocr_abort(cancel_event, deadline_monotonic)
+        try:
+            hi_res = list(
+                _iter_rendered_pdf_pages(
+                    path,
+                    start_page=page_index,
+                    max_pages=1,
+                    dpi=300,
+                )
+            )
+        except ReportOcrError as exc:
+            if exc.code in {ERROR_CANCELLED, ERROR_TIMEOUT}:
+                raise
+            hi_res = []
+        if hi_res:
+            hi_prep = _preprocess_image_for_ocr(hi_res[0])
+            hi_text, hi_conf, hi_warn = _ocr_image_with_orientation_retry(
+                hi_prep, engine, language=language
+            )
+            hi_non_ws = len(re.sub(r"\s+", "", hi_text))
+            base_score = (confidence if confidence is not None else 0.5) * min(non_ws, 500)
+            hi_score = (hi_conf if hi_conf is not None else 0.5) * min(hi_non_ws, 500)
+            if hi_non_ws > 0 and hi_score > base_score:
+                text = hi_text
+                confidence = hi_conf
+                warning = _join_warning(
+                    hi_warn, "Sayfa dusuk guven nedeniyle 300 DPI ile yeniden okundu."
+                )
+
+    return PageText(
+        page_number=page_index + 1,
+        text=text,
+        source=TEXT_SOURCE_OCR,
+        confidence=confidence,
+        warning=warning,
+    )
 
 
 def _ocr_single_pdf_page(
@@ -2024,17 +2169,14 @@ def _ocr_single_pdf_page(
     )
     if not rendered:
         return None
-    _check_ocr_abort(cancel_event, deadline_monotonic)
-    preprocessed = _preprocess_image_for_ocr(rendered[0])
-    text, confidence, warning = _ocr_image_with_orientation_retry(
-        preprocessed, engine, language=language
-    )
-    return PageText(
-        page_number=page_index + 1,
-        text=text,
-        source=TEXT_SOURCE_OCR,
-        confidence=confidence,
-        warning=warning,
+    return _ocr_pdf_page_with_dpi_escalation(
+        path,
+        page_index,
+        rendered[0],
+        engine,
+        language=language,
+        cancel_event=cancel_event,
+        deadline_monotonic=deadline_monotonic,
     )
 
 
@@ -2067,25 +2209,20 @@ def _ocr_pdf_pages(
             ERROR_OCR_UNAVAILABLE,
         )
 
-    pages: list[PageText] = []
-    for index, image in enumerate(
-        _iter_rendered_pdf_pages(path, max_pages=_max_ocr_pages(), dpi=200)
-    ):
-        _check_ocr_abort(cancel_event, deadline_monotonic)
-        preprocessed = _preprocess_image_for_ocr(image)
-        text, confidence, warning = _ocr_image_with_orientation_retry(
-            preprocessed, "tesseract", language=language
+    return [
+        _ocr_pdf_page_with_dpi_escalation(
+            path,
+            index,
+            image,
+            "tesseract",
+            language=language,
+            cancel_event=cancel_event,
+            deadline_monotonic=deadline_monotonic,
         )
-        pages.append(
-            PageText(
-                page_number=index + 1,
-                text=text,
-                source=TEXT_SOURCE_OCR,
-                confidence=confidence,
-                warning=warning,
-            )
+        for index, image in enumerate(
+            _iter_rendered_pdf_pages(path, max_pages=_max_ocr_pages(), dpi=200)
         )
-    return pages
+    ]
 
 
 def _ocr_pdf_pages_with_vision(
@@ -2096,25 +2233,20 @@ def _ocr_pdf_pages_with_vision(
     deadline_monotonic: float | None = None,
 ) -> list[PageText]:
     """OCR PDF pages sequentially with the macOS Vision framework."""
-    pages: list[PageText] = []
-    for index, image in enumerate(
-        _iter_rendered_pdf_pages(path, max_pages=_max_ocr_pages(), dpi=200)
-    ):
-        _check_ocr_abort(cancel_event, deadline_monotonic)
-        preprocessed = _preprocess_image_for_ocr(image)
-        text, confidence, warning = _ocr_image_with_orientation_retry(
-            preprocessed, "vision", language=language
+    return [
+        _ocr_pdf_page_with_dpi_escalation(
+            path,
+            index,
+            image,
+            "vision",
+            language=language,
+            cancel_event=cancel_event,
+            deadline_monotonic=deadline_monotonic,
         )
-        pages.append(
-            PageText(
-                page_number=index + 1,
-                text=text,
-                source=TEXT_SOURCE_OCR,
-                confidence=confidence,
-                warning=warning,
-            )
+        for index, image in enumerate(
+            _iter_rendered_pdf_pages(path, max_pages=_max_ocr_pages(), dpi=200)
         )
-    return pages
+    ]
 
 
 def _ocr_pdf_pages_with_windows_ocr(
@@ -2125,25 +2257,20 @@ def _ocr_pdf_pages_with_windows_ocr(
     deadline_monotonic: float | None = None,
 ) -> list[PageText]:
     """OCR PDF pages sequentially in-process with Windows 10/11 WinRT OCR."""
-    pages: list[PageText] = []
-    for index, image in enumerate(
-        _iter_rendered_pdf_pages(path, max_pages=_max_ocr_pages(), dpi=200)
-    ):
-        _check_ocr_abort(cancel_event, deadline_monotonic)
-        preprocessed = _preprocess_image_for_ocr(image)
-        text, confidence, warning = _ocr_image_with_orientation_retry(
-            preprocessed, "windows_ocr", language=language
+    return [
+        _ocr_pdf_page_with_dpi_escalation(
+            path,
+            index,
+            image,
+            "windows_ocr",
+            language=language,
+            cancel_event=cancel_event,
+            deadline_monotonic=deadline_monotonic,
         )
-        pages.append(
-            PageText(
-                page_number=index + 1,
-                text=text,
-                source=TEXT_SOURCE_OCR,
-                confidence=confidence,
-                warning=warning,
-            )
+        for index, image in enumerate(
+            _iter_rendered_pdf_pages(path, max_pages=_max_ocr_pages(), dpi=200)
         )
-    return pages
+    ]
 
 
 def ocr_pdf_page_rotated(
@@ -2204,10 +2331,7 @@ def _ocr_image_page(path: Path, *, language: str | None = None) -> PageText:
         has_ocr_pkg = (
             importlib.util.find_spec("pytesseract") is not None
             or (sys.platform == "darwin" and importlib.util.find_spec("ocrmac") is not None)
-            or (
-                sys.platform == "win32"
-                and importlib.util.find_spec("winrt.windows.media.ocr") is not None
-            )
+            or (sys.platform == "win32" and _safe_find_spec("winrt.windows.media.ocr") is not None)
         )
         if not has_ocr_pkg:
             raise ReportOcrError(
@@ -3067,8 +3191,37 @@ def parse_number(raw: str, *, dot_decimal: bool = False) -> float:
     return value
 
 
+_OCR_NUM_CANDIDATE_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?<![A-Za-z])[+-]?[0-9OoIl|SB.,/]+(?![A-Za-z])"
+)
+_OCR_DIGIT_TRANS: Final[dict[int, str]] = str.maketrans(
+    {
+        "O": "0",
+        "o": "0",
+        "I": "1",
+        "l": "1",
+        "|": "1",
+        "B": "8",
+        "S": "5",
+    }
+)
+
+
+def _normalize_ocr_numeric_string(raw: str) -> str:
+    """Fix common OCR digit/letter confusions (O->0, l/I->1, B->8, S->5) in numeric tokens."""
+
+    def _replace(match: re.Match[str]) -> str:
+        tok = match.group(0)
+        if not any("0" <= ch <= "9" for ch in tok):
+            return tok
+        return tok.translate(_OCR_DIGIT_TRANS)
+
+    return _OCR_NUM_CANDIDATE_RE.sub(_replace, raw)
+
+
 def _parse_number_detail(raw: str, *, dot_decimal: bool = False) -> tuple[float, bool]:
-    match = _NUMBER_RE.search(str(raw))
+    normalized = _normalize_ocr_numeric_string(str(raw))
+    match = _NUMBER_RE.search(normalized)
     if match is None:
         raise ValueError(f"Sayi bulunamadi: {raw!r}")
 
@@ -3134,7 +3287,7 @@ def _parse_number_detail(raw: str, *, dot_decimal: bool = False) -> tuple[float,
 def parse_date(raw: str) -> str:
     """Parse common Turkish/English date formats to ISO ``YYYY-MM-DD``."""
 
-    text = _fold(str(raw)).strip()
+    text = _fold(_normalize_ocr_numeric_string(str(raw))).strip()
     iso_match = re.search(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b", text)
     if iso_match:
         return _make_iso_date(
@@ -4216,41 +4369,154 @@ def _suggest_fix_for_numeric_value(key: str, raw_val: Any) -> SuggestedFix | Non
     )
 
 
+_CROSS_FIELD_KEYS: Final[tuple[str, ...]] = (
+    "pipe_od_mm",
+    "wall_mm",
+    "pipe_id_mm",
+    "air_test.vp",
+    "air_test.vpa",
+    "air_test.ratio",
+    "pressure_test.t_initial",
+    "pressure_test.t_final",
+    "pressure_test.delta_t",
+)
+
+
+def _suggest_cross_field_fixes(
+    values: Mapping[str, float],
+    existing_fields: set[str],
+) -> list[SuggestedFix]:
+    """Generate physics cross-check suggestions (dT, ID, air ratio) without overwriting."""
+
+    fixes: list[SuggestedFix] = []
+
+    t_init = values.get("pressure_test.t_initial")
+    t_final = values.get("pressure_test.t_final")
+    delta_t = values.get("pressure_test.delta_t")
+    if (
+        "pressure_test.delta_t" not in existing_fields
+        and t_init is not None
+        and t_final is not None
+        and delta_t is not None
+    ):
+        expected_dt = round(t_final - t_init, 4)
+        if abs(abs(delta_t) - abs(expected_dt)) > 0.25:
+            fixes.append(
+                SuggestedFix(
+                    field="pressure_test.delta_t",
+                    label=FIELD_LABELS.get("pressure_test.delta_t", "pressure_test.delta_t"),
+                    current_value=delta_t,
+                    suggested_value=expected_dt,
+                    reason="Tson - Tilk farki ile okunan dT uyusmuyor.",
+                )
+            )
+
+    od = values.get("pipe_od_mm")
+    wall = values.get("wall_mm")
+    pipe_id = values.get("pipe_id_mm")
+    if (
+        "pipe_id_mm" not in existing_fields
+        and od is not None
+        and wall is not None
+        and pipe_id is not None
+    ):
+        expected_id = round(od - 2.0 * wall, 2)
+        if expected_id > 0 and abs(pipe_id - expected_id) > 2.0:
+            fixes.append(
+                SuggestedFix(
+                    field="pipe_id_mm",
+                    label=FIELD_LABELS.get("pipe_id_mm", "pipe_id_mm"),
+                    current_value=pipe_id,
+                    suggested_value=expected_id,
+                    reason="Dis cap ve et kalinligindan hesaplanan ic cap (OD - 2*t) ile uyusmuyor.",
+                )
+            )
+
+    vp = values.get("air_test.vp")
+    vpa = values.get("air_test.vpa")
+    ratio = values.get("air_test.ratio")
+    if (
+        "air_test.ratio" not in existing_fields
+        and vp is not None
+        and vp > 0
+        and vpa is not None
+        and ratio is not None
+    ):
+        expected_ratio = round((vpa / vp) - 1.0, 5)
+        if abs(ratio - expected_ratio) > 0.005:
+            fixes.append(
+                SuggestedFix(
+                    field="air_test.ratio",
+                    label=FIELD_LABELS.get("air_test.ratio", "air_test.ratio"),
+                    current_value=ratio,
+                    suggested_value=expected_ratio,
+                    reason="(Vpa / Vp) - 1 formulu ile okunan hava icerik orani uyusmuyor.",
+                )
+            )
+
+    return fixes
+
+
+def _extract_numeric_float(raw_val: Any) -> float | None:
+    if isinstance(raw_val, bool) or not isinstance(raw_val, (int, float)):
+        return None
+    val = float(raw_val)
+    return val if math.isfinite(val) else None
+
+
 def suggest_field_fixes(report: HydrotestReport) -> list[SuggestedFix]:
-    """Detect likely OCR decimal-point drops against physical domain ranges.
+    """Detect likely OCR decimal-point drops and cross-field physics mismatches.
 
     Degerler otomatik olarak degistirilmez; kullanici onayina sunulmak
     uzere ``SuggestedFix`` onerileri uretilir.
     """
 
     suggestions: list[SuggestedFix] = []
+    numeric_values: dict[str, float] = {}
+    existing_fields: set[str] = set()
     for key, extracted in report.iter_fields():
+        num = _extract_numeric_float(extracted.value)
+        if num is not None:
+            numeric_values[key] = num
         fix = _suggest_fix_for_numeric_value(key, extracted.value)
         if fix is not None:
             suggestions.append(fix)
+            existing_fields.add(fix.field)
+    suggestions.extend(_suggest_cross_field_fixes(numeric_values, existing_fields))
     return suggestions
 
 
 def suggest_field_fixes_from_report_dict(
     report_dict: Mapping[str, Any] | None,
 ) -> list[dict[str, Any]]:
-    """Compute non-destructive OCR decimal-fix suggestions from a serialized report dict."""
+    """Compute non-destructive OCR fix suggestions from a serialized report dict."""
 
     if not isinstance(report_dict, Mapping):
         return []
-    suggestions: list[dict[str, Any]] = []
-    for key in _SUGGESTED_FIX_RANGES:
+    suggestions: list[SuggestedFix] = []
+    numeric_values: dict[str, float] = {}
+    existing_fields: set[str] = set()
+
+    def _lookup(path_key: str) -> Any:
         node: Any = report_dict
-        for part in key.split("."):
+        for part in path_key.split("."):
             if not isinstance(node, Mapping) or part not in node:
-                node = None
-                break
+                return None
             node = node[part]
-        raw_val = node.get("value") if isinstance(node, Mapping) else node
+        return node.get("value") if isinstance(node, Mapping) else node
+
+    for key in _SUGGESTED_FIX_RANGES:
+        raw_val = _lookup(key)
         fix = _suggest_fix_for_numeric_value(key, raw_val)
         if fix is not None:
-            suggestions.append(fix.to_dict())
-    return suggestions
+            suggestions.append(fix)
+            existing_fields.add(fix.field)
+    for key in _CROSS_FIELD_KEYS:
+        num = _extract_numeric_float(_lookup(key))
+        if num is not None:
+            numeric_values[key] = num
+    suggestions.extend(_suggest_cross_field_fixes(numeric_values, existing_fields))
+    return [fix.to_dict() for fix in suggestions]
 
 
 # ---------------------------------------------------------------------------
