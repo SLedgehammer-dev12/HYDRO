@@ -1724,7 +1724,7 @@ class DocumentReadingImprovementsTests(unittest.TestCase):
         )
         by_field = {fix.field: fix for fix in ocr.suggest_field_fixes(report)}
         self.assertEqual(set(by_field), {"pressure_test.delta_t", "pipe_id_mm", "air_test.ratio"})
-        self.assertAlmostEqual(by_field["pressure_test.delta_t"].suggested_value, 1.5)
+        self.assertAlmostEqual(by_field["pressure_test.delta_t"].suggested_value, -1.5)
         self.assertAlmostEqual(by_field["pipe_id_mm"].suggested_value, 388.92)
         self.assertAlmostEqual(by_field["air_test.ratio"].suggested_value, 0.02)
 
@@ -1733,6 +1733,17 @@ class DocumentReadingImprovementsTests(unittest.TestCase):
             {item["field"] for item in dict_fixes},
             {"pressure_test.delta_t", "pipe_id_mm", "air_test.ratio"},
         )
+
+        # Cylindrical volume cross-check suggests expected Vt on mismatch
+        vol_report = HydrotestReport(
+            pipe_od_mm=ExtractedField(value=1219.2),
+            wall_mm=ExtractedField(value=15.9),
+            length_m=ExtractedField(value=10000.0),
+            section_volume_m3=ExtractedField(value=500.0),
+        )
+        vol_fixes = {fix.field: fix for fix in ocr.suggest_field_fixes(vol_report)}
+        self.assertIn("section_volume_m3", vol_fixes)
+        self.assertAlmostEqual(vol_fixes["section_volume_m3"].suggested_value, 11073.476, places=1)
 
     @unittest.skipUnless(HAVE_PIL, "Pillow yok: golge/egiklik testi atlandi")
     def test_shadow_flattening_and_deskew_preserve_clean_grayscale_output(self) -> None:
@@ -1749,6 +1760,59 @@ class DocumentReadingImprovementsTests(unittest.TestCase):
         processed = ocr._preprocess_image_for_ocr(img)
         self.assertEqual(processed.mode, "L")
         self.assertEqual(processed.size, img.size)
+
+    def test_multiline_label_value_lookahead_extracts_next_line_value(self) -> None:
+        report = ocr.parse_report(
+            "\n".join(
+                [
+                    "Hidrostatik Test Raporu",
+                    "Test Basinci:",
+                    "92,5 bar",
+                    "Teorik Ilave Su:",
+                    "0,8893 m3",
+                    "Sonuc:",
+                    "BASARILI",
+                ]
+            )
+        )
+        self.assertAlmostEqual(report.test_pressure_bar.value, 92.5)
+        self.assertAlmostEqual(report.air_test.vp.value, 0.8893)
+        self.assertEqual(report.result.value, "PASS")
+
+    @unittest.skipUnless(HAVE_PIL, "Pillow yok: kase/olcekleme testi atlandi")
+    def test_stamp_suppression_upscale_and_preferred_angle(self) -> None:
+        from PIL import Image, ImageDraw
+
+        # Red wet stamp should brighten toward paper while dark black ink stays dark
+        stamp_img = Image.new("RGB", (120, 120), color=(248, 248, 248))
+        draw = ImageDraw.Draw(stamp_img)
+        draw.rectangle([10, 10, 40, 40], fill=(20, 20, 20))
+        draw.rectangle([60, 10, 100, 50], fill=(215, 35, 35))
+        suppressed = ocr._suppress_colored_stamps(stamp_img)
+        self.assertLess(suppressed.getpixel((25, 25)), 60)
+        self.assertGreater(suppressed.getpixel((80, 30)), 220)
+
+        # Small standalone scan is upscaled cleanly
+        small = Image.new("RGB", (800, 600), color=(255, 255, 255))
+        upscaled = ocr._upscale_small_image_for_ocr(small)
+        self.assertEqual(upscaled.size, (1600, 1200))
+
+        # preferred_angle=90 tries -90 deg first and stops immediately on strong read
+        rot_probe = Image.new("L", (120, 80), color=240)
+        calls: list[tuple[int, int]] = []
+
+        def _fake_tess(im: Any, *, language: str | None = None) -> tuple[str, float | None, str]:
+            calls.append(im.size)
+            return ("Test Basinci: 95 bar\nA: 44.97\nB: 185.2", 0.92, "")
+
+        with mock.patch.object(ocr, "_run_tesseract", side_effect=_fake_tess):
+            text, conf, warn = ocr._ocr_image_with_orientation_retry(
+                rot_probe, "tesseract", preferred_angle=90
+            )
+        self.assertEqual(calls, [(80, 120)])
+        self.assertAlmostEqual(conf, 0.92)
+        self.assertIn("90°", warn)
+        self.assertIn("95 bar", text)
 
 
 if __name__ == "__main__":

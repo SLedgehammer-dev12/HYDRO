@@ -2012,8 +2012,56 @@ def _deskew_small_angle(gray: Any) -> Any:
     return gray
 
 
+def _suppress_colored_stamps(image: Any) -> Any:
+    """Wash out high-chroma red/blue wet-stamp ink on RGB/RGBA images while keeping dark black text."""
+
+    try:
+        from PIL import Image, ImageChops
+    except ImportError:
+        return image
+    if not isinstance(image, Image.Image) or image.mode not in {"RGB", "RGBA"}:
+        return image
+    if image.width < 64 or image.height < 64:
+        return image
+    rgb = image.convert("RGB")
+    r, g, b = rgb.split()
+    max_c = ImageChops.lighter(ImageChops.lighter(r, g), b)
+    min_c = ImageChops.darker(ImageChops.darker(r, g), b)
+    chroma = ImageChops.subtract(max_c, min_c)
+    chroma_mask = chroma.point(lambda p: 255 if p > 45 else 0)
+    bright_mask = max_c.point(lambda p: 255 if p > 90 else 0)
+    stamp_mask = ImageChops.darker(chroma_mask, bright_mask)
+    gray = rgb.convert("L")
+    white_bg = Image.new("L", gray.size, 245)
+    return Image.composite(white_bg, gray, stamp_mask)
+
+
+def _upscale_small_image_for_ocr(image: Any) -> Any:
+    """Upscale low-resolution standalone phone photos/scans while respecting pixel ceilings."""
+
+    try:
+        from PIL import Image
+    except ImportError:
+        return image
+    if not isinstance(image, Image.Image):
+        return image
+    w, h = image.size
+    should_scale = w < OCR_MIN_IMAGE_WIDTH or (min(w, h) >= 200 and max(w, h) < 1400)
+    if not should_scale or w <= 0 or h <= 0:
+        return image
+    target_max = min(2400, max(w, h) * 2)
+    scale = min(2.0, target_max / float(max(w, h)))
+    if scale <= 1.05:
+        return image
+    new_w = max(1, int(round(w * scale)))
+    new_h = max(1, int(round(h * scale)))
+    if new_w * new_h > _OCR_MAX_UPSCALE_PIXELS:
+        return image
+    return image.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+
 def _preprocess_image_for_ocr(image: Any) -> Any:
-    """Apply lighting normalization, small-angle deskew, contrast normalization, and sharpen."""
+    """Apply stamp suppression, lighting normalization, small-angle deskew, contrast normalization, and sharpen."""
 
     try:
         from PIL import Image, ImageFilter, ImageOps
@@ -2021,7 +2069,8 @@ def _preprocess_image_for_ocr(image: Any) -> Any:
         return image
     if not isinstance(image, Image.Image):
         return image
-    gray = image.convert("L") if image.mode != "L" else image
+    desat = _suppress_colored_stamps(image)
+    gray = desat.convert("L") if desat.mode != "L" else desat
     lit = _normalize_uneven_lighting(gray)
     aligned = _deskew_small_angle(lit)
     enhanced = ImageOps.autocontrast(aligned, cutoff=1)
@@ -2033,6 +2082,7 @@ def _ocr_image_with_orientation_retry(
     engine: str,
     *,
     language: str | None = None,
+    preferred_angle: int | None = None,
 ) -> tuple[str, float | None, str]:
     """Run selected OCR engine and retry 90/270/180 deg if text is sparse or low-confidence."""
 
@@ -2043,17 +2093,28 @@ def _ocr_image_with_orientation_retry(
             return _run_vision(target, language=language)
         return _run_tesseract(target, language=language)
 
+    try:
+        from PIL import Image
+
+        is_pil = isinstance(image, Image.Image)
+    except ImportError:
+        is_pil = False
+
+    if preferred_angle in {90, 180, 270} and is_pil:
+        pref_img = image.rotate(-preferred_angle, expand=True)
+        pref_text, pref_conf, pref_warn = _run_engine(pref_img)
+        pref_non_ws = len(re.sub(r"\s+", "", pref_text))
+        if pref_non_ws >= MIN_PAGE_TEXT_CHARS and (pref_conf is None or pref_conf >= 0.45):
+            return (
+                pref_text,
+                pref_conf,
+                _join_warning(pref_warn, f"Sayfa otomatik {preferred_angle}° dondurulerek okundu."),
+            )
+
     best_text, best_conf, best_warn = _run_engine(image)
     non_ws = len(re.sub(r"\s+", "", best_text))
     needs_retry = non_ws < MIN_PAGE_TEXT_CHARS or (best_conf is not None and best_conf < 0.45)
-    if not needs_retry:
-        return best_text, best_conf, best_warn
-
-    try:
-        from PIL import Image
-    except ImportError:
-        return best_text, best_conf, best_warn
-    if not isinstance(image, Image.Image):
+    if not needs_retry or not is_pil:
         return best_text, best_conf, best_warn
 
     def _score(txt: str, conf: float | None) -> float:
@@ -2062,6 +2123,8 @@ def _ocr_image_with_orientation_retry(
     best_score = _score(best_text, best_conf)
     best_angle: int | None = None
     for angle in (90, 270, 180):
+        if angle == preferred_angle:
+            continue
         rotated = image.rotate(-angle, expand=True)
         cand_text, cand_conf, cand_warn = _run_engine(rotated)
         cand_non_ws = len(re.sub(r"\s+", "", cand_text))
@@ -2122,9 +2185,20 @@ def _ocr_pdf_page_with_dpi_escalation(
                 raise
             hi_res = []
         if hi_res:
+            detected_angle = next(
+                (ang for ang in (90, 180, 270) if f"{ang}°" in warning),
+                None,
+            )
             hi_prep = _preprocess_image_for_ocr(hi_res[0])
-            hi_text, hi_conf, hi_warn = _ocr_image_with_orientation_retry(
-                hi_prep, engine, language=language
+            hi_text, hi_conf, hi_warn = (
+                _ocr_image_with_orientation_retry(
+                    hi_prep,
+                    engine,
+                    language=language,
+                    preferred_angle=detected_angle,
+                )
+                if detected_angle is not None
+                else _ocr_image_with_orientation_retry(hi_prep, engine, language=language)
             )
             hi_non_ws = len(re.sub(r"\s+", "", hi_text))
             base_score = (confidence if confidence is not None else 0.5) * min(non_ws, 500)
@@ -2383,7 +2457,9 @@ def _load_image(path: Path) -> Any:
     try:
         with Image.open(path) as image:
             image.load()
-            grayscale = image.convert("L")
+            loaded = (
+                image.convert("RGB") if image.mode in {"RGB", "RGBA", "P"} else image.convert("L")
+            )
     except image_errors as exc:
         raise ReportOcrError(
             "Goruntu dosyasi bozuk, cok buyuk veya desteklenmiyor.",
@@ -2391,15 +2467,8 @@ def _load_image(path: Path) -> Any:
             detail=str(exc),
         ) from exc
 
-    if grayscale.width < OCR_MIN_IMAGE_WIDTH:
-        scale = 2
-        upscaled_pixels = (grayscale.width * scale) * (grayscale.height * scale)
-        if upscaled_pixels <= _OCR_MAX_UPSCALE_PIXELS:
-            grayscale = grayscale.resize(
-                (grayscale.width * scale, grayscale.height * scale),
-                Image.Resampling.LANCZOS,
-            )
-    return _preprocess_image_for_ocr(grayscale)
+    scaled = _upscale_small_image_for_ocr(loaded)
+    return _preprocess_image_for_ocr(scaled)
 
 
 def _choose_tesseract_language(language: str | None = None) -> tuple[str, str]:
@@ -3426,7 +3495,11 @@ def parse_report(
         page_text = page.text[:remaining_chars]
         remaining_chars -= len(page_text)
         page_dot_decimal = is_dot_decimal_text(page_text)
-        for raw_line in page_text.splitlines():
+        lines = page_text.splitlines()
+        line_idx = 0
+        while line_idx < len(lines):
+            raw_line = lines[line_idx]
+            line_idx += 1
             folded = _fold(raw_line)
             stripped = folded.strip()
             if not stripped:
@@ -3441,6 +3514,21 @@ def parse_report(
                 continue
             key, rest_start = matched
             rest = raw_line[rest_start:].strip()
+            if not rest and line_idx < len(lines):
+                next_raw = lines[line_idx].strip()
+                next_folded = _fold(next_raw).strip()
+                if (
+                    next_folded
+                    and _section_heading(next_folded) == ""
+                    and _match_field_line(next_folded, patterns, fuzzy_aliases) is None
+                    and (
+                        key in _STRING_FIELDS
+                        or key in {"result", "date"}
+                        or _NUMBER_RE.search(_normalize_ocr_numeric_string(next_raw)) is not None
+                    )
+                ):
+                    rest = next_raw
+                    line_idx += 1
             if not rest:
                 continue
             if key not in _STRING_FIELDS:
@@ -4400,15 +4488,15 @@ def _suggest_cross_field_fixes(
         and t_final is not None
         and delta_t is not None
     ):
-        expected_dt = round(t_final - t_init, 4)
-        if abs(abs(delta_t) - abs(expected_dt)) > 0.25:
+        expected_dt = round(t_init - t_final, 4)
+        if abs(delta_t - expected_dt) > 0.25:
             fixes.append(
                 SuggestedFix(
                     field="pressure_test.delta_t",
                     label=FIELD_LABELS.get("pressure_test.delta_t", "pressure_test.delta_t"),
                     current_value=delta_t,
                     suggested_value=expected_dt,
-                    reason="Tson - Tilk farki ile okunan dT uyusmuyor.",
+                    reason="Tilk - Tson farki ile okunan dT uyusmuyor.",
                 )
             )
 
@@ -4432,6 +4520,34 @@ def _suggest_cross_field_fixes(
                     reason="Dis cap ve et kalinligindan hesaplanan ic cap (OD - 2*t) ile uyusmuyor.",
                 )
             )
+
+    length_m = values.get("length_m")
+    if (
+        od is not None
+        and wall is not None
+        and length_m is not None
+        and od > 2.0 * wall
+        and length_m > 0
+    ):
+        di_m = (od - 2.0 * wall) / 1000.0
+        expected_vt = round((math.pi / 4.0) * (di_m**2) * length_m, 3)
+        if expected_vt > 0:
+            for vol_key in ("section_volume_m3", "air_test.vt"):
+                rep_vol = values.get(vol_key)
+                if (
+                    vol_key not in existing_fields
+                    and rep_vol is not None
+                    and abs(rep_vol - expected_vt) / expected_vt > 0.10
+                ):
+                    fixes.append(
+                        SuggestedFix(
+                            field=vol_key,
+                            label=FIELD_LABELS.get(vol_key, vol_key),
+                            current_value=rep_vol,
+                            suggested_value=expected_vt,
+                            reason="Boru geometrisinden hesaplanan hacim (pi/4 * Di^2 * L) ile uyusmuyor.",
+                        )
+                    )
 
     vp = values.get("air_test.vp")
     vpa = values.get("air_test.vpa")
