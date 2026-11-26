@@ -20,7 +20,7 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # pyproject.toml target-version ve mypy.ini python_version ile ayni hat.
       - name: Set up Python 3.12
@@ -85,7 +85,7 @@ jobs:
         working-directory: webapp/frontend
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Node 22
         uses: actions/setup-node@v7
