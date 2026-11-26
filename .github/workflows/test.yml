@@ -112,7 +112,7 @@ jobs:
 
       - name: Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-${{ matrix.os }}-py${{ matrix.python-version }}
           path: coverage.xml
@@ -235,7 +235,7 @@ jobs:
 
       - name: Upload smoke server log on failure
         if: failure() && env.TMP_DATA != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: web-browser-smoke-log
           path: ${{ env.TMP_DATA }}/server.log
