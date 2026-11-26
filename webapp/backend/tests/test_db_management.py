@@ -701,3 +701,32 @@ def test_prune_old_backups_and_backup_drill(tmp_path: Path):
     assert not created_files[0].exists()
     assert not created_files[1].exists()
     assert created_files[2].exists()
+
+
+def test_corrupt_backup_and_path_traversal_guards(tmp_path: Path):
+    import pytest
+    from app.core.errors import AppError
+    from app.services import db_admin
+
+    settings = Settings(
+        database_url=f"sqlite:///{(tmp_path / 'guard_data' / 'hydro_web.db').as_posix()}",
+        data_dir=tmp_path / "guard_data",
+        frontend_dist=tmp_path / "dist",
+    )
+    settings.ensure_directories()
+
+    # Path traversal and non-.db filename are rejected
+    with pytest.raises(AppError) as bad_ext:
+        db_admin.resolve_backup_path(settings, "../../etc/passwd")
+    assert bad_ext.value.status_code == 422
+
+    (tmp_path / "escape.db").write_bytes(b"secret")
+    with pytest.raises(AppError) as trav:
+        db_admin.resolve_backup_path(settings, "../../escape.db")
+    assert trav.value.status_code == 404
+
+    # Non-SQLite file header is rejected
+    bad_file = tmp_path / "not_sqlite.db"
+    bad_file.write_bytes(b"THIS IS NOT A SQLITE FILE")
+    with pytest.raises(AppError):
+        db_admin._validate_sqlite_backup_file(bad_file)

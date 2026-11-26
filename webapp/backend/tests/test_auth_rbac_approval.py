@@ -370,3 +370,98 @@ def test_oidc_role_map_session_revocation_and_approval_pagination(tmp_path: Path
     finally:
         auth_core.clear_revoked_sessions()
         db.dispose_database()
+
+
+def test_auth_json_role_map_tampered_cookie_and_approval_rejection_guards(
+    tmp_path: Path, monkeypatch
+):
+    import json
+    import time
+
+    from app.core.errors import AppError
+
+    # Cycle 11: JSON role-map parsing & tampered/expired session + revoked sid pruning
+    monkeypatch.setenv(
+        "HYDRO_OIDC_ROLE_MAP",
+        json.dumps({"GRP-ADMINS": "admin", "GRP-SUP": "supervisor"}),
+    )
+    env_settings = Settings.from_env()
+    assert env_settings.oidc_role_map == {"grp-admins": "admin", "grp-sup": "supervisor"}
+    assert (
+        auth_core.normalize_role(["GRP-SUP"], role_map=env_settings.oidc_role_map) == "supervisor"
+    )
+
+    auth_core.clear_revoked_sessions()
+    settings = _oidc_settings(tmp_path, db_name="r20_edges.db")
+    assert auth_core.parse_session_cookie("tampered.token", settings) is None
+    assert auth_core.extract_session_meta("tampered.token", settings) is None
+    assert auth_core.parse_session_cookie(None, settings) is None
+
+    now = time.time()
+    auth_core.revoke_session_id("expired-sid", now - 10, now=now - 200)
+    assert auth_core.is_session_revoked("expired-sid", now=now + 10) is False
+
+    app = create_app(settings)
+    sup_cookie = issue_session_cookie(
+        AuthPrincipal(sub="sup-edge", name="Supervisor Edge", role="supervisor", workspace="ws-e"),
+        settings,
+    )
+    op_cookie = issue_session_cookie(
+        AuthPrincipal(sub="op-edge", name="Operator Edge", role="operator", workspace="ws-e"),
+        settings,
+    )
+    try:
+        with TestClient(app) as client:
+            # Expired/invalid OIDC state cookie -> 400 invalid_oidc_state
+            cb_bad = client.get("/api/auth/callback?code=c1&state=wrong")
+            assert cb_bad.status_code == 400
+            assert cb_bad.json()["code"] == "invalid_oidc_state"
+
+            # Cycle 12: Rejected two-person approval cannot be re-decided (409) or consumed
+            client.cookies.set(SESSION_COOKIE_NAME, op_cookie)
+            req = client.post(
+                "/api/approvals",
+                json={"action": "session_finalize", "target_id": "sess-rej-1", "reason": "Test"},
+            )
+            assert req.status_code == 201
+            approval_id = req.json()["id"]
+
+            client.cookies.set(SESSION_COOKIE_NAME, sup_cookie)
+            rej = client.post(
+                f"/api/approvals/{approval_id}/decide",
+                json={"decision": "rejected", "note": "Eksik test verisi"},
+            )
+            assert rej.status_code == 200
+            assert rej.json()["status"] == "rejected"
+
+            redecide = client.post(
+                f"/api/approvals/{approval_id}/decide",
+                json={"decision": "approved"},
+            )
+            assert redecide.status_code == 409
+            assert redecide.json()["code"] == "approval_already_decided"
+
+            filtered = client.get(
+                "/api/approvals",
+                params={"status": "rejected", "action": "session_finalize"},
+            ).json()
+            assert any(item["id"] == approval_id for item in filtered["items"])
+
+            from app.api.auth import consume_two_person_approval
+            from app.core import security
+
+            with db.session_scope() as s:
+                try:
+                    consume_two_person_approval(
+                        s,
+                        security.workspace_hash("ws-e"),
+                        action="session_finalize",
+                        target_id="sess-rej-1",
+                    )
+                    raise AssertionError("Expected rejected approval not to be consumable")
+                except AppError as err:
+                    assert err.status_code == 403
+                    assert err.code == "approval_required"
+    finally:
+        auth_core.clear_revoked_sessions()
+        db.dispose_database()

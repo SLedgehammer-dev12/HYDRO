@@ -748,3 +748,28 @@ def test_frozen_migrations_dir_resolution_and_cli_roundtrip(tmp_path: Path, monk
     assert offline_proc.returncode == 0, offline_proc.stderr
     assert "CREATE TABLE ocr_mapping_profiles" in offline_proc.stdout
     assert "DROP INDEX ix_results_type" in offline_proc.stdout
+
+
+def test_migrations_runner_idempotent_on_head_db(tmp_path: Path):
+    from app import db, migrations_runner
+    from app.core.config import Settings
+
+    db_file = tmp_path / "idem.db"
+    settings = Settings(
+        database_url=f"sqlite:///{db_file.as_posix()}",
+        data_dir=tmp_path / "data",
+        frontend_dist=tmp_path / "dist",
+    )
+    db.dispose_database()
+    db.configure_database(settings.database_url)
+    try:
+        db.init_db()
+        first_rev = migrations_runner.get_current_revision(db.get_engine())
+        assert first_rev == migrations_runner.HEAD_REVISION
+
+        # Second init_db / upgrade call is a clean idempotent no-op
+        db.init_db()
+        second_rev = migrations_runner.get_current_revision(db.get_engine())
+        assert second_rev == migrations_runner.HEAD_REVISION
+    finally:
+        db.dispose_database()
