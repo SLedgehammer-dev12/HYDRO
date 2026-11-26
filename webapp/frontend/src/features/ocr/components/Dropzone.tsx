@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { DragEvent } from "react";
 import clsx from "clsx";
 import { FileText, Upload, X } from "lucide-react";
@@ -9,6 +9,13 @@ export const MAX_FILE_LABEL = "500 MB";
 export const ACCEPT_ATTRIBUTE = ".pdf,.xlsx,.xls,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp";
 const SUPPORTED_EXTENSIONS = [".pdf", ".xlsx", ".xls", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"];
 const SUPPORTED_HINT = "PDF, XLSX, XLS, JPG, PNG, TIFF, BMP, WEBP";
+const PASTE_MIME_EXT: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+  "image/bmp": "bmp",
+  "image/tiff": "tiff",
+};
 
 export function validateOcrFile(file: File, maxBytes = MAX_FILE_BYTES): string | null {
   const name = file.name.toLowerCase();
@@ -48,20 +55,62 @@ export default function Dropzone({
 }: DropzoneProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const effectiveMaxBytes = maxBytes > 0 ? maxBytes : MAX_FILE_BYTES;
   const maxLabel =
     effectiveMaxBytes === MAX_FILE_BYTES ? MAX_FILE_LABEL : formatBytes(effectiveMaxBytes);
 
-  const acceptFile = (candidate: File | undefined) => {
-    if (!candidate) return;
-    const validation = validateOcrFile(candidate, effectiveMaxBytes);
-    if (validation) {
-      onError(validation);
+  const acceptFile = useCallback(
+    (candidate: File | undefined) => {
+      if (!candidate) return;
+      const validation = validateOcrFile(candidate, effectiveMaxBytes);
+      if (validation) {
+        onError(validation);
+        return;
+      }
+      onError(null);
+      onSelect(candidate);
+    },
+    [effectiveMaxBytes, onError, onSelect],
+  );
+
+  useEffect(() => {
+    if (!file || !file.type.startsWith("image/") || typeof URL.createObjectURL !== "function") {
+      setPreviewUrl(null);
       return;
     }
-    onError(null);
-    onSelect(candidate);
-  };
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [file]);
+
+  useEffect(() => {
+    if (disabled) return;
+    const onPaste = (event: ClipboardEvent) => {
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
+      ) {
+        return;
+      }
+      const items = Array.from(event.clipboardData?.items ?? []);
+      const imgItem = items.find((it) => it.kind === "file" && it.type.startsWith("image/"));
+      const blob = imgItem?.getAsFile();
+      if (!blob) return;
+      event.preventDefault();
+      const ext = PASTE_MIME_EXT[blob.type.toLowerCase()] ?? "png";
+      const named =
+        blob.name && blob.name !== "image.png"
+          ? blob
+          : new File([blob], `pano-goruntusu.${ext}`, { type: blob.type || "image/png" });
+      acceptFile(named);
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [disabled, acceptFile]);
 
   const openPicker = () => {
     if (disabled) return;
@@ -103,9 +152,17 @@ export default function Dropzone({
 
       {file ? (
         <div className="panel-soft flex flex-wrap items-center gap-3 p-4">
-          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-[var(--info-border)] bg-[var(--info-bg)] text-[var(--primary)]">
-            <FileText size={20} aria-hidden="true" />
-          </span>
+          {previewUrl ? (
+            <img
+              src={previewUrl}
+              alt={`${file.name} küçük önizleme`}
+              className="h-12 w-12 shrink-0 rounded-lg border border-[var(--border)] bg-white object-cover"
+            />
+          ) : (
+            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-[var(--info-border)] bg-[var(--info-bg)] text-[var(--primary)]">
+              <FileText size={20} aria-hidden="true" />
+            </span>
+          )}
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium text-[var(--text)]" title={file.name}>
               {file.name}
@@ -168,7 +225,7 @@ export default function Dropzone({
             veya <span className="font-semibold text-[var(--primary)]">dosya seçin</span>
           </span>
           <span id="ocr-dropzone-hint" className="text-[11px] leading-relaxed text-[var(--text-faint)]">
-            {SUPPORTED_HINT} · en fazla {maxLabel} · tek dosya
+            {SUPPORTED_HINT} · en fazla {maxLabel} · tek dosya · Ctrl/⌘+V ile görüntü yapıştır
           </span>
         </button>
       )}

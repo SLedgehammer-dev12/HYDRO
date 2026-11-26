@@ -126,6 +126,7 @@ export default function OcrPage() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [stage, setStage] = useState<StageKey>("upload");
   const [stageNote, setStageNote] = useState<string | null>(null);
+  const [pageProgress, setPageProgress] = useState<{ done: number; total: number } | null>(null);
   const [elapsed, setElapsed] = useState(0);
 
   const [result, setResult] = useState<OcrAnalysisResult | null>(null);
@@ -410,6 +411,7 @@ export default function OcrPage() {
     setTab(nextTab);
     setComparisonRequested((analysis.discrepancies ?? []).length > 0);
     setStageNote(null);
+    setPageProgress(null);
     window.setTimeout(() => resultHeadingRef.current?.focus(), 40);
   };
 
@@ -524,8 +526,20 @@ export default function OcrPage() {
         signal: controller.signal,
         timeoutMs: (serverTimeoutS + 30) * 1000,
         onProgress: (info) => {
+          const match = /^extract:(\d+)\/(\d+)/i.exec(info.stage ?? "");
+          const pagesDone = info.pages_done ?? (match ? Number(match[1]) : undefined);
+          const pagesTotal = info.pages_total ?? (match ? Number(match[2]) : undefined);
+          if (pagesTotal && pagesTotal > 0 && pagesDone !== undefined) {
+            setPageProgress({ done: pagesDone, total: pagesTotal });
+          }
+          const pageSuffix =
+            pagesTotal && pagesTotal > 0 && pagesDone !== undefined
+              ? ` · Sayfa ${pagesDone} / ${pagesTotal}`
+              : "";
           const label =
-            info.status === "queued" ? "Kuyrukta" : serverStageLabel(info.stage);
+            info.status === "queued"
+              ? "Kuyrukta"
+              : `${serverStageLabel(info.stage)}${pageSuffix}`;
           setActiveOcrJob({
             id: job.analysis_id,
             fileName: file.name,
@@ -535,7 +549,7 @@ export default function OcrPage() {
           setStageNote(
             info.status === "queued"
               ? "Kuyrukta; önceki analiz bitince başlayacak."
-              : `Sunucu aşaması: ${serverStageLabel(info.stage)}`,
+              : `Sunucu aşaması: ${serverStageLabel(info.stage)}${pageSuffix}`,
           );
         },
       });
@@ -1278,6 +1292,31 @@ export default function OcrPage() {
                   {stageNote ?? "Sunucu aşama bilgisi bekleniyor…"} Sayfa sayısı çıkarım bitince
                   gösterilir.
                 </p>
+                {pageProgress && pageProgress.total > 0 ? (
+                  <div className="mt-2.5 space-y-1">
+                    <div className="flex items-center justify-between text-[10px] text-[var(--text-muted)]">
+                      <span>Sayfa OCR ilerlemesi</span>
+                      <span className="numeric font-semibold text-[var(--primary)]">
+                        {pageProgress.done} / {pageProgress.total}
+                      </span>
+                    </div>
+                    <div
+                      className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--surface-3)]"
+                      role="progressbar"
+                      aria-valuemin={0}
+                      aria-valuemax={pageProgress.total}
+                      aria-valuenow={pageProgress.done}
+                      aria-label="OCR sayfa ilerlemesi"
+                    >
+                      <div
+                        className="h-full rounded-full bg-[var(--primary)] transition-all duration-300"
+                        style={{
+                          width: `${Math.min(100, Math.round((pageProgress.done / pageProgress.total) * 100))}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ) : null}
 

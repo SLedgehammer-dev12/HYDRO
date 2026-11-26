@@ -13,6 +13,7 @@ import {
   PanelRightOpen,
   Plus,
   Save,
+  Search,
   Sun,
   UserCheck,
   X,
@@ -35,7 +36,13 @@ import { ConfirmDialog } from "../ui/Dialog";
 import { HydroLogo } from "../ui/HydroLogo";
 import { cn } from "../../lib/utils";
 
-export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
+export function TopBar({
+  onOpenHelp,
+  onOpenCommandPalette,
+}: {
+  onOpenHelp: () => void;
+  onOpenCommandPalette?: () => void;
+}) {
   const tab = useAppStore((state) => state.tab);
   const projectId = useAppStore((state) => state.projectId);
   const sessionName = useAppStore((state) => state.sessionName);
@@ -310,6 +317,21 @@ export function TopBar({ onOpenHelp }: { onOpenHelp: () => void }) {
           </div>
 
           <div className="ml-auto flex items-center gap-2">
+            {onOpenCommandPalette ? (
+              <button
+                type="button"
+                onClick={onOpenCommandPalette}
+                aria-label="Hızlı geçiş (Ctrl+K)"
+                title="Hızlı Geçiş ve Komutlar (Ctrl+K / ⌘K)"
+                className="hidden items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--text)] md:inline-flex"
+              >
+                <Search size={12} aria-hidden />
+                <span>Ara</span>
+                <kbd className="rounded border border-[var(--border)] bg-[var(--surface-1)] px-1 font-mono text-[9.5px]">
+                  ⌘K
+                </kbd>
+              </button>
+            ) : null}
             {activeOcrJob && tab !== "ocr" ? (
               <div
                 className="inline-flex items-center gap-1 rounded-full border border-[color-mix(in_srgb,var(--primary)_38%,var(--border))] bg-[color-mix(in_srgb,var(--primary)_12%,var(--surface-2))] py-0.5 pl-2.5 pr-1 text-[11px] font-semibold text-[var(--primary)]"

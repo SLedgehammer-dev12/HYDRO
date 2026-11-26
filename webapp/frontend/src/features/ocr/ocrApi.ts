@@ -326,6 +326,8 @@ export interface AnalysisProgressInfo {
   status: OcrAnalysisStatus;
   stage: string;
   elapsed_s: number;
+  pages_done?: number;
+  pages_total?: number;
 }
 
 const TERMINAL_STATUSES: ReadonlySet<OcrAnalysisStatus> = new Set([
@@ -378,6 +380,8 @@ export async function waitForAnalysis(
       status: result.status,
       stage: result.progress?.stage ?? result.status,
       elapsed_s: elapsed,
+      pages_done: result.progress?.pages_done,
+      pages_total: result.progress?.pages_total,
     });
     if (TERMINAL_STATUSES.has(result.status)) {
       return result;

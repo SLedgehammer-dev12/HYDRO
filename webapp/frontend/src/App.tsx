@@ -50,6 +50,11 @@ const OcrPage = lazy(() => import("./features/ocr/OcrPage"));
 const HelpDialog = lazy(() =>
   import("./components/layout/HelpDialog").then((module) => ({ default: module.HelpDialog })),
 );
+const CommandPalette = lazy(() =>
+  import("./components/layout/CommandPalette").then((module) => ({
+    default: module.CommandPalette,
+  })),
+);
 const UpdateManagerModal = lazy(() =>
   import("./components/layout/UpdateManagerModal").then((module) => ({
     default: module.UpdateManagerModal,
@@ -126,6 +131,7 @@ export default function App() {
 
   const queryClient = useQueryClient();
   const [helpOpen, setHelpOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   useBackendProbe();
   const sessionsQuery = useSessions();
@@ -262,6 +268,11 @@ export default function App() {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const modifier = event.metaKey || event.ctrlKey;
+      if (modifier && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setPaletteOpen((prev) => !prev);
+        return;
+      }
       if (modifier && event.key.toLowerCase() === "s") {
         event.preventDefault();
         if (useAppStore.getState().tab === "forms") {
@@ -328,7 +339,10 @@ export default function App() {
       <div className="flex min-h-screen">
         <Sidebar />
         <div className="flex min-w-0 flex-1 flex-col">
-          <TopBar onOpenHelp={() => setHelpOpen(true)} />
+          <TopBar
+            onOpenHelp={() => setHelpOpen(true)}
+            onOpenCommandPalette={() => setPaletteOpen(true)}
+          />
           {tab === "air" || tab === "pressure" || tab === "geometry" || tab === "forms" ? (
             <DecisionStrip />
           ) : null}
@@ -375,6 +389,15 @@ export default function App() {
       {helpOpen ? (
         <Suspense fallback={null}>
           <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
+        </Suspense>
+      ) : null}
+      {paletteOpen ? (
+        <Suspense fallback={null}>
+          <CommandPalette
+            open={paletteOpen}
+            onClose={() => setPaletteOpen(false)}
+            onOpenHelp={() => setHelpOpen(true)}
+          />
         </Suspense>
       ) : null}
       {updateModalOpen ? (

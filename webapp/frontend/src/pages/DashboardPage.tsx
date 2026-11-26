@@ -120,14 +120,25 @@ export function DashboardPage() {
     {
       num: 4,
       label: "Resmî Rapor",
-      detail: air && pressure ? "Çıktıya hazır" : "Test sonrası",
-      done: false,
-      active: Boolean(air && pressure),
+      detail:
+        sessionStatus === "completed"
+          ? "Tamamlandı"
+          : air && pressure
+            ? "Çıktıya hazır"
+            : "Test sonrası",
+      done: sessionStatus === "completed",
+      active: Boolean(air && pressure) && sessionStatus !== "completed",
       tab: "reports" as const,
     },
   ];
 
   const specCode = meta?.spec.code ?? "4-NGTL 0-GN-P-002-5007 R4";
+  const showOcrQuickAction = Boolean(
+    !geometry ||
+      !air ||
+      !pressure ||
+      (formsSummary && formsSummary.filled_required < formsSummary.required_total),
+  );
 
   return (
     <div className="space-y-4">
@@ -148,9 +159,16 @@ export function DashboardPage() {
           </>
         }
         actions={
-          <Button size="lg" variant="primary" icon={<ArrowRight size={15} />} onClick={() => setTab(nextStep.tab)}>
-            {nextStep.label}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            {showOcrQuickAction ? (
+              <Button size="lg" variant="default" icon={<FileScan size={15} />} onClick={() => setTab("ocr")}>
+                OCR&apos;dan İçe Aktar
+              </Button>
+            ) : null}
+            <Button size="lg" variant="primary" icon={<ArrowRight size={15} />} onClick={() => setTab(nextStep.tab)}>
+              {nextStep.label}
+            </Button>
+          </div>
         }
       />
 
