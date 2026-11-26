@@ -207,3 +207,31 @@ Guncelleme imzalama ozel anahtari da depoda tutulmaz: lokal gelistirmede
 `~/.config/hydro/update_signing_key.pem`, CI'da `HYDRO_UPDATE_PRIVATE_KEY` secret'i
 kullanilir. `.gitignore` `*.pem`, `.hydro_signing/` ve `update_signing_key*`
 desenlerini kapsar; bu dosyalar `git status` ciktisinda gorunmemelidir.
+
+## CI Kapilari ve Dal Korumasi
+
+Asagidaki isler `main` icin **required status check** olarak isaretlenmelidir
+(GitHub > Settings > Branches > Branch protection rule). Bu ayar repodan
+kodlanamaz; yeni bir klonda veya fork'ta elle dogrulanmalidir.
+
+| Workflow | Check adi | Kapsam |
+| --- | --- | --- |
+| `test.yml` | `py3.12 / ubuntu-latest` | Domain + web + OCR testleri, kapsam esigi |
+| `test.yml` | `Web Backend Pytest (py3.12 / ubuntu-latest)` | FastAPI regresyonu |
+| `test.yml` | `Web Backend PostgreSQL Runtime (py3.12 / ubuntu-latest)` | Postgres/Alembic runtime |
+| `test.yml` | `Web Real-Browser Tab Smoke (py3.12 + Chrome)` | 12 rota + derin E2E, 4 viewport |
+| `lint.yml` | `lint` (job: `lint`) | Ruff, mypy, OpenAPI, envanter, dokuman metrikleri |
+| `lint.yml` | `Frontend Typecheck & Build` | Lint, typecheck, build, bundle butcesi |
+| `lint.yml` | `Security Scan (pip-audit & gitleaks)` | Bagimlilik ve secret taramasi |
+| `release.yml` | `release_gate --quick` adimi | Tag oncesi tam kalite kapisi |
+
+Notlar:
+
+- `Web Real-Browser Tab Smoke` PR'da 1440x900 hizli kosuyu, gece/manuel tetiklemede
+  375/768/1024/1440 matrisini calistirir. Basarisizlikta sunucu logu artifact olarak yuklenir.
+- `release.yml` tag oncesi `python3 scripts/release_gate.py --quick` calistirir; bu adim
+  atlanirsa surum yayinlanmamalidir.
+- Dal korumasi "Require branches to be up to date before merging" ile birlikte
+  kullanilmalidir; aksi halde eski bir yesil kosu yeni degisikligi maskeleyebilir.
+- 20 ardisik smoke kosusunda flake orani %2'nin altinda tutulmalidir; flake gorulurse
+  once port/surec izolasyonu (R23) duzeltilir.

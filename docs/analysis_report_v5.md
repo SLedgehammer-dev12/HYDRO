@@ -83,7 +83,7 @@ Kapanan başlıca üretim boşlukları: OCR worker'ın compose profili + healthc
 | --- | --- | --- | --- |
 | R19 | OCR worker üretim operasyonları | **Büyük ölçüde tamam** | Compose `ocr` profili, healthcheck, mem/pids limiti, `GET /api/ocr/queue` (kuyruk yaşı + DLQ), `POST .../retry` var. Kuyruk yaşı eşik alarmı ve sayfa başına maliyet ölçümü yok |
 | R20 | OIDC/RBAC üretim operasyonları | **Kısmi** | `HYDRO_OIDC_ROLE_MAP`, oturum iptali, idle timeout, onay sayfalama/filtre ve giriş/çıkış audit'i var. MFA/step-up ve onay bildirimi/son kullanma yok |
-| R21 | CI viewport matrisi + derin E2E + required check | **Büyük ölçüde tamam** | PR smoke 1440, CI matrisi 4 viewport, E2E 020 form kaydı + rapor export + proje silme. Required-check ve 20 koşuluk flake ölçümü repodan doğrulanamıyor |
+| R21 | CI viewport matrisi + derin E2E + required check | **Büyük ölçüde tamam** | PR smoke 1440, CI matrisi 4 viewport, E2E 020 form kaydı + rapor export + proje silme. Required-check kurulumu `docs/release.md`'de belgelendi; GitHub ayarı ve 20 koşuluk flake ölçümü repodan doğrulanamıyor |
 | R22 | Kontrast + E2E axe + odak tuzağı | **Kısmi** | Tema token'ları için WCAG AA kontrast testi, `prefers-reduced-motion`, tur `Esc` odak dönüşü var. `@axe-core/playwright` E2E taraması ve tam odak tuzağı yok |
 | R23 | Test süresi/izolasyon/flake | **Kısmi** | Launcher rastgele port/tmp_path izolasyonu var; `slow` marker tanımlı. `ui/domain/web` ayrımı ve paralel/sharded koşu yok |
 | R24 | Doküman tek kaynak + `analysis_report_v5` | **Tamam** | `sync_doc_metrics.py` sürüm/şema/OpenAPI bloğunu üretiyor; DURUM/README/implementation_status test-bundle sayıları senkron; bu rapor eklendi |
