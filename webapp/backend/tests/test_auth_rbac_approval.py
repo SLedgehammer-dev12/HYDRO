@@ -298,3 +298,75 @@ def test_two_person_approval_for_db_restore(tmp_path: Path):
             assert restored.json()["source"] == fname
     finally:
         db.dispose_database()
+
+
+def test_oidc_role_map_session_revocation_and_approval_pagination(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("HYDRO_OIDC_ROLE_MAP", "botas-admins=admin,saha-kontrol=supervisor")
+    env_settings = Settings.from_env()
+    assert env_settings.oidc_role_map == {
+        "botas-admins": "admin",
+        "saha-kontrol": "supervisor",
+    }
+
+    auth_core.clear_revoked_sessions()
+    settings = Settings(
+        database_url=f"sqlite:///{(tmp_path / 'r20_auth.db').as_posix()}",
+        data_dir=tmp_path / "data",
+        frontend_dist=tmp_path / "dist",
+        auth_mode="oidc",
+        auth_session_secret="r20-test-session-secret-0123456789",
+        oidc_issuer="https://idp.example.com",
+        oidc_client_id="hydro-web-client",
+        oidc_role_map=env_settings.oidc_role_map,
+    )
+    app = create_app(settings)
+    try:
+        with TestClient(app) as client:
+            login_res = client.get("/api/auth/login?redirect=0")
+            state = login_res.json()["state"]
+
+            with patch(
+                "app.api.auth._exchange_oidc_code",
+                return_value={
+                    "sub": "group-user-1",
+                    "email": "grp@example.com",
+                    "name": "Grup Admini",
+                    "groups": ["readonly-guest", "botas-admins"],
+                },
+            ):
+                cb = client.get(f"/api/auth/callback?code=c1&state={state}")
+                assert cb.status_code == 200, cb.text
+                assert cb.json()["user"]["role"] == "admin"
+
+            saved_cookie = client.cookies.get(SESSION_COOKIE_NAME)
+            assert saved_cookie
+
+            # Create two approvals and verify pagination limit/offset
+            r1 = client.post(
+                "/api/approvals",
+                json={"action": "session_finalize", "target_id": "s-1", "reason": "First"},
+            )
+            r2 = client.post(
+                "/api/approvals",
+                json={"action": "session_finalize", "target_id": "s-2", "reason": "Second"},
+            )
+            assert r1.status_code == 201 and r2.status_code == 201
+
+            page = client.get("/api/approvals", params={"limit": 1, "offset": 1})
+            assert page.status_code == 200
+            body = page.json()
+            assert body["total"] >= 2
+            assert body["limit"] == 1
+            assert body["offset"] == 1
+            assert len(body["items"]) == 1
+
+            # Logout revokes the active session id immediately even if the old cookie is replayed
+            out = client.post("/api/auth/logout")
+            assert out.status_code == 200
+            client.cookies.set(SESSION_COOKIE_NAME, saved_cookie)
+            replayed = client.get("/api/projects")
+            assert replayed.status_code == 401
+            assert replayed.json()["code"] == "authentication_required"
+    finally:
+        auth_core.clear_revoked_sessions()
+        db.dispose_database()

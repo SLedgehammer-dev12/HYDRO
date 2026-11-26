@@ -2752,6 +2752,8 @@ export interface operations {
             query?: {
                 status?: string | null;
                 action?: string | null;
+                limit?: number;
+                offset?: number;
             };
             header?: never;
             path?: never;

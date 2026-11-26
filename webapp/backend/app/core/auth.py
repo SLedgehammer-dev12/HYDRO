@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import json
 import secrets
+import threading
 import time
 import urllib.parse
 from dataclasses import dataclass
@@ -30,6 +31,61 @@ ROLE_RANK: dict[str, int] = {
     ROLE_ADMIN: 3,
 }
 
+_REVOKED_LOCK = threading.Lock()
+_REVOKED_SESSIONS: dict[str, float] = {}
+
+
+def revoke_session_id(sid: str, exp: float, *, now: float | None = None) -> None:
+    """Record a logged-out or revoked session id until its cookie expiration."""
+
+    clean_sid = sid.strip()
+    if not clean_sid:
+        return
+    ts = float(now if now is not None else time.time())
+    with _REVOKED_LOCK:
+        stale = [k for k, v in _REVOKED_SESSIONS.items() if v <= ts]
+        for k in stale:
+            del _REVOKED_SESSIONS[k]
+        _REVOKED_SESSIONS[clean_sid] = max(float(exp), ts + 60.0)
+
+
+def is_session_revoked(sid: str, *, now: float | None = None) -> bool:
+    clean_sid = sid.strip()
+    if not clean_sid:
+        return False
+    ts = float(now if now is not None else time.time())
+    with _REVOKED_LOCK:
+        exp = _REVOKED_SESSIONS.get(clean_sid)
+        if exp is None:
+            return False
+        if exp <= ts:
+            del _REVOKED_SESSIONS[clean_sid]
+            return False
+        return True
+
+
+def clear_revoked_sessions() -> None:
+    """Clear in-memory session revocation table (primarily for tests)."""
+
+    with _REVOKED_LOCK:
+        _REVOKED_SESSIONS.clear()
+
+
+def extract_session_meta(token: str | None, settings: Settings) -> tuple[str, float] | None:
+    """Return ``(sid, exp)`` for a syntactically valid, signed session cookie."""
+
+    data = verify_payload(token, settings.auth_session_secret)
+    if data is None:
+        return None
+    sid = str(data.get("sid") or "").strip()
+    if not sid:
+        return None
+    try:
+        exp = float(data.get("exp", 0))
+    except (TypeError, ValueError):
+        return None
+    return sid, exp
+
 
 @dataclass(frozen=True)
 class AuthPrincipal:
@@ -47,8 +103,8 @@ class AuthPrincipal:
         return ROLE_RANK.get(self.role, 0) >= ROLE_RANK.get(min_role, 99)
 
 
-def normalize_role(raw: Any) -> str:
-    """Normalize OIDC role or roles claim to the highest valid application role."""
+def normalize_role(raw: Any, role_map: dict[str, str] | None = None) -> str:
+    """Normalize OIDC role/group claims to the highest valid application role."""
 
     candidates: list[str] = []
     if isinstance(raw, str):
@@ -57,13 +113,18 @@ def normalize_role(raw: Any) -> str:
         for item in raw:
             if isinstance(item, str) and item.strip():
                 candidates.append(item.strip().lower())
+            elif isinstance(item, (list, tuple, set)):
+                for nested in item:
+                    if isinstance(nested, str) and nested.strip():
+                        candidates.append(nested.strip().lower())
 
     best = ROLE_OPERATOR
     best_rank = ROLE_RANK[ROLE_OPERATOR]
     for candidate in candidates:
-        rank = ROLE_RANK.get(candidate, 0)
+        mapped = role_map.get(candidate, candidate) if role_map else candidate
+        rank = ROLE_RANK.get(mapped, 0)
         if rank > best_rank:
-            best = candidate
+            best = mapped
             best_rank = rank
     return best
 
@@ -145,6 +206,9 @@ def parse_session_cookie(
     except (TypeError, ValueError):
         return None
     if exp <= ts:
+        return None
+    sid = str(data.get("sid") or "").strip()
+    if sid and is_session_revoked(sid, now=ts):
         return None
     idle_limit = max(60, int(settings.auth_idle_timeout_s))
     if (ts - last_seen) > idle_limit:
@@ -266,11 +330,15 @@ __all__ = [
     "VALID_ROLES",
     "build_oidc_authorize_url",
     "clear_auth_cookies",
+    "clear_revoked_sessions",
+    "extract_session_meta",
     "generate_pkce_pair",
+    "is_session_revoked",
     "issue_session_cookie",
     "normalize_role",
     "parse_session_cookie",
     "require_role",
+    "revoke_session_id",
     "set_oidc_state_cookie",
     "set_session_cookie",
     "sign_payload",

@@ -8,11 +8,11 @@ import secrets
 import time
 import urllib.parse
 import urllib.request
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session as OrmSession
 
 from .. import schemas
@@ -21,13 +21,16 @@ from ..core.auth import (
     ROLE_ADMIN,
     ROLE_OPERATOR,
     ROLE_SUPERVISOR,
+    SESSION_COOKIE_NAME,
     AuthPrincipal,
     build_oidc_authorize_url,
     clear_auth_cookies,
+    extract_session_meta,
     generate_pkce_pair,
     issue_session_cookie,
     normalize_role,
     require_role,
+    revoke_session_id,
     set_oidc_state_cookie,
     set_session_cookie,
     sign_payload,
@@ -229,8 +232,13 @@ def oidc_callback(
     sub = str(claims.get("sub") or "").strip()
     if not sub:
         raise AppError("invalid_oidc_claims", "OIDC kimlik bilgisi 'sub' eksik.", status_code=401)
-    role_raw = claims.get(settings.oidc_role_claim) or claims.get("roles") or claims.get("role")
-    role = normalize_role(role_raw)
+    role_candidates = [
+        claims.get(settings.oidc_role_claim),
+        claims.get("roles"),
+        claims.get("groups"),
+        claims.get("role"),
+    ]
+    role = normalize_role(role_candidates, role_map=settings.oidc_role_map)
     ws_claim = claims.get("workspace")
     principal = AuthPrincipal(
         sub=sub,
@@ -268,6 +276,10 @@ def auth_logout(
     settings: Settings = Depends(get_settings),
     workspace: Workspace = Depends(get_workspace),
 ) -> Response:
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    meta = extract_session_meta(token, settings)
+    if meta is not None:
+        revoke_session_id(meta[0], meta[1])
     principal = getattr(request.state, "principal", None)
     if principal is not None:
         audit.record(
@@ -344,6 +356,8 @@ def consume_two_person_approval(
 def list_approvals(
     status: str | None = Query(default=None),
     action: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     db: OrmSession = Depends(get_db),
     workspace: Workspace = Depends(get_workspace),
 ) -> dict[str, Any]:
@@ -352,8 +366,22 @@ def list_approvals(
         stmt = stmt.where(ApprovalRequest.status == status)
     if action:
         stmt = stmt.where(ApprovalRequest.action == action)
-    rows = db.execute(stmt.order_by(ApprovalRequest.created_at.desc())).scalars().all()
-    return json_safe({"items": [_serialize_approval(row) for row in rows]})
+    total = int(
+        cast(Any, db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()) or 0
+    )
+    rows = (
+        db.execute(stmt.order_by(ApprovalRequest.created_at.desc()).limit(limit).offset(offset))
+        .scalars()
+        .all()
+    )
+    return json_safe(
+        {
+            "items": [_serialize_approval(row) for row in rows],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+    )
 
 
 @router.post("/approvals", status_code=201)

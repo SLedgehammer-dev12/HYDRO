@@ -127,3 +127,15 @@ def test_api_only_root_without_frontend(client):
     body = response.json()
     assert body["service"] == "hydro-web"
     assert body["status"] == "api_only"
+
+
+def test_backup_drill_smoke_and_retention_pruning(tmp_path):
+    from scripts import backup_drill
+
+    first = backup_drill.run_backup_drill(tmp_path, max_backups=1)
+    assert first["status"] == "ok"
+    assert first["pruned_count"] == 0
+
+    second = backup_drill.run_backup_drill(tmp_path, max_backups=1)
+    assert second["status"] == "ok"
+    assert second["pruned_count"] >= 1

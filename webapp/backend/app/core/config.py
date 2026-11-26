@@ -24,6 +24,7 @@ Environment variables (all optional):
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from dataclasses import dataclass, field
@@ -88,6 +89,36 @@ def _parse_csv(raw: str | None) -> tuple[str, ...]:
     return tuple(item.strip() for item in raw.split(",") if item.strip())
 
 
+def _parse_role_map(raw: str | None) -> dict[str, str]:
+    """Parse ``HYDRO_OIDC_ROLE_MAP`` ('group=role,...' or JSON object)."""
+
+    if not raw or not raw.strip():
+        return {}
+    text = raw.strip()
+    out: dict[str, str] = {}
+    if text.startswith("{"):
+        try:
+            loaded = json.loads(text)
+        except json.JSONDecodeError:
+            return {}
+        if isinstance(loaded, dict):
+            for key, val in loaded.items():
+                k = str(key).strip().lower()
+                v = str(val).strip().lower()
+                if k and v:
+                    out[k] = v
+        return out
+    for entry in text.split(","):
+        if "=" not in entry:
+            continue
+        k, v = entry.split("=", 1)
+        k_clean = k.strip().lower()
+        v_clean = v.strip().lower()
+        if k_clean and v_clean:
+            out[k_clean] = v_clean
+    return out
+
+
 def _env(*names: str) -> str | None:
     for name in names:
         value = os.environ.get(name)
@@ -149,6 +180,7 @@ class Settings:
     oidc_client_secret: str = ""
     oidc_redirect_uri: str = ""
     oidc_role_claim: str = "role"
+    oidc_role_map: dict[str, str] = field(default_factory=dict)
     allow_remote: bool = False
     allow_workspace_claim: bool = False
     local_admin_token: str = ""
@@ -244,6 +276,7 @@ class Settings:
             oidc_client_secret=_env("HYDRO_OIDC_CLIENT_SECRET") or "",
             oidc_redirect_uri=_env("HYDRO_OIDC_REDIRECT_URI") or "",
             oidc_role_claim=_env("HYDRO_OIDC_ROLE_CLAIM") or "role",
+            oidc_role_map=_parse_role_map(_env("HYDRO_OIDC_ROLE_MAP")),
             allow_remote=_env_bool("HYDRO_ALLOW_REMOTE", False),
             allow_workspace_claim=_env_bool("HYDRO_ALLOW_WORKSPACE_CLAIM", False),
             local_admin_token=_env("HYDRO_LOCAL_ADMIN_TOKEN") or "",
