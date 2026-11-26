@@ -9,7 +9,7 @@ Dal: `main` (`v2.1.1`)
 
 | Alan | Durum | Kanit |
 | --- | --- | --- |
-| Backend API | Calisiyor | 94 OpenAPI path (109 operation, `openapi.json`), **269 pytest** (1 skipped: Postgres CI-only; `%82` kapsam, Alembic `0005`), 56 backend dosyada `mypy` temiz |
+| Backend API | Calisiyor | 96 OpenAPI path (111 operation, `openapi.json`), **289 pytest** (1 skipped: Postgres CI-only; `%83` kapsam, Alembic `0005`), 56 backend dosyada `mypy` temiz |
 | Frontend kabuk | Calisiyor | 9 sekme (Projeler & Kesitler, birlesik Geometri & Saha, son sekmede birlesik Katsayilar & Detay), responsive, tema |
 | Hesaplamalar | Parity | A/B, hava, basinc, profil, pig, pressurization, termal denge |
 | Proje & Kesit DB | Calisiyor | `projects` + `sessions.project_id` + `inputs.section_meta`, kesit siralama/acma/kopyalama/silme |
@@ -23,10 +23,10 @@ Dal: `main` (`v2.1.1`)
 ## Dogrulama
 
 ```bash
-python3 -m pytest webapp/backend/tests -q  # 269 passed, 1 skipped (Postgres CI-only)
-python3 -m unittest discover -s tests -p "test_*.py"  # 741 OK (skipped=1)
-cd webapp/frontend && npm run check:api && npm run lint && npm test && npm run typecheck && npm run build && npm run check:bundle  # PASS (77 Vitest / 25 dosya, 149,8 kB gzip)
-cd webapp/frontend && HYDRO_APP_URL=http://127.0.0.1:8099 node scripts/verify-tabs.mjs  # 12/12 + E2E PASS; --matrix 36/36
+python3 -m pytest webapp/backend/tests -q  # 289 passed, 1 skipped (Postgres CI-only)
+python3 -m unittest discover -s tests -p "test_*.py"  # 744 OK (skipped=1)
+cd webapp/frontend && npm run check:api && npm run lint && npm test && npm run typecheck && npm run build && npm run check:bundle  # PASS (83 Vitest / 25 dosya, 149,8 kB gzip)
+cd webapp/frontend && HYDRO_APP_URL=http://127.0.0.1:8099 node scripts/verify-tabs.mjs  # 12/12 + E2E PASS; --matrix 48/48 (375/768/1024/1440)
 ```
 
 Canli smoke:
@@ -80,7 +80,7 @@ docker compose -f webapp/docker-compose.yml up --build
 3. **Alembic uretim gocu (tamamlandi):** `webapp/backend/migrations/` (`0002` → `0005`), `migrations_runner.py`, eski `0001`/`0002` koprusu, SQLite FK / Postgres advisory lock korumasi ve asamali geri alinabilir yedek geri yukleme tamamlandi.
 4. **Auth/OIDC ve iki-kisi kurali (tamamlandi):** OIDC PKCE + `HttpOnly` oturum, `operator/supervisor/admin` RBAC ve oturum finalleştirme / `db-restore` icin iki kisi onayi (`0005`, `ApprovalsCard`) aktif.
 5. **Postgres:** kod uyumlu; `psycopg` yerelde kurulu degil, CI'da `postgres:16-alpine` + Alembic/CRUD smoke isi calisiyor.
-6. **Frontend kod bolme & birim testleri (tamamlandi):** rota/Recharts/three.js lazy-loading + `check:bundle` (`149,8 kB` gzip ilk yukleme JS) ve 77 Vitest bilesen/birim testi (25 dosya) aktif.
+6. **Frontend kod bolme & birim testleri (tamamlandi):** rota/Recharts/three.js lazy-loading + `check:bundle` (`149,8 kB` gzip ilk yukleme JS) ve 83 Vitest bilesen/birim testi (25 dosya) aktif.
 7. **3D gercek veri (tamamlandi):** `profile_points[]` ve `equipment[]` girdileri (`SiteSurveyPanel.tsx`, `buildSceneData()`, `build_scene()`, `build_project_scene()`), yoksa acik yaklasik sahne uyarilari gosterilir.
 8. **Muhendislik guvenlik uyarilari, `water_backend` & rapor kimligi uyumu (tamamlandi):** `evaluate_fill_temperature` (`+2 °C` Madde 10.1 uyarisi), `negative_b = b < 0` duzeltmesi ve `0–4 °C` negatif `beta_water`/`B` UI uyarilari, ayri `inputs.water_backend` secicisi + TXT/CSV backend karsilastirma raporu, `t_initial`/`t_final` ve OCR `report_meta` -> `report` tam uyumu tamamlandi.
 9. **Masaüstü JSON snapshot içe aktarma & eşzamanlı düzenleme 409 diff (tamamlandi):** `POST /api/import/desktop-snapshot` (`project_id`, audit & mapping özetleri) UI bağlantısı (`ProjectImportModal` + `ReportsPage`) ve `PUT /sessions/{id}`, `POST /snapshot`, `POST /results` için `If-Match` / `409 revision_conflict` (`details.current` + `details.diff`) ile satır bazlı Sunucu/Yerel birleştirme modalı (`RevisionConflictModal`) eklendi.

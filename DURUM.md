@@ -20,9 +20,9 @@
 
 | Alan | Durum | Kanıt |
 | --- | --- | --- |
-| Masaüstü uygulaması | Çalışıyor, kararlı (`hidrostatik_test/ui/*` kapsam dışı tutuldu) | `tests.test_report_ocr` 76 unittest OK (`skipped=1`); tam paket `python3 -m unittest discover`: **741 OK** (`skipped=1`, Tk testleri CI'da izole) |
-| Web backend (FastAPI) | Çalışıyor | **269 pytest PASS** (1 skipped: Postgres CI-only, Alembic `0005`, `SAWarning=0`, `%82` kapsam ≥ `%80` kapısı), 94 OpenAPI path / 109 operation (`openapi.json`), 56 dosyada `mypy` temiz |
-| Web frontend (React 19) | Çalışıyor | `npm run check:api` (78/94 yol), `npm run lint` (0 hata, `jsx-a11y`), `npm test` (**77 Vitest / 25 dosya**), `npm run typecheck` + `npm run build` + `check:bundle` PASS (**`149,8 kB`** gzip ilk yükleme JS), `verify-tabs.mjs` **12/12 + E2E PASS** (matris 36/36) |
+| Masaüstü uygulaması | Çalışıyor, kararlı (`hidrostatik_test/ui/*` kapsam dışı tutuldu) | `tests.test_report_ocr` 87 unittest OK (`skipped=1`); tam paket `python3 -m unittest discover`: **744 OK** (`skipped=1`, Tk testleri CI'da izole) |
+| Web backend (FastAPI) | Çalışıyor | **289 pytest PASS** (1 skipped: Postgres CI-only, Alembic `0005`, `SAWarning=0`, `%83` kapsam ≥ `%80` kapısı), 96 OpenAPI path / 111 operation (`openapi.json`), 56 dosyada `mypy` temiz |
+| Web frontend (React 19) | Çalışıyor | `npm run check:api` (78/96 yol), `npm run lint` (0 hata, `jsx-a11y`), `npm test` (**83 Vitest / 25 dosya**), `npm run typecheck` + `npm run build` + `check:bundle` PASS (**`149,8 kB`** gzip ilk yükleme JS), `verify-tabs.mjs` **12/12 + E2E PASS** (matris 48/48) |
 | Program İkon & Marka Sistemi | Hazır | Boru kesiti + su dalgası + manometre ikonu (`tools/generate_icons.py`, `assets/icons/*`, `webapp/frontend/public/*`, `<HydroLogo />`, PyInstaller/Inno Setup/Tkinter) |
 | Web Güncelleme Yöneticisi | Çalışıyor | `/api/update/*`, SHA-256 + fail-closed Ed25519 `.sig` doğrulama, `UpdateManagerModal`, macOS `.dmg` / Win `.exe`/`.zip` kurulum |
 | BOTAŞ Test Bölümü Formları | Çalışıyor | Seçenek 1 sol menü (`015`..`023`, `KUR-001`, `KUR-002` + 5 ek), `SectionFormPage`, `rows`/`pig_runs`/`findings`, tekil OCR, `020`/`022` gömülü hesaplama ve `023` (`BOT-FRM-CDB-001-024`) Şartname 16–17 çift yönlü entegrasyonu |
@@ -136,7 +136,7 @@ Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen iş
 - [x] Alembic üretim migrasyonu (`0002` → `0005`; `0004` OCR kuyruğu, `0005` onay istekleri, `migrations_runner.py`, legacy `0001`/`0002` köprüsü, SQLite FK/Postgres advisory lock koruması, geri alınabilir `restore_db_backup`, `HYDRO_AUTO_MIGRATE`, `HydroWeb.spec` paketlemesi).
 - [x] Auth / OIDC + iki kişi onayı (`core/auth.py`, `api/auth.py`, `0005_approval_requests.py`, `ApprovalsCard`; R4).
 - [x] Postgres runtime testi (`test_postgres_runtime.py` + `web-postgres-tests` CI `postgres:16-alpine` + `psycopg[binary]` işi; yerel ortamda `HYDRO_TEST_POSTGRES_URL` yokken atlanır).
-- [x] Frontend birim testleri, kod bölme & paket bütçesi (`check:bundle` ≤ `200 kB` gzip kapısı, rota/Recharts/3D lazy-loading, Vite 8 Rolldown chunk bölmesi, `GZipMiddleware` + HTML `no-cache` bfcache uyumu + `verify-tabs.mjs`; güncel: **77 Vitest / 25 dosya**, `149,8 kB` ilk JS gzip).
+- [x] Frontend birim testleri, kod bölme & paket bütçesi (`check:bundle` ≤ `200 kB` gzip kapısı, rota/Recharts/3D lazy-loading, Vite 8 Rolldown chunk bölmesi, `GZipMiddleware` + HTML `no-cache` bfcache uyumu + `verify-tabs.mjs`; güncel: **83 Vitest / 25 dosya**, `149,8 kB` ilk JS gzip).
 - [x] 3D gerçek veri: `profile_points[]` / `equipment[]` girdileri (`SiteSurveyPanel.tsx`, `buildSceneData()`, `build_scene()`, `build_project_scene()`, yoksa açık yaklaşık sahne + uyarı bayrakları).
 
 **v2.1.0 canlı denetiminden (`docs/analysis_report_v4.md` F18–F29) kapatılan işler:**
@@ -149,7 +149,7 @@ Sıradaki adımlar §4'teki üretim sertleştirmesi ve kurum onayı bekleyen iş
 - [x] Yazma istek modelleri `StrictWriteModel`'e taşındı (`extra="forbid"`, F21).
 - [x] CI'ya `dump_openapi --check` ve `npm run check:api` eklendi; `api_contract.md` §13.5 güncellendi (F22).
 - [x] OCR sekmesinden çıkınca arka planda süren iş için `TopBar` göstergesi ve iptal düğmesi eklendi (F24).
-- [x] Tk diyalog test teardown'u düzeltildi (`tests.test_download_dialog` `update_idletasks`/`quit`/`destroy` + `gc.collect()` → o tarihte **733 OK**; v2.1.1'de **741 OK** (F25).
+- [x] Tk diyalog test teardown'u düzeltildi (`tests.test_download_dialog` `update_idletasks`/`quit`/`destroy` + `gc.collect()` → o tarihte **733 OK**; v2.1.1'de **744 OK** (F25).
 - [x] Yardım menüsü `"Rehberli Demo Turunu Başlat"` düğmesi `useStartDemoTour` ile onboarding akışına birleştirildi (F26).
 
 ### 4.2 Domain / masaüstü (P1–P2, `tasks/todo.md`)
@@ -198,24 +198,24 @@ python3 -m mypy hidrostatik_test/domain/                       # Success: no iss
 python3 -m mypy --ignore-missing-imports webapp/backend/app    # Success: no issues found (56 files)
 
 # Web backend (Alembic + API + OpenAPI sözleşmesi + domain parity + %80 kapsam kapısı)
-python3 -m pytest webapp/backend/tests -q -W default::sqlalchemy.exc.SAWarning  # 269 passed, 1 skipped (%82 kapsam; Postgres CI-only; SAWarning yok)
+python3 -m pytest webapp/backend/tests -q -W default::sqlalchemy.exc.SAWarning  # 289 passed, 1 skipped (%83 kapsam; Postgres CI-only; SAWarning yok)
 
 # OCR/PDF servis birim testleri
-python3 -m unittest tests.test_report_ocr                      # 76 tests OK (skipped=1)
+python3 -m unittest tests.test_report_ocr                      # 87 tests OK (skipped=1)
 
 # Masaüstü tam paket
-python3 -m unittest discover -s tests -p "test_*.py"          # 741 OK (skipped=1, Tk testleri CI'da izole)
+python3 -m unittest discover -s tests -p "test_*.py"          # 744 OK (skipped=1, Tk testleri CI'da izole)
 
 # Masaüstü paketli Web self-test
 python3 webapp/desktop_launcher.py --self-test                 # SELF_TEST_OK
 
 # Frontend sözleşme, derleme, lint, paket bütçesi & test
-cd webapp/frontend && npm run check:api && npm run lint && npm test && npm run typecheck && npm run build && npm run check:bundle  # PASS (77 Vitest / 25 dosya, 149,8 kB gzip)
+cd webapp/frontend && npm run check:api && npm run lint && npm test && npm run typecheck && npm run build && npm run check:bundle  # PASS (83 Vitest / 25 dosya, 149,8 kB gzip)
 
 # Sekme + BOTAŞ Form Ağacı & 020/022/023 Gömülü Hesaplama & Güncelleme Yöneticisi smoke (port 8099, izole DB)
 cd webapp/frontend && HYDRO_APP_URL=http://127.0.0.1:8099 \
   node scripts/verify-tabs.mjs                                 # 12/12 + E2E PASS
-  node scripts/verify-tabs.mjs --matrix --no-e2e               # 36/36 PASS (375/768/1440)
+  node scripts/verify-tabs.mjs --matrix --no-e2e               # 48/48 PASS (375/768/1024/1440)
 ```
 
 Çalıştırma:
