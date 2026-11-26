@@ -1,10 +1,20 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
-import { Pencil, RotateCcw, Sparkles } from "lucide-react";
+import { ArrowDown, Eye, Pencil, RotateCcw, Search, Sparkles } from "lucide-react";
 import { confidenceTier, formatConfidence, formatUnit, formatValue } from "../format";
 import type { FlatField } from "../fields";
 import type { SuggestedFix } from "../types";
 import { TONE_BADGE_CLASSES, confidenceTone, type Tone } from "./tone";
+
+type FieldFilter = "all" | "low" | "suggested" | "edited" | "required";
+
+const FILTER_LABELS: Array<{ key: FieldFilter; label: string }> = [
+  { key: "all", label: "Tümü" },
+  { key: "low", label: "Düşük Güven" },
+  { key: "suggested", label: "Önerili" },
+  { key: "edited", label: "Düzenlenen" },
+  { key: "required", label: "Zorunlu" },
+];
 
 const TIER_LABEL = {
   critical: "Kritik",
@@ -46,8 +56,10 @@ export interface FieldsTableProps {
   selected: Set<string>;
   edits: Record<string, string>;
   suggestedFixes?: SuggestedFix[];
+  lowThreshold?: number;
   onToggle: (key: string, checked: boolean) => void;
   onEdit: (key: string, value: string | null) => void;
+  onPreviewPage?: (page: number) => void;
 }
 
 export default function FieldsTable({
@@ -55,22 +67,76 @@ export default function FieldsTable({
   selected,
   edits,
   suggestedFixes = [],
+  lowThreshold = 0.6,
   onToggle,
   onEdit,
+  onPreviewPage,
 }: FieldsTableProps) {
-  const fixesByField = new Map(suggestedFixes.map((fix) => [fix.field, fix]));
-  const pendingFixes = suggestedFixes.filter(
-    (fix) => !Object.prototype.hasOwnProperty.call(edits, fix.field),
+  const fixesByField = useMemo(
+    () => new Map(suggestedFixes.map((fix) => [fix.field, fix])),
+    [suggestedFixes],
+  );
+  const pendingFixes = useMemo(
+    () =>
+      suggestedFixes.filter((fix) => !Object.prototype.hasOwnProperty.call(edits, fix.field)),
+    [suggestedFixes, edits],
   );
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [filter, setFilter] = useState<FieldFilter>("all");
+  const [search, setSearch] = useState("");
   const editInputRef = useRef<HTMLInputElement>(null);
+  const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
 
   useEffect(() => {
     if (editingKey) {
       editInputRef.current?.focus();
     }
   }, [editingKey]);
+
+  const filteredFields = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase("tr-TR");
+    return fields.filter((item) => {
+      const key = item.descriptor.key;
+      const edited = Object.prototype.hasOwnProperty.call(edits, key);
+      const hasPendingFix = fixesByField.has(key) && !edited;
+      if (filter === "low" && item.field.confidence >= lowThreshold) return false;
+      if (filter === "suggested" && !hasPendingFix) return false;
+      if (filter === "edited" && !edited) return false;
+      if (filter === "required" && !item.descriptor.required) return false;
+      if (!query) return true;
+      return (
+        item.descriptor.label.toLocaleLowerCase("tr-TR").includes(query) ||
+        key.toLocaleLowerCase("tr-TR").includes(query) ||
+        (item.field.raw_text ?? "").toLocaleLowerCase("tr-TR").includes(query)
+      );
+    });
+  }, [fields, edits, fixesByField, filter, search, lowThreshold]);
+
+  const lowPendingCount = useMemo(
+    () => fields.filter((item) => item.field.confidence < lowThreshold && !selected.has(item.descriptor.key)).length,
+    [fields, selected, lowThreshold],
+  );
+
+  const jumpToNextLowConfidence = () => {
+    const target = fields.find(
+      (item) => item.field.confidence < lowThreshold && !selected.has(item.descriptor.key),
+    );
+    if (!target) return;
+    setFilter("all");
+    setSearch("");
+    window.setTimeout(() => {
+      const row = rowRefs.current[target.descriptor.key];
+      row?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+      row?.focus();
+    }, 0);
+  };
+
+  const applyAllPendingFixes = () => {
+    for (const fix of pendingFixes) {
+      onEdit(fix.field, String(fix.suggested_value));
+    }
+  };
 
   const beginEdit = (item: FlatField) => {
     setEditingKey(item.descriptor.key);
@@ -97,7 +163,7 @@ export default function FieldsTable({
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b hairline px-4 py-3">
         <p className="text-xs text-[var(--text-muted)]">
-          {fields.length} alan okundu · onay için satırları seçin
+          {filteredFields.length}/{fields.length} alan gösteriliyor · onay için satırları seçin
         </p>
         <p className="flex flex-wrap items-center gap-3 text-[10px] text-[var(--text-faint)]">
           <span className="inline-flex items-center gap-1">
@@ -112,16 +178,74 @@ export default function FieldsTable({
         </p>
       </div>
 
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b hairline bg-[var(--surface-2)] px-4 py-2.5">
+        <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Alan filtreleri">
+          {FILTER_LABELS.map((item) => {
+            const active = filter === item.key;
+            return (
+              <button
+                key={item.key}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setFilter(item.key)}
+                className={clsx(
+                  "rounded-full border px-2.5 py-1 text-[10.5px] font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]",
+                  active
+                    ? "border-[var(--primary)] bg-[var(--primary-soft)] text-[var(--primary)]"
+                    : "border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-muted)] hover:border-[var(--border-strong)] hover:text-[var(--text)]",
+                )}
+              >
+                {item.label}
+              </button>
+            );
+          })}
+          {lowPendingCount > 0 ? (
+            <button
+              type="button"
+              onClick={jumpToNextLowConfidence}
+              className="ml-1 inline-flex items-center gap-1 rounded-full border border-[var(--warning-border)] bg-[var(--warning-bg)] px-2.5 py-1 text-[10.5px] font-medium text-[var(--warning)] transition hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
+            >
+              <ArrowDown size={11} aria-hidden="true" />
+              Sonraki Düşük Güven ({lowPendingCount})
+            </button>
+          ) : null}
+        </div>
+        <label className="relative flex min-w-[200px] items-center">
+          <Search
+            size={13}
+            aria-hidden="true"
+            className="pointer-events-none absolute left-2.5 text-[var(--text-faint)]"
+          />
+          <input
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Alan veya ham metin ara..."
+            aria-label="Alanlarda ara"
+            className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] py-1 pl-8 pr-2.5 text-[11px] text-[var(--text)] placeholder:text-[var(--text-faint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
+          />
+        </label>
+      </div>
+
       {pendingFixes.length > 0 ? (
         <div
           role="note"
-          className="flex items-center gap-2 border-b border-[var(--warning-border)] bg-[var(--warning-bg)] px-4 py-2 text-[11px] text-[var(--warning)]"
+          className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--warning-border)] bg-[var(--warning-bg)] px-4 py-2 text-[11px] text-[var(--warning)]"
         >
-          <Sparkles size={13} aria-hidden="true" className="shrink-0" />
-          <span>
-            Olası OCR ondalık hatası tespit edildi ({pendingFixes.length} alan) — önerileri tek tıkla
-            uygulayıp onaylayabilirsiniz.
+          <span className="flex items-center gap-2">
+            <Sparkles size={13} aria-hidden="true" className="shrink-0" />
+            <span>
+              Olası OCR ondalık hatası tespit edildi ({pendingFixes.length} alan) — önerileri tek tıkla
+              uygulayıp onaylayabilirsiniz.
+            </span>
           </span>
+          <button
+            type="button"
+            onClick={applyAllPendingFixes}
+            className="rounded-md border border-[var(--warning-border)] bg-[var(--surface-1)] px-2.5 py-1 text-[10.5px] font-semibold text-[var(--warning)] transition hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
+          >
+            Tüm Önerileri Uygula ({pendingFixes.length})
+          </button>
         </div>
       ) : null}
 
@@ -157,7 +281,14 @@ export default function FieldsTable({
             </tr>
           </thead>
           <tbody>
-            {fields.map((item) => {
+            {filteredFields.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="px-4 py-6 text-center text-xs text-[var(--text-faint)]">
+                  Seçili filtre veya arama terimiyle eşleşen alan bulunamadı.
+                </td>
+              </tr>
+            ) : null}
+            {filteredFields.map((item) => {
               const key = item.descriptor.key;
               const tier = confidenceTier(item.field.confidence);
               const edited = Object.prototype.hasOwnProperty.call(edits, key);
@@ -170,8 +301,28 @@ export default function FieldsTable({
               return (
                 <tr
                   key={key}
+                  ref={(node) => {
+                    rowRefs.current[key] = node;
+                  }}
+                  tabIndex={0}
+                  onKeyDown={(event) => {
+                    const target = event.target;
+                    if (
+                      target instanceof HTMLElement &&
+                      ["INPUT", "BUTTON", "TEXTAREA", "SELECT", "A"].includes(target.tagName)
+                    ) {
+                      return;
+                    }
+                    if (event.key === "Enter" || event.key === "e" || event.key === "E") {
+                      event.preventDefault();
+                      beginEdit(item);
+                    } else if (event.key === " ") {
+                      event.preventDefault();
+                      onToggle(key, !selected.has(key));
+                    }
+                  }}
                   className={clsx(
-                    "border-t hairline align-top transition-colors",
+                    "border-t hairline align-top transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus)]",
                     tier === "critical" && "bg-[var(--danger-bg)]",
                     tier === "low" && "bg-[var(--warning-bg)]",
                     "hover:bg-[var(--surface-raised)]",
@@ -284,7 +435,20 @@ export default function FieldsTable({
                     </span>
                   </td>
                   <td className="numeric px-3 py-2.5 text-right text-[var(--text-muted)]">
-                    {item.field.page ?? "—"}
+                    {item.field.page != null && onPreviewPage ? (
+                      <button
+                        type="button"
+                        onClick={() => onPreviewPage(item.field.page!)}
+                        aria-label={`Sayfa ${item.field.page} belgesini önizle`}
+                        title={`Sayfa ${item.field.page} görselini aç`}
+                        className="inline-flex items-center gap-1 rounded border border-[var(--border)] bg-[var(--surface-1)] px-2 py-0.5 text-[11px] font-medium text-[var(--primary)] transition hover:border-[var(--primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
+                      >
+                        <Eye size={11} aria-hidden="true" />
+                        {item.field.page}
+                      </button>
+                    ) : (
+                      item.field.page ?? "—"
+                    )}
                   </td>
                 </tr>
               );

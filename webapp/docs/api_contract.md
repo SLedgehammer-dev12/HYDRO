@@ -2241,7 +2241,7 @@ export interface ApiError {
 ## 16. Otomatik Üretilen OpenAPI Uç Envanteri
 
 <!-- generated:openapi-inventory:start -->
-> OpenAPI `info.version=2.1.1` · **96** path / **111** operasyon (`sync_api_inventory` ile üretildi).
+> OpenAPI `info.version=2.1.1` · **97** path / **112** operasyon (`sync_api_inventory` ile üretildi).
 
 | Metot | Yol | Özet / Operation ID |
 | --- | --- | --- |
@@ -2286,6 +2286,7 @@ export interface ApiError {
 | `POST` | `/api/ocr/analyses/{analysis_id}/approve` | Approve Analysis |
 | `POST` | `/api/ocr/analyses/{analysis_id}/cancel` | Cancel Analysis |
 | `POST` | `/api/ocr/analyses/{analysis_id}/commit-dossier` | Commit Dossier |
+| `GET` | `/api/ocr/analyses/{analysis_id}/pages/{page_no}/preview` | Get Analysis Page Preview |
 | `POST` | `/api/ocr/analyses/{analysis_id}/retry` | Retry Analysis |
 | `POST` | `/api/ocr/analyze` | Analyze |
 | `GET` | `/api/ocr/mapping-profiles` | List Mapping Profiles |

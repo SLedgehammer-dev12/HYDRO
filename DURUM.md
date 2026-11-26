@@ -15,7 +15,7 @@
 | --- | --- | --- |
 | Uygulama / Frontend Sürümü | `2.1.1` / `2.1.1` | `app_metadata.py`, `package.json` |
 | Veritabanı Şema Revizyonu (Alembic) | `0005` | `migrations_runner.py` |
-| OpenAPI Sözleşme Yüzeyi | `96` path / `111` operation | `webapp/docs/openapi.json` |
+| OpenAPI Sözleşme Yüzeyi | `97` path / `112` operation | `webapp/docs/openapi.json` |
 <!-- generated:metrics:end -->
 
 | Alan | Durum | Kanıt |

@@ -592,3 +592,95 @@ def test_update_job_progress_and_detail_payload(tmp_path: Path):
             assert payload["progress"]["pages_total"] == 12
     finally:
         db.dispose_database()
+
+
+def test_render_analysis_page_preview_image_bounds_and_errors(tmp_path: Path):
+    import io
+    import pytest
+    from PIL import Image
+    from app.core.errors import AppError
+
+    db_file = tmp_path / "preview.db"
+    settings = Settings(
+        database_url=f"sqlite:///{db_file.as_posix()}",
+        data_dir=tmp_path / "data",
+        frontend_dist=tmp_path / "dist",
+    )
+    settings.ensure_directories()
+    db.dispose_database()
+    db.configure_database(settings.database_url)
+    db.init_db()
+    ws_hash = security.workspace_hash("preview-ws")
+
+    try:
+        img_file = settings.uploads_dir / "sample.png"
+        buf = io.BytesIO()
+        Image.new("RGB", (320, 200), color=(240, 240, 240)).save(buf, format="PNG")
+        img_file.write_bytes(buf.getvalue())
+
+        xlsx_file = settings.uploads_dir / "sample.xlsx"
+        xlsx_file.write_bytes(b"PK\x03\x04dummy")
+
+        with db.session_scope() as s:
+            att_img = Attachment(
+                id="att-prev-img",
+                workspace_id_hash=ws_hash,
+                session_id=None,
+                filename="sample.png",
+                stored_path="sample.png",
+                mime="image/png",
+                size_bytes=img_file.stat().st_size,
+                sha256="deadbeef01",
+                kind="report_image",
+            )
+            att_xls = Attachment(
+                id="att-prev-xls",
+                workspace_id_hash=ws_hash,
+                session_id=None,
+                filename="sample.xlsx",
+                stored_path="sample.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                size_bytes=xlsx_file.stat().st_size,
+                sha256="deadbeef02",
+                kind="report_excel",
+            )
+            s.add_all([att_img, att_xls])
+            s.flush()
+            ana_img = OcrAnalysis(
+                id="ana-prev-img",
+                workspace_id_hash=ws_hash,
+                attachment_id=att_img.id,
+                status="succeeded",
+            )
+            ana_xls = OcrAnalysis(
+                id="ana-prev-xls",
+                workspace_id_hash=ws_hash,
+                attachment_id=att_xls.id,
+                status="succeeded",
+            )
+            s.add_all([ana_img, ana_xls])
+            s.commit()
+
+            png = ocr_service.render_analysis_page_preview(s, settings, ana_img, 1)
+            assert png.startswith(b"\x89PNG\r\n\x1a\n")
+            # Second call serves cached file cleanly
+            png_cached = ocr_service.render_analysis_page_preview(s, settings, ana_img, 1)
+            assert png_cached == png
+
+            # Out-of-range page -> 404
+            with pytest.raises(AppError) as err_404:
+                ocr_service.render_analysis_page_preview(s, settings, ana_img, 2)
+            assert err_404.value.status_code == 404
+
+            # Invalid page number -> 422
+            with pytest.raises(AppError) as err_invalid:
+                ocr_service.render_analysis_page_preview(s, settings, ana_img, 0)
+            assert err_invalid.value.status_code == 422
+
+            # Spreadsheet -> 422 preview_unsupported
+            with pytest.raises(AppError) as err_xls:
+                ocr_service.render_analysis_page_preview(s, settings, ana_xls, 1)
+            assert err_xls.value.status_code == 422
+            assert err_xls.value.code == "preview_unsupported"
+    finally:
+        db.dispose_database()

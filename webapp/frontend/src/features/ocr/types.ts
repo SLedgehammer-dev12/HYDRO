@@ -226,6 +226,12 @@ export interface SuggestedFix {
   reason: string;
 }
 
+export interface OcrTelemetry {
+  duration_ms?: number;
+  escalated_pages?: number;
+  engine?: string | null;
+}
+
 /** `GET /api/ocr/analyses/{id}` yanıtı (durum alanları opsiyoneldir). */
 export interface OcrAnalysisResult {
   id: string;
@@ -243,7 +249,13 @@ export interface OcrAnalysisResult {
   suggested_fixes?: SuggestedFix[];
   approved_fields?: Record<string, ApprovedField> | null;
   dossier?: OcrDossierView | null;
-  progress?: { stage: string; elapsed_s: number } | null;
+  ocr_telemetry?: OcrTelemetry | null;
+  progress?: {
+    stage: string;
+    elapsed_s: number;
+    pages_done?: number;
+    pages_total?: number;
+  } | null;
   error?: OcrErrorDetail | null;
   created_at?: string;
   started_at?: string | null;

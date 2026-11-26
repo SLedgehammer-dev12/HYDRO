@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import copy
 import inspect
+import io
 import json
+import re
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -19,12 +21,15 @@ from hidrostatik_test.services.report_ocr import (
     ERROR_CANCELLED,
     MAX_OCR_PAGES,
     MAX_PDF_PAGES,
+    SPREADSHEET_EXTENSIONS,
     SUPPORTED_EXTENSIONS,
     OcrAnalysisResult,
     ReportOcrError,
+    _iter_rendered_pdf_pages,
     analyze_report,
     effective_max_file_size_bytes,
     ocr_engine_details,
+    ocr_engine_name,
     ocr_status,
     pdf_rasterizer_status,
     suggest_field_fixes_from_report_dict,
@@ -33,6 +38,7 @@ from hidrostatik_test.services.report_ocr import (
 from .. import db as db_module
 from ..core.config import Settings
 from ..core.errors import AppError, not_found
+from ..core.security import ensure_within, write_private_file
 from ..core.timeutil import as_float, iso_z, json_safe, utcnow
 from ..models import (
     Attachment,
@@ -448,6 +454,17 @@ def _apply_success_result(
     analysis.error_code = None
     analysis.error_message = None
 
+    pages_list = list(result.pages or ())
+    total_ms = round(sum(float(p.duration_ms) for p in pages_list if p.duration_ms is not None), 1)
+    escalated_pages = sum(1 for p in pages_list if p.dpi_used and p.dpi_used >= 300)
+    jp_meta = dict(analysis.job_payload or {})
+    jp_meta["ocr_telemetry"] = {
+        "duration_ms": total_ms,
+        "escalated_pages": escalated_pages,
+        "engine": ocr_engine_name(),
+    }
+    analysis.job_payload = jp_meta
+
     audit.record(
         db,
         action="ocr.analyze",
@@ -851,6 +868,9 @@ def detail_payload(db: OrmSession, analysis: OcrAnalysis) -> dict[str, Any]:
         base["filename"] = attachment.filename if attachment is not None else None
         base["used_ocr"] = analysis.source in {"ocr", "mixed"}
         base["dossier"] = dossier_service.build_dossier_view(db, analysis)
+        jp_telemetry = (analysis.job_payload or {}).get("ocr_telemetry")
+        if isinstance(jp_telemetry, dict):
+            base["ocr_telemetry"] = jp_telemetry
     elif analysis.status in {"queued", "running"}:
         counts = _queue_counts(db, analysis.workspace_id_hash)
         jp = dict(analysis.job_payload or {})
@@ -1618,6 +1638,91 @@ def delete_profile(db: OrmSession, profile: OcrMappingProfile) -> None:
     db.commit()
 
 
+def render_analysis_page_preview(
+    db: OrmSession,
+    settings: Settings,
+    analysis: OcrAnalysis,
+    page_no: int,
+) -> bytes:
+    """Render one analysis source page as a cached PNG preview (PDF or image)."""
+
+    if page_no < 1:
+        raise AppError(
+            "invalid_page",
+            "Sayfa numarasi 1 veya daha buyuk olmalidir.",
+            status_code=422,
+            details={"page_no": page_no},
+        )
+    att = db.get(Attachment, analysis.attachment_id)
+    if att is None:
+        raise not_found("attachment", analysis.attachment_id)
+    stored_path = ensure_within(settings.uploads_dir, settings.uploads_dir / att.stored_path)
+    if not stored_path.is_file():
+        raise not_found("attachment_file", att.id)
+
+    suffix = stored_path.suffix.lower()
+    if suffix in SPREADSHEET_EXTENSIONS:
+        raise AppError(
+            "preview_unsupported",
+            "Excel calisma kitaplarinda sayfa goruntu onizlemesi desteklenmez.",
+            status_code=422,
+            details={"extension": suffix},
+        )
+
+    preview_root = settings.data_dir / "ocr_previews"
+    safe_key = re.sub(r"[^A-Za-z0-9_-]", "", att.sha256 or att.id)[:40] or "doc"
+    cache_path = ensure_within(preview_root, preview_root / f"{safe_key}_p{page_no}.png")
+    if cache_path.is_file():
+        return cache_path.read_bytes()
+
+    try:
+        from PIL import Image
+    except ImportError as exc:  # pragma: no cover
+        raise AppError(
+            "dependency_missing",
+            "Sayfa onizlemesi icin Pillow gerekli.",
+            status_code=503,
+        ) from exc
+
+    img: Any
+    if suffix == ".pdf":
+        rendered = list(
+            _iter_rendered_pdf_pages(stored_path, start_page=page_no - 1, max_pages=1, dpi=150)
+        )
+        if not rendered:
+            raise not_found("page", str(page_no))
+        img = rendered[0]
+    else:
+        try:
+            with Image.open(stored_path) as opened:
+                n_frames = int(getattr(opened, "n_frames", 1) or 1)
+                if page_no > n_frames:
+                    raise not_found("page", str(page_no))
+                if n_frames > 1:
+                    opened.seek(page_no - 1)
+                opened.load()
+                img = opened.convert("RGB") if opened.mode not in {"RGB", "L"} else opened.copy()
+        except AppError:
+            raise
+        except Exception as exc:
+            raise AppError(
+                "corrupt_image",
+                "Goruntu dosyasi onizleme icin acilamadi.",
+                status_code=422,
+                details={"detail": str(exc)},
+            ) from exc
+
+    if img.width > 1400 or img.height > 2200:
+        img = img.copy()
+        img.thumbnail((1400, 2200), Image.Resampling.LANCZOS)
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    png_bytes = buf.getvalue()
+    write_private_file(cache_path, [png_bytes])
+    return png_bytes
+
+
 __all__ = [
     "FIELD_TARGETS",
     "analyze_upload",
@@ -1635,6 +1740,7 @@ __all__ = [
     "list_profiles",
     "profile_brief",
     "profile_payload",
+    "render_analysis_page_preview",
     "status_payload",
     "update_profile",
 ]

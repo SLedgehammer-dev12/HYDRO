@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
@@ -29,6 +29,8 @@ import StatusPanel from "./components/StatusPanel";
 import HistoryPanel from "./components/HistoryPanel";
 import PlanProfilePanel from "./components/PlanProfilePanel";
 import DossierPanel from "./components/DossierPanel";
+
+const PagePreviewDrawer = lazy(() => import("./components/PagePreviewDrawer"));
 import { PageHeader } from "../../components/layout/PageHeader";
 import { ConfirmDialog } from "../../components/ui/Dialog";
 import { useMeta, useOpenSession, useProjects, useSessions } from "../../hooks/queries";
@@ -141,6 +143,7 @@ export default function OcrPage() {
   const [selectedFields, setSelectedFields] = useState<Set<string>>(new Set());
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [tab, setTab] = useState<TabKey>("fields");
+  const [previewPage, setPreviewPage] = useState<number | null>(null);
 
   const [status, setStatus] = useState<OcrStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
@@ -1538,8 +1541,10 @@ export default function OcrPage() {
                             selected={selectedFields}
                             edits={edits}
                             suggestedFixes={result.suggested_fixes}
+                            lowThreshold={lowThreshold}
                             onToggle={toggleField}
                             onEdit={editField}
+                            onPreviewPage={(page) => setPreviewPage(page)}
                           />
                         ) : null}
                         {tab === "discrepancies" ? (
@@ -1874,6 +1879,19 @@ export default function OcrPage() {
         onConfirm={resetAll}
         onClose={() => setConfirmResetOpen(false)}
       />
+
+      {previewPage !== null && result ? (
+        <Suspense fallback={null}>
+          <PagePreviewDrawer
+            analysisId={result.id}
+            pageNo={previewPage}
+            pageCount={result.page_count ?? 1}
+            demo={resultDemo}
+            onPageChange={setPreviewPage}
+            onClose={() => setPreviewPage(null)}
+          />
+        </Suspense>
+      ) : null}
     </div>
   );
 }

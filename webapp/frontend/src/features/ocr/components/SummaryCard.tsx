@@ -132,6 +132,32 @@ export default function SummaryCard({ result, demo }: SummaryCardProps) {
         />
       </dl>
 
+      {result.ocr_telemetry ? (
+        <div
+          data-testid="ocr-telemetry-strip"
+          className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border hairline bg-[var(--surface-2)] px-3 py-2 text-[11px] text-[var(--text-muted)]"
+        >
+          {result.ocr_telemetry.engine ? (
+            <span>
+              Motor: <strong className="text-[var(--text-soft)]">{result.ocr_telemetry.engine}</strong>
+            </span>
+          ) : null}
+          {result.ocr_telemetry.duration_ms !== undefined ? (
+            <span className="numeric">
+              OCR süresi:{" "}
+              <strong className="text-[var(--text-soft)]">
+                {formatNumber(result.ocr_telemetry.duration_ms / 1000, 1)} sn
+              </strong>
+            </span>
+          ) : null}
+          {(result.ocr_telemetry.escalated_pages ?? 0) > 0 ? (
+            <span className="numeric text-[var(--primary)]">
+              {formatNumber(result.ocr_telemetry.escalated_pages ?? 0, 0)} sayfa 300 DPI iyileştirme
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
       <p className="mt-3 flex items-start gap-2 text-[11px] leading-relaxed text-[var(--text-faint)]">
         <ShieldAlert size={13} className="mt-0.5 shrink-0 text-[var(--warning)]" aria-hidden="true" />
         <span>

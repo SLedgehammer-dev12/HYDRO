@@ -4790,6 +4790,56 @@
         ]
       }
     },
+    "/api/ocr/analyses/{analysis_id}/pages/{page_no}/preview": {
+      "get": {
+        "operationId": "get_analysis_page_preview_api_ocr_analyses__analysis_id__pages__page_no__preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analysis_id",
+            "required": true,
+            "schema": {
+              "title": "Analysis Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "page_no",
+            "required": true,
+            "schema": {
+              "title": "Page No",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "image/png": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Analysis Page Preview",
+        "tags": [
+          "ocr"
+        ]
+      }
+    },
     "/api/ocr/analyses/{analysis_id}/retry": {
       "post": {
         "operationId": "retry_analysis_api_ocr_analyses__analysis_id__retry_post",

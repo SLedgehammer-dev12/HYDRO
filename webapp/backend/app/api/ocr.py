@@ -121,6 +121,26 @@ def get_analysis(
     return json_safe(ocr_service.detail_payload(db, analysis))
 
 
+@router.get(
+    "/analyses/{analysis_id}/pages/{page_no}/preview",
+    responses={200: {"content": {"image/png": {}}}},
+)
+def get_analysis_page_preview(
+    analysis_id: str,
+    page_no: int,
+    db: OrmSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    workspace: Workspace = Depends(get_workspace),
+) -> Response:
+    analysis = ocr_service.get_analysis(db, workspace.hash, analysis_id)
+    png_bytes = ocr_service.render_analysis_page_preview(db, settings, analysis, page_no)
+    return Response(
+        content=png_bytes,
+        media_type="image/png",
+        headers={"Cache-Control": "private, max-age=300"},
+    )
+
+
 @router.post("/analyses/{analysis_id}/cancel", status_code=202)
 def cancel_analysis(
     analysis_id: str,

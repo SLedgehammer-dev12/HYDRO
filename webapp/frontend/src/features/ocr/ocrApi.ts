@@ -5,7 +5,7 @@
  * zaman aşımı ve iptal davranışı tek yerden gelir. Backend yoksa çağrılar
  * `OcrApiError` fırlatır ve sayfa demo sonucuna düşer.
  */
-import { ApiError, apiFetch, getWorkspaceId } from "../../lib/api";
+import { ApiError, apiDownload, apiFetch, getWorkspaceId } from "../../lib/api";
 import type {
   AnalyzeRequestInput,
   ApplyRequestInput,
@@ -180,6 +180,27 @@ export async function getAnalysis(
     signal,
     timeoutMs: 15_000,
   });
+}
+
+export async function fetchAnalysisPagePreview(
+  analysisId: string,
+  pageNo: number,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  try {
+    const result = await apiDownload(
+      `/ocr/analyses/${encodeURIComponent(analysisId)}/pages/${encodeURIComponent(String(pageNo))}/preview`,
+      {
+        method: "GET",
+        signal,
+        fallbackFilename: `sayfa-${pageNo}.png`,
+        timeoutMs: 20_000,
+      },
+    );
+    return result.blob;
+  } catch (error) {
+    throw toOcrApiError(error);
+  }
 }
 
 export async function cancelOcrAnalysis(
