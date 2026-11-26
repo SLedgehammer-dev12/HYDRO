@@ -81,6 +81,15 @@ def status(
     return json_safe(ocr_service.status_payload(db, workspace.hash, refresh=bool(refresh)))
 
 
+@router.get("/queue")
+def queue_overview(
+    db: OrmSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    workspace: Workspace = Depends(get_workspace),
+) -> dict:
+    return json_safe(ocr_service.queue_overview(db, workspace.hash, settings))
+
+
 @router.get("/analyses")
 def list_analyses(
     session_id: str | None = Query(default=None),
@@ -120,6 +129,17 @@ def cancel_analysis(
 ) -> dict:
     analysis = ocr_service.get_analysis(db, workspace.hash, analysis_id)
     return ocr_service.cancel_analysis(db, analysis)
+
+
+@router.post("/analyses/{analysis_id}/retry", status_code=202)
+def retry_analysis(
+    analysis_id: str,
+    db: OrmSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    workspace: Workspace = Depends(get_workspace),
+) -> dict:
+    analysis = ocr_service.get_analysis(db, workspace.hash, analysis_id)
+    return json_safe(ocr_service.retry_analysis(db, settings, analysis))
 
 
 @router.post("/analyses/{analysis_id}/approve")

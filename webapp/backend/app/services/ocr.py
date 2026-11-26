@@ -546,63 +546,18 @@ def analyze_upload(
         OCR_QUEUE.unregister(analysis.id)
 
 
-def enqueue_upload(
-    db: OrmSession,
-    settings: Settings,
-    workspace_hash: str,
+def _submit_inline_ocr_job(
     *,
-    file_name: str | None,
-    stream: BinaryIO,
-    calculated_raw: str | None,
-    session_id: str | None,
-    mapping_profile_id: str | None,
+    analysis_id: str,
+    workspace_hash: str,
+    stored_path: Path,
+    stored_filename: str,
+    calculated: dict[str, Any] | None,
+    aliases: dict[str, list[str]] | None,
     language: str | None,
-    force: bool = False,
-) -> tuple[OcrAnalysis, bool, int | None]:
-    """Persist an upload in ``queued`` state and schedule background OCR execution."""
-    analysis, reused, stored, calculated, profile = _prepare_upload(
-        db,
-        settings,
-        workspace_hash,
-        file_name=file_name,
-        stream=stream,
-        calculated_raw=calculated_raw,
-        session_id=session_id,
-        mapping_profile_id=mapping_profile_id,
-        force=force,
-    )
-    if reused or stored is None:
-        est: int | None = None
-        if analysis.status in {"queued", "running"}:
-            counts = _queue_counts(db, workspace_hash)
-            att = db.get(Attachment, analysis.attachment_id)
-            est = OCR_QUEUE.estimate_wait_seconds(
-                queued=counts["queued"],
-                running=counts["running"],
-                size_bytes=att.size_bytes if att is not None else 0,
-            )
-        return analysis, True, est
-
-    analysis.job_payload = json_safe({"calculated": calculated, "language": language})
-    analysis.cancel_requested = False
-    db.commit()
-    db.refresh(analysis)
-
-    counts = _queue_counts(db, workspace_hash)
-    est_wait = OCR_QUEUE.estimate_wait_seconds(
-        queued=max(0, counts["queued"] - 1),
-        running=counts["running"],
-        size_bytes=stored.size_bytes,
-    )
-    if getattr(settings, "ocr_worker_mode", "inline") == "external":
-        return analysis, False, est_wait
-
+    timeout_s: float,
+) -> None:
     session_factory = db_module.get_sessionmaker()
-    analysis_id = analysis.id
-    stored_path = stored.path
-    stored_filename = stored.filename
-    aliases = _profile_aliases(profile)
-    timeout_s = float(settings.ocr_timeout_s)
 
     def _mark_cancelled_if_needed(wdb: OrmSession, row: OcrAnalysis) -> None:
         row.status = "cancelled"
@@ -689,6 +644,69 @@ def enqueue_upload(
             )
 
     OCR_QUEUE.submit(analysis_id, _worker)
+
+
+def enqueue_upload(
+    db: OrmSession,
+    settings: Settings,
+    workspace_hash: str,
+    *,
+    file_name: str | None,
+    stream: BinaryIO,
+    calculated_raw: str | None,
+    session_id: str | None,
+    mapping_profile_id: str | None,
+    language: str | None,
+    force: bool = False,
+) -> tuple[OcrAnalysis, bool, int | None]:
+    """Persist an upload in ``queued`` state and schedule background OCR execution."""
+    analysis, reused, stored, calculated, profile = _prepare_upload(
+        db,
+        settings,
+        workspace_hash,
+        file_name=file_name,
+        stream=stream,
+        calculated_raw=calculated_raw,
+        session_id=session_id,
+        mapping_profile_id=mapping_profile_id,
+        force=force,
+    )
+    if reused or stored is None:
+        est: int | None = None
+        if analysis.status in {"queued", "running"}:
+            counts = _queue_counts(db, workspace_hash)
+            att = db.get(Attachment, analysis.attachment_id)
+            est = OCR_QUEUE.estimate_wait_seconds(
+                queued=counts["queued"],
+                running=counts["running"],
+                size_bytes=att.size_bytes if att is not None else 0,
+            )
+        return analysis, True, est
+
+    analysis.job_payload = json_safe({"calculated": calculated, "language": language})
+    analysis.cancel_requested = False
+    db.commit()
+    db.refresh(analysis)
+
+    counts = _queue_counts(db, workspace_hash)
+    est_wait = OCR_QUEUE.estimate_wait_seconds(
+        queued=max(0, counts["queued"] - 1),
+        running=counts["running"],
+        size_bytes=stored.size_bytes,
+    )
+    if getattr(settings, "ocr_worker_mode", "inline") == "external":
+        return analysis, False, est_wait
+
+    _submit_inline_ocr_job(
+        analysis_id=analysis.id,
+        workspace_hash=workspace_hash,
+        stored_path=stored.path,
+        stored_filename=stored.filename,
+        calculated=calculated,
+        aliases=_profile_aliases(profile),
+        language=language,
+        timeout_s=float(settings.ocr_timeout_s),
+    )
     return analysis, False, est_wait
 
 
@@ -891,6 +909,151 @@ def cancel_analysis(db: OrmSession, analysis: OcrAnalysis) -> dict[str, Any]:
     )
     db.commit()
     return {"id": analysis.id, "status": analysis.status}
+
+
+def queue_overview(
+    db: OrmSession,
+    workspace_hash: str,
+    settings: Settings,
+) -> dict[str, Any]:
+    """Return OCR queue status counts, oldest queued job age, and recent dead-letter jobs."""
+
+    counts: dict[str, int] = {
+        "queued": 0,
+        "running": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "cancelled": 0,
+    }
+    rows = db.execute(
+        select(OcrAnalysis.status, func.count(OcrAnalysis.id))
+        .where(OcrAnalysis.workspace_id_hash == workspace_hash)
+        .group_by(OcrAnalysis.status)
+    ).all()
+    for st, count in rows:
+        if st in counts:
+            counts[st] = int(count)
+
+    oldest_queued = db.execute(
+        select(func.min(OcrAnalysis.created_at)).where(
+            OcrAnalysis.workspace_id_hash == workspace_hash,
+            OcrAnalysis.status == "queued",
+        )
+    ).scalar_one_or_none()
+    oldest_age_s: float | None = None
+    if oldest_queued is not None:
+        ref = (
+            oldest_queued.replace(tzinfo=timezone.utc)
+            if oldest_queued.tzinfo is None
+            else oldest_queued
+        )
+        oldest_age_s = max(0.0, round((utcnow() - ref).total_seconds(), 2))
+
+    dead_rows = (
+        db.execute(
+            select(OcrAnalysis)
+            .where(
+                OcrAnalysis.workspace_id_hash == workspace_hash,
+                OcrAnalysis.status == "failed",
+            )
+            .order_by(OcrAnalysis.finished_at.desc(), OcrAnalysis.created_at.desc())
+            .limit(20)
+        )
+        .scalars()
+        .all()
+    )
+    dead_letter = [
+        {
+            "id": row.id,
+            "status": row.status,
+            "attempts": int(row.attempts or 0),
+            "max_attempts": int(row.max_attempts or 3),
+            "error_code": row.error_code,
+            "error_message": row.error_message,
+            "created_at": iso_z(row.created_at),
+            "finished_at": iso_z(row.finished_at),
+        }
+        for row in dead_rows
+    ]
+    return {
+        "worker_mode": getattr(settings, "ocr_worker_mode", "inline"),
+        "counts": counts,
+        "oldest_queued_age_s": oldest_age_s,
+        "dead_letter_count": counts["failed"],
+        "dead_letter": dead_letter,
+    }
+
+
+def retry_analysis(
+    db: OrmSession,
+    settings: Settings,
+    analysis: OcrAnalysis,
+) -> dict[str, Any]:
+    """Reset a failed/cancelled OCR analysis back to queued and dispatch to worker."""
+
+    if analysis.status not in {"failed", "cancelled"}:
+        raise AppError(
+            "not_retryable",
+            "Yalnizca basarisiz veya iptal edilmis analizler yeniden kuyruga alinabilir.",
+            status_code=409,
+            details={"status": analysis.status},
+        )
+    att = db.get(Attachment, analysis.attachment_id)
+    if att is None:
+        raise AppError(
+            "attachment_missing",
+            "Yuklenen dosya eki bulunamadi; dosyayi yeniden yukleyin.",
+            status_code=404,
+        )
+    stored_path = (settings.uploads_dir / att.stored_path).resolve()
+    if not stored_path.is_file():
+        raise AppError(
+            "attachment_missing",
+            "Yuklenen dosya eki diskte bulunamadi; dosyayi yeniden yukleyin.",
+            status_code=404,
+        )
+
+    analysis.status = "queued"
+    analysis.attempts = 0
+    analysis.cancel_requested = False
+    analysis.lease_until = None
+    analysis.worker_id = None
+    analysis.error_code = None
+    analysis.error_message = None
+    analysis.started_at = None
+    analysis.finished_at = None
+    audit.record(
+        db,
+        action="ocr.retry",
+        entity_type="ocr_analysis",
+        entity_id=analysis.id,
+        session_id=analysis.session_id,
+        workspace_hash=analysis.workspace_id_hash,
+    )
+    db.commit()
+    db.refresh(analysis)
+
+    if getattr(settings, "ocr_worker_mode", "inline") != "external":
+        job_payload = dict(analysis.job_payload or {})
+        calculated = job_payload.get("calculated")
+        language = job_payload.get("language") or settings.ocr_lang
+        profile = (
+            db.get(OcrMappingProfile, analysis.mapping_profile_id)
+            if analysis.mapping_profile_id
+            else None
+        )
+        _submit_inline_ocr_job(
+            analysis_id=analysis.id,
+            workspace_hash=analysis.workspace_id_hash,
+            stored_path=stored_path,
+            stored_filename=att.filename,
+            calculated=calculated if isinstance(calculated, dict) else None,
+            aliases=_profile_aliases(profile),
+            language=str(language) if language else None,
+            timeout_s=float(settings.ocr_timeout_s),
+        )
+
+    return detail_payload(db, analysis)
 
 
 # ---------------------------------------------------------------------------

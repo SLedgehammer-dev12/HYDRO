@@ -4767,6 +4767,50 @@
         ]
       }
     },
+    "/api/ocr/analyses/{analysis_id}/retry": {
+      "post": {
+        "operationId": "retry_analysis_api_ocr_analyses__analysis_id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analysis_id",
+            "required": true,
+            "schema": {
+              "title": "Analysis Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Retry Analysis Api Ocr Analyses  Analysis Id  Retry Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry Analysis",
+        "tags": [
+          "ocr"
+        ]
+      }
+    },
     "/api/ocr/analyze": {
       "post": {
         "operationId": "analyze_api_ocr_analyze_post",
@@ -5033,6 +5077,29 @@
           }
         },
         "summary": "Update Mapping Profile",
+        "tags": [
+          "ocr"
+        ]
+      }
+    },
+    "/api/ocr/queue": {
+      "get": {
+        "operationId": "queue_overview_api_ocr_queue_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Queue Overview Api Ocr Queue Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Queue Overview",
         "tags": [
           "ocr"
         ]

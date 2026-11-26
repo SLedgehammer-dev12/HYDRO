@@ -2241,7 +2241,7 @@ export interface ApiError {
 ## 16. Otomatik Üretilen OpenAPI Uç Envanteri
 
 <!-- generated:openapi-inventory:start -->
-> OpenAPI `info.version=2.1.1` · **94** path / **109** operasyon (`sync_api_inventory` ile üretildi).
+> OpenAPI `info.version=2.1.1` · **96** path / **111** operasyon (`sync_api_inventory` ile üretildi).
 
 | Metot | Yol | Özet / Operation ID |
 | --- | --- | --- |
@@ -2286,12 +2286,14 @@ export interface ApiError {
 | `POST` | `/api/ocr/analyses/{analysis_id}/approve` | Approve Analysis |
 | `POST` | `/api/ocr/analyses/{analysis_id}/cancel` | Cancel Analysis |
 | `POST` | `/api/ocr/analyses/{analysis_id}/commit-dossier` | Commit Dossier |
+| `POST` | `/api/ocr/analyses/{analysis_id}/retry` | Retry Analysis |
 | `POST` | `/api/ocr/analyze` | Analyze |
 | `GET` | `/api/ocr/mapping-profiles` | List Mapping Profiles |
 | `POST` | `/api/ocr/mapping-profiles` | Create Mapping Profile |
 | `GET` | `/api/ocr/mapping-profiles/{profile_id}` | Get Mapping Profile |
 | `PUT` | `/api/ocr/mapping-profiles/{profile_id}` | Update Mapping Profile |
 | `DELETE` | `/api/ocr/mapping-profiles/{profile_id}` | Delete Mapping Profile |
+| `GET` | `/api/ocr/queue` | Queue Overview |
 | `GET` | `/api/ocr/status` | Status |
 | `GET` | `/api/projects` | List Projects |
 | `POST` | `/api/projects` | Create Project |

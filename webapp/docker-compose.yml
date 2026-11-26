@@ -42,28 +42,34 @@ services:
   #     - hydro-db:/var/lib/postgresql/data
   #   restart: unless-stopped
   #
-  # Kalici dis OCR iscisi icin (Postgres veya paylasilan diskle):
-  #   web servisinde HYDRO_OCR_WORKER_MODE: "external" tanimlayip asagidaki isciyi acin:
-  # ocr-worker:
-  #   image: hydro-web:local
-  #   command: ["python", "-m", "app.worker.ocr", "--poll-interval", "1.0"]
-  #   environment:
-  #     HYDRO_DATA_DIR: "/data"
-  #     HYDRO_DATABASE_URL: "postgresql+psycopg://hydro:${POSTGRES_PASSWORD:?required}@db:5432/hydro"
-  #     HYDRO_OCR_WORKER_MODE: "external"
-  #     HOME: "/tmp"
-  #   volumes:
-  #     - hydro-data:/data
-  #   read_only: true
-  #   tmpfs:
-  #     - /tmp
-  #   cap_drop:
-  #     - ALL
-  #   security_opt:
-  #     - no-new-privileges:true
-  #   depends_on:
-  #     - db
-  #   restart: unless-stopped
+  # Kalici dis OCR iscisi icin (`docker compose --profile ocr up`):
+  #   web servisinde HYDRO_OCR_WORKER_MODE: "external" tanimlayin.
+  ocr-worker:
+    profiles: ["ocr"]
+    image: hydro-web:local
+    command: ["python", "-m", "app.worker.ocr", "--poll-interval", "1.0"]
+    environment:
+      HYDRO_DATA_DIR: "/data"
+      HYDRO_DATABASE_URL: "${HYDRO_DATABASE_URL:-sqlite:////data/hydro_web.db}"
+      HYDRO_OCR_WORKER_MODE: "external"
+      HOME: "/tmp"
+    volumes:
+      - hydro-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: "2g"
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import app.worker.ocr\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
 
 volumes:
   hydro-data:

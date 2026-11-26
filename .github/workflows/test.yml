@@ -231,7 +231,7 @@ jobs:
             fi
             sleep 0.5
           done
-          HYDRO_APP_URL=http://127.0.0.1:8099 node webapp/frontend/scripts/verify-tabs.mjs
+          HYDRO_APP_URL=http://127.0.0.1:8099 node webapp/frontend/scripts/verify-tabs.mjs --matrix
 
       - name: Upload smoke server log on failure
         if: failure() && env.TMP_DATA != ''

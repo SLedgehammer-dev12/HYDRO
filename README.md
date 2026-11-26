@@ -128,6 +128,7 @@ Mevcut kod:
 - A ve B katsayilari icin otomatik, manuel ve referans modlari sunar
 - `BOTAS referans tablosu` ve `GAIL referans tablosu` seceneklerini tablo modunda ayri veri kaynaklari olarak sunar
 - A ve B icin backend soyutlamasi ile gelecekte dagitima uygun ikinci dogrulama motoru eklenmesine hazirdir
+- Kurumsal OIDC PKCE + RBAC + iki kisi onayi ve kalici DB tabanli OCR worker destegi sunar
 - `table_v1` backend ile offline uretilen CSV grid uzerinden interpolasyon yapabilir
 - Kurum ici `A/B` kontrol tablosu ile hesaplanan katsayilari ayni noktada karsilastirabilir
 - Segmentli geometri modelini destekler
@@ -136,7 +137,7 @@ Mevcut kod:
 - Oturumlari SQLite ve JSON olarak kaydedip geri yukleyebilir; PDF/Excel rapor uretir
 - Windows `.zip` ve macOS `.dmg` paketleri icin SHA-256 dogrulamali self-update akisina sahiptir
 - `HYDRO` repo ayrisma gecisi icin legacy `Programlar` release kaynagina fallback destekler
-- 253 web backend pytest testi (`%83` web kapsamı, CI `--fail-under=80` kapısı), 63 frontend Vitest testi (`21` dosya) ve `tests.test_report_ocr` (76 unittest, 1 skipped; Tk diyalog sınıfı hariç tam masaüstü paketi: 725 unittest OK) ile dogrulanir
+- 269 web backend pytest testi (`%82` web kapsamı, CI `--fail-under=80` kapısı), 77 frontend Vitest testi (`25` dosya) ve `tests.test_report_ocr` (76 unittest, 1 skipped; tam masaüstü paketi: 741 unittest OK) ile dogrulanir
 
 Mevcut kod henuz sunlari tam modellememektedir:
 

@@ -869,7 +869,8 @@ volumes: { hydro_data: {}, pg_data: {} }
 |---|---|---|
 | `HYDRO_WEB_HOST` | `127.0.0.1` | Bind adresi |
 | `HYDRO_WEB_PORT` | `8080` | Port |
-| `HYDRO_WEB_WORKERS` | `1` | `run_web.py` tarafından okunur; SQLite'ta otomatik `1`'e sabitlenir. OCR kuyruğu süreç-içi (`ThreadPoolExecutor`) olduğundan OCR açıkken çok worker önerilmez |
+| `HYDRO_WEB_WORKERS` | `1` | `run_web.py` tarafından okunur; SQLite'ta otomatik `1`'e sabitlenir. Çoklu web/worker ölçeği için `HYDRO_OCR_WORKER_MODE=external` ile kalıcı OCR worker kullanın |
+| `HYDRO_OCR_WORKER_MODE` | `inline` | `inline` (süreç-içi kuyruk) veya `external` (`python -m app.worker.ocr` / `docker compose --profile ocr up`, lease/DLQ, `GET /api/ocr/queue`, `POST /api/ocr/analyses/{id}/retry`) |
 | `HYDRO_LOCAL_ADMIN_TOKEN` | boş | Loopback dışı (ör. Docker `0.0.0.0`) `/api/system/*` ve `/api/update/*` uçları için `X-Hydro-Admin-Token` doğrulama anahtarı |
 | `HYDRO_DB_URL` | `sqlite:///webapp/data/hydro_web.db` | SQLAlchemy URL |
 | `HYDRO_DATA_DIR` | `webapp/data` | Upload/export kökü |

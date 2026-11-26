@@ -189,6 +189,12 @@ def main(argv: list[str] | None = None) -> int:
             ROOT,
             py_backend_env,
         ),
+        (
+            "doc-metrics-check",
+            [sys.executable, "scripts/sync_doc_metrics.py", "--check"],
+            ROOT,
+            None,
+        ),
         ("frontend-check-api", ["npm", "run", "check:api"], FRONTEND_DIR, None),
         ("frontend-api-types", ["npm", "run", "check:api-types"], FRONTEND_DIR, None),
     ]

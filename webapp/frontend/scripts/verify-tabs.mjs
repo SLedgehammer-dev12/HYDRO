@@ -26,7 +26,9 @@ const USE_MATRIX = process.argv.includes("--matrix");
 const RUN_E2E = !process.argv.includes("--no-e2e") && process.env.HYDRO_E2E !== "0";
 
 function parseViewports() {
-  const raw = process.env.VERIFY_VIEWPORTS || (USE_MATRIX ? "375x812,768x1024,1440x900" : "1440x900");
+  const raw =
+    process.env.VERIFY_VIEWPORTS ||
+    (USE_MATRIX ? "375x812,768x1024,1024x768,1440x900" : "1440x900");
   return raw
     .split(",")
     .map((item) => item.trim())
@@ -139,19 +141,29 @@ async function main() {
   const child = spawn(
     chrome,
     [
-      "--headless",
+      "--headless=new",
       "--disable-gpu",
       "--no-sandbox",
+      "--disable-dev-shm-usage",
+      "--no-first-run",
+      "--no-default-browser-check",
+      "--disable-background-networking",
+      "--remote-debugging-address=127.0.0.1",
       `--remote-debugging-port=${CDP_PORT}`,
       `--user-data-dir=${profile}`,
       "about:blank",
     ],
-    { stdio: "ignore" },
+    { stdio: ["ignore", "ignore", "pipe"] },
   );
+  let chromeStderr = "";
+  child.stderr?.on("data", (chunk) => {
+    chromeStderr = (chromeStderr + chunk.toString("utf8")).slice(-1000);
+  });
 
   try {
     let ready = false;
-    for (let attempt = 0; attempt < 40; attempt += 1) {
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      if (child.exitCode !== null) break;
       try {
         await request(`http://127.0.0.1:${CDP_PORT}/json/version`);
         ready = true;
@@ -160,7 +172,10 @@ async function main() {
         await SLEEP(250);
       }
     }
-    if (!ready) throw new Error(`Chrome CDP ${CDP_PORT} portunda açılmadı.`);
+    if (!ready) {
+      const suffix = chromeStderr.trim() ? ` stderr=${chromeStderr.trim()}` : "";
+      throw new Error(`Chrome CDP ${CDP_PORT} portunda açılmadı.${suffix}`);
+    }
 
     const target = await openTarget();
     const socket = new WebSocket(target.webSocketDebuggerUrl);
@@ -294,7 +309,35 @@ async function main() {
           }
 
           localStorage.setItem("hydro-workspace-id", ws);
-          location.hash = "#/forms/air_test";
+
+          const formGet = await fetch(
+            "/api/sessions/" + encodeURIComponent(sessionId) + "/forms/air_acceptance",
+            { headers: { "X-Session-ID": ws } },
+          );
+          if (!formGet.ok) {
+            return { ok: false, step: "form-get", status: formGet.status };
+          }
+          const etag = formGet.headers.get("etag");
+          const formPut = await fetch(
+            "/api/sessions/" + encodeURIComponent(sessionId) + "/forms/air_acceptance",
+            {
+              method: "PUT",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Session-ID": ws,
+                ...(etag ? { "If-Match": etag } : {}),
+              },
+              body: JSON.stringify({
+                form_date: "2026-11-26",
+                extracted_data: { notes: "e2e-saved" },
+              }),
+            },
+          );
+          if (!formPut.ok) {
+            return { ok: false, step: "form-save", status: formPut.status };
+          }
+
+          location.hash = "#/forms/air_acceptance";
           await new Promise((r) => setTimeout(r, 400));
           const formsPage = document.querySelector('main [data-page="forms"]');
 
@@ -310,7 +353,20 @@ async function main() {
               hasReports: Boolean(reportsPage),
             };
           }
-          return { ok: true, code: gen.project.code, sessionId };
+
+          const exportRes = await fetch(
+            "/api/sessions/" + encodeURIComponent(sessionId) + "/export?format=txt&preview=true",
+            { headers: { "X-Session-ID": ws } },
+          );
+          if (!exportRes.ok) {
+            return { ok: false, step: "report-export", status: exportRes.status };
+          }
+          const exportText = await exportRes.text();
+          if (!exportText || exportText.length < 100) {
+            return { ok: false, step: "report-export-empty", length: exportText?.length ?? 0 };
+          }
+
+          return { ok: true, code: gen.project.code, sessionId, exportLen: exportText.length };
         } finally {
           if (projectId) {
             await fetch("/api/projects/" + encodeURIComponent(projectId), {
@@ -325,7 +381,9 @@ async function main() {
         failures.push({ route: "e2e-happy-path", ...e2eResult });
         console.log(`FAIL  [e2e]        happy-path           ${JSON.stringify(e2eResult)}`);
       } else {
-        console.log(`PASS  [e2e]        happy-path           ${e2eResult.code} -> air_test -> reports`);
+        console.log(
+          `PASS  [e2e]        happy-path           ${e2eResult.code} -> save air_acceptance -> reports -> export (${e2eResult.exportLen} B)`,
+        );
       }
     }
 

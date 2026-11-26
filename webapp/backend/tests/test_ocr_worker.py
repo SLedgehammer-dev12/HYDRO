@@ -219,3 +219,61 @@ def test_ocr_detail_payload_includes_suggested_fixes(tmp_path: Path):
             assert by_field["air_test.k"]["suggested_value"] == 1.02
     finally:
         db.dispose_database()
+
+
+def test_ocr_queue_overview_and_retry_failed_job(tmp_path: Path):
+    db_file = tmp_path / "queue_dlq_ocr.db"
+    settings = Settings(
+        database_url=f"sqlite:///{db_file.as_posix()}",
+        data_dir=tmp_path / "data",
+        frontend_dist=tmp_path / "dist",
+        ocr_worker_mode="external",
+    )
+    app = create_app(settings)
+    headers = {"X-Session-ID": "queue-dlq-ws"}
+
+    try:
+        with TestClient(app) as client:
+            pdf_bytes = b"%PDF-1.4\n1 0 obj <<>> endobj\ntrailer <<>>\n%%EOF\n"
+            res = client.post(
+                "/api/ocr/analyze",
+                headers={**headers, "Prefer": "respond-async"},
+                files={"file": ("dlq.pdf", pdf_bytes, "application/pdf")},
+            )
+            assert res.status_code == 202, res.text
+            job_id = res.json()["analysis_id"]
+
+            # Simulate exhausted dead-letter failure on that job while keeping uploaded file intact
+            with db.session_scope() as s:
+                row = s.get(OcrAnalysis, job_id)
+                assert row is not None
+                row.status = "failed"
+                row.attempts = 3
+                row.error_code = "worker_lease_expired"
+                row.error_message = "Lease expired"
+                s.commit()
+
+            q_res = client.get("/api/ocr/queue", headers=headers)
+            assert q_res.status_code == 200, q_res.text
+            q_body = q_res.json()
+            assert q_body["worker_mode"] == "external"
+            assert q_body["counts"]["failed"] == 1
+            assert q_body["dead_letter_count"] == 1
+            assert q_body["dead_letter"][0]["id"] == job_id
+            assert q_body["dead_letter"][0]["error_code"] == "worker_lease_expired"
+
+            retry_res = client.post(f"/api/ocr/analyses/{job_id}/retry", headers=headers)
+            assert retry_res.status_code == 202, retry_res.text
+            assert retry_res.json()["status"] == "queued"
+
+            q_after = client.get("/api/ocr/queue", headers=headers).json()
+            assert q_after["counts"]["queued"] == 1
+            assert q_after["counts"]["failed"] == 0
+            assert q_after["oldest_queued_age_s"] is not None
+
+            # Already queued job cannot be retried again -> 409 not_retryable
+            conflict = client.post(f"/api/ocr/analyses/{job_id}/retry", headers=headers)
+            assert conflict.status_code == 409
+            assert conflict.json()["code"] == "not_retryable"
+    finally:
+        db.dispose_database()
