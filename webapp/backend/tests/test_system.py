@@ -139,3 +139,55 @@ def test_backup_drill_smoke_and_retention_pruning(tmp_path):
     second = backup_drill.run_backup_drill(tmp_path, max_backups=1)
     assert second["status"] == "ok"
     assert second["pruned_count"] >= 1
+
+
+def test_health_reports_disk_space_telemetry(client):
+    body = client.get("/api/health").json()
+    assert isinstance(body["data_dir"]["free_mb"], float)
+    assert body["data_dir"]["free_mb"] >= 0.0
+    assert isinstance(body["data_dir"]["low_disk_space"], bool)
+
+
+def test_timeutil_json_safe_parse_and_numbers():
+    from dataclasses import dataclass
+    from datetime import date, datetime, timezone
+    from enum import Enum
+
+    import pytest
+    from app.core import timeutil
+    from app.core.errors import AppError
+
+    class _Color(Enum):
+        RED = "red"
+
+    @dataclass
+    class _Item:
+        x: float
+        when: date
+
+    naive = datetime(2026, 11, 26, 10, 0, 0)
+    assert timeutil.iso_z(naive) == "2026-11-26T10:00:00Z"
+    assert timeutil.iso_z(None) is None
+    assert timeutil.parse_datetime("") is None
+    parsed = timeutil.parse_datetime("2026-11-26T10:00:00Z")
+    assert parsed is not None and parsed.tzinfo == timezone.utc
+    with pytest.raises(AppError):
+        timeutil.parse_datetime("not-a-date")
+
+    payload = timeutil.json_safe(
+        {
+            "nan": float("nan"),
+            "inf": float("inf"),
+            "item": _Item(x=1.5, when=date(2026, 11, 26)),
+            "color": _Color.RED,
+            "tags": {"a"},
+        }
+    )
+    assert payload["nan"] is None
+    assert payload["inf"] is None
+    assert payload["item"] == {"x": 1.5, "when": "2026-11-26"}
+    assert payload["color"] == "red"
+    assert payload["tags"] == ["a"]
+    assert timeutil.as_float("1.234,5") == 1234.5
+    assert timeutil.as_positive_float(True) is None
+    assert timeutil.fmt_number(12.3400, 4) == "12.34"

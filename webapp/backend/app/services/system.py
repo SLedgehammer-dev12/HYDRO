@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import time
 from typing import Any
 
@@ -111,6 +112,15 @@ def health_payload(settings: Settings, *, instance_id: str | None = None) -> dic
     db_health = db.database_health()
     data_dir_ok = settings.data_dir.exists() and settings.data_dir.is_dir()
     writable = data_dir_ok and os.access(settings.data_dir, os.W_OK)
+    free_mb: float | None = None
+    low_disk_space = False
+    if data_dir_ok:
+        try:
+            usage = shutil.disk_usage(settings.data_dir)
+            free_mb = round(usage.free / (1024.0 * 1024.0), 1)
+            low_disk_space = free_mb < 256.0
+        except OSError:
+            free_mb = None
     queue = {"queued": 0, "running": 0}
     if db_health.get("ok"):
         try:
@@ -144,7 +154,12 @@ def health_payload(settings: Settings, *, instance_id: str | None = None) -> dic
         "instance_id": instance_id,
         "engine": "hidrostatik_test",
         "db": db_health,
-        "data_dir": {"ok": data_dir_ok, "writable": writable},
+        "data_dir": {
+            "ok": data_dir_ok,
+            "writable": writable,
+            "free_mb": free_mb,
+            "low_disk_space": low_disk_space,
+        },
         "ocr": {
             "available": ocr_ok,
             "status": str(ocr_details["status_text"]),

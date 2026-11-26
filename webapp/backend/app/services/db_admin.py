@@ -7,7 +7,7 @@ import os
 import sqlite3
 import tempfile
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -981,6 +981,43 @@ def run_db_maintenance(
     return result
 
 
+def prune_stale_demo_projects(
+    db: OrmSession,
+    *,
+    max_age_days: int = 7,
+) -> int:
+    """Soft-delete abandoned ``DEMO-*`` onboarding projects older than ``max_age_days``."""
+
+    cutoff = utcnow() - timedelta(days=max(1, int(max_age_days)))
+    rows = (
+        db.execute(
+            select(Project).where(
+                Project.deleted_at.is_(None),
+                Project.code.like("DEMO-%"),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    pruned = 0
+    now = utcnow()
+    for proj in rows:
+        stamp = proj.updated_at or proj.created_at
+        if stamp is None:
+            continue
+        aware = (
+            stamp.replace(tzinfo=timezone.utc)
+            if stamp.tzinfo is None
+            else stamp.astimezone(timezone.utc)
+        )
+        if aware < cutoff:
+            proj.deleted_at = now
+            pruned += 1
+    if pruned:
+        db.commit()
+    return pruned
+
+
 __all__ = [
     "claim_workspace",
     "create_db_backup",
@@ -989,6 +1026,7 @@ __all__ = [
     "list_trash",
     "list_workspaces",
     "prune_old_backups",
+    "prune_stale_demo_projects",
     "purge_trash_item",
     "resolve_backup_path",
     "restore_db_backup",

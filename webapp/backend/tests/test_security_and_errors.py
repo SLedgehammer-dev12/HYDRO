@@ -979,3 +979,58 @@ def test_system_metrics_json_prometheus_and_admin_guard(tmp_path: Path):
     finally:
         METRICS.reset()
         db.dispose_database()
+
+
+def test_rate_limiter_eviction_bypass_and_retry_after():
+    from app.core.errors import AppError
+    from app.core.rate_limit import RateLimiter
+
+    limiter = RateLimiter(max_keys=64)
+    # Bypass when limit <= 0 or window_s <= 0
+    limiter.check("op", "k0", limit=0, window_s=60.0)
+    limiter.check("op", "k0", limit=2, window_s=0.0)
+
+    # Evicts oldest keys once capacity exceeds max_keys (min clamped to 64)
+    for idx in range(70):
+        limiter.check("op", f"client-{idx}", limit=5, window_s=60.0)
+    assert len(limiter._buckets) <= 64
+
+    limiter.reset()
+    limiter.check("strict", "ws-a", limit=2, window_s=30.0)
+    limiter.check("strict", "ws-a", limit=2, window_s=30.0)
+    with pytest.raises(AppError) as exc_info:
+        limiter.check("strict", "ws-a", limit=2, window_s=30.0)
+    assert exc_info.value.status_code == 429
+    assert exc_info.value.details["retry_after_s"] >= 1
+
+
+def test_security_sniff_mime_path_guard_and_bounded_read(tmp_path: Path):
+    import asyncio
+    from io import BytesIO
+
+    from app.core import security
+    from app.core.errors import AppError
+
+    assert security.sniff_mime(b"RIFF\x00\x00\x00\x00WEBP") == "image/webp"
+    assert security.sniff_mime(b"II*\x00extra") == "image/tiff"
+    assert security.sniff_mime(b"MM\x00*extra") == "image/tiff"
+    assert security.sniff_mime(b"BM\x00\x00") == "image/bmp"
+    assert security.sniff_mime(b"random") is None
+    assert security.safe_filename("../../../etc/passwd") == "passwd"
+    assert security.safe_filename(None) == "upload"
+
+    with pytest.raises(AppError) as trav:
+        security.ensure_within(tmp_path, tmp_path.parent / "escape.txt")
+    assert trav.value.status_code == 400
+
+    class _FakeUpload:
+        def __init__(self, data: bytes) -> None:
+            self._buf = BytesIO(data)
+
+        async def read(self, size: int) -> bytes:
+            return self._buf.read(size)
+
+    assert asyncio.run(security.read_upload_bounded(_FakeUpload(b"hello"), 1024)) == b"hello"
+    with pytest.raises(AppError) as too_big:
+        asyncio.run(security.read_upload_bounded(_FakeUpload(b"x" * 200), 100, chunk_size=32))
+    assert too_big.value.status_code == 413

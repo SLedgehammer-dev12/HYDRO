@@ -1325,3 +1325,66 @@ def test_slice3_cad_48in_mainline_od_project_name_and_elevasyon_profile():
     assert sec["end_m"] == pytest.approx(10973.42, abs=0.2)
     assert sec["start_elevation_m"] == pytest.approx(1973.7, abs=0.2)
     assert sec["lowest_elevation_m"] == pytest.approx(1784.9, abs=0.2)
+
+
+def test_prune_stale_demo_projects_soft_deletes_only_expired_demos(tmp_path):
+    from datetime import timedelta
+
+    from app import db
+    from app.core import security
+    from app.core.config import Settings
+    from app.core.timeutil import utcnow
+    from app.models import Project
+    from app.services import db_admin
+
+    settings = Settings(
+        database_url=f"sqlite:///{(tmp_path / 'demo_ttl.db').as_posix()}",
+        data_dir=tmp_path / "data",
+        frontend_dist=tmp_path / "dist",
+    )
+    db.dispose_database()
+    db.configure_database(settings.database_url)
+    db.init_db()
+    ws_hash = security.workspace_hash("demo-ttl-ws")
+    old_ts = utcnow() - timedelta(days=10)
+    fresh_ts = utcnow() - timedelta(days=1)
+
+    try:
+        with db.session_scope() as s:
+            s.add_all(
+                [
+                    Project(
+                        id="p-old-demo",
+                        workspace_id_hash=ws_hash,
+                        code="DEMO-OLD",
+                        name="Old Demo",
+                        created_at=old_ts,
+                        updated_at=old_ts,
+                    ),
+                    Project(
+                        id="p-fresh-demo",
+                        workspace_id_hash=ws_hash,
+                        code="DEMO-FRESH",
+                        name="Fresh Demo",
+                        created_at=fresh_ts,
+                        updated_at=fresh_ts,
+                    ),
+                    Project(
+                        id="p-old-prod",
+                        workspace_id_hash=ws_hash,
+                        code="PRJ-48",
+                        name="Production Line",
+                        created_at=old_ts,
+                        updated_at=old_ts,
+                    ),
+                ]
+            )
+            s.commit()
+
+            pruned = db_admin.prune_stale_demo_projects(s, max_age_days=7)
+            assert pruned == 1
+            assert s.get(Project, "p-old-demo").deleted_at is not None
+            assert s.get(Project, "p-fresh-demo").deleted_at is None
+            assert s.get(Project, "p-old-prod").deleted_at is None
+    finally:
+        db.dispose_database()
