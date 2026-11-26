@@ -32,7 +32,7 @@ jobs:
         python-version: [ "3.12", "3.13" ]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -125,7 +125,7 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -164,7 +164,7 @@ jobs:
           --health-retries=10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -189,7 +189,7 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
