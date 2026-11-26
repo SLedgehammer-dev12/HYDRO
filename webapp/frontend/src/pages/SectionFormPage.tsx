@@ -147,9 +147,30 @@ export function SectionFormPage() {
     function onGlobalSave() {
       saveHandlerRef.current();
     }
+    function onSaveShortcut(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        saveHandlerRef.current();
+      }
+    }
     window.addEventListener("hydro:save", onGlobalSave);
-    return () => window.removeEventListener("hydro:save", onGlobalSave);
+    window.addEventListener("keydown", onSaveShortcut);
+    return () => {
+      window.removeEventListener("hydro:save", onGlobalSave);
+      window.removeEventListener("keydown", onSaveShortcut);
+    };
   }, []);
+
+  /* Kaydedilmemiş form değişikliklerinde tarayıcı sekmesinden çıkış uyarısı (R7) */
+  useEffect(() => {
+    if (!dirty || isDemoOrOffline) return;
+    function onBeforeUnload(e: BeforeUnloadEvent) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty, isDemoOrOffline]);
 
   /* Form veya kesit değişince sunucudaki güncel veriyi (veya eşleşen yerel taslağı) forma yükle */
   useEffect(() => {
@@ -246,6 +267,13 @@ export function SectionFormPage() {
   const hdr = asObj(draftData.header);
   const sig = asObj(draftData.signatures);
   const findings = formRecord?.findings ?? [];
+  const failFindings = findings.filter((fd) => fd.status === "failed");
+  const warningFindings = findings.filter((fd) => fd.status === "warning");
+  const missingDate = spec.required && !draftDate.trim();
+  const hasValidationSummary =
+    failFindings.length > 0 || warningFindings.length > 0 || missingDate;
+  const formDateInputId = `section-form-date-${spec.code}`;
+  const findingsAnchorId = `section-form-findings-${spec.code}`;
   const relatedCheckpoints = (payload?.checkpoints ?? []).filter((cp) =>
     cp.source_forms.includes(spec.code),
   );
@@ -646,6 +674,65 @@ export function SectionFormPage() {
         </InlineNotice>
       ) : null}
 
+      {hasValidationSummary ? (
+        <div
+          role="region"
+          aria-label="Form doğrulama özeti"
+          className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--warning-border)] bg-[var(--warning-bg)] px-3.5 py-2 text-xs"
+        >
+          <div className="flex flex-wrap items-center gap-2 font-semibold text-[var(--text)]">
+            <AlertTriangle size={14} className="text-[var(--warning)]" aria-hidden />
+            <span>Form Doğrulama Özeti:</span>
+            {failFindings.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => {
+                  const target = document.getElementById(findingsAnchorId);
+                  if (target && typeof target.scrollIntoView === "function") {
+                    target.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }
+                }}
+                className="rounded-md border border-[var(--danger-border)] bg-[var(--danger-bg)] px-2 py-0.5 text-[11px] font-semibold text-[var(--danger)] hover:underline"
+              >
+                {failFindings.length} hata bulgusu
+              </button>
+            ) : null}
+            {warningFindings.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => {
+                  const target = document.getElementById(findingsAnchorId);
+                  if (target && typeof target.scrollIntoView === "function") {
+                    target.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }
+                }}
+                className="rounded-md border border-[var(--warning-border)] bg-[var(--surface)] px-2 py-0.5 text-[11px] font-semibold text-[var(--warning)] hover:underline"
+              >
+                {warningFindings.length} uyarı
+              </button>
+            ) : null}
+            {missingDate ? (
+              <button
+                type="button"
+                onClick={() => {
+                  const el = document.getElementById(formDateInputId) as HTMLInputElement | null;
+                  el?.focus();
+                  if (el && typeof el.scrollIntoView === "function") {
+                    el.scrollIntoView({ behavior: "smooth", block: "center" });
+                  }
+                }}
+                className="rounded-md border border-[var(--border-strong)] bg-[var(--surface)] px-2 py-0.5 text-[11px] font-semibold text-[var(--primary)] hover:underline"
+              >
+                Form tarihi eksik
+              </button>
+            ) : null}
+          </div>
+          <span className="font-mono text-[10px] text-[var(--text-muted)]">
+            Hızlı kaydet: Ctrl/Cmd+S
+          </span>
+        </div>
+      ) : null}
+
       {/* 018 / 020 / 021 / 022 / 023 Detay Hesaplama Paneli */}
       {spec.hasDetailCalc && showDetailCalc ? (
         <div className="rounded-2xl border border-[var(--primary-border)] bg-[var(--surface)] p-4">
@@ -722,9 +809,10 @@ export function SectionFormPage() {
                   className="mt-0.5 h-6 w-full rounded border border-[var(--border)] bg-[var(--canvas)] px-2 text-[11px] text-[var(--text)]"
                 />
               </label>
-              <label className="text-[10px] text-[var(--text-muted)]">
+              <label className="text-[10px] text-[var(--text-muted)]" htmlFor={formDateInputId}>
                 Form Tarihi:
                 <input
+                  id={formDateInputId}
                   type="text"
                   value={draftDate}
                   placeholder="GG.AA.YYYY"
@@ -877,7 +965,7 @@ export function SectionFormPage() {
         </div>
 
         {/* Sağ Sütun: Otomatik Şartname Kontrolleri ve Bulgular */}
-        <div className="space-y-4">
+        <div id={findingsAnchorId} className="space-y-4">
           <SectionCard
             title="Şartname Kontrolleri & Bulgular"
             description="4-NGTL 0-GN-P-002-5007 R4 kurallarına göre form bazlı otomatik doğrulama sonuçları."

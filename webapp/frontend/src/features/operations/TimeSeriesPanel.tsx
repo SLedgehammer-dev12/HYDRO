@@ -46,6 +46,11 @@ export interface TimeSeriesPanelProps {
   formDirty?: boolean;
 }
 
+const VIRTUALIZE_THRESHOLD = 80;
+const VIRTUAL_ROW_HEIGHT = 34;
+const VIRTUAL_VIEWPORT_ROWS = 12;
+const VIRTUAL_OVERSCAN = 8;
+
 interface FieldErrors {
   timestamp?: string;
   pressure?: string;
@@ -118,6 +123,7 @@ export function TimeSeriesPanel({ online, formContext, formDirty = false }: Time
 
   const [localRecords, setLocalRecords] = useState<TimeSeriesRecordItem[]>([]);
   const [adHocSummary, setAdHocSummary] = useState<ThermalBalanceResponse | null>(null);
+  const [tableScrollTop, setTableScrollTop] = useState<number>(0);
 
   const [timestampInput, setTimestampInput] = useState<string>(() => toUtcDateTimeInputValue());
   const [pressureInput, setPressureInput] = useState<string>("");
@@ -148,6 +154,7 @@ export function TimeSeriesPanel({ online, formContext, formDirty = false }: Time
     setPasteText("");
     setLocalRecords([]);
     setAdHocSummary(null);
+    setTableScrollTop(0);
     setTimestampInput(toUtcDateTimeInputValue());
     lastEvaluatedKeyRef.current = "";
     resetThermal();
@@ -182,6 +189,26 @@ export function TimeSeriesPanel({ online, formContext, formDirty = false }: Time
       (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
     );
   }, [persistedMode, listQuery.data?.items, localRecords]);
+
+  const isVirtualized = records.length > VIRTUALIZE_THRESHOLD;
+  const { visibleRecords, topSpacerHeight, bottomSpacerHeight } = useMemo(() => {
+    if (!isVirtualized) {
+      return { visibleRecords: records, topSpacerHeight: 0, bottomSpacerHeight: 0 };
+    }
+    const startIdx = Math.max(
+      0,
+      Math.floor(tableScrollTop / VIRTUAL_ROW_HEIGHT) - VIRTUAL_OVERSCAN,
+    );
+    const endIdx = Math.min(
+      records.length,
+      startIdx + VIRTUAL_VIEWPORT_ROWS + VIRTUAL_OVERSCAN * 2,
+    );
+    return {
+      visibleRecords: records.slice(startIdx, endIdx),
+      topSpacerHeight: startIdx * VIRTUAL_ROW_HEIGHT,
+      bottomSpacerHeight: Math.max(0, (records.length - endIdx) * VIRTUAL_ROW_HEIGHT),
+    };
+  }, [isVirtualized, records, tableScrollTop]);
 
   const summary: TimeSeriesSummary | undefined = persistedMode
     ? summaryQuery.data
@@ -369,6 +396,7 @@ export function TimeSeriesPanel({ online, formContext, formDirty = false }: Time
     }
     setLocalRecords([]);
     setAdHocSummary(null);
+    setTableScrollTop(0);
     resetThermal();
     setConfirmClear(false);
     setFormStatus("Yerel okumalar temizlendi.");
@@ -958,6 +986,9 @@ export function TimeSeriesPanel({ online, formContext, formDirty = false }: Time
         tabIndex={0}
         role="region"
         aria-labelledby={tableCaptionId}
+        onScroll={(e) => {
+          if (isVirtualized) setTableScrollTop(e.currentTarget.scrollTop);
+        }}
         className="table-wrap table-sticky diff-table-wrap max-h-[340px] overflow-auto scroll-thin"
       >
         <table className="data compact">
@@ -994,42 +1025,54 @@ export function TimeSeriesPanel({ online, formContext, formDirty = false }: Time
                 </td>
               </tr>
             ) : (
-              records.map((row) => {
-                const shortTs = formatTsShort(row.timestamp);
-                return (
-                  <tr key={row.id}>
-                    <th scope="row" className="sticky-col whitespace-nowrap font-mono" title={row.timestamp}>
-                      {shortTs}
-                    </th>
-                    <td className="num font-mono" data-label="Basınç (bar)">
-                      {num(row.pressure_bar, 3)}
-                    </td>
-                    <td className="num font-mono" data-label="Sıcaklık (°C)">
-                      {num(row.temperature_c, 2)}
-                    </td>
-                    <td className="num font-mono" data-label="Hacim (m³)">
-                      {row.volume_m3 !== null ? num(row.volume_m3, 3) : "—"}
-                    </td>
-                    <td data-label="Kaynak">
-                      <Badge tone="neutral">{row.source || "manual"}</Badge>
-                    </td>
-                    <td className="max-w-[200px] truncate" data-label="Not" title={row.notes}>
-                      {row.notes || "—"}
-                    </td>
-                    <td className="num" data-label="İşlem">
-                      <button
-                        type="button"
-                        disabled={deleteMutation.isPending}
-                        onClick={() => handleDeleteRow(row)}
-                        aria-label={`Okumayı sil (${shortTs})`}
-                        className="rounded p-1 text-[var(--text-faint)] hover:bg-[var(--danger-bg)] hover:text-[var(--danger)]"
-                      >
-                        <Trash2 size={13} aria-hidden />
-                      </button>
-                    </td>
+              <>
+                {topSpacerHeight > 0 ? (
+                  <tr aria-hidden="true" data-virtual-spacer="top">
+                    <td colSpan={7} style={{ height: `${topSpacerHeight}px`, padding: 0, border: 0 }} />
                   </tr>
-                );
-              })
+                ) : null}
+                {visibleRecords.map((row) => {
+                  const shortTs = formatTsShort(row.timestamp);
+                  return (
+                    <tr key={row.id}>
+                      <th scope="row" className="sticky-col whitespace-nowrap font-mono" title={row.timestamp}>
+                        {shortTs}
+                      </th>
+                      <td className="num font-mono" data-label="Basınç (bar)">
+                        {num(row.pressure_bar, 3)}
+                      </td>
+                      <td className="num font-mono" data-label="Sıcaklık (°C)">
+                        {num(row.temperature_c, 2)}
+                      </td>
+                      <td className="num font-mono" data-label="Hacim (m³)">
+                        {row.volume_m3 !== null ? num(row.volume_m3, 3) : "—"}
+                      </td>
+                      <td data-label="Kaynak">
+                        <Badge tone="neutral">{row.source || "manual"}</Badge>
+                      </td>
+                      <td className="max-w-[200px] truncate" data-label="Not" title={row.notes}>
+                        {row.notes || "—"}
+                      </td>
+                      <td className="num" data-label="İşlem">
+                        <button
+                          type="button"
+                          disabled={deleteMutation.isPending}
+                          onClick={() => handleDeleteRow(row)}
+                          aria-label={`Okumayı sil (${shortTs})`}
+                          className="rounded p-1 text-[var(--text-faint)] hover:bg-[var(--danger-bg)] hover:text-[var(--danger)]"
+                        >
+                          <Trash2 size={13} aria-hidden />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {bottomSpacerHeight > 0 ? (
+                  <tr aria-hidden="true" data-virtual-spacer="bottom">
+                    <td colSpan={7} style={{ height: `${bottomSpacerHeight}px`, padding: 0, border: 0 }} />
+                  </tr>
+                ) : null}
+              </>
             )}
           </tbody>
         </table>

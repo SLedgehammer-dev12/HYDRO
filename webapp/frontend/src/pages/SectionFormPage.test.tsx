@@ -165,4 +165,74 @@ describe("SectionFormPage optimistic concurrency (F1)", () => {
     });
     expect(screen.getByDisplayValue("2026-11-23")).toBeTruthy();
   });
+
+  it("guards unsaved changes on beforeunload, saves on Ctrl+S, and renders clickable validation summary (R7)", async () => {
+    const payload = makeFormsPayload(2, "Başlangıç notu");
+    payload.forms[0].findings = [
+      {
+        code: "F-016-1",
+        title: "İmza eksik",
+        status: "failed",
+        message: "BOTAŞ kontrol imzası eksik.",
+        ref: "BOT-FRM-İNB-001-016",
+      },
+      {
+        code: "F-016-2",
+        title: "Not uyarısı",
+        status: "warning",
+        message: "Ek saha notu önerilir.",
+        ref: "BOT-FRM-İNB-001-016",
+      },
+    ];
+    mockSessionForms.mockResolvedValue(payload);
+    mockUpdateSessionForm.mockResolvedValue({
+      form: { ...payload.forms[0], revision: 3 },
+      session: {
+        id: "sess-1",
+        name: "Kesit 1",
+        status: "draft",
+        revision: 3,
+        project_id: "proj-1",
+        inputs: {},
+        created_at: "2026-11-23T08:00:00Z",
+        updated_at: "2026-11-23T08:05:00Z",
+      },
+      forms_payload: payload,
+    });
+
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={qc}>
+        <SectionFormPage />
+      </QueryClientProvider>,
+    );
+
+    const dateInput = await screen.findByDisplayValue("2026-11-23");
+    const summaryRegion = await screen.findByRole("region", { name: "Form doğrulama özeti" });
+    expect(summaryRegion).toBeInTheDocument();
+    const failBtn = screen.getByRole("button", { name: /1 hata bulgusu/i });
+    const scrollIntoViewMock = vi.fn();
+    const findingsContainer = document.getElementById("section-form-findings-cleaning");
+    if (findingsContainer) findingsContainer.scrollIntoView = scrollIntoViewMock;
+    fireEvent.click(failBtn);
+    expect(scrollIntoViewMock).toHaveBeenCalledTimes(1);
+
+    // Clean form does not cancel beforeunload
+    const cleanUnload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(cleanUnload);
+    expect(cleanUnload.defaultPrevented).toBe(false);
+
+    // Dirty form cancels beforeunload and triggers save on Ctrl+S
+    fireEvent.change(dateInput, { target: { value: "25.11.2026" } });
+    const dirtyUnload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(dirtyUnload);
+    expect(dirtyUnload.defaultPrevented).toBe(true);
+
+    fireEvent.keyDown(dateInput, { key: "s", ctrlKey: true });
+    await waitFor(() => {
+      expect(mockUpdateSessionForm).toHaveBeenCalledTimes(1);
+    });
+  });
 });

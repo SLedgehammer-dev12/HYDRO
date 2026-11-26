@@ -325,4 +325,36 @@ describe("TimeSeriesPanel and OperationsPanel", () => {
     await user.click(screen.getByRole("button", { name: /Tümünü silmeyi onayla/ }));
     expect(screen.getByText("Yerel okumalar temizlendi.")).toBeInTheDocument();
   });
+
+  it("virtualizes 10,000 time-series rows with bounded DOM nodes and fast render (R9)", async () => {
+    const startMs = Date.parse("2026-11-01T00:00:00Z");
+    const bulkItems: TimeSeriesRecordItem[] = Array.from({ length: 10000 }, (_, i) => ({
+      id: `bulk-${i}`,
+      timestamp: new Date(startMs + i * 60_000).toISOString(),
+      pressure_bar: 85.0 - (i % 10) * 0.01,
+      temperature_c: 15.0 + (i % 5) * 0.1,
+      volume_m3: 100.0,
+      notes: `Okuma ${i}`,
+      source: "batch",
+    }));
+
+    vi.spyOn(api, "timeSeries").mockResolvedValue({
+      items: bulkItems,
+      total: bulkItems.length,
+      limit: 10000,
+      offset: 0,
+    });
+    vi.spyOn(api, "timeSeriesSummary").mockResolvedValue(makeSummary({ record_count: bulkItems.length }));
+
+    const t0 = performance.now();
+    const { container } = renderWithQuery(<OperationsPanel />);
+    await screen.findByText(/\(10000\)/);
+    const elapsedMs = performance.now() - t0;
+
+    const dataRows = container.querySelectorAll("tbody tr:not([data-virtual-spacer])");
+    expect(dataRows.length).toBeGreaterThan(0);
+    expect(dataRows.length).toBeLessThanOrEqual(40);
+    expect(container.querySelector('tr[data-virtual-spacer="bottom"]')).not.toBeNull();
+    expect(elapsedMs).toBeLessThan(1500);
+  });
 });
