@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import inspect
 import json
 import threading
 import time
@@ -12,6 +13,7 @@ from typing import Any, BinaryIO, Iterable
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as OrmSession
+from sqlalchemy.orm import sessionmaker
 
 from hidrostatik_test.services.report_ocr import (
     ERROR_CANCELLED,
@@ -544,6 +546,45 @@ def analyze_upload(
         OCR_QUEUE.unregister(analysis.id)
 
 
+def update_job_progress(
+    session_factory: sessionmaker[OrmSession],
+    analysis_id: str,
+    done: int,
+    total: int,
+) -> None:
+    """Persist page-level OCR progress on job_payload without requiring a schema migration."""
+    if total <= 0:
+        return
+    with session_factory() as pdb:
+        row = pdb.get(OcrAnalysis, analysis_id)
+        if row is None or row.status != "running":
+            return
+        payload = dict(row.job_payload or {})
+        payload["progress_done"] = max(0, min(int(done), int(total)))
+        payload["progress_total"] = int(total)
+        row.job_payload = payload
+        pdb.commit()
+
+
+def call_analyze_with_progress(
+    analyze_fn: Any,
+    *args: Any,
+    progress_callback: Any = None,
+    **kwargs: Any,
+) -> OcrAnalysisResult:
+    """Call analyze_report while passing progress_callback only if accepted by callee/mock."""
+    if progress_callback is not None:
+        try:
+            params = inspect.signature(analyze_fn).parameters
+            if "progress_callback" in params or any(
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+            ):
+                kwargs["progress_callback"] = progress_callback
+        except (TypeError, ValueError):
+            pass
+    return analyze_fn(*args, **kwargs)
+
+
 def _submit_inline_ocr_job(
     *,
     analysis_id: str,
@@ -588,14 +629,19 @@ def _submit_inline_ocr_job(
         result: OcrAnalysisResult | None = None
         caught_ocr_err: ReportOcrError | None = None
         caught_unexpected = False
+        def _on_progress(done: int, total: int) -> None:
+            update_job_progress(session_factory, analysis_id, done, total)
+
         try:
-            result = analyze_report(
+            result = call_analyze_with_progress(
+                analyze_report,
                 stored_path,
                 calculated,
                 extra_aliases=aliases,
                 language=language,
                 cancel_event=cancel_event,
                 timeout_seconds=timeout_s,
+                progress_callback=_on_progress,
             )
         except ReportOcrError as exc:
             caught_ocr_err = exc
@@ -807,10 +853,27 @@ def detail_payload(db: OrmSession, analysis: OcrAnalysis) -> dict[str, Any]:
         base["dossier"] = dossier_service.build_dossier_view(db, analysis)
     elif analysis.status in {"queued", "running"}:
         counts = _queue_counts(db, analysis.workspace_id_hash)
-        base["progress"] = {
-            "stage": "analyzing" if analysis.status == "running" else "queued",
+        jp = dict(analysis.job_payload or {})
+        pages_done = jp.get("progress_done")
+        pages_total = jp.get("progress_total")
+        has_pages = (
+            analysis.status == "running"
+            and isinstance(pages_total, int)
+            and pages_total > 0
+            and isinstance(pages_done, int)
+        )
+        progress_payload: dict[str, Any] = {
+            "stage": (
+                f"extract:{pages_done}/{pages_total}"
+                if has_pages
+                else ("analyzing" if analysis.status == "running" else "queued")
+            ),
             "elapsed_s": _elapsed_seconds(analysis.started_at),
         }
+        if has_pages:
+            progress_payload["pages_done"] = pages_done
+            progress_payload["pages_total"] = pages_total
+        base["progress"] = progress_payload
         base["estimated_wait_s"] = OCR_QUEUE.estimate_wait_seconds(
             queued=counts["queued"],
             running=counts["running"],

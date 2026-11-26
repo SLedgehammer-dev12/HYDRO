@@ -542,3 +542,53 @@ def test_cleanup_stale_failed_uploads_preserves_fresh_and_removes_expired(tmp_pa
             assert not old_file.is_file()
     finally:
         db.dispose_database()
+
+
+def test_update_job_progress_and_detail_payload(tmp_path: Path):
+    db_file = tmp_path / "progress.db"
+    settings = Settings(
+        database_url=f"sqlite:///{db_file.as_posix()}",
+        data_dir=tmp_path / "data",
+        frontend_dist=tmp_path / "dist",
+    )
+    settings.ensure_directories()
+    db.dispose_database()
+    db.configure_database(settings.database_url)
+    db.init_db()
+    ws_hash = security.workspace_hash("progress-ws")
+
+    try:
+        factory = db.get_sessionmaker()
+        with factory() as s:
+            att = Attachment(
+                id="att-prog",
+                workspace_id_hash=ws_hash,
+                session_id=None,
+                filename="multi.pdf",
+                stored_path="multi.pdf",
+                mime="application/pdf",
+                size_bytes=1234,
+                sha256="abcd",
+                kind="report_pdf",
+            )
+            row = OcrAnalysis(
+                id="ana-prog",
+                workspace_id_hash=ws_hash,
+                attachment_id=att.id,
+                status="running",
+                started_at=utcnow(),
+                job_payload={"language": "tur"},
+            )
+            s.add_all([att, row])
+            s.commit()
+
+        ocr_service.update_job_progress(factory, "ana-prog", 3, 12)
+        with factory() as s:
+            refreshed = s.get(OcrAnalysis, "ana-prog")
+            assert refreshed is not None
+            payload = ocr_service.detail_payload(s, refreshed)
+            assert payload["progress"]["stage"] == "extract:3/12"
+            assert payload["progress"]["pages_done"] == 3
+            assert payload["progress"]["pages_total"] == 12
+    finally:
+        db.dispose_database()

@@ -1850,6 +1850,94 @@ class DocumentReadingImprovementsTests(unittest.TestCase):
                 self.assertIsNotNone(page.duration_ms)
                 self.assertGreaterEqual(page.duration_ms or 0.0, 0.0)
 
+    def test_phase1_binarization_psm6_retry_border_pipe_and_fallback(self) -> None:
+        # 1) Table border pipe stripping vs interior '|' digit
+        self.assertAlmostEqual(ocr.parse_number("| 12,45"), 12.45)
+        self.assertAlmostEqual(ocr.parse_number("|12,45"), 12.45)
+        self.assertAlmostEqual(ocr.parse_number("|45,515|"), 45.515)
+        self.assertAlmostEqual(ocr.parse_number("│ 185,2 │"), 185.2)
+        self.assertAlmostEqual(ocr.parse_number("1|2,5"), 112.5)
+
+        if HAVE_PIL:
+            from PIL import Image, ImageDraw
+
+            # 2) Otsu binarization yields pure black/white 'L' pixels
+            img = Image.new("L", (160, 80), color=235)
+            draw = ImageDraw.Draw(img)
+            draw.rectangle([20, 20, 100, 60], fill=35)
+            binary = ocr._binarize_for_ocr(img)
+            self.assertEqual(binary.mode, "L")
+            self.assertEqual(binary.getpixel((50, 40)), 0)
+            self.assertEqual(binary.getpixel((5, 5)), 255)
+
+            # 3) Low-conf Tesseract triggers --psm 6 binarized secondary pass
+            configs: list[str] = []
+
+            def _tess_with_psm(
+                target: Any, *, language: str | None = None, config: str = ""
+            ) -> tuple[str, float | None, str]:
+                configs.append(config)
+                if config == "--psm 6":
+                    return ("Test Basinci: 96,5 bar\nA: 45,12\nB: 185,4\nPa: 0,18 bar", 0.92, "")
+                return ("Test Basinci: 96,5 bar\nA: 45,12\nB: 185,4", 0.48, "")
+
+            with mock.patch.object(ocr, "_run_tesseract", side_effect=_tess_with_psm):
+                txt, conf, warn = ocr._ocr_image_with_orientation_retry(img, "tesseract")
+            self.assertEqual(configs, ["", "--psm 6"])
+            self.assertAlmostEqual(conf, 0.92)
+            self.assertIn("--psm 6", warn)
+            self.assertIn("Pa: 0,18", txt)
+
+            # 4) Cross-engine fallback: weak Vision -> Tesseract rescues page
+            with (
+                mock.patch.object(
+                    ocr,
+                    "_ocr_image_with_orientation_retry",
+                    side_effect=[
+                        ("", 0.10, ""),
+                        ("Basinc Testi Rapor No: YEDEK-1\nTest Basinci: 92 bar", 0.89, ""),
+                    ],
+                ),
+                mock.patch.object(ocr, "_iter_rendered_pdf_pages", return_value=iter([])),
+                mock.patch.object(ocr, "_tesseract_available", return_value=True),
+            ):
+                fb_page = ocr._ocr_pdf_page_with_dpi_escalation(
+                    Path("dummy.pdf"), 0, img, "vision"
+                )
+            self.assertIn("YEDEK-1", fb_page.text)
+            self.assertIn("Tesseract yedek", fb_page.warning)
+
+            # 5) Multi-page parallel Tesseract preserves page order and emits progress callbacks
+            pages_img = [Image.new("L", (40, 40), color=240) for _ in range(3)]
+            progress_events: list[tuple[int, int]] = []
+
+            def _fake_page_ocr(
+                _p: Path,
+                idx: int,
+                _im: Any,
+                _eng: str,
+                **_kw: Any,
+            ) -> ocr.PageText:
+                return ocr.PageText(
+                    page_number=idx + 1,
+                    text=f"Sayfa {idx + 1} icerigi",
+                    source=ocr.TEXT_SOURCE_OCR,
+                    confidence=0.9,
+                )
+
+            with (
+                mock.patch.object(ocr, "_resolve_ocr_engine", return_value="tesseract"),
+                mock.patch.object(ocr, "_iter_rendered_pdf_pages", return_value=iter(pages_img)),
+                mock.patch.object(ocr, "_ocr_pdf_page_with_dpi_escalation", side_effect=_fake_page_ocr),
+            ):
+                out = ocr._ocr_pdf_pages(
+                    Path("multi.pdf"),
+                    progress_callback=lambda done, total: progress_events.append((done, total)),
+                )
+            self.assertEqual([p.page_number for p in out], [1, 2, 3])
+            self.assertEqual(len(progress_events), 3)
+            self.assertEqual(progress_events[-1], (3, 3))
+
 
 if __name__ == "__main__":
     unittest.main()

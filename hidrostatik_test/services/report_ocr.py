@@ -21,9 +21,11 @@ zorunlu degildir; yoksa metin katmani ile devam edilir ve anlasilir bir
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import difflib
 import importlib
 import importlib.util
+import inspect
 import io
 import math
 import os
@@ -39,7 +41,7 @@ from dataclasses import dataclass, replace
 from datetime import date as _date
 from datetime import datetime as _datetime
 from pathlib import Path
-from typing import Any, Final, Iterator, Mapping, Sequence
+from typing import Any, Callable, Final, Iterator, Mapping, Sequence
 
 from hidrostatik_test.domain.report_schema import (
     FIELD_ALIASES,
@@ -360,6 +362,7 @@ def extract_text(
     language: str | None = None,
     cancel_event: threading.Event | None = None,
     deadline_monotonic: float | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> list[PageText]:
     """Extract text pages from a PDF or an image report.
 
@@ -428,6 +431,7 @@ def extract_text(
                 language=language,
                 cancel_event=cancel_event,
                 deadline_monotonic=deadline_monotonic,
+                progress_callback=progress_callback,
             )
         except ReportOcrError as exc:
             if exc.code in {ERROR_CANCELLED, ERROR_TIMEOUT}:
@@ -2062,6 +2066,49 @@ def _upscale_small_image_for_ocr(image: Any) -> Any:
     return image.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
 
+def _otsu_threshold(hist: Sequence[int]) -> int:
+    """Compute Otsu optimal grayscale threshold from a 256-bin histogram."""
+
+    total = sum(hist[:256])
+    if total <= 0:
+        return 128
+    sum_total = sum(i * hist[i] for i in range(256))
+    sum_bg = 0.0
+    weight_bg = 0
+    max_var = -1.0
+    threshold = 128
+    for i in range(256):
+        weight_bg += hist[i]
+        if weight_bg == 0:
+            continue
+        weight_fg = total - weight_bg
+        if weight_fg == 0:
+            break
+        sum_bg += i * hist[i]
+        mean_bg = sum_bg / weight_bg
+        mean_fg = (sum_total - sum_bg) / weight_fg
+        var_between = float(weight_bg) * float(weight_fg) * ((mean_bg - mean_fg) ** 2)
+        if var_between > max_var:
+            max_var = var_between
+            threshold = i
+    return threshold
+
+
+def _binarize_for_ocr(image: Any) -> Any:
+    """Apply Otsu adaptive global thresholding on a Pillow image, returning high-contrast 'L'."""
+
+    try:
+        from PIL import Image
+    except ImportError:
+        return image
+    if not isinstance(image, Image.Image):
+        return image
+    gray = image.convert("L") if image.mode != "L" else image
+    threshold = _otsu_threshold(gray.histogram())
+    lut = [255 if px > threshold else 0 for px in range(256)]
+    return gray.point(lut, mode="L")
+
+
 def _preprocess_image_for_ocr(image: Any) -> Any:
     """Apply stamp suppression, lighting normalization, small-angle deskew, contrast normalization, and sharpen."""
 
@@ -2079,6 +2126,26 @@ def _preprocess_image_for_ocr(image: Any) -> Any:
     return enhanced.filter(ImageFilter.SHARPEN)
 
 
+def _call_tesseract_pass(
+    target: Any,
+    *,
+    language: str | None = None,
+    config: str = "",
+) -> tuple[str, float | None, str]:
+    """Invoke _run_tesseract while staying compatible with test doubles lacking 'config'."""
+
+    if config:
+        try:
+            params = inspect.signature(_run_tesseract).parameters
+            if "config" in params or any(
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+            ):
+                return _run_tesseract(target, language=language, config=config)
+        except (TypeError, ValueError):
+            pass
+    return _run_tesseract(target, language=language)
+
+
 def _ocr_image_with_orientation_retry(
     image: Any,
     engine: str,
@@ -2086,7 +2153,7 @@ def _ocr_image_with_orientation_retry(
     language: str | None = None,
     preferred_angle: int | None = None,
 ) -> tuple[str, float | None, str]:
-    """Run selected OCR engine and retry 90/270/180 deg if text is sparse or low-confidence."""
+    """Run selected OCR engine, retry 90/270/180 deg if sparse/low-confidence, and retry Tesseract --psm 6 binarized."""
 
     def _run_engine(target: Any) -> tuple[str, float | None, str]:
         if engine == "windows_ocr":
@@ -2116,28 +2183,49 @@ def _ocr_image_with_orientation_retry(
     best_text, best_conf, best_warn = _run_engine(image)
     non_ws = len(re.sub(r"\s+", "", best_text))
     needs_retry = non_ws < MIN_PAGE_TEXT_CHARS or (best_conf is not None and best_conf < 0.45)
-    if not needs_retry or not is_pil:
-        return best_text, best_conf, best_warn
 
     def _score(txt: str, conf: float | None) -> float:
         return (conf if conf is not None else 0.5) * min(len(re.sub(r"\s+", "", txt)), 500)
 
     best_score = _score(best_text, best_conf)
     best_angle: int | None = None
-    for angle in (90, 270, 180):
-        if angle == preferred_angle:
-            continue
-        rotated = image.rotate(-angle, expand=True)
-        cand_text, cand_conf, cand_warn = _run_engine(rotated)
-        cand_non_ws = len(re.sub(r"\s+", "", cand_text))
-        cand_score = _score(cand_text, cand_conf)
-        if cand_non_ws >= MIN_PAGE_TEXT_CHARS and cand_score > best_score * 1.25:
-            best_text, best_conf, best_warn = cand_text, cand_conf, cand_warn
-            best_score = cand_score
-            best_angle = angle
+    if needs_retry and is_pil:
+        for angle in (90, 270, 180):
+            if angle == preferred_angle:
+                continue
+            rotated = image.rotate(-angle, expand=True)
+            cand_text, cand_conf, cand_warn = _run_engine(rotated)
+            cand_non_ws = len(re.sub(r"\s+", "", cand_text))
+            cand_score = _score(cand_text, cand_conf)
+            if cand_non_ws >= MIN_PAGE_TEXT_CHARS and cand_score > best_score * 1.25:
+                best_text, best_conf, best_warn = cand_text, cand_conf, cand_warn
+                best_score = cand_score
+                best_angle = angle
 
-    if best_angle is not None:
-        best_warn = _join_warning(best_warn, f"Sayfa otomatik {best_angle}° dondurulerek okundu.")
+        if best_angle is not None:
+            best_warn = _join_warning(best_warn, f"Sayfa otomatik {best_angle}° dondurulerek okundu.")
+
+    final_non_ws = len(re.sub(r"\s+", "", best_text))
+    if (
+        engine == "tesseract"
+        and is_pil
+        and (final_non_ws < MIN_PAGE_TEXT_CHARS or (best_conf is not None and best_conf < 0.55))
+    ):
+        oriented = image.rotate(-best_angle, expand=True) if best_angle in {90, 180, 270} else image
+        binarized = _binarize_for_ocr(oriented)
+        bin_text, bin_conf, bin_warn = _call_tesseract_pass(
+            binarized, language=language, config="--psm 6"
+        )
+        bin_non_ws = len(re.sub(r"\s+", "", bin_text))
+        bin_score = _score(bin_text, bin_conf)
+        if bin_non_ws > 0 and bin_score > best_score * 1.10:
+            best_text = bin_text
+            best_conf = bin_conf
+            best_warn = _join_warning(
+                bin_warn,
+                "Sayfa adaptif ikili esikleme (--psm 6) ile yeniden okundu.",
+            )
+
     return best_text, best_conf, best_warn
 
 
@@ -2215,6 +2303,28 @@ def _ocr_pdf_page_with_dpi_escalation(
                     hi_warn, "Sayfa dusuk guven nedeniyle 300 DPI ile yeniden okundu."
                 )
 
+    final_non_ws = len(re.sub(r"\s+", "", text))
+    if (
+        engine in {"vision", "windows_ocr"}
+        and (final_non_ws < MIN_PAGE_TEXT_CHARS or (confidence is not None and confidence < 0.45))
+        and _tesseract_available()
+    ):
+        _check_ocr_abort(cancel_event, deadline_monotonic)
+        fb_image = locals().get("hi_prep") or preprocessed
+        fb_text, fb_conf, fb_warn = _ocr_image_with_orientation_retry(
+            fb_image, "tesseract", language=language
+        )
+        fb_non_ws = len(re.sub(r"\s+", "", fb_text))
+        cur_score = (confidence if confidence is not None else 0.5) * min(final_non_ws, 500)
+        fb_score = (fb_conf if fb_conf is not None else 0.5) * min(fb_non_ws, 500)
+        if fb_non_ws > 0 and fb_score > cur_score:
+            text = fb_text
+            confidence = fb_conf
+            warning = _join_warning(
+                fb_warn,
+                f"Birincil motor ({engine}) zayif kaldigi icin Tesseract yedek motoru kullanildi.",
+            )
+
     duration_ms = round((time.monotonic() - started) * 1000.0, 2)
     return PageText(
         page_number=page_index + 1,
@@ -2262,12 +2372,42 @@ def _ocr_single_pdf_page(
     )
 
 
+def _run_sequential_pdf_ocr(
+    path: Path,
+    rendered_pages: Sequence[Any],
+    engine: str,
+    *,
+    language: str | None = None,
+    cancel_event: threading.Event | None = None,
+    deadline_monotonic: float | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> list[PageText]:
+    total = len(rendered_pages)
+    results: list[PageText] = []
+    for index, image in enumerate(rendered_pages):
+        results.append(
+            _ocr_pdf_page_with_dpi_escalation(
+                path,
+                index,
+                image,
+                engine,
+                language=language,
+                cancel_event=cancel_event,
+                deadline_monotonic=deadline_monotonic,
+            )
+        )
+        if progress_callback is not None:
+            progress_callback(index + 1, total)
+    return results
+
+
 def _ocr_pdf_pages(
     path: Path,
     *,
     language: str | None = None,
     cancel_event: threading.Event | None = None,
     deadline_monotonic: float | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> list[PageText]:
     _check_ocr_abort(cancel_event, deadline_monotonic)
     engine = _resolve_ocr_engine()
@@ -2277,6 +2417,7 @@ def _ocr_pdf_pages(
             language=language,
             cancel_event=cancel_event,
             deadline_monotonic=deadline_monotonic,
+            progress_callback=progress_callback,
         )
     if engine == "vision":
         return _ocr_pdf_pages_with_vision(
@@ -2284,6 +2425,7 @@ def _ocr_pdf_pages(
             language=language,
             cancel_event=cancel_event,
             deadline_monotonic=deadline_monotonic,
+            progress_callback=progress_callback,
         )
     if engine != "tesseract":
         raise ReportOcrError(
@@ -2291,20 +2433,51 @@ def _ocr_pdf_pages(
             ERROR_OCR_UNAVAILABLE,
         )
 
-    return [
-        _ocr_pdf_page_with_dpi_escalation(
+    rendered_pages = list(_iter_rendered_pdf_pages(path, max_pages=_max_ocr_pages(), dpi=200))
+    total = len(rendered_pages)
+    if total <= 1:
+        return _run_sequential_pdf_ocr(
             path,
-            index,
-            image,
+            rendered_pages,
             "tesseract",
             language=language,
             cancel_event=cancel_event,
             deadline_monotonic=deadline_monotonic,
+            progress_callback=progress_callback,
         )
-        for index, image in enumerate(
-            _iter_rendered_pdf_pages(path, max_pages=_max_ocr_pages(), dpi=200)
-        )
-    ]
+
+    max_workers = min(4, total, max(1, os.cpu_count() or 2))
+    ordered: list[PageText | None] = [None] * total
+    completed = 0
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=max_workers, thread_name_prefix="ocr-page"
+    ) as pool:
+        futures = {
+            pool.submit(
+                _ocr_pdf_page_with_dpi_escalation,
+                path,
+                index,
+                image,
+                "tesseract",
+                language=language,
+                cancel_event=cancel_event,
+                deadline_monotonic=deadline_monotonic,
+            ): index
+            for index, image in enumerate(rendered_pages)
+        }
+        try:
+            for fut in concurrent.futures.as_completed(futures):
+                _check_ocr_abort(cancel_event, deadline_monotonic)
+                idx = futures[fut]
+                ordered[idx] = fut.result()
+                completed += 1
+                if progress_callback is not None:
+                    progress_callback(completed, total)
+        except Exception:
+            for pending in futures:
+                pending.cancel()
+            raise
+    return [page for page in ordered if page is not None]
 
 
 def _ocr_pdf_pages_with_vision(
@@ -2313,22 +2486,19 @@ def _ocr_pdf_pages_with_vision(
     language: str | None = None,
     cancel_event: threading.Event | None = None,
     deadline_monotonic: float | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> list[PageText]:
     """OCR PDF pages sequentially with the macOS Vision framework."""
-    return [
-        _ocr_pdf_page_with_dpi_escalation(
-            path,
-            index,
-            image,
-            "vision",
-            language=language,
-            cancel_event=cancel_event,
-            deadline_monotonic=deadline_monotonic,
-        )
-        for index, image in enumerate(
-            _iter_rendered_pdf_pages(path, max_pages=_max_ocr_pages(), dpi=200)
-        )
-    ]
+    rendered_pages = list(_iter_rendered_pdf_pages(path, max_pages=_max_ocr_pages(), dpi=200))
+    return _run_sequential_pdf_ocr(
+        path,
+        rendered_pages,
+        "vision",
+        language=language,
+        cancel_event=cancel_event,
+        deadline_monotonic=deadline_monotonic,
+        progress_callback=progress_callback,
+    )
 
 
 def _ocr_pdf_pages_with_windows_ocr(
@@ -2337,22 +2507,19 @@ def _ocr_pdf_pages_with_windows_ocr(
     language: str | None = None,
     cancel_event: threading.Event | None = None,
     deadline_monotonic: float | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> list[PageText]:
     """OCR PDF pages sequentially in-process with Windows 10/11 WinRT OCR."""
-    return [
-        _ocr_pdf_page_with_dpi_escalation(
-            path,
-            index,
-            image,
-            "windows_ocr",
-            language=language,
-            cancel_event=cancel_event,
-            deadline_monotonic=deadline_monotonic,
-        )
-        for index, image in enumerate(
-            _iter_rendered_pdf_pages(path, max_pages=_max_ocr_pages(), dpi=200)
-        )
-    ]
+    rendered_pages = list(_iter_rendered_pdf_pages(path, max_pages=_max_ocr_pages(), dpi=200))
+    return _run_sequential_pdf_ocr(
+        path,
+        rendered_pages,
+        "windows_ocr",
+        language=language,
+        cancel_event=cancel_event,
+        deadline_monotonic=deadline_monotonic,
+        progress_callback=progress_callback,
+    )
 
 
 def ocr_pdf_page_rotated(
@@ -2493,7 +2660,12 @@ def _choose_tesseract_language(language: str | None = None) -> tuple[str, str]:
     return "eng", "Tesseract 'tur' dil paketi bulunamadi; OCR ingilizce ile yapildi."
 
 
-def _run_tesseract(image: Any, *, language: str | None = None) -> tuple[str, float | None, str]:
+def _run_tesseract(
+    image: Any,
+    *,
+    language: str | None = None,
+    config: str = "",
+) -> tuple[str, float | None, str]:
     try:
         pytesseract = importlib.import_module("pytesseract")
         _configure_pytesseract(pytesseract)
@@ -2505,6 +2677,7 @@ def _run_tesseract(image: Any, *, language: str | None = None) -> tuple[str, flo
         data = pytesseract.image_to_data(
             image,
             lang=resolved_language,
+            config=config,
             output_type=pytesseract.Output.DICT,
             timeout=60,
         )
@@ -3268,8 +3441,11 @@ def parse_number(raw: str, *, dot_decimal: bool = False) -> float:
     return value
 
 
+_BORDER_PIPE_EDGE_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:^|(?<=\s))[|¦│]+|[|¦│]+(?=\s|$)"
+)
 _OCR_NUM_CANDIDATE_RE: Final[re.Pattern[str]] = re.compile(
-    r"(?<![A-Za-z])[+-]?[0-9OoIl|SB.,/]+(?![A-Za-z])"
+    r"(?<![A-Za-z])[+-]?[0-9OoIl|¦│SB.,/]+(?![A-Za-z])"
 )
 _OCR_DIGIT_TRANS: Final[dict[int, str]] = str.maketrans(
     {
@@ -3285,15 +3461,17 @@ _OCR_DIGIT_TRANS: Final[dict[int, str]] = str.maketrans(
 
 
 def _normalize_ocr_numeric_string(raw: str) -> str:
-    """Fix common OCR digit/letter confusions (O->0, l/I->1, B->8, S->5) in numeric tokens."""
+    """Strip table-border pipes and fix common OCR digit/letter confusions in numeric tokens."""
+
+    cleaned = _BORDER_PIPE_EDGE_RE.sub("", raw)
 
     def _replace(match: re.Match[str]) -> str:
-        tok = match.group(0)
+        tok = match.group(0).strip("|¦│")
         if not any("0" <= ch <= "9" for ch in tok):
             return tok
         return tok.translate(_OCR_DIGIT_TRANS)
 
-    return _OCR_NUM_CANDIDATE_RE.sub(_replace, raw)
+    return _OCR_NUM_CANDIDATE_RE.sub(_replace, cleaned)
 
 
 def _parse_number_detail(raw: str, *, dot_decimal: bool = False) -> tuple[float, bool]:
@@ -4658,6 +4836,7 @@ def analyze_report(
     cancel_event: threading.Event | None = None,
     deadline_monotonic: float | None = None,
     timeout_seconds: float | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> OcrAnalysisResult:
     """Extract, parse, validate and (optionally) compare one report."""
 
@@ -4675,6 +4854,7 @@ def analyze_report(
         language=language,
         cancel_event=cancel_event,
         deadline_monotonic=effective_deadline,
+        progress_callback=progress_callback,
     )
     _check_ocr_abort(cancel_event, effective_deadline)
     report = parse_report(

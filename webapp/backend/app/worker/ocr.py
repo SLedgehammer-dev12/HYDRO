@@ -190,18 +190,23 @@ def process_claimed_job(
     )
     hb_thread.start()
 
+    def _on_progress(done: int, total: int) -> None:
+        ocr_service.update_job_progress(session_factory, analysis_id, done, total)
+
     started = time.monotonic()
     result: OcrAnalysisResult | None = None
     caught_ocr_err: ReportOcrError | None = None
     caught_unexpected = False
     try:
-        result = analyze_report(
+        result = ocr_service.call_analyze_with_progress(
+            analyze_report,
             stored_path,
             calculated,
             extra_aliases=aliases,
             language=language,
             cancel_event=cancel_event,
             timeout_seconds=float(settings.ocr_timeout_s),
+            progress_callback=_on_progress,
         )
     except ReportOcrError as exc:
         caught_ocr_err = exc
