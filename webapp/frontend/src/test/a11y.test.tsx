@@ -8,6 +8,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TopBar } from "../components/layout/TopBar";
 import { GuidedTourOverlay } from "../components/onboarding/GuidedTourOverlay";
 import { OnboardingWelcomeCard } from "../components/onboarding/OnboardingWelcomeCard";
+import { ApprovalsCard } from "../components/settings/ApprovalsCard";
+import HistoryPanel from "../features/ocr/components/HistoryPanel";
 import { DashboardPage } from "../pages/DashboardPage";
 import { useAppStore } from "../store/useAppStore";
 
@@ -169,5 +171,63 @@ describe("Accessibility (R8): critical components and focus management", () => {
         ).toBeGreaterThanOrEqual(minRatio);
       }
     }
+  });
+
+  it("ApprovalsCard and HistoryPanel (with retry button) pass axe-core serious/critical checks", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { container } = render(
+      <QueryClientProvider client={qc}>
+        <div>
+          <ApprovalsCard
+            authMe={{
+              auth_mode: "oidc",
+              enforced_auth: true,
+              authenticated: true,
+              user: { sub: "sup-1", email: "sup@example.com", name: "Yetkili", role: "supervisor", workspace: null },
+            }}
+            approvals={[
+              {
+                id: "app-1",
+                action: "session_finalize",
+                target_id: "sess-1",
+                status: "pending",
+                requested_by: "operator:op-1",
+                requested_role: "operator",
+                approved_by: null,
+                approved_role: null,
+                reason: "Nihai onay talebi",
+                decision_note: "",
+                created_at: "2026-11-26T09:00:00Z",
+                decided_at: null,
+                consumed_at: null,
+              },
+            ]}
+            onCreate={vi.fn()}
+            onDecide={vi.fn()}
+          />
+          <HistoryPanel
+            items={[
+              {
+                id: "ana-fail-1",
+                status: "failed",
+                source: "ocr",
+                confidence: 0,
+                page_count: 1,
+                blocking_count: 1,
+                warnings_count: 1,
+                created_at: "2026-11-26T09:30:00Z",
+              },
+            ]}
+            loading={false}
+            error={false}
+            openingId={null}
+            onOpen={vi.fn()}
+            onRetry={vi.fn()}
+            onRefresh={vi.fn()}
+          />
+        </div>
+      </QueryClientProvider>,
+    );
+    await expectNoSeriousA11yViolations(container);
   });
 });

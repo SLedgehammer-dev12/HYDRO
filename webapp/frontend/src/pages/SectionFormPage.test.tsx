@@ -235,4 +235,45 @@ describe("SectionFormPage optimistic concurrency (F1)", () => {
       expect(mockUpdateSessionForm).toHaveBeenCalledTimes(1);
     });
   });
+
+  it("focuses missing required form date when validation chip clicked and saves on Cmd+S (R7)", async () => {
+    const payload = makeFormsPayload(2, "Eksik tarih testi");
+    payload.forms[0].form_date = "";
+    mockSessionForms.mockResolvedValue(payload);
+    mockUpdateSessionForm.mockResolvedValue({
+      form: { ...payload.forms[0], form_date: "26.11.2026", revision: 3 },
+      session: {
+        id: "sess-1",
+        name: "Kesit 1",
+        status: "draft",
+        revision: 3,
+        project_id: "proj-1",
+        inputs: {},
+        created_at: "2026-11-23T08:00:00Z",
+        updated_at: "2026-11-23T08:05:00Z",
+      },
+      forms_payload: payload,
+    });
+
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={qc}>
+        <SectionFormPage />
+      </QueryClientProvider>,
+    );
+
+    const dateInput = (await screen.findByLabelText(/Form Tarihi/i)) as HTMLInputElement;
+    const missingDateBtn = await screen.findByRole("button", { name: /Form tarihi eksik/i });
+    dateInput.scrollIntoView = vi.fn();
+
+    fireEvent.click(missingDateBtn);
+    expect(document.activeElement).toBe(dateInput);
+
+    fireEvent.keyDown(dateInput, { key: "s", metaKey: true });
+    await waitFor(() => {
+      expect(mockUpdateSessionForm).toHaveBeenCalledTimes(1);
+    });
+  });
 });

@@ -356,5 +356,18 @@ describe("TimeSeriesPanel and OperationsPanel", () => {
     expect(dataRows.length).toBeLessThanOrEqual(40);
     expect(container.querySelector('tr[data-virtual-spacer="bottom"]')).not.toBeNull();
     expect(elapsedMs).toBeLessThan(1500);
+
+    // Scrolling updates the virtual window and renders top spacer + offset slice
+    const scrollRegion = screen.getByRole("region", {
+      name: /24 Saatlik Basınç ve Sıcaklık Zaman Serisi Kayıtları/,
+    });
+    fireEvent.scroll(scrollRegion, { target: { scrollTop: 3400 } });
+    await waitFor(() => {
+      expect(container.querySelector('tr[data-virtual-spacer="top"]')).not.toBeNull();
+      expect(screen.getByText("Okuma 100")).toBeInTheDocument();
+    });
+    const scrolledRows = container.querySelectorAll("tbody tr:not([data-virtual-spacer])");
+    expect(scrolledRows.length).toBeGreaterThan(0);
+    expect(scrolledRows.length).toBeLessThanOrEqual(40);
   });
 });
