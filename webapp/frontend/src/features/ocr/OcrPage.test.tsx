@@ -23,6 +23,13 @@ vi.mock("./ocrApi", async () => {
       limits: { max_file_size_bytes: 50 * 1024 * 1024 },
     }),
     listAnalyses: (...args: unknown[]) => mockListAnalyses(...args),
+    getOcrQueue: vi.fn().mockResolvedValue({
+      worker_mode: "inline",
+      counts: { queued: 1, running: 0, succeeded: 2, failed: 1, cancelled: 0 },
+      oldest_queued_age_s: 3.0,
+      dead_letter_count: 1,
+      dead_letter: [],
+    }),
     listMappingProfiles: vi.fn().mockResolvedValue({ items: [] }),
     analyzeOcr: (...args: unknown[]) => mockAnalyzeOcr(...args),
     waitForAnalysis: (...args: unknown[]) => mockWaitForAnalysis(...args),
@@ -179,6 +186,9 @@ describe("OcrPage unmount cleanup (F10) and dynamic server timeout (F11)", () =>
     );
 
     const retryBtn = await screen.findByRole("button", { name: /Tekrar Dene/i });
+    expect(await screen.findByTestId("ocr-queue-badge")).toHaveTextContent(
+      "Kuyruk: 1 · Başarısız: 1",
+    );
     fireEvent.click(retryBtn);
 
     await waitFor(() => {

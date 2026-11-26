@@ -470,3 +470,75 @@ def test_worker_handles_cancel_unexpected_error_missing_attachment_and_cli(
         assert ocr_worker.main(["--once", "--worker-id", "cli-smoke"]) == 0
     finally:
         db.dispose_database()
+
+
+def test_cleanup_stale_failed_uploads_preserves_fresh_and_removes_expired(tmp_path: Path):
+    db_file = tmp_path / "stale_dlq.db"
+    settings = Settings(
+        database_url=f"sqlite:///{db_file.as_posix()}",
+        data_dir=tmp_path / "data",
+        frontend_dist=tmp_path / "dist",
+    )
+    settings.ensure_directories()
+    db.dispose_database()
+    db.configure_database(settings.database_url)
+    db.init_db()
+    ws_hash = security.workspace_hash("stale-dlq-ws")
+
+    try:
+        fresh_file = settings.uploads_dir / "fresh.pdf"
+        old_file = settings.uploads_dir / "old.pdf"
+        fresh_file.write_bytes(b"%PDF-1.4\n%%EOF\n")
+        old_file.write_bytes(b"%PDF-1.4\n%%EOF\n")
+
+        with db.session_scope() as s:
+            att_fresh = Attachment(
+                id="att-fresh",
+                workspace_id_hash=ws_hash,
+                session_id=None,
+                filename="fresh.pdf",
+                stored_path="fresh.pdf",
+                mime="application/pdf",
+                size_bytes=fresh_file.stat().st_size,
+                sha256="1111",
+                kind="report_pdf",
+            )
+            att_old = Attachment(
+                id="att-old",
+                workspace_id_hash=ws_hash,
+                session_id=None,
+                filename="old.pdf",
+                stored_path="old.pdf",
+                mime="application/pdf",
+                size_bytes=old_file.stat().st_size,
+                sha256="2222",
+                kind="report_pdf",
+            )
+            s.add_all([att_fresh, att_old])
+            s.flush()
+            s.add_all(
+                [
+                    OcrAnalysis(
+                        id="ana-fresh-fail",
+                        workspace_id_hash=ws_hash,
+                        attachment_id=att_fresh.id,
+                        status="failed",
+                        finished_at=utcnow() - timedelta(days=1),
+                    ),
+                    OcrAnalysis(
+                        id="ana-old-fail",
+                        workspace_id_hash=ws_hash,
+                        attachment_id=att_old.id,
+                        status="failed",
+                        finished_at=utcnow() - timedelta(days=10),
+                    ),
+                ]
+            )
+            s.commit()
+
+            removed = ocr_service.cleanup_stale_failed_uploads(s, settings, max_age_days=7)
+            assert removed == 1
+            assert fresh_file.is_file()
+            assert not old_file.is_file()
+    finally:
+        db.dispose_database()

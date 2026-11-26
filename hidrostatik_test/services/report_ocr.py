@@ -185,6 +185,8 @@ class PageText:
     source: str = TEXT_SOURCE_LAYER
     confidence: float | None = None
     warning: str = ""
+    duration_ms: float | None = None
+    dpi_used: int | None = None
 
     @property
     def is_ocr(self) -> bool:
@@ -2151,6 +2153,8 @@ def _ocr_pdf_page_with_dpi_escalation(
 ) -> PageText:
     """OCR a rendered PDF page and retry at 300 DPI if confidence or density is low."""
 
+    started = time.monotonic()
+    dpi_used = 200
     _check_ocr_abort(cancel_event, deadline_monotonic)
     preprocessed = _preprocess_image_for_ocr(initial_image)
     text, confidence, warning = _ocr_image_with_orientation_retry(
@@ -2204,18 +2208,22 @@ def _ocr_pdf_page_with_dpi_escalation(
             base_score = (confidence if confidence is not None else 0.5) * min(non_ws, 500)
             hi_score = (hi_conf if hi_conf is not None else 0.5) * min(hi_non_ws, 500)
             if hi_non_ws > 0 and hi_score > base_score:
+                dpi_used = 300
                 text = hi_text
                 confidence = hi_conf
                 warning = _join_warning(
                     hi_warn, "Sayfa dusuk guven nedeniyle 300 DPI ile yeniden okundu."
                 )
 
+    duration_ms = round((time.monotonic() - started) * 1000.0, 2)
     return PageText(
         page_number=page_index + 1,
         text=text,
         source=TEXT_SOURCE_OCR,
         confidence=confidence,
         warning=warning,
+        duration_ms=duration_ms,
+        dpi_used=dpi_used,
     )
 
 
@@ -3060,17 +3068,17 @@ _MICRO_HINT_RE = re.compile(r"micro|µ|μ|\bu\s*/\s*(?:bar|c)\b")
 _UNIT_PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = tuple(
     (re.compile(pattern), unit)
     for pattern, unit in (
-        (r"^m\s*[³3](?![0-9])|^m\s*\^\s*3", UNIT_M3),
+        (r"^m\s*[³3](?![0-9])|^m\s*\^\s*3|^rn\s*[³3](?![0-9])", UNIT_M3),
         (r"^ml\b|^mililitre\b", "mL"),
         (r"^l\b|^lt\b|^litre\b|^liter\b", "L"),
-        (r"^bars?\b|^barg\b|^bara\b", UNIT_BAR),
+        (r"^bars?\b|^barg\b|^bara\b|^har\b|^b4r\b", UNIT_BAR),
         (r"^psi\b", "psi"),
         (r"^kpa\b", "kPa"),
         (r"^mpa\b", "MPa"),
-        (r"^°\s*c\b|^degc\b|^celsius\b", UNIT_CELSIUS),
+        (r"^°\s*[cg0]\b|^degc\b|^celsius\b", UNIT_CELSIUS),
         (r"^°\s*f\b|^degf\b|^fahrenheit\b", "°F"),
         (r"^k\b|^kelvin\b", "K"),
-        (r"^mm\b|^milimetre\b|^millimeter\b", "mm"),
+        (r"^mm\b|^mrn\b|^milimetre\b|^millimeter\b", "mm"),
         (r"^cm\b", "cm"),
         (r"^km\b", "km"),
         (r"^inç\b|^inch\b|^in\b|[″\"]", "in"),

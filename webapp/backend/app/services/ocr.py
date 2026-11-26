@@ -6,7 +6,7 @@ import copy
 import json
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, BinaryIO, Iterable
 
@@ -1485,6 +1485,57 @@ def update_profile(
     return profile
 
 
+def cleanup_stale_failed_uploads(
+    db: OrmSession,
+    settings: Settings,
+    *,
+    max_age_days: int = 7,
+) -> int:
+    """Remove uploaded files for old failed/cancelled OCR jobs past the retry window."""
+
+    cutoff = utcnow() - timedelta(days=max(1, int(max_age_days)))
+    rows = (
+        db.execute(select(OcrAnalysis).where(OcrAnalysis.status.in_(("failed", "cancelled"))))
+        .scalars()
+        .all()
+    )
+    removed = 0
+    for row in rows:
+        stamp = row.finished_at or row.created_at
+        if stamp is None:
+            continue
+        aware = (
+            stamp.replace(tzinfo=timezone.utc)
+            if stamp.tzinfo is None
+            else stamp.astimezone(timezone.utc)
+        )
+        if aware >= cutoff:
+            continue
+        att = db.get(Attachment, row.attachment_id)
+        if att is None:
+            continue
+        other_active = (
+            db.execute(
+                select(OcrAnalysis.id)
+                .where(
+                    OcrAnalysis.attachment_id == att.id,
+                    OcrAnalysis.id != row.id,
+                    OcrAnalysis.status.in_(("queued", "running", "succeeded")),
+                )
+                .limit(1)
+            )
+            .scalars()
+            .first()
+        )
+        if other_active is not None:
+            continue
+        stored = (settings.uploads_dir / att.stored_path).resolve()
+        if stored.is_file():
+            stored.unlink(missing_ok=True)
+            removed += 1
+    return removed
+
+
 def delete_profile(db: OrmSession, profile: OcrMappingProfile) -> None:
     if profile.is_default:
         raise AppError(
@@ -1510,6 +1561,7 @@ __all__ = [
     "apply_to_session",
     "approve",
     "cancel_analysis",
+    "cleanup_stale_failed_uploads",
     "create_profile",
     "delete_profile",
     "detail_payload",

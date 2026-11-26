@@ -44,12 +44,14 @@ import {
 } from "./demoData";
 import {
   OcrApiError,
+  type OcrQueueOverview,
   analyzeOcr,
   applyOcrAnalysis,
   approveOcrAnalysis,
   cancelOcrAnalysis,
   currentSessionId,
   getMappingProfile,
+  getOcrQueue,
   getOcrStatus,
   isAbortError,
   listAnalyses,
@@ -151,6 +153,7 @@ export default function OcrPage() {
   const [historyDemo, setHistoryDemo] = useState(false);
   const [openingHistoryId, setOpeningHistoryId] = useState<string | null>(null);
   const [retryingHistoryId, setRetryingHistoryId] = useState<string | null>(null);
+  const [queueOverview, setQueueOverview] = useState<OcrQueueOverview | null>(null);
 
   const [profiles, setProfiles] = useState<MappingProfile[]>([]);
   const [profilesLoading, setProfilesLoading] = useState(true);
@@ -268,8 +271,12 @@ export default function OcrPage() {
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
     try {
-      const data = await listAnalyses({ limit: 20 });
+      const [data, queueData] = await Promise.all([
+        listAnalyses({ limit: 20 }),
+        getOcrQueue().catch(() => null),
+      ]);
       setHistory(data.items);
+      if (queueData) setQueueOverview(queueData);
       setHistoryDemo(false);
       setHistoryError(false);
     } catch {
@@ -939,6 +946,17 @@ export default function OcrPage() {
             <p className="numeric text-[10px] text-[var(--text-faint)]" title={sessionId}>
               Çalışma Alanı: {shortId(sessionId)}
             </p>
+            {queueOverview &&
+            (queueOverview.counts.queued + queueOverview.counts.running > 0 ||
+              queueOverview.dead_letter_count > 0) ? (
+              <span
+                data-testid="ocr-queue-badge"
+                className="rounded-full border border-[var(--info-border)] bg-[var(--info-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--info)]"
+              >
+                Kuyruk: {queueOverview.counts.queued + queueOverview.counts.running} · Başarısız:{" "}
+                {queueOverview.dead_letter_count}
+              </span>
+            ) : null}
           </div>
         }
       />

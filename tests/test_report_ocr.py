@@ -1814,6 +1814,42 @@ class DocumentReadingImprovementsTests(unittest.TestCase):
         self.assertIn("90°", warn)
         self.assertIn("95 bar", text)
 
+    def test_unit_ocr_noise_normalization_and_page_telemetry(self) -> None:
+        self.assertEqual(ocr._detect_unit("rn3"), "m³")
+        self.assertEqual(ocr._detect_unit("har"), "bar")
+        self.assertEqual(ocr._detect_unit("b4r"), "bar")
+        self.assertEqual(ocr._detect_unit("mrn"), "mm")
+        self.assertEqual(ocr._detect_unit("°G"), "°C")
+
+        if HAVE_PIL:
+            import tempfile
+
+            from PIL import Image, ImageDraw
+
+            # Synthetic degraded scan: shaded paper + red stamp + dark ink -> clean L output
+            degraded = Image.new("RGB", (360, 240), color=(238, 238, 238))
+            draw = ImageDraw.Draw(degraded)
+            draw.rectangle([0, 0, 180, 240], fill=(135, 135, 135))
+            draw.rectangle([30, 50, 140, 80], fill=(18, 18, 18))
+            draw.rectangle([200, 40, 320, 100], fill=(220, 35, 45))
+
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                tmp_png = Path(tmp_dir) / "degraded_stamp.png"
+                degraded.save(tmp_png, "PNG")
+                loaded = ocr._load_image(tmp_png)
+                self.assertEqual(loaded.mode, "L")
+                self.assertEqual(loaded.size, (720, 480))
+
+                with mock.patch.object(
+                    ocr,
+                    "_ocr_image_with_orientation_retry",
+                    return_value=("Test Basinci: 85 bar\nA: 45,7", 0.91, ""),
+                ):
+                    page = ocr._ocr_pdf_page_with_dpi_escalation(tmp_png, 0, degraded, "tesseract")
+                self.assertEqual(page.dpi_used, 200)
+                self.assertIsNotNone(page.duration_ms)
+                self.assertGreaterEqual(page.duration_ms or 0.0, 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
