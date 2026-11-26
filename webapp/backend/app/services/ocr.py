@@ -646,6 +646,7 @@ def _submit_inline_ocr_job(
         result: OcrAnalysisResult | None = None
         caught_ocr_err: ReportOcrError | None = None
         caught_unexpected = False
+
         def _on_progress(done: int, total: int) -> None:
             update_job_progress(session_factory, analysis_id, done, total)
 

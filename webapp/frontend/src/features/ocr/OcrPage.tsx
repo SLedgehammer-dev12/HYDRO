@@ -10,7 +10,6 @@ import {
   Download,
   FileJson,
   FileScan,
-  FolderOpen,
   Loader2,
   RefreshCw,
   RotateCcw,
@@ -29,6 +28,7 @@ import StatusPanel from "./components/StatusPanel";
 import HistoryPanel from "./components/HistoryPanel";
 import PlanProfilePanel from "./components/PlanProfilePanel";
 import DossierPanel from "./components/DossierPanel";
+import ApplyToSessionPanel from "./components/ApplyToSessionPanel";
 
 const PagePreviewDrawer = lazy(() => import("./components/PagePreviewDrawer"));
 import { PageHeader } from "../../components/layout/PageHeader";
@@ -74,49 +74,17 @@ import {
   type OcrErrorDetail,
   type OcrStatus,
 } from "./types";
+import {
+  STAGES,
+  type StageKey,
+  mapServerStage,
+  parseExtractProgress,
+  serverStageLabel,
+  wait,
+} from "./ocrStages";
 
 type Phase = "idle" | "analyzing" | "done" | "error";
 type TabKey = "fields" | "discrepancies" | "warnings";
-type StageKey = "upload" | "extract" | "parse" | "compare";
-
-const STAGES: Array<{ key: StageKey; label: string; detail: string }> = [
-  { key: "upload", label: "Yükleniyor", detail: "Dosya sunucuya aktarılıyor" },
-  { key: "extract", label: "Metin / OCR çıkarılıyor", detail: "Metin katmanı veya Tesseract" },
-  { key: "parse", label: "Alanlar ayrıştırılıyor", detail: "Etiket + regex eşleme" },
-  { key: "compare", label: "Karşılaştırılıyor", detail: "Toleranslı hesap kontrolü" },
-];
-
-function mapServerStage(raw: string | null | undefined): StageKey {
-  const value = (raw ?? "").toLowerCase();
-  if (value.includes("queue") || value.includes("upload")) return "upload";
-  if (value.includes("compare")) return "compare";
-  if (value.includes("pars") || value.includes("field")) return "parse";
-  if (value.includes("extract") || value.includes("ocr") || value.includes("text")) return "extract";
-  return "extract";
-}
-
-function serverStageLabel(raw: string | null | undefined): string {
-  const stage = mapServerStage(raw);
-  return STAGES.find((item) => item.key === stage)?.label ?? "İşleniyor";
-}
-
-function wait(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal.aborted) {
-      reject(new DOMException("İptal edildi.", "AbortError"));
-      return;
-    }
-    const onAbort = () => {
-      window.clearTimeout(timer);
-      reject(new DOMException("İptal edildi.", "AbortError"));
-    };
-    const timer = window.setTimeout(() => {
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
-}
 
 export default function OcrPage() {
   const [ocrMode, setOcrMode] = useState<"report" | "plan_profile">("report");
@@ -526,16 +494,17 @@ export default function OcrPage() {
         signal: controller.signal,
         timeoutMs: (serverTimeoutS + 30) * 1000,
         onProgress: (info) => {
-          const match = /^extract:(\d+)\/(\d+)/i.exec(info.stage ?? "");
-          const pagesDone = info.pages_done ?? (match ? Number(match[1]) : undefined);
-          const pagesTotal = info.pages_total ?? (match ? Number(match[2]) : undefined);
-          if (pagesTotal && pagesTotal > 0 && pagesDone !== undefined) {
-            setPageProgress({ done: pagesDone, total: pagesTotal });
+          const parsedProgress = parseExtractProgress(
+            info.stage,
+            info.pages_done,
+            info.pages_total,
+          );
+          if (parsedProgress) {
+            setPageProgress(parsedProgress);
           }
-          const pageSuffix =
-            pagesTotal && pagesTotal > 0 && pagesDone !== undefined
-              ? ` · Sayfa ${pagesDone} / ${pagesTotal}`
-              : "";
+          const pageSuffix = parsedProgress
+            ? ` · Sayfa ${parsedProgress.done} / ${parsedProgress.total}`
+            : "";
           const label =
             info.status === "queued"
               ? "Kuyrukta"
@@ -1605,237 +1574,49 @@ export default function OcrPage() {
                 );
 
                 const approvalPanel = (
-                  <section className="panel p-5" aria-labelledby="ocr-approval-title">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h2 id="ocr-approval-title" className="text-[18px] font-bold text-[var(--text)]">
-                        Alan onayı ve kesite aktarım
-                      </h2>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="numeric rounded-full border border-[var(--border)] bg-[var(--surface-3)] px-2.5 py-1 text-[10px] text-[var(--text-soft)]">
-                          {selectedFields.size}/{fields.length} seçili
-                        </span>
-                        <span className="numeric rounded-full border border-[var(--success-border)] bg-[var(--success-bg)] px-2.5 py-1 text-[10px] text-[var(--success)]">
-                          {approvedKeys.size} onaylı
-                        </span>
-                      </div>
-                    </div>
-                    <p className="mt-1 max-w-3xl text-[11px] leading-relaxed text-[var(--text-muted)]">
-                      Onay, raporun ham değerini değiştirmez; onaylı değerler seçtiğiniz proje/test bölümüne
-                      aktarılır ve mühendislik hesapları otomatik tetiklenir. Düşük güvenli alanlar (&lt;{" "}
-                      {formatNumber(lowThreshold, 2)}) açıkça işaretlenmeden toplu onay verilemez. Kritik
-                      güven eşiği &lt; {formatNumber(criticalThreshold, 2)}.
-                    </p>
-
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedFields(new Set(fields.map((item) => item.descriptor.key)))}
-                        disabled={allSelected || fields.length === 0}
-                        className="rounded-md border border-[var(--border)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--text-soft)] hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        Tümünü seç
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedFields(new Set())}
-                        disabled={selectedFields.size === 0}
-                        className="rounded-md border border-[var(--border)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--text-soft)] hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        Seçimi temizle
-                      </button>
-                      {pendingLowConfidence.length > 0 ? (
-                        <span className="rounded-full border border-[var(--warning-border)] bg-[var(--warning-bg)] px-2.5 py-1 text-[10px] text-[var(--warning)]">
-                          {pendingLowConfidence.length} düşük güvenli alan onay bekliyor:{" "}
-                          {pendingLowConfidence
-                            .slice(0, 3)
-                            .map((item) => item.descriptor.label)
-                            .join(", ")}
-                          {pendingLowConfidence.length > 3 ? "…" : ""}
-                        </span>
-                      ) : (
-                        <span className="rounded-full border border-[var(--success-border)] bg-[var(--success-bg)] px-2.5 py-1 text-[10px] text-[var(--success)]">
-                          düşük güvenli alan seçimi tamam
-                        </span>
-                      )}
-                      {editedCount > 0 ? (
-                        <span className="rounded-full border border-[var(--border)] bg-[var(--surface-3)] px-2.5 py-1 text-[10px] text-[var(--text-soft)]">
-                          {editedCount} elle düzeltme
-                        </span>
-                      ) : null}
-                    </div>
-
-                    {!resultDemo ? (
-                      <div className="mt-4 space-y-3 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3.5 text-xs">
-                        <div className="flex flex-wrap items-center gap-4">
-                          <label className="inline-flex cursor-pointer items-center gap-2 font-medium text-[var(--text)]">
-                            <input
-                              type="radio"
-                              name="ocr-single-apply-mode"
-                              checked={applyMode === "existing"}
-                              disabled={projects.length === 0}
-                              onChange={() => setApplyMode("existing")}
-                            />
-                            Kayıtlı proje / test bölümüne uygula
-                          </label>
-                          <label className="inline-flex cursor-pointer items-center gap-2 font-medium text-[var(--text)]">
-                            <input
-                              type="radio"
-                              name="ocr-single-apply-mode"
-                              checked={applyMode === "new"}
-                              onChange={() => setApplyMode("new")}
-                            />
-                            Yeni proje ve test bölümü oluştur
-                          </label>
-                        </div>
-
-                        {applyMode === "existing" ? (
-                          <div className="grid gap-3 sm:grid-cols-2">
-                            <label className="flex flex-col gap-1 text-[11px] font-medium text-[var(--text-soft)]">
-                              Hedef proje
-                              <select
-                                value={applyProjectId}
-                                onChange={(e) => {
-                                  setApplyProjectId(e.target.value);
-                                  setApplySessionId("");
-                                }}
-                                className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-2.5 py-2 text-xs text-[var(--text)]"
-                              >
-                                {projects.map((proj) => (
-                                  <option key={proj.id} value={proj.id}>
-                                    {proj.code ? `[${proj.code}] ` : ""}
-                                    {proj.name} ({proj.section_count} bölüm)
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <label className="flex flex-col gap-1 text-[11px] font-medium text-[var(--text-soft)]">
-                              Hedef test bölümü
-                              <select
-                                value={applySessionId}
-                                onChange={(e) => setApplySessionId(e.target.value)}
-                                className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-2.5 py-2 text-xs text-[var(--text)]"
-                              >
-                                {targetSessions.map((sess) => (
-                                  <option key={sess.id} value={sess.id}>
-                                    {sess.name}
-                                  </option>
-                                ))}
-                                <option value="__NEW__">+ Bu projede yeni test bölümü oluştur</option>
-                              </select>
-                            </label>
-                            {applySessionId === "__NEW__" ? (
-                              <label className="flex flex-col gap-1 text-[11px] font-medium text-[var(--text-soft)] sm:col-span-2">
-                                Yeni bölüm numarası
-                                <input
-                                  type="text"
-                                  value={newApplySectionNo}
-                                  onChange={(e) => setNewApplySectionNo(e.target.value)}
-                                  placeholder="Ör: BÖLÜM 1"
-                                  className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-2.5 py-2 text-xs text-[var(--text)]"
-                                />
-                              </label>
-                            ) : null}
-                          </div>
-                        ) : (
-                          <div className="grid gap-3 sm:grid-cols-2">
-                            <label className="flex flex-col gap-1 text-[11px] font-medium text-[var(--text-soft)]">
-                              Yeni proje adı
-                              <input
-                                type="text"
-                                value={newApplyProjectName}
-                                onChange={(e) => setNewApplyProjectName(e.target.value)}
-                                placeholder="Ör: HİZAN İLÇESİ DGBH YAPIM İŞİ PROJESİ"
-                                className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-2.5 py-2 text-xs text-[var(--text)]"
-                              />
-                            </label>
-                            <label className="flex flex-col gap-1 text-[11px] font-medium text-[var(--text-soft)]">
-                              Yeni bölüm numarası
-                              <input
-                                type="text"
-                                value={newApplySectionNo}
-                                onChange={(e) => setNewApplySectionNo(e.target.value)}
-                                placeholder="Ör: BÖLÜM 1"
-                                className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-2.5 py-2 text-xs text-[var(--text)]"
-                              />
-                            </label>
-                          </div>
-                        )}
-
-                        <label className="inline-flex cursor-pointer items-center gap-2 text-[11px] text-[var(--text-soft)]">
-                          <input
-                            type="checkbox"
-                            checked={overwriteExisting}
-                            onChange={(e) => setOverwriteExisting(e.target.checked)}
-                          />
-                          Kesitte zaten dolu olan alanların üzerine yaz
-                        </label>
-                      </div>
-                    ) : null}
-
-                    {actionError ? (
-                      <p
-                        role="alert"
-                        className="mt-3 rounded-lg border border-[var(--danger-border)] bg-[var(--danger-bg)] px-3 py-2 text-[11px] text-[var(--danger)]"
-                      >
-                        {actionError}
-                      </p>
-                    ) : null}
-
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        disabled={Boolean(approveDisabledReason) || approving}
-                        title={approveDisabledReason ?? "Seçili alanları onayla"}
-                        onClick={() => {
-                          void handleApproveSelected();
-                        }}
-                        className="btn btn-secondary inline-flex min-h-10 items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {approving ? (
-                          <Loader2 size={14} className="animate-spin" aria-hidden="true" />
-                        ) : (
-                          <CheckCircle2 size={14} aria-hidden="true" />
-                        )}
-                        Seçilenleri onayla ({selectedFields.size})
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!canApplyToSession}
-                        title={
-                          resultDemo
-                            ? "Demo analiz sunucuya uygulanamaz."
-                            : approvedKeys.size === 0
-                              ? "Önce en az bir alanı onaylayın."
-                              : "Onaylı alanları seçili test bölümüne aktar ve hesapla"
-                        }
-                        onClick={() => {
-                          void handleApplyToSession();
-                        }}
-                        className="btn btn-primary inline-flex min-h-10 items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {applying ? (
-                          <Loader2 size={14} className="animate-spin" aria-hidden="true" />
-                        ) : (
-                          <ArrowRight size={14} aria-hidden="true" />
-                        )}
-                        Oturuma uygula ({approvedKeys.size} onaylı)
-                      </button>
-                      {appliedSessionId ? (
-                        <button
-                          type="button"
-                          onClick={() => setStoreTab("geometry")}
-                          className="btn btn-secondary inline-flex min-h-10 items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-semibold"
-                        >
-                          <FolderOpen size={14} aria-hidden="true" />
-                          Kesit ve Hesapları Aç
-                        </button>
-                      ) : null}
-                    </div>
-                    <p className="mt-2 text-[10px] leading-relaxed text-[var(--text-faint)]">
-                      Denetim izi: onaylayan kullanıcı, zaman damgası, alan bazlı değer ve ham OCR metni
-                      kaydedilir. Uygulama adımında kesit hesaplamaları ve 11 zorunlu form slotu otomatik güncellenir.
-                    </p>
-                  </section>
+                  <ApplyToSessionPanel
+                    fields={fields}
+                    selectedFields={selectedFields}
+                    approvedKeys={approvedKeys}
+                    lowThreshold={lowThreshold}
+                    criticalThreshold={criticalThreshold}
+                    allSelected={allSelected}
+                    pendingLowConfidence={pendingLowConfidence}
+                    editedCount={editedCount}
+                    resultDemo={resultDemo}
+                    applyMode={applyMode}
+                    applyProjectId={applyProjectId}
+                    applySessionId={applySessionId}
+                    newApplyProjectName={newApplyProjectName}
+                    newApplySectionNo={newApplySectionNo}
+                    overwriteExisting={overwriteExisting}
+                    projects={projects}
+                    targetSessions={targetSessions}
+                    actionError={actionError}
+                    approveDisabledReason={approveDisabledReason}
+                    approving={approving}
+                    canApplyToSession={canApplyToSession}
+                    applying={applying}
+                    appliedSessionId={appliedSessionId}
+                    onSelectAll={() => setSelectedFields(new Set(fields.map((item) => item.descriptor.key)))}
+                    onClearSelection={() => setSelectedFields(new Set())}
+                    onChangeApplyMode={setApplyMode}
+                    onChangeApplyProjectId={(id) => {
+                      setApplyProjectId(id);
+                      setApplySessionId("");
+                    }}
+                    onChangeApplySessionId={setApplySessionId}
+                    onChangeNewProjectName={setNewApplyProjectName}
+                    onChangeNewSectionNo={setNewApplySectionNo}
+                    onChangeOverwriteExisting={setOverwriteExisting}
+                    onApproveSelected={() => {
+                      void handleApproveSelected();
+                    }}
+                    onApplyToSession={() => {
+                      void handleApplyToSession();
+                    }}
+                    onOpenGeometry={() => setStoreTab("geometry")}
+                  />
                 );
 
                 return result.dossier && result.dossier.sections.length > 0 ? (

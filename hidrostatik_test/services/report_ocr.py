@@ -2203,7 +2203,9 @@ def _ocr_image_with_orientation_retry(
                 best_angle = angle
 
         if best_angle is not None:
-            best_warn = _join_warning(best_warn, f"Sayfa otomatik {best_angle}° dondurulerek okundu.")
+            best_warn = _join_warning(
+                best_warn, f"Sayfa otomatik {best_angle}° dondurulerek okundu."
+            )
 
     final_non_ws = len(re.sub(r"\s+", "", best_text))
     if (
@@ -3441,9 +3443,7 @@ def parse_number(raw: str, *, dot_decimal: bool = False) -> float:
     return value
 
 
-_BORDER_PIPE_EDGE_RE: Final[re.Pattern[str]] = re.compile(
-    r"(?:^|(?<=\s))[|¦│]+|[|¦│]+(?=\s|$)"
-)
+_BORDER_PIPE_EDGE_RE: Final[re.Pattern[str]] = re.compile(r"(?:^|(?<=\s))[|¦│]+|[|¦│]+(?=\s|$)")
 _OCR_NUM_CANDIDATE_RE: Final[re.Pattern[str]] = re.compile(
     r"(?<![A-Za-z])[+-]?[0-9OoIl|¦│SB.,/]+(?![A-Za-z])"
 )

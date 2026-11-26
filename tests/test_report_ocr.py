@@ -1901,9 +1901,7 @@ class DocumentReadingImprovementsTests(unittest.TestCase):
                 mock.patch.object(ocr, "_iter_rendered_pdf_pages", return_value=iter([])),
                 mock.patch.object(ocr, "_tesseract_available", return_value=True),
             ):
-                fb_page = ocr._ocr_pdf_page_with_dpi_escalation(
-                    Path("dummy.pdf"), 0, img, "vision"
-                )
+                fb_page = ocr._ocr_pdf_page_with_dpi_escalation(Path("dummy.pdf"), 0, img, "vision")
             self.assertIn("YEDEK-1", fb_page.text)
             self.assertIn("Tesseract yedek", fb_page.warning)
 
@@ -1928,7 +1926,9 @@ class DocumentReadingImprovementsTests(unittest.TestCase):
             with (
                 mock.patch.object(ocr, "_resolve_ocr_engine", return_value="tesseract"),
                 mock.patch.object(ocr, "_iter_rendered_pdf_pages", return_value=iter(pages_img)),
-                mock.patch.object(ocr, "_ocr_pdf_page_with_dpi_escalation", side_effect=_fake_page_ocr),
+                mock.patch.object(
+                    ocr, "_ocr_pdf_page_with_dpi_escalation", side_effect=_fake_page_ocr
+                ),
             ):
                 out = ocr._ocr_pdf_pages(
                     Path("multi.pdf"),

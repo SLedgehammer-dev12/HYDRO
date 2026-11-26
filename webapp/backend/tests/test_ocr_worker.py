@@ -596,9 +596,10 @@ def test_update_job_progress_and_detail_payload(tmp_path: Path):
 
 def test_render_analysis_page_preview_image_bounds_and_errors(tmp_path: Path):
     import io
+
     import pytest
-    from PIL import Image
     from app.core.errors import AppError
+    from PIL import Image
 
     db_file = tmp_path / "preview.db"
     settings = Settings(
