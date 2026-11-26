@@ -228,7 +228,7 @@ jobs:
           "notes=$(Join-Path .\release "$baseName-RELEASE-NOTES.md")" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Upload windows assets
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-assets
           path: |
@@ -345,7 +345,7 @@ jobs:
           echo "notes=release/${base}-RELEASE-NOTES.md" >> "$GITHUB_OUTPUT"
 
       - name: Upload macos assets
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-assets
           path: |
@@ -456,7 +456,7 @@ jobs:
           echo "notes=release/${base}-RELEASE-NOTES.md" >> "$GITHUB_OUTPUT"
 
       - name: Upload web macOS assets
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: web-macos-assets
           path: |
@@ -575,7 +575,7 @@ jobs:
           "notes=$(Join-Path .\release "$baseName-RELEASE-NOTES.md")" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Upload web Windows assets
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: web-windows-assets
           path: |
