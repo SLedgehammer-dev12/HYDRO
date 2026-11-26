@@ -275,39 +275,62 @@ def _run_self_test(args: argparse.Namespace) -> int:
             Path(args.frontend_dist) if args.frontend_dist else env_settings.frontend_dist
         )
         host = "127.0.0.1"
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.bind((host, 0))
-            port = int(sock.getsockname()[1])
-
-        settings = replace(
-            env_settings,
-            host=host,
-            port=port,
-            database_url=f"sqlite:///{(tmp_dir / 'hydro_web.db').as_posix()}",
-            data_dir=tmp_dir,
-            frontend_dist=frontend_dist,
-            log_level="WARNING",
-        )
-        app = create_app(settings)
-        server, thread, error_holder = _start_uvicorn_thread(app, host, port, "WARNING")
-
-        base_url = f"http://{host}:{port}"
-        deadline = time.monotonic() + 20.0
         health_data: dict | None = None
         last_err: Exception | None = None
 
-        while time.monotonic() < deadline:
-            if error_holder:
-                raise RuntimeError(f"Sunucu baslatilamadi: {error_holder[0]}")
+        for bind_attempt in range(3):
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.bind((host, 0))
+                port = int(sock.getsockname()[1])
+
+            settings = replace(
+                env_settings,
+                host=host,
+                port=port,
+                database_url=f"sqlite:///{(tmp_dir / 'hydro_web.db').as_posix()}",
+                data_dir=tmp_dir,
+                frontend_dist=frontend_dist,
+                log_level="WARNING",
+            )
+            app = create_app(settings)
+            server, thread, error_holder = _start_uvicorn_thread(app, host, port, "WARNING")
+
+            base_url = f"http://{host}:{port}"
+            deadline = time.monotonic() + 30.0
+            bind_retry = False
+
+            while time.monotonic() < deadline:
+                if error_holder:
+                    err_text = str(error_holder[0]).lower()
+                    if bind_attempt < 2 and (
+                        "address already in use" in err_text
+                        or "errno 98" in err_text
+                        or "errno 48" in err_text
+                    ):
+                        bind_retry = True
+                        break
+                    raise RuntimeError(f"Sunucu baslatilamadi: {error_holder[0]}")
+                try:
+                    status, health_data = _http_json(f"{base_url}/api/health", timeout=2.0)
+                    if status == 200:
+                        break
+                except (urllib.error.URLError, ConnectionError, OSError) as exc:
+                    last_err = exc
+                    time.sleep(0.1)
+            else:
+                raise TimeoutError(f"/api/health 30s icinde yanit vermedi: {last_err}")
+
+            if not bind_retry:
+                break
+            server.should_exit = True
+            thread.join(timeout=3.0)
             try:
-                status, health_data = _http_json(f"{base_url}/api/health", timeout=2.0)
-                if status == 200:
-                    break
-            except (urllib.error.URLError, ConnectionError, OSError) as exc:
-                last_err = exc
-                time.sleep(0.1)
+                db_mod.dispose_database()
+            except Exception:
+                pass
+            time.sleep(0.15)
         else:
-            raise TimeoutError(f"/api/health 20s icinde yanit vermedi: {last_err}")
+            raise RuntimeError(f"Sunucu port tahsis edemedi: {error_holder!r}")
 
         if not health_data or not health_data.get("db", {}).get("ok"):
             raise AssertionError(f"DB health basarisiz: {health_data}")

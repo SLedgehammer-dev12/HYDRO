@@ -1,0 +1,94 @@
+[
+  {
+    "name": "botas_020_clean_tr",
+    "text": "Hidrostatik Test Raporu\nRapor No: BOT-FRM-INB-001-020\nTarih: 15.11.2026\nDis Cap: 1219,2 mm\nEt Kalinligi: 15,9 mm\nHat Uzunlugu: 10000 m\nTest Basinci: 85 bar\nHava Icerik Testi\nTeorik Ilave Su: 0,8893 m3\nFiili Ilave Su: 0,5000 m3\nA (hava): 45,728\nSonuc: BASARILI",
+    "expected": {
+      "report_no": "BOT-FRM-INB-001-020",
+      "date": "2026-11-15",
+      "pipe_od_mm": 1219.2,
+      "wall_mm": 15.9,
+      "length_m": 10000.0,
+      "test_pressure_bar": 85.0,
+      "air_test.vp": 0.8893,
+      "air_test.vpa": 0.5,
+      "air_test.a": 45.728,
+      "result": "PASS"
+    }
+  },
+  {
+    "name": "botas_022_pressure_clean",
+    "text": "Hidrostatik Test Raporu\nRapor No: BOT-FRM-INB-001-022\nTarih: 18/11/2026\nDis Cap: 914,4 mm\nEt Kalinligi: 12,7 mm\nHat Uzunlugu: 8500 m\nBasinc Degisim Testi\nBaslangic Sicakligi: 17,5 C\nBitis Sicakligi: 17,7 C\nSicaklik Farki: 0,20 C\nBasinc Dususu: 0,78 bar\nA (basinc): 45,3665\nB Katsayisi: 161,5148\nSonuc: RED",
+    "expected": {
+      "report_no": "BOT-FRM-INB-001-022",
+      "date": "2026-11-18",
+      "pipe_od_mm": 914.4,
+      "wall_mm": 12.7,
+      "length_m": 8500.0,
+      "pressure_test.t_initial": 17.5,
+      "pressure_test.t_final": 17.7,
+      "pressure_test.delta_t": 0.2,
+      "pressure_test.pa": 0.78,
+      "pressure_test.a": 45.3665,
+      "pressure_test.b": 161.5148,
+      "result": "FAIL"
+    }
+  },
+  {
+    "name": "ocr_noise_o0_l1",
+    "text": "Hidrostatik Test Raporu\nRapor No: BOT-2026-0142\nTarih: 2026-11-15\nDis Cap: 4O6,4 mm\nEt Kalinligi: 8,74 mm\nHat Uzunlugu: l0000 m\nTest Basinci: 8O bar\nHava Icerik Testi\nTeorik Ilave Su: O,00783 m3\nFiili Ilave Su: O,00775 m3\nBasinc Degisim Testi\nBasinc Dususu: O,55 bar\nSonuc: PASS",
+    "expected": {
+      "report_no": "BOT-2026-0142",
+      "date": "2026-11-15",
+      "pipe_od_mm": 406.4,
+      "wall_mm": 8.74,
+      "length_m": 10000.0,
+      "test_pressure_bar": 80.0,
+      "air_test.vp": 0.00783,
+      "air_test.vpa": 0.00775,
+      "pressure_test.pa": 0.55,
+      "result": "PASS"
+    }
+  },
+  {
+    "name": "section_and_kp_metadata",
+    "text": "Hidrostatik Test Raporu\nOperator: Ahmet Yilmaz\nKesim No: KESIT-04\nBaslangic KP: 12+450\nBitis KP: 22+450\nMaksimum Isletme Basinci: 75 bar\nSMYS: 485 MPa\nTest Basinci: 93,75 bar",
+    "expected": {
+      "operator": "Ahmet Yilmaz",
+      "section_id": "KESIT-04",
+      "start_kp": "12+450",
+      "end_kp": "22+450",
+      "max_operating_pressure_bar": 75.0,
+      "smys_mpa": 485.0,
+      "test_pressure_bar": 93.75
+    }
+  },
+  {
+    "name": "freeform_verdict_and_form_number",
+    "text": "BOTAS Kabul Tutanagi BOT-FRM-INB-001-021\nDis Cap: 762,0 mm\nEt Kalinligi: 11,9 mm\nHat Uzunlugu: 5200 m\nYapilan olcum sonucunda test kabul edilmistir.",
+    "expected": {
+      "report_no": "BOT-FRM-INB-001-021",
+      "pipe_od_mm": 762.0,
+      "wall_mm": 11.9,
+      "length_m": 5200.0,
+      "result": "PASS"
+    }
+  },
+  {
+    "name": "dot_decimal_english_report",
+    "text": "Hydrostatic Test Report\nReport No: HYDRO-EN-2026-09\nDate: 2026-11-20\nOutside Diameter: 406.4 mm\nWall Thickness: 8.74 mm\nLength: 10000 m\nTest Pressure: 80.0 bar\nAir Content Test\nTheoretical Added Water: 0.00783 m3\nActual Added Water: 0.00775 m3\nPressure Variation Test\nInitial Temperature: 20.5 C\nFinal Temperature: 21.0 C\nPressure Drop: 0.12 bar\nResult: PASS",
+    "expected": {
+      "report_no": "HYDRO-EN-2026-09",
+      "date": "2026-11-20",
+      "pipe_od_mm": 406.4,
+      "wall_mm": 8.74,
+      "length_m": 10000.0,
+      "test_pressure_bar": 80.0,
+      "air_test.vp": 0.00783,
+      "air_test.vpa": 0.00775,
+      "pressure_test.t_initial": 20.5,
+      "pressure_test.t_final": 21.0,
+      "pressure_test.pa": 0.12,
+      "result": "PASS"
+    }
+  }
+]

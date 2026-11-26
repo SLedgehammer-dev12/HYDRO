@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import os
 import socket
 import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from app.core import config as web_config
 
 
@@ -101,13 +103,26 @@ def test_pick_port_defaults_to_uncontested_range():
     assert picked >= 18790
 
 
+@pytest.mark.slow
 def test_desktop_launcher_self_test_subprocess(tmp_path):
     repo_root = Path(__file__).resolve().parents[3]
     launcher = repo_root / "webapp" / "desktop_launcher.py"
     log_file = tmp_path / "self_test.log"
+    isolated_env = dict(os.environ)
+    for key in (
+        "HYDRO_DATABASE_URL",
+        "HYDRO_DB_URL",
+        "DATABASE_URL",
+        "HYDRO_ADMIN_TOKEN",
+        "HYDRO_OIDC_ISSUER",
+        "HYDRO_OCR_WORKER_MODE",
+    ):
+        isolated_env.pop(key, None)
+    isolated_env["HYDRO_DATA_DIR"] = str(tmp_path / "data")
     proc = subprocess.run(
         [sys.executable, str(launcher), "--self-test", "--self-test-log", str(log_file)],
         cwd=str(repo_root),
+        env=isolated_env,
         capture_output=True,
         text=True,
         timeout=60,

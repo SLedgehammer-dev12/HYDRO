@@ -71,3 +71,11 @@ exclude_lines = [
 
 [tool.coverage.xml]
 output = "coverage.xml"
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: slow subprocess or end-to-end tests",
+    "golden: deterministic golden corpus and OCR regression tests",
+    "ocr: OCR extraction and worker queue tests",
+    "postgres: PostgreSQL runtime tests (CI / opt-in)",
+]

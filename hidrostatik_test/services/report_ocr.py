@@ -3690,7 +3690,7 @@ def _trailing_value(rest: str) -> str:
         tail = tail.strip()
         if not tail or len(tail) > 32 or len(head.strip()) < 3:
             return ""
-        if len(_NUMBER_RE.findall(tail)) != 1:
+        if len(_NUMBER_RE.findall(_normalize_ocr_numeric_string(tail))) != 1:
             return ""
         return tail
 
@@ -3815,7 +3815,8 @@ def _build_numeric_field(
     base_confidence: float,
     dot_decimal: bool = False,
 ) -> ExtractedField | None:
-    match = _NUMBER_RE.search(rest)
+    normalized_rest = _normalize_ocr_numeric_string(rest)
+    match = _NUMBER_RE.search(normalized_rest)
     if match is None:
         return None
     try:
@@ -3824,7 +3825,7 @@ def _build_numeric_field(
         return None
 
     canonical_unit, kind = _KEY_UNITS[key]
-    tail = rest[match.end() : match.end() + 24]
+    tail = normalized_rest[match.end() : match.end() + 24]
     detected_unit = _detect_unit(tail)
     confidence = base_confidence
     unit = canonical_unit

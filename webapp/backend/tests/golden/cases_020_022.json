@@ -1,0 +1,279 @@
+[
+  {
+    "name": "48in_x70_pass",
+    "description": "BOTAS Form 020 & 022 baseline passing 48-inch pipeline section",
+    "merged_header": {
+      "outside_diameter_mm": 1219.2,
+      "wall_thickness_mm": 15.9,
+      "length_m": 10000.0,
+      "test_pressure_bar": 85.0
+    },
+    "segments": null,
+    "forms": {
+      "air_acceptance": {
+        "extracted_data": {
+          "air_acceptance": {
+            "temperature_c": 15.0,
+            "pressure_bar": 85.0,
+            "vpa_m3": 0.5,
+            "k_factor": 1.02
+          }
+        }
+      },
+      "pressure_acceptance": {
+        "extracted_data": {
+          "pressure_acceptance": {
+            "temperature_c": 15.0,
+            "pressure_bar": 85.0,
+            "pa_bar": 0.3,
+            "delta_t_c": 0.25
+          }
+        }
+      }
+    },
+    "expected": {
+      "air": {
+        "status": "passed",
+        "passed": true,
+        "vp_m3": 0.889321,
+        "vpa_m3": 0.5,
+        "vt_m3": 11073.476,
+        "a_micro_per_bar": 45.728
+      },
+      "pressure": {
+        "status": "passed",
+        "passed": true,
+        "pa_bar": 0.3,
+        "pt_bar": 0.4173,
+        "margin_bar": -0.1173,
+        "a_micro_per_bar": 45.728,
+        "b_micro_per_c": 131.4304,
+        "pl_bar": 0.3
+      }
+    }
+  },
+  {
+    "name": "48in_air_fail",
+    "description": "Air content test fails when Vpa >= 1.06 * Vp",
+    "merged_header": {
+      "outside_diameter_mm": 1219.2,
+      "wall_thickness_mm": 15.9,
+      "length_m": 10000.0,
+      "test_pressure_bar": 85.0
+    },
+    "segments": null,
+    "forms": {
+      "air_acceptance": {
+        "extracted_data": {
+          "air_acceptance": {
+            "temperature_c": 15.0,
+            "pressure_bar": 85.0,
+            "vpa_m3": 0.96,
+            "k_factor": 1.02
+          }
+        }
+      },
+      "pressure_acceptance": {
+        "extracted_data": {
+          "pressure_acceptance": {
+            "temperature_c": 15.0,
+            "pressure_bar": 85.0,
+            "pa_bar": 0.3,
+            "delta_t_c": 0.25
+          }
+        }
+      }
+    },
+    "expected": {
+      "air": {
+        "status": "failed",
+        "passed": false,
+        "vp_m3": 0.889321,
+        "vpa_m3": 0.96,
+        "vt_m3": 11073.476,
+        "a_micro_per_bar": 45.728
+      },
+      "pressure": {
+        "status": "passed",
+        "passed": true,
+        "pa_bar": 0.3,
+        "pt_bar": 0.4173,
+        "margin_bar": -0.1173,
+        "a_micro_per_bar": 45.728,
+        "b_micro_per_c": 131.4304,
+        "pl_bar": 0.3
+      }
+    }
+  },
+  {
+    "name": "36in_pressure_fail",
+    "description": "Pressure variation fails when (Pa - Pt) > 0.30 bar on 36-inch line",
+    "merged_header": {
+      "outside_diameter_mm": 914.4,
+      "wall_thickness_mm": 12.7,
+      "length_m": 8500.0,
+      "test_pressure_bar": 72.0
+    },
+    "segments": null,
+    "forms": {
+      "air_acceptance": {
+        "extracted_data": {
+          "air_acceptance": {
+            "temperature_c": 18.0,
+            "pressure_bar": 72.0,
+            "vpa_m3": 0.28,
+            "k_factor": 1.02
+          }
+        }
+      },
+      "pressure_acceptance": {
+        "extracted_data": {
+          "pressure_acceptance": {
+            "temperature_c": 18.0,
+            "pressure_bar": 72.0,
+            "pa_bar": 0.78,
+            "delta_t_c": 0.2
+          }
+        }
+      }
+    },
+    "expected": {
+      "air": {
+        "status": "passed",
+        "passed": true,
+        "vp_m3": 0.410652,
+        "vpa_m3": 0.28,
+        "vt_m3": 5276.092,
+        "a_micro_per_bar": 45.3665
+      },
+      "pressure": {
+        "status": "failed",
+        "passed": false,
+        "pa_bar": 0.78,
+        "pt_bar": 0.4233,
+        "margin_bar": 0.3567,
+        "a_micro_per_bar": 45.3665,
+        "b_micro_per_c": 161.5148,
+        "pl_bar": 0.3
+      }
+    }
+  },
+  {
+    "name": "multi_segment_mixed_wt_pass",
+    "description": "Two-segment mixed wall-thickness PipeGeometry air & pressure evaluation",
+    "merged_header": {
+      "outside_diameter_mm": 1219.2,
+      "wall_thickness_mm": 15.9,
+      "length_m": 10000.0,
+      "test_pressure_bar": 90.0
+    },
+    "segments": [
+      {
+        "outside_diameter_mm": 1219.2,
+        "wall_thickness_mm": 14.3,
+        "length_m": 6000.0
+      },
+      {
+        "outside_diameter_mm": 1219.2,
+        "wall_thickness_mm": 17.5,
+        "length_m": 4000.0
+      }
+    ],
+    "forms": {
+      "air_acceptance": {
+        "extracted_data": {
+          "air_acceptance": {
+            "temperature_c": 16.0,
+            "pressure_bar": 90.0,
+            "vpa_m3": 0.5,
+            "k_factor": 1.02
+          }
+        }
+      },
+      "pressure_acceptance": {
+        "extracted_data": {
+          "pressure_acceptance": {
+            "temperature_c": 16.0,
+            "pressure_bar": 90.0,
+            "pa_bar": 0.35,
+            "delta_t_c": 0.22
+          }
+        }
+      }
+    },
+    "expected": {
+      "air": {
+        "status": "passed",
+        "passed": true,
+        "vp_m3": 0.899516,
+        "vpa_m3": 0.5,
+        "vt_m3": 11085.494,
+        "a_micro_per_bar": 45.4907
+      },
+      "pressure": {
+        "status": "passed",
+        "passed": true,
+        "pa_bar": 0.35,
+        "pt_bar": 0.3962,
+        "margin_bar": -0.0462,
+        "a_micro_per_bar": 45.4907,
+        "b_micro_per_c": 143.2527,
+        "pl_bar": 0.3
+      }
+    }
+  },
+  {
+    "name": "pressure_pl_override_guard",
+    "description": "Backend enforces spec PL=0.30 bar even when form reports relaxed pl_bar=0.50",
+    "merged_header": {
+      "outside_diameter_mm": 1219.2,
+      "wall_thickness_mm": 15.9,
+      "length_m": 10000.0,
+      "test_pressure_bar": 85.0
+    },
+    "segments": null,
+    "forms": {
+      "air_acceptance": {
+        "extracted_data": {
+          "air_acceptance": {
+            "temperature_c": 15.0,
+            "pressure_bar": 85.0,
+            "vpa_m3": 0.5,
+            "k_factor": 1.02
+          }
+        }
+      },
+      "pressure_acceptance": {
+        "extracted_data": {
+          "pressure_acceptance": {
+            "temperature_c": 15.0,
+            "pressure_bar": 85.0,
+            "pa_bar": 0.78,
+            "delta_t_c": 0.25,
+            "pl_bar": 0.5
+          }
+        }
+      }
+    },
+    "expected": {
+      "air": {
+        "status": "passed",
+        "passed": true,
+        "vp_m3": 0.889321,
+        "vpa_m3": 0.5,
+        "vt_m3": 11073.476,
+        "a_micro_per_bar": 45.728
+      },
+      "pressure": {
+        "status": "failed",
+        "passed": false,
+        "pa_bar": 0.78,
+        "pt_bar": 0.4173,
+        "margin_bar": 0.3627,
+        "a_micro_per_bar": 45.728,
+        "b_micro_per_c": 131.4304,
+        "pl_bar": 0.3
+      }
+    }
+  }
+]
