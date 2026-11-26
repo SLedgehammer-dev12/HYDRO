@@ -123,12 +123,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: "pip"
@@ -146,4 +146,5 @@ jobs:
           GITLEAKS_ENABLE_SUMMARY: "false"
 
       - name: Dependency audit (high/critical)
+        working-directory: webapp/frontend
         run: npm audit --omit=dev --audit-level=high
