@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.2.0 - 2026-11-26
+
+### Added & Changed
+
+- **OCR Okuma Doğruluğu, Hızı & Telemetri (`report_ocr.py`, `worker/ocr.py`, `services/ocr.py`)**:
+  - Düşük güvenli/seyrek Tesseract taramaları için Otsu adaptif ikili eşikleme (`_binarize_for_ocr`) ve tablo dostu `--psm 6` ikincil geçiş eklendi; `vision`/`windows_ocr` zayıf kaldığında sayfa bazlı Tesseract yedek motor geçişi eklendi.
+  - Çok sayfalı PDF'lerde sınırlı paralel sayfa OCR (`ThreadPoolExecutor`) ve veritabanı şema değişikliği olmadan `job_payload` üzerinden canlı `Sayfa X / Y` ilerleme aktarımı eklendi.
+  - `_UNIT_PATTERNS` birim gürültüsü normalize kuralları (`rn3`→`m³`, `har`/`b4r`→`bar`, `mrn`→`mm`, `°g`/`°0`→`°C`), `_BORDER_PIPE_EDGE_RE` tablo kenarlık pipe temizliği, sayfa `duration_ms`/`dpi_used` telemetrisi ve süresi dolmuş başarısız yüklemeler için `cleanup_stale_failed_uploads` eklendi.
+- **OCR Doğrulama Arayüzü (`api/ocr.py`, `PagePreviewDrawer.tsx`, `FieldsTable.tsx`, `SummaryCard.tsx`, `Dropzone.tsx`)**:
+  - Önbellekli sayfa görseli önizleme ucu (`GET /api/ocr/analyses/{id}/pages/{page_no}/preview`) ve zoom/90° döndürme/sayfa geçişli sağdan kayar `PagePreviewDrawer` eklendi.
+  - Alan tablosuna hızlı filtre çipleri (`Tümü`, `Düşük Güven`, `Önerili`, `Düzenlenen`, `Zorunlu`), arama kutusu, tek tıkla **"Tüm Önerileri Uygula"**, **"Sonraki Düşük Güven"** atlama, satır klavye kısayolları (`Enter`/`E`, `Space`), özet kartında OCR telemetri şeridi, kuyruk durum rozeti ve panodan (`Ctrl/⌘+V`) görsel yapıştırma + önizleme eklendi.
+- **Program Arayüzü Ergonomisi & Modülerlik (`CommandPalette.tsx`, `TopBar.tsx`, `DashboardPage.tsx`, `ApplyToSessionPanel.tsx`)**:
+  - Sekmeler, BOTAŞ formları, test bölümleri ve hızlı eylemler için genel `Ctrl/⌘ + K` komut paleti eklendi.
+  - `Dashboard` Adım 4 (`Resmî Rapor`) gerçek tamamlanma durumuna bağlandı ve eksik verilerde `OCR'dan İçe Aktar` kısayolu eklendi; `OcrPage` içinden `ApplyToSessionPanel` ve `ocrStages` ayrıştırıldı.
+- **Backend Sağlık & Test Güvencesi (`services/system.py`, `services/db_admin.py`)**:
+  - `/api/health` veri dizinine `free_mb` / `low_disk_space` telemetrisi ve terk edilmiş `DEMO-*` projeleri için `prune_stale_demo_projects` temizliği eklendi; OIDC/RBAC, iki kişi onayı, bozuk yedek/path traversal, migrasyon idempotency, `axe-core` ve sanal kaydırma testleri genişletildi.
+
 ## 2.1.1 - 2026-11-24
 
 ### Added & Changed

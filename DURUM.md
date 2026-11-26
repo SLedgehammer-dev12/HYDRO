@@ -2,9 +2,9 @@
 
 > Tek kaynak özet. Ayrıntı için "Ayrıntılı notlar" bölümündeki dosyalara bakın.
 >
-> **Son güncelleme:** 2026-11-24
-> **Dal:** `main` (`v2.1.1` — `R1–R18` Kurumsal Güvenlik/Otomasyon + `OCR-1..4` Hibrit Doküman Okuma + CI Sertleştirme)
-> **Son commit:** `hidrostatik-test-v2.1.1` (`R1–R18`, `F18–F29`, `OCR-1..4`, OIDC/RBAC/İki Kişi Onayı, Kalıcı OCR Worker)
+> **Son güncelleme:** 2026-11-26
+> **Dal:** `main` (`v2.2.0` — OCR Adaptif Okuma/Önizleme + `Ctrl/⌘+K` Komut Paleti + 20 Döngülük Kalite İyileştirmeleri)
+> **Son commit:** `hidrostatik-test-v2.2.0` (`v2.2.0` — OCR & UI İyileştirmeleri, Sayfa Önizleme, `R1–R18`, OIDC/RBAC/İki Kişi Onayı)
 
 ---
 
@@ -13,16 +13,16 @@
 <!-- generated:metrics:start -->
 | Otomatik Metrik (`sync_doc_metrics.py`) | Değer | Kaynak |
 | --- | --- | --- |
-| Uygulama / Frontend Sürümü | `2.1.1` / `2.1.1` | `app_metadata.py`, `package.json` |
+| Uygulama / Frontend Sürümü | `2.2.0` / `2.2.0` | `app_metadata.py`, `package.json` |
 | Veritabanı Şema Revizyonu (Alembic) | `0005` | `migrations_runner.py` |
 | OpenAPI Sözleşme Yüzeyi | `97` path / `112` operation | `webapp/docs/openapi.json` |
 <!-- generated:metrics:end -->
 
 | Alan | Durum | Kanıt |
 | --- | --- | --- |
-| Masaüstü uygulaması | Çalışıyor, kararlı (`hidrostatik_test/ui/*` kapsam dışı tutuldu) | `tests.test_report_ocr` 87 unittest OK (`skipped=1`); tam paket `python3 -m unittest discover`: **744 OK** (`skipped=1`, Tk testleri CI'da izole) |
-| Web backend (FastAPI) | Çalışıyor | **289 pytest PASS** (1 skipped: Postgres CI-only, Alembic `0005`, `SAWarning=0`, `%83` kapsam ≥ `%80` kapısı), 96 OpenAPI path / 111 operation (`openapi.json`), 56 dosyada `mypy` temiz |
-| Web frontend (React 19) | Çalışıyor | `npm run check:api` (78/96 yol), `npm run lint` (0 hata, `jsx-a11y`), `npm test` (**83 Vitest / 25 dosya**), `npm run typecheck` + `npm run build` + `check:bundle` PASS (**`149,8 kB`** gzip ilk yükleme JS), `verify-tabs.mjs` **12/12 + E2E PASS** (matris 48/48) |
+| Masaüstü uygulaması | Çalışıyor, kararlı (`hidrostatik_test/ui/*` kapsam dışı tutuldu) | `tests.test_report_ocr` 88 unittest OK (`skipped=1`); tam paket `python3 -m unittest discover`: **744+ OK** (`skipped=1`, Tk testleri CI'da izole) |
+| Web backend (FastAPI) | Çalışıyor | **291 pytest PASS** (1 skipped: Postgres CI-only, Alembic `0005`, `SAWarning=0`, `%83` kapsam ≥ `%80` kapısı), 97 OpenAPI path / 113 operation (`openapi.json`), 56 dosyada `mypy` temiz |
+| Web frontend (React 19) | Çalışıyor | `npm run check:api` (79/97 yol), `npm run lint` (0 hata, `jsx-a11y`), `npm test` (**87 Vitest / 26 dosya**), `npm run typecheck` + `npm run build` + `check:bundle` PASS (**`152,5 kB`** gzip ilk yükleme JS), `verify-tabs.mjs` **12/12 + E2E PASS** (matris 48/48) |
 | Program İkon & Marka Sistemi | Hazır | Boru kesiti + su dalgası + manometre ikonu (`tools/generate_icons.py`, `assets/icons/*`, `webapp/frontend/public/*`, `<HydroLogo />`, PyInstaller/Inno Setup/Tkinter) |
 | Web Güncelleme Yöneticisi | Çalışıyor | `/api/update/*`, SHA-256 + fail-closed Ed25519 `.sig` doğrulama, `UpdateManagerModal`, macOS `.dmg` / Win `.exe`/`.zip` kurulum |
 | BOTAŞ Test Bölümü Formları | Çalışıyor | Seçenek 1 sol menü (`015`..`023`, `KUR-001`, `KUR-002` + 5 ek), `SectionFormPage`, `rows`/`pig_runs`/`findings`, tekil OCR, `020`/`022` gömülü hesaplama ve `023` (`BOT-FRM-CDB-001-024`) Şartname 16–17 çift yönlü entegrasyonu |

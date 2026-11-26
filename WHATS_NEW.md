@@ -1,7 +1,14 @@
-# Neler Yeni — HYDRO v2.1.1 (What's New)
+# Neler Yeni — HYDRO v2.2.0 (What's New)
 
-**Sürüm:** `v2.1.1` (`hidrostatik-test-v2.1.1`)  
-**Tarih:** 2026-11-24
+**Sürüm:** `v2.2.0` (`hidrostatik-test-v2.2.0`)  
+**Tarih:** 2026-11-26
+
+---
+
+### v2.2.0 Öne Çıkanlar
+- **Daha İsabetli & Hızlı OCR Okuma:** Düşük güvenli taramalarda Otsu adaptif eşikleme + `--psm 6` ikinci geçiş, tablo kenarlığı `|` temizliği, zayıf `vision`/`windows_ocr` sayfalarında Tesseract yedeği, çok sayfalı PDF'lerde paralel OCR ve canlı `Sayfa X / Y` ilerleme çubuğu.
+- **Yan Yana Belge Doğrulama:** Alan tablosundaki sayfa numarasına tıklayarak kaynak sayfanın önizlemesini açma (`PagePreviewDrawer`, yakınlaştırma ve `90°` döndürme), filtre çipleri, anlık arama, tek tıkla **"Tüm Önerileri Uygula"** ve klavye kısayolları (`Enter`/`E`, `Space`).
+- **Arayüz Ergonomisi (`Ctrl/⌘ + K`):** Tüm sekmeler, 16 BOTAŞ formu ve Test Bölümleri arasında tek tuşla geçiş yapan Komut Paleti, panodan (`Ctrl/⌘+V`) görsel yapıştırma ve Dashboard üzerinden tek tıkla `OCR'dan İçe Aktar`.
 
 ---
 
