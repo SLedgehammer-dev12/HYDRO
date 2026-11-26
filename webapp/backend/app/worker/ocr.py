@@ -230,7 +230,6 @@ def process_claimed_job(
             row.error_message = None
             row.finished_at = row.finished_at or utcnow()
             db.commit()
-            stored_path.unlink(missing_ok=True)
             return "cancelled"
 
         if caught_ocr_err is not None:
@@ -240,7 +239,6 @@ def process_claimed_job(
             row.lease_until = None
             row.finished_at = utcnow()
             db.commit()
-            stored_path.unlink(missing_ok=True)
             return "failed"
 
         if caught_unexpected or result is None:
@@ -250,7 +248,6 @@ def process_claimed_job(
             row.lease_until = None
             row.finished_at = utcnow()
             db.commit()
-            stored_path.unlink(missing_ok=True)
             return "failed"
 
         OCR_QUEUE.record_duration(time.monotonic() - started)

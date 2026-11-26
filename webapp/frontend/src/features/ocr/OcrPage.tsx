@@ -54,6 +54,7 @@ import {
   isAbortError,
   listAnalyses,
   listMappingProfiles,
+  retryOcrAnalysis,
   toOcrApiError,
   waitForAnalysis,
 } from "./ocrApi";
@@ -149,6 +150,7 @@ export default function OcrPage() {
   const [historyError, setHistoryError] = useState(false);
   const [historyDemo, setHistoryDemo] = useState(false);
   const [openingHistoryId, setOpeningHistoryId] = useState<string | null>(null);
+  const [retryingHistoryId, setRetryingHistoryId] = useState<string | null>(null);
 
   const [profiles, setProfiles] = useState<MappingProfile[]>([]);
   const [profilesLoading, setProfilesLoading] = useState(true);
@@ -612,6 +614,65 @@ export default function OcrPage() {
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
       setOpeningHistoryId(null);
+      setElapsed(0);
+    }
+  };
+
+  const retryHistoryItem = async (item: OcrAnalysisSummary) => {
+    if (phase === "analyzing" || historyDemo || item.id.startsWith("demo")) return;
+    setRetryingHistoryId(item.id);
+    setError(null);
+    setResult(null);
+    setResultDemo(false);
+    setEdits({});
+    setPhase("analyzing");
+    setStage("extract");
+    setStageNote("Başarısız analiz yeniden kuyruğa alınıyor…");
+    setElapsed(0);
+    startedAtRef.current = Date.now();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      const job = await retryOcrAnalysis(item.id, controller.signal);
+      setJobId(job.analysis_id);
+      setActiveOcrJob({
+        id: job.analysis_id,
+        fileName: item.id.slice(0, 10),
+        stage: "Kuyrukta",
+      });
+      const serverTimeoutS = metaQuery.data?.limits?.ocr_timeout_s ?? 600;
+      const final = await waitForAnalysis(job.analysis_id, {
+        signal: controller.signal,
+        timeoutMs: (serverTimeoutS + 30) * 1000,
+        onProgress: (info) => {
+          setStage(mapServerStage(info.stage));
+          setStageNote(`Sunucu aşaması: ${serverStageLabel(info.stage)}`);
+        },
+      });
+      setActiveOcrJob(null);
+      if (final.status === "succeeded") {
+        applyResult(final, false);
+        void loadHistory();
+      } else if (final.status === "failed") {
+        showFailure(final.error, "Yeniden denenen analiz başarısız oldu.");
+        void loadHistory();
+      } else if (final.status === "cancelled") {
+        setPhase("idle");
+        setStageNote("Analiz iptal edildi.");
+        void loadHistory();
+      }
+    } catch (caught) {
+      setActiveOcrJob(null);
+      if (isAbortError(caught) || controller.signal.aborted) {
+        if (!unmountRef.current) setPhase("idle");
+      } else {
+        setError(toOcrApiError(caught));
+        setPhase("error");
+      }
+    } finally {
+      if (abortRef.current === controller) abortRef.current = null;
+      setJobId(null);
+      setRetryingHistoryId(null);
       setElapsed(0);
     }
   };
@@ -1754,9 +1815,13 @@ export default function OcrPage() {
             loading={historyLoading}
             error={historyError}
             openingId={openingHistoryId}
+            retryingId={retryingHistoryId}
             selectedId={result?.id ?? null}
             onOpen={(item) => {
               void openHistoryItem(item);
+            }}
+            onRetry={(item) => {
+              void retryHistoryItem(item);
             }}
             onRefresh={() => {
               void loadHistory();

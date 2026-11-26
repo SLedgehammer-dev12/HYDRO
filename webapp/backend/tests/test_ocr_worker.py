@@ -277,3 +277,196 @@ def test_ocr_queue_overview_and_retry_failed_job(tmp_path: Path):
             assert conflict.json()["code"] == "not_retryable"
     finally:
         db.dispose_database()
+
+
+def test_real_ocr_failure_preserves_file_for_retry_to_succeed(tmp_path: Path):
+    from hidrostatik_test.services.report_ocr import ReportOcrError
+
+    db_file = tmp_path / "retry_preserve.db"
+    settings = Settings(
+        database_url=f"sqlite:///{db_file.as_posix()}",
+        data_dir=tmp_path / "data",
+        frontend_dist=tmp_path / "dist",
+        ocr_worker_mode="external",
+    )
+    app = create_app(settings)
+    headers = {"X-Session-ID": "retry-preserve-ws"}
+
+    try:
+        with TestClient(app) as client:
+            pdf_bytes = b"%PDF-1.4\n1 0 obj <<>> endobj\ntrailer <<>>\n%%EOF\n"
+            res = client.post(
+                "/api/ocr/analyze",
+                headers={**headers, "Prefer": "respond-async"},
+                files={"file": ("retryable.pdf", pdf_bytes, "application/pdf")},
+            )
+            assert res.status_code == 202
+            job_id = res.json()["analysis_id"]
+
+            # 1) First worker execution raises ReportOcrError -> job fails, file stays on disk
+            with patch(
+                "app.worker.ocr.analyze_report",
+                side_effect=ReportOcrError("ocr_timeout", "Zaman asimi"),
+            ):
+                assert ocr_worker.run_once(settings, worker_id="w-fail") is True
+
+            failed = client.get(f"/api/ocr/analyses/{job_id}", headers=headers).json()
+            assert failed["status"] == "failed"
+            with db.session_scope() as s:
+                row = s.get(OcrAnalysis, job_id)
+                assert row is not None
+                att = s.get(Attachment, row.attachment_id)
+                assert att is not None
+                assert (settings.uploads_dir / att.stored_path).is_file()
+
+            # 2) Operator triggers retry -> queued again, second worker run succeeds
+            retry = client.post(f"/api/ocr/analyses/{job_id}/retry", headers=headers)
+            assert retry.status_code == 202, retry.text
+            assert retry.json()["status"] == "queued"
+
+            with patch(
+                "app.worker.ocr.analyze_report",
+                return_value=_fake_success_result(),
+            ):
+                assert ocr_worker.run_once(settings, worker_id="w-recover") is True
+
+            done = client.get(f"/api/ocr/analyses/{job_id}", headers=headers).json()
+            assert done["status"] == "succeeded"
+    finally:
+        db.dispose_database()
+
+
+def test_worker_handles_cancel_unexpected_error_missing_attachment_and_cli(
+    tmp_path: Path, monkeypatch
+):
+    import threading
+    import time
+
+    from sqlalchemy.orm import Session as OrmSession
+
+    db_file = tmp_path / "worker_edges.db"
+    settings = Settings(
+        database_url=f"sqlite:///{db_file.as_posix()}",
+        data_dir=tmp_path / "data",
+        frontend_dist=tmp_path / "dist",
+        ocr_worker_mode="external",
+    )
+    settings.ensure_directories()
+    db.dispose_database()
+    db.configure_database(settings.database_url)
+    db.init_db()
+    factory = db.get_sessionmaker()
+    ws_hash = security.workspace_hash("worker-edges-ws")
+
+    try:
+        assert "-" in ocr_worker.default_worker_id()
+
+        with db.session_scope() as s:
+            sample = settings.uploads_dir / "edge.pdf"
+            sample.write_bytes(b"%PDF-1.4\n%%EOF\n")
+            att = Attachment(
+                id="att-edge-1",
+                workspace_id_hash=ws_hash,
+                session_id=None,
+                filename="edge.pdf",
+                stored_path="edge.pdf",
+                mime="application/pdf",
+                size_bytes=sample.stat().st_size,
+                sha256="abcd1234",
+                kind="report_pdf",
+            )
+            s.add(att)
+            s.add_all(
+                [
+                    OcrAnalysis(
+                        id="job-unexpected",
+                        workspace_id_hash=ws_hash,
+                        attachment_id=att.id,
+                        status="running",
+                        worker_id="w-edge",
+                        lease_until=utcnow() + timedelta(minutes=5),
+                    ),
+                    OcrAnalysis(
+                        id="job-pre-cancel",
+                        workspace_id_hash=ws_hash,
+                        attachment_id=att.id,
+                        status="running",
+                        cancel_requested=True,
+                        worker_id="w-edge",
+                    ),
+                    OcrAnalysis(
+                        id="job-mid-cancel",
+                        workspace_id_hash=ws_hash,
+                        attachment_id=att.id,
+                        status="running",
+                        worker_id="w-edge",
+                        lease_until=utcnow() + timedelta(minutes=5),
+                    ),
+                    OcrAnalysis(
+                        id="job-no-att",
+                        workspace_id_hash=ws_hash,
+                        attachment_id=att.id,
+                        status="running",
+                        worker_id="w-edge",
+                    ),
+                ]
+            )
+            s.commit()
+
+        assert (
+            ocr_worker.process_claimed_job(factory, settings, "does-not-exist", worker_id="w-edge")
+            == "missing"
+        )
+        orig_get = OrmSession.get
+
+        def _missing_att_get(self, entity, ident, *args, **kwargs):
+            if entity is Attachment:
+                return None
+            return orig_get(self, entity, ident, *args, **kwargs)
+
+        with patch.object(OrmSession, "get", _missing_att_get):
+            assert (
+                ocr_worker.process_claimed_job(factory, settings, "job-no-att", worker_id="w-edge")
+                == "failed"
+            )
+        assert (
+            ocr_worker.process_claimed_job(factory, settings, "job-pre-cancel", worker_id="w-edge")
+            == "cancelled"
+        )
+
+        with patch("app.worker.ocr.analyze_report", side_effect=RuntimeError("boom")):
+            assert (
+                ocr_worker.process_claimed_job(
+                    factory, settings, "job-unexpected", worker_id="w-edge"
+                )
+                == "failed"
+            )
+        assert (settings.uploads_dir / "edge.pdf").is_file()
+
+        def _slow_analyze(*_args, cancel_event: threading.Event, **_kwargs):
+            with factory() as wdb:
+                row = wdb.get(OcrAnalysis, "job-mid-cancel")
+                assert row is not None
+                row.cancel_requested = True
+                wdb.commit()
+            deadline = time.monotonic() + 3.0
+            while not cancel_event.is_set() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            return _fake_success_result()
+
+        with patch("app.worker.ocr.analyze_report", side_effect=_slow_analyze):
+            res = ocr_worker.process_claimed_job(
+                factory,
+                settings,
+                "job-mid-cancel",
+                worker_id="w-edge",
+                lease_seconds=120,
+                heartbeat_interval_s=0.2,
+            )
+            assert res == "cancelled"
+
+        monkeypatch.setenv("HYDRO_DATABASE_URL", settings.database_url)
+        monkeypatch.setenv("HYDRO_DATA_DIR", str(settings.data_dir))
+        assert ocr_worker.main(["--once", "--worker-id", "cli-smoke"]) == 0
+    finally:
+        db.dispose_database()

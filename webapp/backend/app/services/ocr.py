@@ -517,7 +517,6 @@ def analyze_upload(
                 analysis.error_message = exc.message
             analysis.finished_at = utcnow()
             db.commit()
-            stored.path.unlink(missing_ok=True)
             raise _http_error(exc, analysis_id=analysis.id) from exc
         except Exception as exc:  # unexpected domain failure
             analysis.status = "failed"
@@ -525,7 +524,6 @@ def analyze_upload(
             analysis.error_message = "OCR analizi tamamlanamadi."
             analysis.finished_at = utcnow()
             db.commit()
-            stored.path.unlink(missing_ok=True)
             raise AppError(
                 "internal_error",
                 "OCR analizi tamamlanamadi.",
@@ -572,7 +570,6 @@ def _submit_inline_ocr_job(
                 row = wdb.get(OcrAnalysis, analysis_id)
                 if row is not None and row.status != "cancelled":
                     _mark_cancelled_if_needed(wdb, row)
-            stored_path.unlink(missing_ok=True)
             return
 
         with session_factory() as wdb:
@@ -580,7 +577,8 @@ def _submit_inline_ocr_job(
             if row is None or row.status == "cancelled" or cancel_event.is_set():
                 if row is not None and row.status != "cancelled":
                     _mark_cancelled_if_needed(wdb, row)
-                stored_path.unlink(missing_ok=True)
+                if row is None:
+                    stored_path.unlink(missing_ok=True)
                 return
             row.status = "running"
             row.started_at = utcnow()
@@ -615,7 +613,6 @@ def _submit_inline_ocr_job(
                 or (caught_ocr_err is not None and caught_ocr_err.code == ERROR_CANCELLED)
             ):
                 _mark_cancelled_if_needed(wdb, row)
-                stored_path.unlink(missing_ok=True)
                 return
             if caught_ocr_err is not None:
                 row.status = "failed"
@@ -623,7 +620,6 @@ def _submit_inline_ocr_job(
                 row.error_message = caught_ocr_err.message
                 row.finished_at = utcnow()
                 wdb.commit()
-                stored_path.unlink(missing_ok=True)
                 return
             if caught_unexpected or result is None:
                 row.status = "failed"
@@ -631,7 +627,6 @@ def _submit_inline_ocr_job(
                 row.error_message = "OCR analizi tamamlanamadi."
                 row.finished_at = utcnow()
                 wdb.commit()
-                stored_path.unlink(missing_ok=True)
                 return
 
             OCR_QUEUE.record_duration(time.monotonic() - started)

@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { History, Loader2, RefreshCw } from "lucide-react";
+import { History, Loader2, RefreshCw, RotateCcw } from "lucide-react";
 import { formatConfidence, formatDateTime, formatNumber } from "../format";
 import {
   ANALYSIS_STATUS_LABELS,
@@ -13,8 +13,10 @@ export interface HistoryPanelProps {
   loading: boolean;
   error: boolean;
   openingId: string | null;
+  retryingId?: string | null;
   selectedId?: string | null;
   onOpen: (item: OcrAnalysisSummary) => void;
+  onRetry?: (item: OcrAnalysisSummary) => void;
   onRefresh: () => void;
 }
 
@@ -23,8 +25,10 @@ export default function HistoryPanel({
   loading,
   error,
   openingId,
+  retryingId = null,
   selectedId = null,
   onOpen,
+  onRetry,
   onRefresh,
 }: HistoryPanelProps) {
   return (
@@ -82,14 +86,18 @@ export default function HistoryPanel({
           {items.map((item) => {
             const tone = analysisStatusTone(item.status);
             const opening = openingId === item.id;
+            const retrying = retryingId === item.id;
             const selected = selectedId === item.id;
             const blocking = item.blocking_count ?? 0;
+            const canRetry = Boolean(
+              onRetry && (item.status === "failed" || item.status === "cancelled"),
+            );
             return (
-              <li key={item.id}>
+              <li key={item.id} className="space-y-1.5">
                 <button
                   type="button"
                   onClick={() => onOpen(item)}
-                  disabled={opening}
+                  disabled={opening || retrying}
                   aria-current={selected ? "true" : undefined}
                   aria-label={`Analizi aç: ${ANALYSIS_STATUS_LABELS[item.status]} · ${formatDateTime(item.created_at)}`}
                   className={clsx(
@@ -138,6 +146,21 @@ export default function HistoryPanel({
                     <span className="numeric text-[var(--text-faint)]">{item.id.slice(0, 10)}…</span>
                   </div>
                 </button>
+                {canRetry ? (
+                  <button
+                    type="button"
+                    disabled={retrying}
+                    onClick={() => onRetry?.(item)}
+                    className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-[var(--primary-border)] bg-[var(--primary-soft)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--primary)] transition hover:bg-[var(--primary)] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] disabled:cursor-wait disabled:opacity-60"
+                  >
+                    {retrying ? (
+                      <Loader2 size={12} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                    ) : (
+                      <RotateCcw size={12} aria-hidden="true" />
+                    )}
+                    {retrying ? "Yeniden kuyruğa alınıyor..." : "Tekrar Dene"}
+                  </button>
+                ) : null}
               </li>
             );
           })}

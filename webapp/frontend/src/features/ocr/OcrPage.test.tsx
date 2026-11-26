@@ -9,6 +9,8 @@ import OcrPage from "./OcrPage";
 const mockAnalyzeOcr = vi.fn();
 const mockWaitForAnalysis = vi.fn();
 const mockCancelOcrAnalysis = vi.fn();
+const mockRetryOcrAnalysis = vi.fn();
+const mockListAnalyses = vi.fn();
 
 vi.mock("./ocrApi", async () => {
   const actual = await vi.importActual<typeof import("./ocrApi")>("./ocrApi");
@@ -20,11 +22,12 @@ vi.mock("./ocrApi", async () => {
       status: "Hazır",
       limits: { max_file_size_bytes: 50 * 1024 * 1024 },
     }),
-    listAnalyses: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+    listAnalyses: (...args: unknown[]) => mockListAnalyses(...args),
     listMappingProfiles: vi.fn().mockResolvedValue({ items: [] }),
     analyzeOcr: (...args: unknown[]) => mockAnalyzeOcr(...args),
     waitForAnalysis: (...args: unknown[]) => mockWaitForAnalysis(...args),
     cancelOcrAnalysis: (...args: unknown[]) => mockCancelOcrAnalysis(...args),
+    retryOcrAnalysis: (...args: unknown[]) => mockRetryOcrAnalysis(...args),
   };
 });
 
@@ -48,6 +51,7 @@ vi.mock("../../hooks/queries", async () => {
 describe("OcrPage unmount cleanup (F10) and dynamic server timeout (F11)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockListAnalyses.mockResolvedValue({ items: [], total: 0 });
     useAppStore.setState({ backend: "online", sessionId: null, activeOcrJob: null, tab: "ocr" });
   });
 
@@ -125,5 +129,67 @@ describe("OcrPage unmount cleanup (F10) and dynamic server timeout (F11)", () =>
       expect(mockCancelOcrAnalysis).toHaveBeenCalledWith("job-456");
     });
     expect(useAppStore.getState().activeOcrJob).toBeNull();
+  });
+
+  it("renders Tekrar Dene button for failed history items and retries via POST retry", async () => {
+    mockListAnalyses.mockResolvedValue({
+      items: [
+        {
+          id: "failed-ana-999",
+          status: "failed",
+          source: "ocr",
+          confidence: 0,
+          page_count: 1,
+          blocking_count: 0,
+          warnings_count: 0,
+          created_at: "2026-11-26T10:00:00Z",
+        },
+      ],
+      total: 1,
+    });
+    mockRetryOcrAnalysis.mockResolvedValue({
+      analysis_id: "failed-ana-999",
+      status: "queued",
+      reused: false,
+    });
+    mockWaitForAnalysis.mockResolvedValue({
+      id: "failed-ana-999",
+      status: "succeeded",
+      source: "ocr",
+      page_count: 1,
+      character_count: 100,
+      confidence: 0.94,
+      report: { warnings: [] },
+      discrepancies: [],
+      issues: [],
+      warnings: [],
+      pages: [],
+      approved: false,
+      applied: false,
+      suggested_fixes: [],
+    });
+
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={qc}>
+        <OcrPage />
+      </QueryClientProvider>,
+    );
+
+    const retryBtn = await screen.findByRole("button", { name: /Tekrar Dene/i });
+    fireEvent.click(retryBtn);
+
+    await waitFor(() => {
+      expect(mockRetryOcrAnalysis).toHaveBeenCalledWith(
+        "failed-ana-999",
+        expect.any(AbortSignal),
+      );
+      expect(mockWaitForAnalysis).toHaveBeenCalledWith(
+        "failed-ana-999",
+        expect.objectContaining({ timeoutMs: 1_230_000 }),
+      );
+    });
   });
 });

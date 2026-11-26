@@ -192,6 +192,46 @@ export async function cancelOcrAnalysis(
   );
 }
 
+export async function retryOcrAnalysis(
+  analysisId: string,
+  signal?: AbortSignal,
+): Promise<OcrAnalyzeJob> {
+  return request<OcrAnalyzeJob>(
+    `/ocr/analyses/${encodeURIComponent(analysisId)}/retry`,
+    { method: "POST", signal, timeoutMs: 15_000 },
+  );
+}
+
+export interface OcrQueueOverview {
+  worker_mode: string;
+  counts: {
+    queued: number;
+    running: number;
+    succeeded: number;
+    failed: number;
+    cancelled: number;
+  };
+  oldest_queued_age_s: number | null;
+  dead_letter_count: number;
+  dead_letter: Array<{
+    id: string;
+    attempts: number;
+    max_attempts: number;
+    error_code?: string | null;
+    error_message?: string | null;
+    created_at?: string | null;
+    finished_at?: string | null;
+  }>;
+}
+
+export async function getOcrQueue(signal?: AbortSignal): Promise<OcrQueueOverview> {
+  return request<OcrQueueOverview>("/ocr/queue", {
+    method: "GET",
+    signal,
+    timeoutMs: 10_000,
+  });
+}
+
 /** Onay uç noktası hazır; arayüzde yetki katmanı bağlanınca etkinleştirilecek. */
 export async function approveOcrAnalysis(
   analysisId: string,
