@@ -1,5 +1,26 @@
 # Changelog
 
+## 2.3.0 - 2026-11-27
+
+### Added & Changed
+
+- **Basınç Testi Mod Güvenliği & Mühendislik Ergonomisi (`PressurePage.tsx`, `FieldPage.tsx`, `ReportsPage.tsx`)**:
+  - `"ΔT doğrudan gir"` modunda kullanılmayan `Tilk` / `Tson` alanları gizlenerek mod çelişkisi giderildi; `Pa` için isteğe bağlı **`Pilk − Pson ile türet`** seçeneği ve canlı işaret yönü geri bildirimi (`Basınç düşüşü` / `Basınç artışı`) eklendi.
+  - `FieldPage` gömülü görünümüne doğrudan `Kot & Grafikler` sekmesine geçen **"Profil girdilerini düzenle"** düğmesi, `ReportsPage` `İçerik durumu` satırlarına ise ilgili sekmelere atlayan tıklanabilir bağlantılar eklendi.
+- **Standart Laptop Bağlamı, Kısayol Hizalaması & Okunabilirlik (`RightPanel.tsx`, `Sidebar.tsx`, `constants.ts`, `HelpDialog.tsx`, `styles.css`)**:
+  - `<1536px` ekranlar için sağdan açılan native `<dialog>` `Canlı Özet` çekmecesi (`RightPanel`) eklendi; `Alt + 1…9` sekme sırası yan menüdeki görsel sırayla eşitlendi; `HelpDialog` kısayollarına `Ctrl/Cmd + K` eklendi; çekirdek kabuktaki `8.5–10.5px` mikro-tipografi minimum `11px` tabanına yükseltildi.
+
+### Fixed
+
+- **CSS Token Bütünlüğü & WCAG AA Kontrastı (`styles.css`, `App.tsx`, `a11y.test.tsx`)**:
+  - Tanımsız `--surface-1` (29 kullanım) `var(--surface)` ile, `--danger-text` (2 kullanım) `var(--danger)` ile değiştirildi; koyu/açık temalara `--primary-border` eklendi; açık temada okunmayan çevrimdışı uyarı bandı semantik `var(--warning*)` tokenlarına geçirildi.
+  - `--text-faint` her iki temada `≥ 4.5:1` WCAG AA kontrastını sağlayacak şekilde güncellendi (`#7f95b2` koyu, `#596b84` açık) ve `a11y.test.tsx` içine otomatik token tanımlılık + `--text-faint` kontrast regresyon testleri eklendi.
+- **Sessiz Veri Kaybı & Bayat Rapor Korumaları (`Field.tsx`, `GeometryPage.tsx`, `TopBar.tsx`, `ReportsPage.tsx`)**:
+  - `NumberField` ve `SegmentNumberCell` odaktan çıkıldığında (`onBlur`) geçersiz metni sessizce eski değere döndürmek yerine kullanıcı metnini ve `aria-invalid` uyarısını korur.
+  - `TopBar` bölüm seçicisine kaydedilmemiş (`dirty`) değişikliklerde `ConfirmDialog` onayı, `ReportsPage` PDF/Excel çıktısına ise indirme öncesi otomatik kaydetme koruması eklendi.
+- **Erişilebilirlik & Native `<dialog>` Odak Yönetimi (`CommandPalette.tsx`, `PagePreviewDrawer.tsx`, `TopBar.tsx`, `App.tsx`, `styles.css`)**:
+  - `CommandPalette` ve `PagePreviewDrawer` odak iadeli native `<dialog>` yapısına taşındı; `TopBar` seçicisi `role="dialog"` + iç `role="listbox"` + `Escape`/ok tuşlarıyla düzeltildi; `Ana içeriğe atla` skip-link eklendi ve `prefers-reduced-motion` kuralı spinner geri bildirimini koruyacak şekilde iyileştirildi.
+
 ## 2.2.0 - 2026-11-26
 
 ### Added & Changed

@@ -2978,7 +2978,7 @@
   "info": {
     "description": "Hidrostatik test degerlendirme API'si. Hesaplama motoru hidrostatik_test paketinden import edilir.",
     "title": "HYDRO Web API",
-    "version": "2.2.0"
+    "version": "2.3.0"
   },
   "openapi": "3.1.0",
   "paths": {

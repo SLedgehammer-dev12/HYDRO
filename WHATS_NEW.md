@@ -1,7 +1,14 @@
-# Neler Yeni — HYDRO v2.2.0 (What's New)
+# Neler Yeni — HYDRO v2.3.0 (What's New)
 
-**Sürüm:** `v2.2.0` (`hidrostatik-test-v2.2.0`)  
-**Tarih:** 2026-11-26
+**Sürüm:** `v2.3.0` (`hidrostatik-test-v2.3.0`)  
+**Tarih:** 2026-11-27
+
+---
+
+### v2.3.0 Öne Çıkanlar
+- **Veri Kaybı & Bayat Rapor Koruması:** Sayısal alanlarda (`NumberField`, segment tablosu) hatalı girişler odaktan çıkınca sessizce geri alınmaz; bölüm değiştirirken kaydedilmemiş değişiklik uyarısı ve PDF/Excel indirmeden önce otomatik kaydetme çalışır.
+- **Basınç Testinde `Pilk − Pson` Türetme & İşaret Netliği:** Doğrudan `ΔT` modunda yanıltıcı `Tilk`/`Tson` alanları gizlenir; `Pa` için isteğe bağlı `Pilk − Pson ile türet` modu ve canlı basınç düşüşü/artışı yön etiketi eklendi.
+- **WCAG AA Kontrast, CSS Token Bütünlüğü & `<1536px` Canlı Özet:** Şeffaf açılan `⌘K` komut paleti/önizleme çekmecesi ve açık tema uyarı bandı düzeltildi, `--text-faint` kontrastı `≥4.5:1` seviyesine taşındı, `<1536px` ekranlara açılır `Canlı Özet` çekmecesi ve klavye odak iadeli native `<dialog>` desteği eklendi.
 
 ---
 
