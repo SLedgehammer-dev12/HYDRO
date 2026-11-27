@@ -2556,3 +2556,84 @@ def test_didim_excel_regression_fixes_multifile_and_forms(tmp_path) -> None:
             "note": "TEMİZ",
         }
     ]
+
+
+def test_plan_profile_didim_revize_procedure_tables_and_od() -> None:
+    from app.services.plan_profile import parse_plan_profile_text
+
+    sec2_text = "\n".join(
+        [
+            "BOTAŞ SOYSAL MÜH. A.Ş. DİDİM DGBH YAPIM İŞİ PROJESİ REVİZE TEST PROSEDÜRÜ 2 No'lu SECTION",
+            "SECTION 2-A  SECTION 2-B",
+            "SECTION 2-A TEST HESAPLAMALARI",
+            "Başlangıç Weld No Bitiş Weld No Başlangıç KP (KPs) Bitiş KP (KPe) Section Uzunluğu (m) Başlangıç Kotu (m) Bitiş Kotu (m) Max Kot (m) - 25+400 Min Kot(m) - 34+400 Max Kot Farkı (m)",
+            "19W23T  34W53T  19+220  34+670  15450  0,145  -7,425  3,098  -11,520  14,618",
+            "Pmin = 1,25 (Class 1&2) x Pişletme = 1,25 x 75 bar = 93,75 bar",
+            'Pstart = Pmin + (Hmax-Hs) x g x 10"# = 93,75 + 0,2953 = 94,04 bar',
+            "API 5L X60 için SMYS = 415 MPa",
+            'Dp (Diameter of Pipe) : 16" (406,4 mm) Wt (Wall Thickness) : 5,2 mm',
+            "SECTION 2-B TEST HESAPLAMALARI",
+            "Başlangıç Weld No Bitiş Weld No Başlangıç KP (KPs) Bitiş KP (KPe) Section Uzunluğu (m) Başlangıç Kotu (m) Bitiş Kotu (m) Max Kot (m) - 38+152 Min Kot(m) - 34+670 Max Kot Farkı (m)",
+            "34W53T  38W10T  34+670  38+152  3482  -7,425  96,168  96,168  -7,425  103,593",
+        ]
+    )
+    res2 = parse_plan_profile_text(sec2_text)
+    assert res2["strategy"] == "explicit"
+    assert res2["pipe_meta"]["outside_diameter_mm"] == pytest.approx(406.4)
+    assert res2["pipe_meta"]["design_pressure_bar"] == pytest.approx(75.0)
+    assert res2["pipe_meta"]["smys_mpa"] == pytest.approx(415.0)
+    assert [d["section_no"] for d in res2["draft_sections"]] == ["BÖLÜM 2A", "BÖLÜM 2B"]
+    assert res2["draft_sections"][0]["start_kp"] == "19+220"
+    assert res2["draft_sections"][0]["end_kp"] == "34+670"
+    assert res2["draft_sections"][0]["lowest_elevation_m"] == pytest.approx(-11.52)
+    assert res2["draft_sections"][0]["highest_elevation_m"] == pytest.approx(3.098)
+    assert res2["draft_sections"][1]["start_kp"] == "34+670"
+    assert res2["draft_sections"][1]["end_kp"] == "38+152"
+    assert res2["draft_sections"][1]["highest_elevation_m"] == pytest.approx(96.168)
+
+    sec1_text = "\n".join(
+        [
+            "DİDİM DGBH YAPIM İŞİ PROJESİ 1 No'lu SECTION REVİZE",
+            "1-A  1-B",
+            "Başlangıç Weld No Bitiş Weld No Başlangıç KP (KPs) Bitiş KP (KPe) Section Uzunluğu (m) Başlangıç Kotu (m) Bitiş Kotu (m) Max Kot (m) - 0+440 Min Kot(m) - 0+750 Max Kot Farkı (m)",
+            "00W01T  02W05T  0+000  02+060  2060  9,814  10,034  10,034  -7,100  17,134",
+            'Dp (Diameter of Pipe) : 16" (406,4 mm) Wt : 5,2 mm API 5L X60',
+            "Başlangıç Weld No Bitiş Weld No Başlangıç KP (KPs) Bitiş KP (KPe) Section Uzunluğu (m) Başlangıç Kotu (m) Bitiş Kotu (m) Max Kot (m) - 2+060 Min Kot(m) - 16+120 Max Kot Farkı (m)",
+            "02W05T  19W23T  2+060  19+220  17160  10,034  0,145  10,034  -5,100  15,134",
+        ]
+    )
+    res1 = parse_plan_profile_text(sec1_text)
+    assert [d["section_no"] for d in res1["draft_sections"]] == ["BÖLÜM 1A", "BÖLÜM 1B"]
+    assert res1["draft_sections"][0]["lowest_elevation_m"] == pytest.approx(-7.1)
+    assert res1["draft_sections"][1]["start_kp"] == "2+060"
+    assert res1["draft_sections"][1]["lowest_elevation_m"] == pytest.approx(-5.1)
+
+
+def test_parse_time_log_ignores_ordinal_pig_notes_on_scanned_filling() -> None:
+    from app.services.dossier import _extract_form_specific_data
+
+    filling_ocr = "\n".join(
+        [
+            "SU DOLUM RAPORU",
+            "Test Bölüm No : 1. Section",
+            "08:00",
+            "5.587",
+            "13",
+            "1. Pig Gönderildi",
+            "09:00",
+            "5.657",
+            "70",
+            "70",
+            "2. Pig Gönderildi",
+            "10:00",
+            "5.727",
+            "70",
+            "140",
+            "13",
+        ]
+    )
+    out = _extract_form_specific_data("filling", filling_ocr)
+    assert out["filling"]["min_temp_c"] == pytest.approx(13.0)
+    assert out["filling"]["total_filled_m3"] == pytest.approx(140.0)
+    assert "Pig" in out["rows"][0]["note"]
+    assert "Pig" in out["rows"][1]["note"]

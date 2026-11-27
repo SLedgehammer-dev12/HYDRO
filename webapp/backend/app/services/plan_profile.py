@@ -64,12 +64,13 @@ _KP_RANGE_RE = re.compile(
 _STATION_ELEV_RE = re.compile(
     r"(?:KP\s*)?(\d{1,3}\s*\+\s*\d{3}(?:[.,]\d+)?)"
     r"(?:[^\n\r\d+-]{1,35}?(?:kot|el\.?|elev(?:ation)?|rak[ıi]m|zemin)\s*[:=]?\s*|\s{2,}|\s*[|;]\s*)"
-    r"(-?\d{1,4}(?:[.,]\d+)?)\s*(?:m\b)?",
+    r"(-?\d{1,4}(?:[.,]\d+)?)(?!\s*\+\s*\d{3})\s*(?:m\b)?",
     re.IGNORECASE,
 )
 
 _OD_RE = re.compile(
-    r"(?:d[ıi][sş]\s*[cç]ap|outside\s*diameter|\bOD\b)\s*[:=]?\s*(\d{2,4}(?:[.,]\d+)?)\s*(?:mm)?",
+    r"(?:(?:d[ıi][sş]\s*[cç]ap|outside\s*diameter|\bOD\b)\s*[:=]?\s*(\d{2,4}(?:[.,]\d+)?)\s*(?:mm)?"
+    r"|\bDp\s*(?:\([^)]*\))?\s*[:=]\s*(?:\d{1,2}\s*(?:\"|″|'')?\s*\(?\s*)?(\d{2,4}(?:[.,]\d+)?)\s*mm)",
     re.IGNORECASE,
 )
 _PIPE_SPEC_INCH_RE = re.compile(
@@ -84,7 +85,7 @@ _MAINLINE_INCH_RE = re.compile(
     re.IGNORECASE,
 )
 _INCH_OD_RE = re.compile(
-    r"(?<![<>≤≥]\s)(?<![<>≤≥'′°]\s)(?<![<>≤≥'′°])\b(4|6|8|10|12|14|16|18|20|22|24|26|28|30|32|34|36|40|42|44|48)\s*(?:\"|″|''|\b(?:inch|in[çc])\b)",
+    r"(?<![<>≤≥]\s)(?<![<>≤≥'′°]\s)(?<![<>≤≥'′°])\b(4|6|8|10|12|14|16|18|20|22|24|26|28|30|32|34|36|40|42|44|48)\s*(?:\"|″|''|\b(?:inch|in[çc])\b)(?!\s*[#.\-−^])",
     re.IGNORECASE,
 )
 _INCH_TO_MM: dict[str, float] = {
@@ -115,7 +116,8 @@ _WT_RE = re.compile(
     re.IGNORECASE,
 )
 _DESIGN_P_RE = re.compile(
-    r"(?:dizayn\s*bas[ıi]nc[ıi]|tasar[ıi]m\s*bas[ıi]nc[ıi]|design\s*pressure|\bDP\b)\s*[:=]?\s*(\d{1,3}(?:[.,]\d+)?)\s*(?:bar)?",
+    r"(?:(?:dizayn\s*bas[ıi]nc[ıi]|tasar[ıi]m\s*bas[ıi]nc[ıi]|design\s*pressure|\bDP\b)\s*[:=]?\s*(\d{1,3}(?:[.,]\d+)?)\s*(?:bar)?"
+    r"|p[iı][sş]letme\s*=\s*\d+(?:[.,]\d+)?\s*[x×]\s*(\d{1,3}(?:[.,]\d+)?)\s*bar)",
     re.IGNORECASE,
 )
 _GRADE_RE = re.compile(r"\b(X\d{2}|L\d{3})\b", re.IGNORECASE)
@@ -317,7 +319,7 @@ def _extract_pipe_meta(text: str) -> dict[str, Any]:
     grade_match = _GRADE_RE.search(text)
 
     if od_match:
-        outside_diameter_mm = _parse_float(od_match.group(1))
+        outside_diameter_mm = _parse_float(od_match.group(1) or od_match.group(2))
     elif spec_inch_match:
         outside_diameter_mm = _INCH_TO_MM.get(spec_inch_match.group(1))
     elif mainline_tokens:
@@ -371,7 +373,9 @@ def _extract_pipe_meta(text: str) -> dict[str, Any]:
         if override_mm := _pick_dominant_inch_mm(consistent_tokens):
             outside_diameter_mm = override_mm
 
-    design_pressure_bar = _parse_float(dp_match.group(1)) if dp_match else None
+    design_pressure_bar = (
+        _parse_float(dp_match.group(1) or dp_match.group(2)) if dp_match else None
+    )
     material_grade = ""
     smys_mpa: float | None = None
     if grade_match:
@@ -561,6 +565,104 @@ def _apply_activity_elevations_to_single_draft(
             d0[key] = round(val, 2)
 
 
+def _extract_procedure_section_tables(text: str) -> list[dict[str, Any]]:
+    """Didim Revize tipi hidrostatik test prosedürü PDF tablolarından alt kesitleri ve kotları çıkarır."""
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    if not lines:
+        return []
+
+    banner_tokens: list[str] = []
+    for ln in lines[:8]:
+        if re.search(r"test\s*hesaplamalar", dossier_service.fold_tr(ln)):
+            break
+        found = re.findall(
+            r"(?:SECTION|B[ÖO]L[ÜU]M|KES[İI][MT])?\s*\b(\d{1,3}\s*-\s*[A-Za-z])\b",
+            ln,
+            re.IGNORECASE,
+        )
+        if found:
+            banner_tokens.extend(re.sub(r"\s+", "", tok).upper() for tok in found)
+
+    rows_out: list[dict[str, Any]] = []
+    for idx, ln in enumerate(lines):
+        folded = dossier_service.fold_tr(ln)
+        if not (
+            "baslangic kp" in folded
+            and "bitis kp" in folded
+            and "baslangic kotu" in folded
+            and "bitis kotu" in folded
+        ):
+            continue
+        if idx + 1 >= len(lines):
+            continue
+        data_ln = lines[idx + 1]
+        kp_matches = list(_CHAINAGE_RE.finditer(data_ln))
+        if len(kp_matches) < 2:
+            continue
+        start_m = parse_kp_meters(f"{kp_matches[0].group(1)}+{kp_matches[0].group(2)}")
+        end_m = parse_kp_meters(f"{kp_matches[1].group(1)}+{kp_matches[1].group(2)}")
+        if start_m is None or end_m is None or end_m <= start_m:
+            continue
+        tail = data_ln[kp_matches[1].end() :]
+        nums = [
+            v
+            for tok in re.findall(r"-?\d+(?:[.,]\d+)?", tail)
+            if (v := _parse_float(tok)) is not None
+        ]
+        if len(nums) < 5:
+            continue
+        hs, he, hmax, hmin = nums[1], nums[2], nums[3], nums[4]
+
+        sec_no: str | None = None
+        if idx > 0:
+            prev_line = lines[idx - 1]
+            m_prev = re.search(
+                r"\b(?:SECTION|B[ÖO]L[ÜU]M|KES[İI][MT])\s*[:#-]?\s*(\d{1,3}\s*-\s*[A-Za-z])\b",
+                prev_line,
+                re.IGNORECASE,
+            )
+            if m_prev:
+                sec_no = dossier_service.normalize_section_no(f"BÖLÜM {m_prev.group(1)}")
+        row_idx = len(rows_out)
+        if not sec_no and row_idx < len(banner_tokens):
+            sec_no = dossier_service.normalize_section_no(f"BÖLÜM {banner_tokens[row_idx]}")
+        if not sec_no:
+            sec_no = f"BÖLÜM {row_idx + 1}"
+
+        # Header satırında "Max Kot (m) - 25+400 Min Kot(m) - 34+400" gibi KP ipuçlarını da al
+        max_kp_m: float | None = None
+        min_kp_m: float | None = None
+        if m_max_kp := re.search(
+            r"max\s*kot[^-\n]*-\s*(\d{1,3}\s*\+\s*\d{3}(?:[.,]\d+)?)",
+            folded,
+        ):
+            cand_m = parse_kp_meters(m_max_kp.group(1))
+            if cand_m is not None and start_m <= cand_m <= end_m:
+                max_kp_m = round(cand_m, 1)
+        if m_min_kp := re.search(
+            r"min\s*kot[^-\n]*-\s*(\d{1,3}\s*\+\s*\d{3}(?:[.,]\d+)?)",
+            folded,
+        ):
+            cand_m = parse_kp_meters(m_min_kp.group(1))
+            if cand_m is not None and start_m <= cand_m <= end_m:
+                min_kp_m = round(cand_m, 1)
+
+        rows_out.append(
+            {
+                "section_no": sec_no,
+                "start_m": round(start_m, 1),
+                "end_m": round(end_m, 1),
+                "start_elevation_m": round(hs, 3),
+                "end_elevation_m": round(he, 3),
+                "highest_elevation_m": round(hmax, 3),
+                "lowest_elevation_m": round(hmin, 3),
+                "max_kp_m": max_kp_m,
+                "min_kp_m": min_kp_m,
+            }
+        )
+    return rows_out
+
+
 def parse_plan_profile_text(
     text: str,
     *,
@@ -610,17 +712,42 @@ def parse_plan_profile_text(
     sorted_stations = sorted(all_stations)
 
     # 4) Açıkça yazılmış kesitler var mı?
+    proc_rows = _extract_procedure_section_tables(text)
     explicit_sections: list[tuple[str, float, float]] = []
     seen_spans: set[tuple[float, float]] = set()
-    for m in _EXPLICIT_SECTION_RE.finditer(text):
-        raw_no = (m.group(1) or m.group(2) or "").strip()
-        s_m = parse_kp_meters(m.group(3))
-        e_m = parse_kp_meters(m.group(4))
-        if s_m is not None and e_m is not None and e_m > s_m:
-            span = (round(s_m, 1), round(e_m, 1))
+    if proc_rows:
+        # Prosedür tablosu varsa ham KP etiketlerini temizleyip tablonun gerçek kotlarını kullan
+        station_elev_map = {}
+        proc_pts: list[tuple[float, float]] = []
+        for r in proc_rows:
+            s_m = float(r["start_m"])
+            e_m = float(r["end_m"])
+            proc_pts.append((s_m, float(r["start_elevation_m"])))
+            proc_pts.append((e_m, float(r["end_elevation_m"])))
+            span_mid = round((s_m + e_m) / 2.0, 1)
+            max_st = r["max_kp_m"] if r["max_kp_m"] is not None else span_mid
+            min_st = r["min_kp_m"] if r["min_kp_m"] is not None else round((s_m + e_m) * 0.6, 1)
+            if abs(max_st - s_m) > 0.5 and abs(max_st - e_m) > 0.5:
+                proc_pts.append((float(max_st), float(r["highest_elevation_m"])))
+            if abs(min_st - s_m) > 0.5 and abs(min_st - e_m) > 0.5 and abs(min_st - float(max_st)) > 0.5:
+                proc_pts.append((float(min_st), float(r["lowest_elevation_m"])))
+            station_elev_map.update({round(st, 1): el for st, el in proc_pts})
+        profile_points = sorted(station_elev_map.items(), key=lambda item: item[0])
+        for r in proc_rows:
+            span = (float(r["start_m"]), float(r["end_m"]))
             if span not in seen_spans:
                 seen_spans.add(span)
-                explicit_sections.append((raw_no, span[0], span[1]))
+                explicit_sections.append((str(r["section_no"]), span[0], span[1]))
+    else:
+        for m in _EXPLICIT_SECTION_RE.finditer(text):
+            raw_no = (m.group(1) or m.group(2) or "").strip()
+            s_m = parse_kp_meters(m.group(3))
+            e_m = parse_kp_meters(m.group(4))
+            if s_m is not None and e_m is not None and e_m > s_m:
+                span = (round(s_m, 1), round(e_m, 1))
+                if span not in seen_spans:
+                    seen_spans.add(span)
+                    explicit_sections.append((raw_no, span[0], span[1]))
 
     # Eğer açık kesit etiketi yoksa ama birden fazla "KP X+XXX - Y+YYY" pafta/aralık satırı varsa
     if not explicit_sections:
@@ -658,7 +785,11 @@ def parse_plan_profile_text(
             if len(explicit_sections) == 1 and (e_m - s_m) > 20_000.0:
                 strategy = "auto_split"
                 break
-            sec_no = raw_no.upper() if raw_no.upper().startswith(("K-", "S-")) else f"K-{idx:02d}"
+            upper_no = raw_no.upper()
+            if proc_rows or upper_no.startswith(("K-", "S-")):
+                sec_no = raw_no
+            else:
+                sec_no = f"K-{idx:02d}"
             spans.append((sec_no, s_m, e_m))
 
     if not spans:
@@ -722,6 +853,14 @@ def parse_plan_profile_text(
     )
     if act_elevs is not None:
         _apply_activity_elevations_to_single_draft(response, act_elevs)
+    elif proc_rows:
+        proc_by_no = {str(r["section_no"]): r for r in proc_rows}
+        for draft in response.get("draft_sections") or []:
+            matched = proc_by_no.get(str(draft.get("section_no") or ""))
+            if not matched:
+                continue
+            for ek in ("start_elevation_m", "end_elevation_m", "highest_elevation_m", "lowest_elevation_m"):
+                draft[ek] = matched[ek]
     return response
 
 

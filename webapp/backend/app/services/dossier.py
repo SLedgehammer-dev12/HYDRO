@@ -1331,7 +1331,11 @@ def _parse_time_log(text: str, *, dot_decimal: bool = False) -> dict[str, Any]:
                         row_notes.append(tok)
             elif tail:
                 for tok in tail.split():
-                    if not _DATE_RE.search(tok) and re.fullmatch(r"[-+]?\d[\d.,]*", tok):
+                    if (
+                        not _DATE_RE.search(tok)
+                        and not re.fullmatch(r"\d+\.", tok)
+                        and re.fullmatch(r"[-+]?\d[\d.,]*", tok)
+                    ):
                         try:
                             nums.append(parse_number(tok, dot_decimal=dot_decimal))
                         except ValueError:
@@ -1368,8 +1372,10 @@ def _parse_time_log(text: str, *, dot_decimal: bool = False) -> dict[str, Any]:
                 has_non_num = False
                 for tok in tokens:
                     clean_tok = tok.lstrip("•.")
-                    if not _DATE_RE.search(clean_tok) and re.fullmatch(
-                        r"[-+]?\d[\d.,]*", clean_tok
+                    if (
+                        not _DATE_RE.search(clean_tok)
+                        and not re.fullmatch(r"\d+\.", tok)
+                        and re.fullmatch(r"[-+]?\d[\d.,]*", clean_tok)
                     ):
                         try:
                             nums.append(parse_number(clean_tok, dot_decimal=dot_decimal))
@@ -1377,7 +1383,10 @@ def _parse_time_log(text: str, *, dot_decimal: bool = False) -> dict[str, Any]:
                             pass
                     else:
                         has_non_num = True
-                if has_non_num and not any(ch.isdigit() for ch in nxt_raw):
+                if has_non_num and (
+                    not any(ch.isdigit() for ch in nxt_raw)
+                    or re.match(r"^\d+\.\s+[A-Za-zÇĞİÖŞÜçğıöşü]", nxt_raw)
+                ):
                     row_notes.append(nxt_raw)
                 j += 1
 
