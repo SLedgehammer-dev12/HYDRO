@@ -1,4 +1,13 @@
-import { Droplets, Pause, Play, RotateCcw, Scissors, Tag } from "lucide-react";
+import {
+  Droplets,
+  Eye,
+  MapPin,
+  Pause,
+  Play,
+  RotateCcw,
+  Scissors,
+  Tag,
+} from "lucide-react";
 import type {
   SceneData,
   SceneEquipment,
@@ -19,18 +28,27 @@ import {
   type CameraPreset,
   type ColorMode,
   type SceneRanges,
+  type SceneViewMode,
+  type VerticalScaleMode,
 } from "./sceneModel";
 
-const PRESETS: Array<{ preset: CameraPreset; label: string }> = [
+const PRESETS: Array<{ preset: CameraPreset; label: string; detailOnly?: boolean }> = [
   { preset: "overview", label: "Genel" },
   { preset: "profile", label: "Kot profili" },
-  { preset: "pig", label: "Pig" },
-  { preset: "equipment", label: "Vana/Pompa" },
+  { preset: "pig", label: "Pig", detailOnly: true },
+  { preset: "equipment", label: "Vana/Pompa", detailOnly: true },
   { preset: "top", label: "Kuş bakışı" },
 ];
 
+const VERTICAL_SCALES: Array<{ value: VerticalScaleMode; label: string }> = [
+  { value: "auto", label: "Oto" },
+  { value: "1x", label: "1×" },
+  { value: "2x", label: "2×" },
+  { value: "4x", label: "4×" },
+];
+
 const BUTTON_BASE =
-  "inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border px-3 text-[12.5px] font-semibold transition-colors " +
+  "inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border px-2.5 text-[11.5px] font-semibold transition-colors " +
   "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan";
 
 const BUTTON_IDLE =
@@ -38,14 +56,22 @@ const BUTTON_IDLE =
 const BUTTON_ACTIVE = "border-cyan/60 bg-cyan/15 text-cyan";
 
 interface PresetToolbarProps {
+  mode: SceneViewMode;
   preset: CameraPreset;
   onPreset: (preset: CameraPreset) => void;
+  verticalScale: VerticalScaleMode;
+  onVerticalScale: (scale: VerticalScaleMode) => void;
+  translucentPipe: boolean;
+  onTranslucentPipe: () => void;
   cutaway: boolean;
   onCutaway: () => void;
   flow: boolean;
   onFlow: () => void;
   labels: boolean;
   onLabels: () => void;
+  hasLandmarks: boolean;
+  landmarksVisible: boolean;
+  onLandmarks: () => void;
   hasPig: boolean;
   pigPlaying: boolean;
   onPigPlay: () => void;
@@ -56,14 +82,22 @@ interface PresetToolbarProps {
 }
 
 export function PresetToolbar({
+  mode,
   preset,
   onPreset,
+  verticalScale,
+  onVerticalScale,
+  translucentPipe,
+  onTranslucentPipe,
   cutaway,
   onCutaway,
   flow,
   onFlow,
   labels,
   onLabels,
+  hasLandmarks,
+  landmarksVisible,
+  onLandmarks,
   hasPig,
   pigPlaying,
   onPigPlay,
@@ -72,6 +106,9 @@ export function PresetToolbar({
   onReset,
   reducedMotion,
 }: PresetToolbarProps) {
+  const isOverview = mode === "overview";
+  const visiblePresets = PRESETS.filter((item) => !isOverview || !item.detailOnly);
+
   return (
     <div className="pointer-events-auto flex w-full max-w-full flex-col gap-1 rounded-xl border border-line/70 bg-ink-950/85 p-1.5 shadow-lg backdrop-blur-[2px] sm:w-auto sm:max-w-[calc(100vw-2rem)]">
       <div
@@ -82,7 +119,7 @@ export function PresetToolbar({
         <span className="hidden px-1 text-[9px] uppercase tracking-[0.16em] text-mist-500 sm:inline">
           Kamera
         </span>
-        {PRESETS.map((item) => (
+        {visiblePresets.map((item) => (
           <button
             key={item.preset}
             type="button"
@@ -94,27 +131,73 @@ export function PresetToolbar({
             {item.label}
           </button>
         ))}
+        <span className="ml-1 hidden px-1 text-[9px] uppercase tracking-[0.16em] text-mist-500 md:inline">
+          Kot
+        </span>
+        <div role="group" aria-label="Dikey kot ölçeği" className="inline-flex gap-0.5">
+          {VERTICAL_SCALES.map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              aria-label={`Dikey kot abartması: ${item.label}`}
+              aria-pressed={verticalScale === item.value}
+              className={`h-8 rounded-lg border px-2 text-[11px] font-semibold transition-colors ${
+                verticalScale === item.value ? BUTTON_ACTIVE : BUTTON_IDLE
+              }`}
+              onClick={() => onVerticalScale(item.value)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
       </div>
       <div className="flex flex-wrap items-center gap-1 border-t border-line/50 pt-1">
-        <button
-          type="button"
-          aria-label="Kesit görünümünü aç veya kapat"
-          aria-pressed={cutaway}
-          className={`${BUTTON_BASE} ${cutaway ? BUTTON_ACTIVE : BUTTON_IDLE}`}
-          onClick={onCutaway}
-        >          <Scissors size={14} aria-hidden />
-          Kesit
-        </button>
-        <button
-          type="button"
-          aria-label="Akış animasyonunu aç veya kapat"
-          aria-pressed={flow}
-          className={`${BUTTON_BASE} ${flow ? BUTTON_ACTIVE : BUTTON_IDLE}`}
-          onClick={onFlow}
-        >
-          <Droplets size={14} aria-hidden />
-          Akış
-        </button>
+        {!isOverview ? (
+          <>
+            <button
+              type="button"
+              aria-label="Yarı saydam boru duvarını aç veya kapat"
+              aria-pressed={translucentPipe}
+              className={`${BUTTON_BASE} ${translucentPipe ? BUTTON_ACTIVE : BUTTON_IDLE}`}
+              onClick={onTranslucentPipe}
+            >
+              <Eye size={13} aria-hidden />
+              Saydam
+            </button>
+            <button
+              type="button"
+              aria-label="Kesit görünümünü aç veya kapat"
+              aria-pressed={cutaway}
+              className={`${BUTTON_BASE} ${cutaway ? BUTTON_ACTIVE : BUTTON_IDLE}`}
+              onClick={onCutaway}
+            >
+              <Scissors size={13} aria-hidden />
+              Kesit
+            </button>
+            <button
+              type="button"
+              aria-label="Akış animasyonunu aç veya kapat"
+              aria-pressed={flow}
+              className={`${BUTTON_BASE} ${flow ? BUTTON_ACTIVE : BUTTON_IDLE}`}
+              onClick={onFlow}
+            >
+              <Droplets size={13} aria-hidden />
+              Akış
+            </button>
+          </>
+        ) : null}
+        {hasLandmarks ? (
+          <button
+            type="button"
+            aria-label="Pafta saha geçiş noktalarını aç veya kapat"
+            aria-pressed={landmarksVisible}
+            className={`${BUTTON_BASE} ${landmarksVisible ? BUTTON_ACTIVE : BUTTON_IDLE}`}
+            onClick={onLandmarks}
+          >
+            <MapPin size={13} aria-hidden />
+            Geçişler
+          </button>
+        ) : null}
         <button
           type="button"
           aria-label="Sahne etiketlerini aç veya kapat"
@@ -122,10 +205,10 @@ export function PresetToolbar({
           className={`${BUTTON_BASE} ${labels ? BUTTON_ACTIVE : BUTTON_IDLE}`}
           onClick={onLabels}
         >
-          <Tag size={14} aria-hidden />
+          <Tag size={13} aria-hidden />
           Etiket
         </button>
-        {hasPig ? (
+        {!isOverview && hasPig ? (
           <>
             <button
               type="button"
@@ -142,7 +225,7 @@ export function PresetToolbar({
               } disabled:cursor-not-allowed disabled:opacity-50`}
               onClick={onPigPlay}
             >
-              {pigPlaying ? <Pause size={14} aria-hidden /> : <Play size={14} aria-hidden />}
+              {pigPlaying ? <Pause size={13} aria-hidden /> : <Play size={13} aria-hidden />}
               Pig
             </button>
             <button
@@ -162,7 +245,7 @@ export function PresetToolbar({
           className={`${BUTTON_BASE} ${BUTTON_IDLE}`}
           onClick={onReset}
         >
-          <RotateCcw size={14} aria-hidden />
+          <RotateCcw size={13} aria-hidden />
           Sıfırla
         </button>
       </div>

@@ -10,6 +10,7 @@ import { ProgressBar } from "../components/ui/Gauge";
 import { EmptyState, InlineNotice } from "../components/ui/State";
 import { PressureWindowChart, ElevationProfileChart } from "../components/charts/LazyCharts";
 const PipelineScene = lazy(() => import("../components/three/PipelineScene"));
+const SectionDetailModal = lazy(() => import("../components/three/SectionDetailModal"));
 import {
   useCalculatePig,
   useCalculateProfile,
@@ -98,6 +99,7 @@ export function FieldPage({
   const pushToast = useAppStore((state) => state.pushToast);
 
   const sceneHostRef = useRef<HTMLDivElement | null>(null);
+  const [detailSessionId, setDetailSessionId] = useState<string | null>(null);
   const [sceneVisible, setSceneVisible] = useState(
     () => !embedded || typeof IntersectionObserver === "undefined",
   );
@@ -388,16 +390,19 @@ export function FieldPage({
               </div>
             ) : null;
           })()}
-          {scene.segments.length > 0 && (!scene.is_survey_profile || !scene.is_custom_equipment) ? (
+          {scene.segments.length > 0 &&
+          (!scene.is_survey_profile || (!effectiveProjectMode && !scene.is_custom_equipment)) ? (
             <div className="mb-3">
               <InlineNotice tone="warning" title="Yaklaşık 3D sahne">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span>
-                    {!scene.is_survey_profile && !scene.is_custom_equipment
-                      ? "Gerçek kot profili (profile_points[]) ve saha ekipmanı (equipment[]) girilmediği için 3D görünüm 4 kot noktası ve varsayılan ekipman yerleşimiyle yaklaşık çizilir."
-                      : !scene.is_survey_profile
-                        ? "Gerçek kot profili (profile_points[]) girilmediği için zemin ve boru kotu 4 noktadan yaklaşık türetildi."
-                        : "Özel saha ekipmanı (equipment[]) tanımlanmadığı için vana, pompa ve pig yerleşimi varsayılan konumlarla gösteriliyor."}
+                    {effectiveProjectMode
+                      ? "Gerçek kot profili (profile_points[]) girilmediği için eksik kesitler 4 kot noktasından yaklaşık türetildi."
+                      : !scene.is_survey_profile && !scene.is_custom_equipment
+                        ? "Gerçek kot profili (profile_points[]) ve saha ekipmanı (equipment[]) girilmediği için 3D görünüm 4 kot noktası ve varsayılan ekipman yerleşimiyle yaklaşık çizilir."
+                        : !scene.is_survey_profile
+                          ? "Gerçek kot profili (profile_points[]) girilmediği için zemin ve boru kotu 4 noktadan yaklaşık türetildi."
+                          : "Özel saha ekipmanı (equipment[]) tanımlanmadığı için vana, pompa ve pig yerleşimi varsayılan konumlarla gösteriliyor."}
                   </span>
                   {!effectiveProjectMode ? (
                     <Button
@@ -432,7 +437,12 @@ export function FieldPage({
               >
                 <PipelineScene
                   data={scene}
+                  mode={effectiveProjectMode ? "overview" : "detail"}
+                  defaultTranslucent={!effectiveProjectMode}
                   className="min-h-[620px] sm:min-h-[600px]"
+                  onSelectSection={
+                    effectiveProjectMode ? (sid) => setDetailSessionId(sid) : undefined
+                  }
                   onOpenSession={
                     effectiveProjectMode
                       ? (sid) => {
@@ -456,6 +466,21 @@ export function FieldPage({
           </div>
         </SectionCard>
       </div>
+
+      {detailSessionId ? (
+        <Suspense fallback={null}>
+          <SectionDetailModal
+            sessionId={detailSessionId}
+            sections={projectScene?.sections ?? []}
+            onClose={() => setDetailSessionId(null)}
+            onSelectSection={(sid) => setDetailSessionId(sid)}
+            onOpenWorkspace={(sid) => {
+              safeSwitchSession.switchSession(sid);
+              setSceneScope("section");
+            }}
+          />
+        </Suspense>
+      ) : null}
 
       {embedded ? (
         <div className="flex flex-wrap items-end justify-between gap-3">

@@ -685,6 +685,12 @@ export interface ProjectSceneSectionItem {
   start_m: number;
   end_m: number;
   length_m: number;
+  od_mm?: number;
+  wt_mm?: number;
+  start_elevation_m?: number;
+  end_elevation_m?: number;
+  min_elevation_m?: number;
+  max_elevation_m?: number;
   status: SceneStatus;
 }
 

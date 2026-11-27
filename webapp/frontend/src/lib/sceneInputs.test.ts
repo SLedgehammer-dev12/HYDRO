@@ -6,11 +6,14 @@ import {
 import {
   buildDemoResults,
   buildSceneData,
+  buildSectionDetailSceneData,
   computeProfile,
   createDefaultInputs,
   createEmptyInputs,
   sectionsFromInputs,
+  simplifyProfilePointsRdp,
 } from "./mock";
+import { buildSceneLayout } from "../components/three/sceneModel";
 import { normalizeInputs, toApiInputs } from "./normalize";
 
 describe("3D real profile_points and equipment inputs", () => {
@@ -280,5 +283,37 @@ describe("3D real profile_points and equipment inputs", () => {
     normalized.section_profile.smys_mpa = null;
     const demoSegOnly = buildDemoResults(normalized);
     expect(demoSegOnly.profile?.limiting_smys_mpa).toBe(305);
+  });
+
+  it("preserves RDP profile spikes, guarantees detail launcher/receiver/pig, and scales overview slimmer than detail", () => {
+    const denseCurve = Array.from({ length: 140 }, (_, idx) => ({
+      x: idx * 50,
+      y: 250 + Math.sin(idx / 12) * 15,
+    }));
+    denseCurve[43] = { x: 43 * 50, y: 410 };
+    denseCurve[97] = { x: 97 * 50, y: 120 };
+
+    const simplified = simplifyProfilePointsRdp(denseCurve, 24);
+    expect(simplified.length).toBeLessThanOrEqual(24);
+    expect(simplified.some((p) => p.x === 43 * 50 && p.y === 410)).toBe(true);
+    expect(simplified.some((p) => p.x === 97 * 50 && p.y === 120)).toBe(true);
+
+    const inputs = createDefaultInputs();
+    inputs.equipment = [];
+    inputs.field.pig_distance_m = null;
+    inputs.profile_points = denseCurve.map((p) => ({ station_m: p.x, elevation_m: p.y }));
+    const detailScene = buildSectionDetailSceneData(inputs);
+
+    expect(detailScene.equipment.some((eq) => eq.type === "pig-launcher")).toBe(true);
+    expect(detailScene.equipment.some((eq) => eq.type === "pig-receiver")).toBe(true);
+    expect(detailScene.pig).not.toBeNull();
+    expect(detailScene.pig?.distance_m).toBe(0);
+
+    const overviewLayout = buildSceneLayout(detailScene, { mode: "overview", verticalScaleMode: "auto" });
+    const detailLayout = buildSceneLayout(detailScene, { mode: "detail", verticalScaleMode: "4x" });
+    expect(overviewLayout.segments[0].radius).toBeLessThan(detailLayout.segments[0].radius);
+    expect(overviewLayout.segments[0].radius).toBeLessThanOrEqual(0.16);
+    expect(detailLayout.verticalExaggeration).toBeGreaterThan(overviewLayout.verticalExaggeration);
+    expect(overviewLayout.elevationTicks.length).toBeGreaterThan(0);
   });
 });

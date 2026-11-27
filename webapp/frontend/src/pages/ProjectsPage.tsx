@@ -29,6 +29,7 @@ import { ProjectDataCenterModal } from "../features/projects/ProjectDataCenterMo
 import { ProjectImportModal, SampleProjectModal } from "../features/projects/SampleAndImportModals";
 import { SectionFormsModal } from "../features/projects/SectionFormsModal";
 const PipelineScene = lazy(() => import("../components/three/PipelineScene"));
+const SectionDetailModal = lazy(() => import("../components/three/SectionDetailModal"));
 import {
   useCreateProject,
   useCreateSession,
@@ -215,6 +216,7 @@ export function ProjectsPage() {
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [showDefaults, setShowDefaults] = useState(false);
   const [showProjectScene, setShowProjectScene] = useState(false);
+  const [detailSessionId, setDetailSessionId] = useState<string | null>(null);
   const projectSceneQuery = useProjectScene(
     selected?.id ?? null,
     showProjectScene && Boolean(selected),
@@ -593,16 +595,10 @@ export function ProjectsPage() {
           })()}
           {projectSceneQuery.data &&
           projectSceneQuery.data.segments.length > 0 &&
-          (!projectSceneQuery.data.is_survey_profile ||
-            !projectSceneQuery.data.is_custom_equipment) ? (
+          !projectSceneQuery.data.is_survey_profile ? (
             <div className="mb-3">
-              <InlineNotice tone="warning" title="Yaklaşık 3D sahne">
-                {!projectSceneQuery.data.is_survey_profile &&
-                !projectSceneQuery.data.is_custom_equipment
-                  ? "Bazı veya tüm kesitlerde gerçek kot profili (profile_points[]) ve özel saha ekipmanı (equipment[]) bulunmadığı için sahne yaklaşık türetildi."
-                  : !projectSceneQuery.data.is_survey_profile
-                    ? "Gerçek kot profili eksik olan kesitler 4 kot noktasından yaklaşık türetildi."
-                    : "Özel saha ekipmanı girilmediği için bölüm sınır vanaları ve varsayılan ekipman yerleşimi gösteriliyor."}
+              <InlineNotice tone="warning" title="Yaklaşık 3D kot profili">
+                Gerçek kot profili eksik olan kesitler 4 kot noktasından yaklaşık türetildi.
               </InlineNotice>
             </div>
           ) : null}
@@ -621,7 +617,9 @@ export function ProjectsPage() {
               >
                 <PipelineScene
                   data={projectSceneQuery.data}
+                  mode="overview"
                   className="min-h-[620px] sm:min-h-[600px]"
+                  onSelectSection={(sid) => setDetailSessionId(sid)}
                   onOpenSession={(sid) =>
                     openSession.mutate(sid, {
                       onSuccess: () => {
@@ -1398,6 +1396,24 @@ export function ProjectsPage() {
           setTab("geometry");
         }}
       />
+      {detailSessionId ? (
+        <Suspense fallback={null}>
+          <SectionDetailModal
+            sessionId={detailSessionId}
+            sections={projectSceneQuery.data?.sections ?? []}
+            onClose={() => setDetailSessionId(null)}
+            onSelectSection={(sid) => setDetailSessionId(sid)}
+            onOpenWorkspace={(sid) =>
+              openSession.mutate(sid, {
+                onSuccess: () => {
+                  setSceneScope("section");
+                  setTab("geometry");
+                },
+              })
+            }
+          />
+        </Suspense>
+      ) : null}
     </div>
   );
 }

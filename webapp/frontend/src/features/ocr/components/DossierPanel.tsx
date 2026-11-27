@@ -37,6 +37,7 @@ import type {
 interface Props {
   analysisId: string;
   dossier: OcrDossierView;
+  autoOpenModal?: boolean;
   onCommitted?: (res: DossierCommitResponse) => void;
 }
 
@@ -111,7 +112,12 @@ function checkStatusMeta(status: string | undefined): { label: string; tone: Ton
   }
 }
 
-export default function DossierPanel({ analysisId, dossier, onCommitted }: Props) {
+export default function DossierPanel({
+  analysisId,
+  dossier,
+  autoOpenModal = true,
+  onCommitted,
+}: Props) {
   const queryClient = useQueryClient();
   const projectsQuery = useProjects();
   const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data]);
@@ -145,7 +151,7 @@ export default function DossierPanel({ analysisId, dossier, onCommitted }: Props
   );
   const [confirmOverwrite, setConfirmOverwrite] = useState(false);
   const [serverConflicts, setServerConflicts] = useState<DossierConflictItem[] | null>(null);
-  const [commitModalOpen, setCommitModalOpen] = useState(true);
+  const [commitModalOpen, setCommitModalOpen] = useState(() => autoOpenModal);
   const [submitting, setSubmitting] = useState(false);
   const [commitError, setCommitError] = useState<string | null>(null);
   const [commitSuccess, setCommitSuccess] = useState<DossierCommitResponse | null>(null);
@@ -155,7 +161,7 @@ export default function DossierPanel({ analysisId, dossier, onCommitted }: Props
     setActiveSectionNo(dossier.sections[0]?.section_no ?? "");
     setConfirmOverwrite(false);
     setServerConflicts(null);
-    setCommitModalOpen(true);
+    setCommitModalOpen(autoOpenModal);
     setCommitError(null);
     setCommitSuccess(null);
     setNewProjectCode("");
@@ -169,7 +175,7 @@ export default function DossierPanel({ analysisId, dossier, onCommitted }: Props
       setNewProjectName(dossier.detected_project_name ?? "");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analysisId]);
+  }, [analysisId, autoOpenModal]);
 
   useEffect(() => {
     if (projectMode === "existing" && !selectedProjectId && projects.length > 0) {

@@ -10,22 +10,31 @@ import type { SceneData } from "../../lib/scene";
 import SceneEnvironment from "./SceneEnvironment";
 import PipeNetwork from "./PipeNetwork";
 import SceneEquipment from "./SceneEquipment";
-import PipelinePig, { FlowParticles, type PigHandle } from "./PigAndFlow";
+import PipelinePig, {
+  FlowParticles,
+  type PigHandle,
+  type PigTelemetry,
+} from "./PigAndFlow";
 import SceneCamera, { type CameraRequest } from "./SceneCamera";
 import type {
   ColorMode,
   LayoutEquipment,
   SceneLayout,
+  SceneViewMode,
 } from "./sceneModel";
 
 interface SceneCanvasProps {
   scene: SceneData;
   layout: SceneLayout;
+  mode?: SceneViewMode;
+  translucentPipe?: boolean;
+  showLandmarks: boolean;
   clipPlane: THREE.Plane;
   clipPlanes: THREE.Plane[];
   colorMode: ColorMode;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
+  onSelectSection?: (sessionId: string) => void;
   showLabels: boolean;
   showFlow: boolean;
   cutaway: boolean;
@@ -33,6 +42,10 @@ interface SceneCanvasProps {
   focusEquipment: LayoutEquipment | null;
   pigPlaying: boolean;
   pigRate: number;
+  pigDirection?: 1 | -1;
+  pigSeekDistance?: number | null;
+  pigSeekNonce?: number;
+  onPigProgress?: (sample: PigTelemetry) => void;
   pigStart: number;
   pigPositionRef: PigHandle;
   reducedMotion: boolean;
@@ -67,11 +80,15 @@ const CAMERA_FOV_COMPACT = 44;
 export default function SceneCanvas({
   scene,
   layout,
+  mode = "detail",
+  translucentPipe = false,
+  showLandmarks,
   clipPlane,
   clipPlanes,
   colorMode,
   selectedId,
   onSelect,
+  onSelectSection,
   showLabels,
   showFlow,
   cutaway,
@@ -79,6 +96,10 @@ export default function SceneCanvas({
   focusEquipment,
   pigPlaying,
   pigRate,
+  pigDirection = 1,
+  pigSeekDistance = null,
+  pigSeekNonce = 0,
+  onPigProgress,
   pigStart,
   pigPositionRef,
   reducedMotion,
@@ -126,45 +147,58 @@ export default function SceneCanvas({
         <SceneEnvironment
           layout={layout}
           showLabels={showLabels}
+          showLandmarks={showLandmarks}
           highQuality={!compact}
           reducedMotion={reducedMotion}
         />
 
         <PipeNetwork
           layout={layout}
+          mode={mode}
+          translucentPipe={translucentPipe}
           clipPlanes={clipPlanes}
           colorMode={colorMode}
           selectedId={selectedId}
           onSelect={onSelect}
+          onSelectSection={onSelectSection}
           showLabels={showLabels}
         />
 
-        <SceneEquipment
-          layout={layout}
-          selectedId={selectedId}
-          onSelect={onSelect}
-          showLabels={showLabels}
-        />
+        {mode === "detail" ? (
+          <>
+            <SceneEquipment
+              layout={layout}
+              selectedId={selectedId}
+              onSelect={onSelect}
+              showLabels={showLabels}
+            />
 
-        <PipelinePig
-          layout={layout}
-          startDistance={pigStart}
-          speedMps={scene.pig?.speed_m_per_s ?? null}
-          playing={pigPlaying}
-          rate={pigRate}
-          visible={Boolean(scene.pig)}
-          showLabels={showLabels}
-          reducedMotion={reducedMotion}
-          positionRef={pigPositionRef}
-        />
+            <PipelinePig
+              layout={layout}
+              startDistance={pigStart}
+              speedMps={scene.pig?.speed_m_per_s ?? null}
+              playing={pigPlaying}
+              rate={pigRate}
+              direction={pigDirection}
+              seekDistance={pigSeekDistance}
+              seekNonce={pigSeekNonce}
+              onProgress={onPigProgress}
+              visible={Boolean(scene.pig)}
+              showLabels={showLabels}
+              reducedMotion={reducedMotion}
+              positionRef={pigPositionRef}
+            />
 
-        <FlowParticles
-          layout={layout}
-          speedMps={scene.flow_speed_m_per_s}
-          enabled={showFlow}
-          reducedMotion={reducedMotion}
-          compact={compact}
-        />
+            <FlowParticles
+              layout={layout}
+              speedMps={scene.flow_speed_m_per_s}
+              direction={pigDirection}
+              enabled={showFlow}
+              reducedMotion={reducedMotion}
+              compact={compact}
+            />
+          </>
+        ) : null}
 
         <SceneCamera
           layout={layout}

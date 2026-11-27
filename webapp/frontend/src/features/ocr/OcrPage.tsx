@@ -51,6 +51,7 @@ import {
   applyOcrAnalysis,
   approveOcrAnalysis,
   cancelOcrAnalysis,
+  commitOcrDossier,
   currentSessionId,
   getMappingProfile,
   getOcrQueue,
@@ -94,6 +95,7 @@ interface OcrBatchItem {
   analysisId?: string;
   result?: OcrAnalysisResult;
   error?: string;
+  committedProjectName?: string;
 }
 
 const BATCH_STATUS_LABEL: Record<BatchItemStatus, string> = {
@@ -190,6 +192,11 @@ export default function OcrPage() {
   const [applying, setApplying] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [appliedSessionId, setAppliedSessionId] = useState<string | null>(null);
+  const [batchCommitting, setBatchCommitting] = useState(false);
+  const [batchCommitError, setBatchCommitError] = useState<string | null>(null);
+  const [batchCommitTargetProjectId, setBatchCommitTargetProjectId] = useState<string>("");
+  const [batchCommitNewProjectName, setBatchCommitNewProjectName] = useState<string>("");
+  const [batchCommitOverwrite, setBatchCommitOverwrite] = useState(false);
 
   const targetSessionsQuery = useSessions(
     applyMode === "existing" && applyProjectId ? applyProjectId : null,
@@ -711,6 +718,18 @@ export default function OcrPage() {
               firstShown = true;
               applyResult(enriched, false, true);
               setActiveBatchKey(entry.key);
+              const detected = enriched.dossier?.detected_project_name?.trim() || "";
+              const simProj =
+                enriched.dossier?.similar_projects?.find((p) => p.exact_match || p.similarity >= 0.9) ??
+                enriched.dossier?.similar_projects?.[0];
+              if (simProj) {
+                setBatchCommitTargetProjectId(simProj.id);
+              } else {
+                setBatchCommitTargetProjectId("__NEW__");
+              }
+              if (detected) {
+                setBatchCommitNewProjectName(detected);
+              }
             }
           } else if (final.status === "cancelled") {
             setBatchItems((prev) =>
@@ -947,6 +966,7 @@ export default function OcrPage() {
     setFiles([]);
     setBatchItems([]);
     setActiveBatchKey(null);
+    setBatchCommitError(null);
     setFileError(null);
     setResult(null);
     setResultDemo(false);
@@ -1152,6 +1172,76 @@ export default function OcrPage() {
       pushToast("error", "Kesite aktarım tamamlanamadı", apiErr.message);
     } finally {
       setApplying(false);
+    }
+  };
+
+  const handleBatchCommitAll = async () => {
+    const candidates = batchItems.filter(
+      (item) =>
+        item.status === "succeeded" &&
+        item.analysisId &&
+        item.result?.dossier &&
+        item.result.dossier.sections.length > 0 &&
+        !item.committedProjectName,
+    );
+    if (candidates.length === 0) return;
+
+    const useNew = batchCommitTargetProjectId === "__NEW__" || !batchCommitTargetProjectId;
+    if (useNew && !batchCommitNewProjectName.trim()) {
+      setBatchCommitError("Yeni proje adı boş bırakılamaz.");
+      return;
+    }
+
+    setBatchCommitting(true);
+    setBatchCommitError(null);
+    let resolvedProjectId = useNew ? "" : batchCommitTargetProjectId;
+    let resolvedProjectName = "";
+    let savedFiles = 0;
+    let savedSections = 0;
+    let savedForms = 0;
+
+    try {
+      for (const item of candidates) {
+        const res = await commitOcrDossier(item.analysisId!, {
+          target_project_id: resolvedProjectId || null,
+          create_new_project: !resolvedProjectId,
+          new_project_name: !resolvedProjectId ? batchCommitNewProjectName.trim() : null,
+          overwrite_filled: batchCommitOverwrite,
+          selected_sections: item.result!.dossier!.sections.map((s) => s.section_no),
+        });
+        resolvedProjectId = res.project.id;
+        resolvedProjectName = res.project.name;
+        setStoreProject(res.project);
+        setBatchCommitTargetProjectId(res.project.id);
+        savedFiles += 1;
+        savedSections += (res.created_sections?.length ?? 0) + (res.updated_sections?.length ?? 0);
+        savedForms += res.saved_forms_count ?? 0;
+
+        setBatchItems((prev) =>
+          prev.map((entry) =>
+            entry.key === item.key
+              ? { ...entry, committedProjectName: res.project.name }
+              : entry,
+          ),
+        );
+      }
+      void queryClient.invalidateQueries({ queryKey: ["projects"] });
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      void queryClient.invalidateQueries({ queryKey: ["session-forms"] });
+      void queryClient.invalidateQueries({ queryKey: ["project-scene"] });
+      pushToast(
+        "success",
+        "Tüm Dosyalar Projeye Kaydedildi",
+        `${resolvedProjectName}: ${savedFiles} dosya, ${savedSections} kesit, ${savedForms} form işlendi.`,
+      );
+    } catch (caught) {
+      const apiErr = toOcrApiError(caught);
+      setBatchCommitError(
+        `${apiErr.message} (${savedFiles}/${candidates.length} dosya işlendi)`,
+      );
+      pushToast("error", "Toplu proje kaydı kesildi", apiErr.message);
+    } finally {
+      setBatchCommitting(false);
     }
   };
 
@@ -1729,29 +1819,112 @@ export default function OcrPage() {
                             </p>
                           ) : item.result?.dossier?.sections?.[0]?.section_no ? (
                             <p className="text-[10px] text-[var(--text-muted)]">
-                              {item.result.dossier.sections[0].section_no}
+                              {item.result.dossier.sections.map((s) => s.section_no).join(", ")}
+                              {item.committedProjectName ? ` · Kaydedildi (${item.committedProjectName})` : ""}
                             </p>
                           ) : null}
                         </div>
                         <span
                           className={clsx(
                             "shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold",
-                            item.status === "succeeded"
+                            item.committedProjectName
                               ? "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success)]"
-                              : item.status === "failed"
-                                ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger)]"
-                                : item.status === "analyzing"
-                                  ? "border-[var(--info-border)] bg-[var(--info-bg)] text-[var(--primary)]"
-                                  : "border-[var(--border)] bg-[var(--surface-3)] text-[var(--text-muted)]",
+                              : item.status === "succeeded"
+                                ? "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success)]"
+                                : item.status === "failed"
+                                  ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger)]"
+                                  : item.status === "analyzing"
+                                    ? "border-[var(--info-border)] bg-[var(--info-bg)] text-[var(--primary)]"
+                                    : "border-[var(--border)] bg-[var(--surface-3)] text-[var(--text-muted)]",
                           )}
                         >
-                          {BATCH_STATUS_LABEL[item.status]}
+                          {item.committedProjectName ? "Kaydedildi ✓" : BATCH_STATUS_LABEL[item.status]}
                         </span>
                       </button>
                     </li>
                   );
                 })}
               </ul>
+
+              {(() => {
+                const pendingCommit = batchItems.filter(
+                  (item) =>
+                    item.status === "succeeded" &&
+                    item.analysisId &&
+                    item.result?.dossier &&
+                    item.result.dossier.sections.length > 0 &&
+                    !item.committedProjectName,
+                );
+                if (phase === "analyzing" || pendingCommit.length === 0) return null;
+                const totalSecCount = pendingCommit.reduce(
+                  (sum, it) => sum + (it.result?.dossier?.sections.length ?? 0),
+                  0,
+                );
+                return (
+                  <div className="mt-3 rounded-xl border border-[var(--info-border)] bg-[var(--surface-2)] p-3">
+                    <div className="flex flex-wrap items-end gap-2">
+                      <label className="min-w-[180px] flex-1 text-[11px] font-medium text-[var(--text-soft)]">
+                        Hedef Proje
+                        <select
+                          value={batchCommitTargetProjectId || "__NEW__"}
+                          onChange={(e) => {
+                            setBatchCommitTargetProjectId(e.target.value);
+                            setBatchCommitError(null);
+                          }}
+                          className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-xs text-[var(--text)]"
+                        >
+                          {projects.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name} ({p.section_count} kesit)
+                            </option>
+                          ))}
+                          <option value="__NEW__">+ Yeni proje oluştur</option>
+                        </select>
+                      </label>
+                      {(batchCommitTargetProjectId === "__NEW__" || !batchCommitTargetProjectId) ? (
+                        <label className="min-w-[200px] flex-1 text-[11px] font-medium text-[var(--text-soft)]">
+                          Yeni Proje Adı
+                          <input
+                            type="text"
+                            value={batchCommitNewProjectName}
+                            onChange={(e) => {
+                              setBatchCommitNewProjectName(e.target.value);
+                              setBatchCommitError(null);
+                            }}
+                            placeholder="Örn. Didim Doğalgaz Hattı"
+                            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-xs text-[var(--text)]"
+                          />
+                        </label>
+                      ) : null}
+                      <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 text-[11px] text-[var(--text-soft)]">
+                        <input
+                          type="checkbox"
+                          checked={batchCommitOverwrite}
+                          onChange={(e) => setBatchCommitOverwrite(e.target.checked)}
+                          className="h-3.5 w-3.5 accent-[var(--primary)]"
+                        />
+                        Mevcut formların üzerine yaz
+                      </label>
+                      <button
+                        type="button"
+                        disabled={batchCommitting}
+                        onClick={() => {
+                          void handleBatchCommitAll();
+                        }}
+                        className="btn btn-primary"
+                      >
+                        {batchCommitting ? (
+                          <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+                        ) : null}
+                        Tüm Bölümleri Projeye Kaydet ({pendingCommit.length} dosya / {totalSecCount} bölüm)
+                      </button>
+                    </div>
+                    {batchCommitError ? (
+                      <p className="mt-2 text-xs text-[var(--danger)]">{batchCommitError}</p>
+                    ) : null}
+                  </div>
+                );
+              })()}
             </section>
           ) : null}
 
@@ -2002,7 +2175,11 @@ export default function OcrPage() {
 
                 return result.dossier && result.dossier.sections.length > 0 ? (
                   <>
-                    <DossierPanel analysisId={result.id} dossier={result.dossier} />
+                    <DossierPanel
+                      analysisId={result.id}
+                      dossier={result.dossier}
+                      autoOpenModal={batchItems.length <= 1}
+                    />
                     <details className="panel p-4">
                       <summary className="cursor-pointer text-sm font-semibold text-[var(--text-muted)]">
                         Ham Tekil OCR Alan Dökümü ve Alan Onayı (Çoklu bölüm dokümanlarında yukarıdaki Bölüm Kartlarını kullanın)

@@ -140,17 +140,21 @@ function buildAnalyzeBody(input: AnalyzeRequestInput): FormData {
   return body;
 }
 
+let idempotencyCounter = 0;
+
 export async function analyzeOcr(
   input: AnalyzeRequestInput,
   signal?: AbortSignal,
 ): Promise<OcrAnalyzeJob> {
+  idempotencyCounter += 1;
+  const nonce = `${Date.now().toString(36)}-${idempotencyCounter.toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
   return request<OcrAnalyzeJob>("/ocr/analyze", {
     method: "POST",
     body: buildAnalyzeBody(input),
     signal,
     timeoutMs: 120_000,
     headers: {
-      "Idempotency-Key": currentSessionId() + "-" + Date.now().toString(36),
+      "Idempotency-Key": `${currentSessionId()}-${nonce}`,
       Prefer: "respond-async",
     },
   });

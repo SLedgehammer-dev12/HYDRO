@@ -311,51 +311,101 @@ function LauncherModel({
   accent: string;
   emissive: number;
 }) {
-  const z = item.side * 1.25;
-  const r = Math.max(0.15, item.radius * 1.25);
-  const barrelY = 0.62;
+  const z = item.side * 1.15;
+  const barrelR = Math.max(0.16, item.radius * 1.38);
+  const neckR = Math.max(0.11, item.radius * 0.96);
+  const barrelY = 0.66;
   const fromPipe = item.pipePoint.y - item.groundPoint.y;
   const isLauncher = item.equipment.type === "pig-launcher";
+  const dir = isLauncher ? 1 : -1;
+
   return (
     <group position={[0, item.groundPoint.y - item.pipePoint.y, z]}>
-      {[-0.34, 0.34].map((x) => (
-        <mesh key={x} position={[x, 0.2, 0]} castShadow receiveShadow>
-          <boxGeometry args={[0.13, 0.4, 0.2]} />
-          <meshStandardMaterial color="#31465e" metalness={0.5} roughness={0.55} />
+      {/* Ağır beton/çelik kızak kaidesi */}
+      <mesh position={[0, 0.04, 0]} castShadow receiveShadow>
+        <boxGeometry args={[1.65, 0.08, 0.68]} />
+        <meshStandardMaterial color="#1f2e42" metalness={0.45} roughness={0.65} />
+      </mesh>
+      {/* Çift eyer (saddle) desteği */}
+      {[-0.36, 0.32].map((x) => (
+        <mesh key={x} position={[x, 0.28, 0]} castShadow receiveShadow>
+          <boxGeometry args={[0.12, 0.42, 0.24]} />
+          <meshStandardMaterial color="#31465e" metalness={0.55} roughness={0.5} />
         </mesh>
       ))}
+      {/* Ana büyük çaplı varil (pig barrel) */}
       <mesh
-        position={[0, barrelY, 0]}
-        rotation={[0, 0, Math.PI / 2 + (isLauncher ? -0.1 : 0.1)]}
+        position={[dir * -0.16, barrelY, 0]}
+        rotation={[0, 0, Math.PI / 2]}
         castShadow
       >
-        <cylinderGeometry args={[r, r, 1.05, 18]} />
+        <cylinderGeometry args={[barrelR, barrelR, 0.9, 22]} />
         <meshStandardMaterial
           color="#7f96ad"
-          metalness={0.62}
-          roughness={0.4}
+          metalness={0.64}
+          roughness={0.36}
           emissive={accent}
           emissiveIntensity={emissive * 0.55}
         />
       </mesh>
+      {/* Eksantrik redüksiyon konisi (varilden ana hat çapına geçiş) */}
       <mesh
-        position={[isLauncher ? -0.55 : 0.55, barrelY + (isLauncher ? 0.06 : -0.06), 0]}
+        position={[dir * 0.42, barrelY - 0.015, 0]}
+        rotation={[0, 0, dir * (-Math.PI / 2)]}
+        castShadow
+      >
+        <cylinderGeometry args={[neckR, barrelR, 0.3, 22]} />
+        <meshStandardMaterial
+          color="#92a9c0"
+          metalness={0.68}
+          roughness={0.34}
+          emissive={accent}
+          emissiveIntensity={emissive * 0.4}
+        />
+      </mesh>
+      {/* Hızlı açılır kapak (quick-opening closure) + kilitleme kelepçesi */}
+      <mesh
+        position={[dir * -0.63, barrelY, 0]}
         rotation={[0, 0, Math.PI / 2]}
         castShadow
       >
-        <cylinderGeometry args={[r * 1.12, r * 1.12, 0.06, 18]} />
-        <meshStandardMaterial color="#b8cbdd" metalness={0.72} roughness={0.3} />
+        <cylinderGeometry args={[barrelR * 1.14, barrelR * 1.14, 0.06, 22]} />
+        <meshStandardMaterial color="#cbd9e8" metalness={0.78} roughness={0.28} />
       </mesh>
-      <mesh position={[0, barrelY + r * 1.15, 0]} rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[r * 0.5, 0.022, 6, 20]} />
+      <mesh
+        position={[dir * -0.67, barrelY, 0]}
+        rotation={[0, 0, Math.PI / 2]}
+        castShadow
+      >
+        <cylinderGeometry args={[barrelR * 0.92, barrelR * 1.05, 0.05, 20]} />
+        <meshStandardMaterial color="#e2b15f" metalness={0.55} roughness={0.4} />
+      </mesh>
+      {/* Kicker / bypass hattı + izolasyon vanası el çarkı */}
+      <mesh position={[0, barrelY + barrelR * 0.85, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
+        <cylinderGeometry args={[0.036, 0.036, 0.62, 10]} />
+        <meshStandardMaterial color="#a6bcd1" metalness={0.7} roughness={0.35} />
+      </mesh>
+      <mesh position={[dir * -0.26, barrelY + barrelR * 0.45, 0]} castShadow>
+        <cylinderGeometry args={[0.032, 0.032, barrelR * 0.82, 10]} />
+        <meshStandardMaterial color="#a6bcd1" metalness={0.7} roughness={0.35} />
+      </mesh>
+      <mesh position={[dir * 0.05, barrelY + barrelR * 1.18, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[barrelR * 0.44, 0.022, 8, 22]} />
         <meshStandardMaterial color="#e2b15f" metalness={0.5} roughness={0.42} />
       </mesh>
-      <mesh position={[0.02, fromPipe, z * -0.5]} rotation={[Math.PI / 2, 0, 0]} castShadow>
-        <cylinderGeometry args={[0.07, 0.07, Math.abs(z) * 1.05, 12]} />
+      {/* Tahliye / vent kolonu ve manometre */}
+      <mesh position={[dir * -0.42, barrelY + barrelR * 1.28, 0]} castShadow>
+        <cylinderGeometry args={[0.024, 0.028, 0.28, 8]} />
+        <meshStandardMaterial color="#b8cbdd" metalness={0.72} roughness={0.32} />
+      </mesh>
+      <Gauge position={[dir * -0.42, barrelY + barrelR * 1.28 + 0.22, 0.02]} scale={0.95} />
+      {/* Ana boru bağlantı kolu */}
+      <mesh position={[dir * 0.56, fromPipe, z * -0.5]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+        <cylinderGeometry args={[neckR * 0.72, neckR * 0.72, Math.abs(z) * 1.05, 14]} />
         <meshStandardMaterial color="#7f96ad" metalness={0.62} roughness={0.4} />
       </mesh>
-      <FlowArrow position={[0.1, barrelY + 0.42, 0]} color={accent} reverse={!isLauncher} />
-      <StatusLed y={barrelY + 0.3} color={accent} />
+      <FlowArrow position={[dir * 0.15, barrelY + barrelR * 1.68, 0]} color={accent} reverse={!isLauncher} />
+      <StatusLed y={barrelY + barrelR * 1.55} color={accent} />
     </group>
   );
 }

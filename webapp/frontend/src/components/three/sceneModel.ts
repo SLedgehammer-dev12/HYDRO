@@ -22,7 +22,6 @@ import type {
 
 export const DISPLAY_SPAN = 26;
 const GROUND_LIFT = 1.0;
-const TERRAIN_DROP = 0.85;
 const TERRAIN_HALF_WIDTH = 7;
 const SUPPORT_COUNT = 9;
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
@@ -30,6 +29,27 @@ const Z_AXIS = new THREE.Vector3(0, 0, 1);
 
 export type ColorMode = "pressure" | "utilization";
 export type CameraPreset = "overview" | "profile" | "pig" | "equipment" | "top";
+export type SceneViewMode = "overview" | "detail";
+export type VerticalScaleMode = "auto" | "1x" | "2x" | "4x";
+
+export interface ElevationTick {
+  elevation: number;
+  y: number;
+  label: string;
+}
+
+export interface SectionBoundaryMark {
+  sessionId: string;
+  sectionNo: string;
+  distanceM: number;
+  position: THREE.Vector3;
+  radius: number;
+}
+
+export interface SceneLayoutOptions {
+  mode?: SceneViewMode;
+  verticalScaleMode?: VerticalScaleMode;
+}
 
 export interface ResolvedScene {
   data: SceneData;
@@ -271,9 +291,14 @@ export interface SceneRanges {
 }
 
 export interface SceneLayout {
+  mode: SceneViewMode;
+  verticalScaleMode: VerticalScaleMode;
+  verticalExaggeration: number;
   totalLengthM: number;
   span: number;
   center: THREE.Vector3;
+  minElevationM: number;
+  maxElevationM: number;
   elevationRangeM: number;
   stationScale: number;
   verticalScale: number;
@@ -284,6 +309,8 @@ export interface SceneLayout {
   landmarks: LayoutLandmark[];
   supports: SupportPost[];
   ticks: TickMark[];
+  elevationTicks: ElevationTick[];
+  sectionBoundaries: SectionBoundaryMark[];
   profile: ProfileSample[];
   terrain: TerrainMesh;
   views: Record<"overview" | "profile" | "top", CameraView>;
@@ -306,10 +333,14 @@ function stationOf(segment: SceneSegment): [number, number] {
   return [Math.min(segment.start_m, segment.end_m), Math.max(segment.start_m, segment.end_m)];
 }
 
-function visualRadius(segment: SceneSegment): number {
+function visualRadius(segment: SceneSegment, mode: SceneViewMode): number {
   const od = finite(segment.outside_diameter_mm, 0);
-  const base = od > 0 ? (od / 1000) * 0.75 : 0.22;
-  return clamp(base, 0.16, 0.38);
+  if (mode === "overview") {
+    const base = od > 0 ? (od / 1000) * 0.36 : 0.11;
+    return clamp(base, 0.08, 0.16);
+  }
+  const base = od > 0 ? (od / 1000) * 0.48 : 0.15;
+  return clamp(base, 0.12, 0.22);
 }
 
 function visualInnerRadius(segment: SceneSegment, radius: number): number {
@@ -383,8 +414,8 @@ function buildTerrain(
   layout: Omit<SceneLayout, "terrain">,
 ): TerrainMesh {
   const { totalLengthM, profile, stationToX, elevationToY, isSurveyProfile } = layout;
-  const terrainDrop = isSurveyProfile ? 0.36 : TERRAIN_DROP;
-  const samples = isSurveyProfile ? 96 : 72;
+  const terrainDrop = isSurveyProfile ? 0.22 : 0.45;
+  const samples = isSurveyProfile ? 160 : 84;
   const lanes = [-1, -0.62, -0.28, 0, 0.28, 0.62, 1];
   const positions: number[] = [];
   const colors: number[] = [];
@@ -458,24 +489,43 @@ function buildTerrain(
 function buildViews(
   center: THREE.Vector3,
   span: number,
+  verticalSpan: number,
 ): SceneLayout["views"] {
+  const relief = Math.max(1.5, verticalSpan);
   return {
     overview: {
-      position: new THREE.Vector3(center.x + span * 0.09, center.y + span * 0.44, span * 0.92),
+      position: new THREE.Vector3(
+        center.x + span * 0.09,
+        center.y + Math.max(span * 0.42, relief * 0.95),
+        span * 0.98 + relief * 0.25,
+      ),
       target: center.clone().add(new THREE.Vector3(0, 0.15, 0)),
     },
     profile: {
-      position: new THREE.Vector3(center.x, center.y + span * 0.04, span * 1.04),
+      position: new THREE.Vector3(
+        center.x,
+        center.y + span * 0.03,
+        span * 1.04 + relief * 0.3,
+      ),
       target: new THREE.Vector3(center.x, center.y, 0),
     },
     top: {
-      position: new THREE.Vector3(center.x + 0.01, span * 1.08, span * 0.3),
+      position: new THREE.Vector3(
+        center.x + 0.01,
+        Math.max(span * 1.08, center.y + span * 0.95),
+        span * 0.28,
+      ),
       target: center.clone(),
     },
   };
 }
 
-export function buildSceneLayout(data: SceneData): SceneLayout {
+export function buildSceneLayout(
+  data: SceneData,
+  options: SceneLayoutOptions = {},
+): SceneLayout {
+  const mode: SceneViewMode = options.mode ?? "detail";
+  const verticalScaleMode: VerticalScaleMode = options.verticalScaleMode ?? "auto";
   const cleanedSegments = data.segments.filter(
     (segment) => Number.isFinite(segment.start_m) && Number.isFinite(segment.end_m),
   );
@@ -507,8 +557,19 @@ export function buildSceneLayout(data: SceneData): SceneLayout {
   const minElevationM = elevationValues.length ? Math.min(...elevationValues) : 0;
   const maxElevationM = elevationValues.length ? Math.max(...elevationValues) : 1;
   const elevationRangeM = Math.max(1, maxElevationM - minElevationM);
-  const verticalScale =
-    clamp(elevationRangeM * stationScale * 4.5, 1.2, 5.0) / elevationRangeM;
+  const autoHeight = clamp(
+    elevationRangeM * stationScale * 8.0,
+    mode === "overview" ? 2.6 : 3.2,
+    8.5,
+  );
+  let targetHeight = autoHeight;
+  if (verticalScaleMode === "1x") {
+    targetHeight = clamp(autoHeight * 0.45, 1.0, 5.0);
+  } else if (verticalScaleMode === "4x") {
+    targetHeight = clamp(autoHeight * 1.55, 3.8, 11.5);
+  }
+  const verticalScale = targetHeight / elevationRangeM;
+  const verticalExaggeration = verticalScale / stationScale;
 
   const stationToX = (distance: number): number =>
     (distance - totalLengthM / 2) * stationScale;
@@ -530,7 +591,7 @@ export function buildSceneLayout(data: SceneData): SceneLayout {
     const direction = end.clone().sub(start);
     if (direction.lengthSq() < 1e-8) direction.set(1, 0, 0);
     direction.normalize();
-    const radius = visualRadius(segment);
+    const radius = visualRadius(segment, mode);
     return {
       segment,
       index,
@@ -575,7 +636,7 @@ export function buildSceneLayout(data: SceneData): SceneLayout {
 
   const profilePairsValue = profilePairs(data, totalLengthM);
   const isSurveyProfile = Boolean(data.is_survey_profile);
-  const terrainDrop = isSurveyProfile ? 0.36 : TERRAIN_DROP;
+  const terrainDrop = isSurveyProfile ? 0.22 : 0.45;
 
   const groundYAt = (distance: number): number => {
     const pipe = sample(distance, new THREE.Vector3());
@@ -585,7 +646,7 @@ export function buildSceneLayout(data: SceneData): SceneLayout {
   };
 
   const profile: ProfileSample[] = [];
-  const profileSamples = isSurveyProfile ? 96 : 64;
+  const profileSamples = isSurveyProfile ? 160 : 84;
   for (let index = 0; index <= profileSamples; index += 1) {
     const distance = (index / profileSamples) * totalLengthM;
     const elevation = elevationFromProfile(profilePairsValue, distance);
@@ -693,10 +754,47 @@ export function buildSceneLayout(data: SceneData): SceneLayout {
     };
   });
 
+  const elSteps = [5, 10, 20, 25, 50, 100, 200, 500];
+  const elStep = elSteps.find((step) => elevationRangeM / step <= 6) ?? elSteps[elSteps.length - 1];
+  const firstTickEl = Math.floor(minElevationM / elStep) * elStep;
+  const lastTickEl = Math.ceil(maxElevationM / elStep) * elStep;
+  const elevationTicks: ElevationTick[] = [];
+  for (let el = firstTickEl; el <= lastTickEl + 1e-6; el += elStep) {
+    const y = elevationToY(el);
+    if (y >= 0.05) {
+      elevationTicks.push({
+        elevation: el,
+        y,
+        label: `${numberFormat0.format(el)} m`,
+      });
+    }
+  }
+
+  const sectionBoundaries: SectionBoundaryMark[] = [];
+  const seenSessions = new Set<string>();
+  for (const item of segments) {
+    const sid = item.segment.session_id;
+    if (!sid || seenSessions.has(sid)) continue;
+    seenSessions.add(sid);
+    sectionBoundaries.push({
+      sessionId: sid,
+      sectionNo: item.segment.section_no || item.segment.label.split("·")[0]?.trim() || sid,
+      distanceM: item.distanceStart,
+      position: item.start.clone(),
+      radius: item.radius,
+    });
+  }
+
+  const verticalSpan = elevationToY(maxElevationM) - elevationToY(minElevationM);
   const partial: Omit<SceneLayout, "terrain"> = {
+    mode,
+    verticalScaleMode,
+    verticalExaggeration,
     totalLengthM,
     span: DISPLAY_SPAN,
     center,
+    minElevationM,
+    maxElevationM,
     elevationRangeM,
     stationScale,
     verticalScale,
@@ -707,8 +805,10 @@ export function buildSceneLayout(data: SceneData): SceneLayout {
     landmarks,
     supports,
     ticks,
+    elevationTicks,
+    sectionBoundaries,
     profile,
-    views: buildViews(center, DISPLAY_SPAN),
+    views: buildViews(center, DISPLAY_SPAN, verticalSpan),
     stationToX,
     elevationToY,
     segmentAt,

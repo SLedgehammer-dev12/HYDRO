@@ -11,6 +11,7 @@ const mockWaitForAnalysis = vi.fn();
 const mockCancelOcrAnalysis = vi.fn();
 const mockRetryOcrAnalysis = vi.fn();
 const mockListAnalyses = vi.fn();
+const mockCommitOcrDossier = vi.fn();
 
 vi.mock("./ocrApi", async () => {
   const actual = await vi.importActual<typeof import("./ocrApi")>("./ocrApi");
@@ -35,6 +36,7 @@ vi.mock("./ocrApi", async () => {
     waitForAnalysis: (...args: unknown[]) => mockWaitForAnalysis(...args),
     cancelOcrAnalysis: (...args: unknown[]) => mockCancelOcrAnalysis(...args),
     retryOcrAnalysis: (...args: unknown[]) => mockRetryOcrAnalysis(...args),
+    commitOcrDossier: (...args: unknown[]) => mockCommitOcrDossier(...args),
   };
 });
 
@@ -235,7 +237,49 @@ describe("OcrPage unmount cleanup (F10) and dynamic server timeout (F11)", () =>
       approved: false,
       applied: false,
       suggested_fixes: [],
+      dossier: {
+        schema_version: 2,
+        source_filename: `${sectionId}.xlsx`,
+        page_count: 16,
+        blank_template_pages: [],
+        sections_count: 1,
+        detected_project_name: "DİDİM DOĞALGAZ",
+        similar_projects: [],
+        project_conflicts: {},
+        required_form_catalog: [],
+        warnings: [],
+        unassigned_pages: [],
+        sections: [
+          {
+            section_no: sectionId,
+            header: {},
+            present_forms: [],
+            missing_required_forms: [],
+            filled_required_count: 11,
+            required_total: 11,
+            supplementary_count: 0,
+            calculations: {},
+            checks: {},
+            check_details: {},
+            pages: [1, 2],
+          },
+        ],
+      },
     });
+
+    mockCommitOcrDossier
+      .mockResolvedValueOnce({
+        project: { id: "proj-new-1", name: "DİDİM DOĞALGAZ" },
+        created_sections: [{ session_id: "s-1", section_no: "BÖLÜM 1A" }],
+        updated_sections: [],
+        saved_forms_count: 11,
+      })
+      .mockResolvedValueOnce({
+        project: { id: "proj-new-1", name: "DİDİM DOĞALGAZ" },
+        created_sections: [{ session_id: "s-2", section_no: "BÖLÜM 1B" }],
+        updated_sections: [],
+        saved_forms_count: 11,
+      });
 
     mockWaitForAnalysis
       .mockResolvedValueOnce(makeResult("job-1a", "BÖLÜM 1A"))
@@ -275,6 +319,9 @@ describe("OcrPage unmount cleanup (F10) and dynamic server timeout (F11)", () =>
     const queuePanel = await screen.findByTestId("ocr-batch-queue");
     expect(queuePanel).toHaveTextContent("Tamamlanan: 2 / 2");
 
+    // In batch mode DossierPanel should NOT block the screen with an auto-opened modal
+    expect(screen.queryByRole("dialog")).toBeNull();
+
     // First result is active initially (#job-1a)
     expect(screen.getByRole("heading", { name: /Analiz sonucu/i })).toHaveTextContent("job-1a");
 
@@ -283,5 +330,25 @@ describe("OcrPage unmount cleanup (F10) and dynamic server timeout (F11)", () =>
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: /Analiz sonucu/i })).toHaveTextContent("job-1b");
     });
+
+    // Batch commit button saves all succeeded files into one project sequentially
+    const commitAllBtn = screen.getByRole("button", {
+      name: /Tüm Bölümleri Projeye Kaydet \(2 dosya \/ 2 bölüm\)/i,
+    });
+    fireEvent.click(commitAllBtn);
+
+    await waitFor(() => {
+      expect(mockCommitOcrDossier).toHaveBeenCalledTimes(2);
+    });
+    expect(mockCommitOcrDossier).toHaveBeenNthCalledWith(
+      1,
+      "job-1a",
+      expect.objectContaining({ create_new_project: true, new_project_name: "DİDİM DOĞALGAZ" }),
+    );
+    expect(mockCommitOcrDossier).toHaveBeenNthCalledWith(
+      2,
+      "job-1b",
+      expect.objectContaining({ target_project_id: "proj-new-1", create_new_project: false }),
+    );
   });
 });

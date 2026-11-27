@@ -1452,7 +1452,7 @@ export const DEMO_OCR_STATUS: OcrStatusResponse = {
 /* 3D sahne adaptörü                                                  */
 /* ------------------------------------------------------------------ */
 
-function interpolateElevation(profile: Array<{ x: number; y: number }>, x: number): number {
+export function interpolateElevation(profile: Array<{ x: number; y: number }>, x: number): number {
   if (profile.length === 0) return 0;
   if (x <= profile[0].x) return profile[0].y;
   for (let i = 1; i < profile.length; i += 1) {
@@ -1566,7 +1566,70 @@ export function buildDefaultEquipmentInputs(inputs: AppInputs): EquipmentInputIt
   ];
 }
 
-export function buildSceneData(inputs: AppInputs, results: { profile?: PressureProfileResponse; pig?: PigSpeedResponse }): SceneData {
+/** Ramer–Douglas–Peucker tabanlı, tepe/vadi ve uç noktaları koruyan profil sadeleştirmesi. */
+export function simplifyProfilePointsRdp(
+  profile: Array<{ x: number; y: number }>,
+  maxPoints: number,
+): Array<{ x: number; y: number }> {
+  if (profile.length <= maxPoints || maxPoints < 4) return profile;
+  let minIdx = 0;
+  let maxIdx = 0;
+  profile.forEach((pt, idx) => {
+    if (pt.y < profile[minIdx].y) minIdx = idx;
+    if (pt.y > profile[maxIdx].y) maxIdx = idx;
+  });
+  const keep = new Set<number>([0, profile.length - 1, minIdx, maxIdx]);
+  const xSpan = Math.max(1e-6, profile[profile.length - 1].x - profile[0].x);
+  const ySpan = Math.max(1e-6, profile[maxIdx].y - profile[minIdx].y);
+
+  const perpDist = (idx: number, i0: number, i1: number): number => {
+    const x0 = profile[i0].x / xSpan;
+    const y0 = profile[i0].y / ySpan;
+    const x1 = profile[i1].x / xSpan;
+    const y1 = profile[i1].y / ySpan;
+    const px = profile[idx].x / xSpan;
+    const py = profile[idx].y / ySpan;
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const denom = Math.hypot(dx, dy);
+    if (denom <= 1e-12) return Math.hypot(px - x0, py - y0);
+    return Math.abs(dy * px - dx * py + x1 * y0 - y1 * x0) / denom;
+  };
+
+  while (keep.size < maxPoints) {
+    const sorted = Array.from(keep).sort((a, b) => a - b);
+    let bestIdx = -1;
+    let bestDist = -1;
+    for (let s = 0; s < sorted.length - 1; s += 1) {
+      const i0 = sorted[s];
+      const i1 = sorted[s + 1];
+      if (i1 - i0 <= 1) continue;
+      for (let idx = i0 + 1; idx < i1; idx += 1) {
+        const d = perpDist(idx, i0, i1);
+        if (d > bestDist) {
+          bestDist = d;
+          bestIdx = idx;
+        }
+      }
+    }
+    if (bestIdx === -1 || bestDist <= 1e-9) break;
+    keep.add(bestIdx);
+  }
+
+  return Array.from(keep)
+    .sort((a, b) => a - b)
+    .map((idx) => profile[idx]);
+}
+
+export interface BuildSceneDataOptions {
+  ensureDetailDefaults?: boolean;
+}
+
+export function buildSceneData(
+  inputs: AppInputs,
+  results: { profile?: PressureProfileResponse; pig?: PigSpeedResponse },
+  options: BuildSceneDataOptions = {},
+): SceneData {
   const sections = sectionsFromInputs(inputs);
   if (sections.length === 0) {
     return {
@@ -1619,24 +1682,7 @@ export function buildSceneData(inputs: AppInputs, results: { profile?: PressureP
       cursor += sec.length_m;
     }
 
-    let chosenProfile = profile;
-    if (profile.length > 38) {
-      let minIdx = 0;
-      let maxIdx = 0;
-      profile.forEach((pt, idx) => {
-        if (pt.y < profile[minIdx].y) minIdx = idx;
-        if (pt.y > profile[maxIdx].y) maxIdx = idx;
-      });
-      const keep = new Set<number>([0, profile.length - 1, minIdx, maxIdx]);
-      const slots = 36 - keep.size;
-      for (let slot = 1; slot <= slots; slot += 1) {
-        const idx = Math.min(profile.length - 1, Math.round((slot * (profile.length - 1)) / (slots + 1)));
-        keep.add(idx);
-      }
-      chosenProfile = Array.from(keep)
-        .sort((a, b) => a - b)
-        .map((idx) => profile[idx]);
-    }
+    const chosenProfile = simplifyProfilePointsRdp(profile, 96);
 
     const requiredBps = [0, ...sectionRanges.map((r) => r.end), totalLength];
     const isRequiredBp = (val: number) => requiredBps.some((r) => Math.abs(r - val) <= 1e-6);
@@ -1814,6 +1860,32 @@ export function buildSceneData(inputs: AppInputs, results: { profile?: PressureP
     }
   }
 
+  if (options.ensureDetailDefaults) {
+    const launcherDist = pumpAtStart ? 0 : totalLength;
+    const receiverDist = pumpAtStart ? totalLength : 0;
+    if (!equipment.some((item) => item.type === "pig-launcher")) {
+      equipment.push({
+        id: "eq-detail-launcher",
+        type: "pig-launcher",
+        label: "Pig Atıcı (Launcher)",
+        distance_m: round(launcherDist, 1),
+        elevation_m: round(interpolateElevation(profile, launcherDist), 1),
+        status: "pass",
+      });
+    }
+    if (!equipment.some((item) => item.type === "pig-receiver")) {
+      equipment.push({
+        id: "eq-detail-receiver",
+        type: "pig-receiver",
+        label: "Pig Alıcı (Receiver)",
+        distance_m: round(receiverDist, 1),
+        elevation_m: round(interpolateElevation(profile, receiverDist), 1),
+        status: "pass",
+      });
+    }
+    equipment.sort((a, b) => a.distance_m - b.distance_m);
+  }
+
   const landmarks: SceneLandmark[] = (inputs.landmarks ?? []).map((lm, idx) => {
     const dist = clamp(lm.station_m, 0, totalLength);
     return {
@@ -1832,8 +1904,17 @@ export function buildSceneData(inputs: AppInputs, results: { profile?: PressureP
   const computedMinPressure = segPressures.length ? Math.min(...segPressures) : undefined;
   const computedMaxPressure = segPressures.length ? Math.max(...segPressures) : undefined;
 
-  const pigDistance = inputs.field.pig_distance_m ?? totalLength / 2;
-  const pigSpeed = results.pig?.speed_m_per_s ?? inputs.field.pig_speed_m_per_s ?? null;
+  const rawPigDist = inputs.field.pig_distance_m;
+  const pigDistance =
+    typeof rawPigDist === "number" && Number.isFinite(rawPigDist)
+      ? rawPigDist
+      : options.ensureDetailDefaults
+        ? 0
+        : totalLength / 2;
+  const pigSpeed =
+    results.pig?.speed_m_per_s ??
+    inputs.field.pig_speed_m_per_s ??
+    (options.ensureDetailDefaults ? 0.6 : null);
 
   const warnings: string[] = [];
   if (results.profile?.feasible === false) {
@@ -1871,6 +1952,14 @@ export function buildSceneData(inputs: AppInputs, results: { profile?: PressureP
     landmarks,
     warnings,
   };
+}
+
+/** Tek bir test kesitinin detay 3D pop-up sahnesini oluşturur (her zaman pig + atıcı/alıcı içerir). */
+export function buildSectionDetailSceneData(
+  inputs: AppInputs,
+  results: { profile?: PressureProfileResponse; pig?: PigSpeedResponse } = {},
+): SceneData {
+  return buildSceneData(inputs, results, { ensureDetailDefaults: true });
 }
 
 /* ------------------------------------------------------------------ */

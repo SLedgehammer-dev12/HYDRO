@@ -7,6 +7,7 @@ import type { SceneLayout } from "./sceneModel";
 interface SceneEnvironmentProps {
   layout: SceneLayout;
   showLabels: boolean;
+  showLandmarks: boolean;
   highQuality: boolean;
   reducedMotion: boolean;
 }
@@ -173,9 +174,46 @@ function LandmarkPins({ layout, showLabels }: { layout: SceneLayout; showLabels:
   );
 }
 
+/** Arka planda kot farkını somutlaştıran yatay rakım kılavuz çizgileri. */
+function ElevationBackdropGrid({
+  layout,
+  showLabels,
+}: {
+  layout: SceneLayout;
+  showLabels: boolean;
+}) {
+  if (!layout.elevationTicks.length) return null;
+  const halfX = layout.span / 2;
+  const z = -7.2;
+
+  return (
+    <group>
+      {layout.elevationTicks.map((tick) => (
+        <group key={tick.elevation} position={[0, tick.y, z]}>
+          <Line
+            points={[new THREE.Vector3(-halfX, 0, 0), new THREE.Vector3(halfX, 0, 0)]}
+            color="#223b54"
+            lineWidth={1}
+            transparent
+            opacity={0.45}
+          />
+          {showLabels ? (
+            <SceneHtml position={[-halfX - 0.55, 0, 0]} center zIndexRange={[6, 0]}>
+              <span className="numeric whitespace-nowrap rounded bg-ink-950/70 px-1 py-0.5 text-[9px] text-mist-500">
+                {tick.label}
+              </span>
+            </SceneHtml>
+          ) : null}
+        </group>
+      ))}
+    </group>
+  );
+}
+
 export default function SceneEnvironment({
   layout,
   showLabels,
+  showLandmarks,
   highQuality,
   reducedMotion,
 }: SceneEnvironmentProps) {
@@ -184,7 +222,8 @@ export default function SceneEnvironment({
       <SceneLights layout={layout} highQuality={highQuality} />
       <GroundPlane layout={layout} />
       <Terrain layout={layout} />
-      <LandmarkPins layout={layout} showLabels={showLabels} />
+      <ElevationBackdropGrid layout={layout} showLabels={showLabels} />
+      {showLandmarks ? <LandmarkPins layout={layout} showLabels={showLabels} /> : null}
       <StationRuler layout={layout} showLabels={showLabels} />
       {highQuality && !reducedMotion ? (
         <ContactShadows

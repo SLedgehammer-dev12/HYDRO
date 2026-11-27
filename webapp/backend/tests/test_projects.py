@@ -1388,3 +1388,70 @@ def test_prune_stale_demo_projects_soft_deletes_only_expired_demos(tmp_path):
             assert s.get(Project, "p-old-prod").deleted_at is None
     finally:
         db.dispose_database()
+
+
+def test_rdp_thin_points_preserves_peaks_valleys_and_project_section_meta(client, headers):
+    from app.services.scene import _thin_points
+
+    # 120 noktalı profil: keskin bir tepe (420 m) ve vadi (95 m) içeren veri
+    pts = [(float(i * 100), 200.0) for i in range(120)]
+    pts[37] = (3700.0, 420.0)
+    pts[82] = (8200.0, 95.0)
+    pts[60] = (6000.0, 260.0)
+
+    thinned = _thin_points(pts, 12, required_xs={6000.0})
+    assert len(thinned) <= 12
+    assert thinned[0] == pts[0]
+    assert thinned[-1] == pts[-1]
+    assert (3700.0, 420.0) in thinned
+    assert (8200.0, 95.0) in thinned
+    assert (6000.0, 260.0) in thinned
+
+    # build_project_scene sections_summary zenginleştirilmiş alanları döndürmeli
+    proj = client.post("/api/projects", json={"name": "RDP Özet Hat"}, headers=headers).json()
+    _create_session(
+        client,
+        headers,
+        name="K-01",
+        project_id=proj["id"],
+        inputs={
+            "section_meta": {"section_no": "K-01", "start_kp": "0+000", "end_kp": "2+000"},
+            "geometry": {
+                "outside_diameter_mm": 406.4,
+                "wall_thickness_mm": 8.74,
+                "length_m": 2000.0,
+            },
+            "profile_points": [
+                {"station_m": 0.0, "elevation_m": 120.0},
+                {"station_m": 900.0, "elevation_m": 290.0},
+                {"station_m": 1600.0, "elevation_m": 85.0},
+                {"station_m": 2000.0, "elevation_m": 150.0},
+            ],
+        },
+    )
+    scene = client.get(f"/api/projects/{proj['id']}/scene", headers=headers).json()
+    assert len(scene["sections"]) == 1
+    sec = scene["sections"][0]
+    assert sec["od_mm"] == 406.4
+    assert sec["wt_mm"] == 8.74
+    assert sec["min_elevation_m"] == 85.0
+    assert sec["max_elevation_m"] == 290.0
+    assert sec["start_elevation_m"] == 120.0
+    assert sec["end_elevation_m"] == 150.0
+
+
+def test_filter_cad_vertical_spikes_removes_isolated_needles_and_keeps_real_peaks():
+    from app.services.plan_profile import _filter_cad_vertical_spikes
+
+    pts = [
+        (0.0, 1891.5),
+        (5000.0, 1878.0),
+        (7500.0, 2441.9),  # izole CAD çerçeve sıçraması (+550 m tek nokta)
+        (10000.0, 1896.4),
+        (33500.0, 2404.7),
+        (33829.0, 2441.9),  # gerçek sürekli dağ zirvesi
+        (34000.0, 2420.6),
+    ]
+    filtered = _filter_cad_vertical_spikes(pts)
+    assert (7500.0, 2441.9) not in filtered
+    assert (33829.0, 2441.9) in filtered

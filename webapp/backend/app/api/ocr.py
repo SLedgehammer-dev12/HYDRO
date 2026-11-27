@@ -32,7 +32,7 @@ def analyze(
     settings: Settings = Depends(get_settings),
     workspace: Workspace = Depends(get_workspace),
 ) -> dict:
-    enforce_rate_limit(request, settings, bucket="ocr_analyze", limit=30)
+    enforce_rate_limit(request, settings, bucket="ocr_analyze", limit=60)
     prefer_async = "respond-async" in (request.headers.get("prefer") or "").lower()
     if async_mode or prefer_async:
         analysis, reused, estimated_wait_s = ocr_service.enqueue_upload(

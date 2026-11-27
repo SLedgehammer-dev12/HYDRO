@@ -581,6 +581,12 @@ def _thin_points(
     *,
     required_xs: set[float] | None = None,
 ) -> list[tuple[float, float]]:
+    """Şekil koruyan öncelikli Ramer-Douglas-Peucker nokta sadeleştirmesi.
+
+    Başlangıç/bitiş, mutlak tepe/vadi ve istenen zorunlu istasyonları her zaman korur;
+    kalan nokta bütçesini X-Y ölçeği normalize edilmiş dikey sapması en büyük kırılma
+    noktalarına ayırır.
+    """
     if len(points) <= max_points or max_points < 4:
         return points
     min_idx = min(range(len(points)), key=lambda idx: points[idx][1])
@@ -590,11 +596,40 @@ def _thin_points(
         for idx, (x, _y) in enumerate(points):
             if any(abs(x - rx) <= 1.0 for rx in required_xs):
                 keep.add(idx)
-    slots = max(0, max_points - len(keep))
-    if slots > 0:
-        step = (len(points) - 1) / float(slots + 1)
-        for slot in range(1, slots + 1):
-            keep.add(min(len(points) - 1, round(slot * step)))
+
+    if len(keep) >= max_points:
+        return [points[idx] for idx in sorted(keep)][:max_points]
+
+    x_span = max(1e-6, points[-1][0] - points[0][0])
+    y_span = max(1e-6, points[max_idx][1] - points[min_idx][1])
+
+    def _perp_dist(idx: int, i0: int, i1: int) -> float:
+        x0, y0 = points[i0][0] / x_span, points[i0][1] / y_span
+        x1, y1 = points[i1][0] / x_span, points[i1][1] / y_span
+        px, py = points[idx][0] / x_span, points[idx][1] / y_span
+        dx = x1 - x0
+        dy = y1 - y0
+        denom = (dx * dx + dy * dy) ** 0.5
+        if denom <= 1e-12:
+            return ((px - x0) ** 2 + (py - y0) ** 2) ** 0.5
+        return abs(dy * px - dx * py + x1 * y0 - y1 * x0) / denom
+
+    while len(keep) < max_points:
+        sorted_keep = sorted(keep)
+        best_idx: int | None = None
+        best_dist = -1.0
+        for i0, i1 in zip(sorted_keep, sorted_keep[1:]):
+            if i1 - i0 <= 1:
+                continue
+            for idx in range(i0 + 1, i1):
+                dist = _perp_dist(idx, i0, i1)
+                if dist > best_dist:
+                    best_dist = dist
+                    best_idx = idx
+        if best_idx is None or best_dist <= 1e-9:
+            break
+        keep.add(best_idx)
+
     return [points[idx] for idx in sorted(keep)][:max_points]
 
 
@@ -952,7 +987,7 @@ def build_project_scene(
         else:
             base_status = "pending"
 
-        target_pts = max(3, min(24, round(64.0 * sec_len / max(total_length_m, 1.0))))
+        target_pts = max(6, min(48, round(180.0 * sec_len / max(total_length_m, 1.0))))
         sub_pts = _thin_points(local_pts, target_pts)
         seg_boundaries = sorted(
             {
@@ -1163,6 +1198,7 @@ def build_project_scene(
         if sec_has_equipment:
             equipment_section_count += 1
 
+        local_elevs = [pt[1] for pt in local_pts] if local_pts else [round(local_interp(0.0), 2)]
         sections_summary.append(
             {
                 "session_id": sess.id,
@@ -1173,11 +1209,17 @@ def build_project_scene(
                 "start_m": round(offset_m, 2),
                 "end_m": round(end_offset_m, 2),
                 "length_m": round(rec["sec_len"], 2),
+                "od_mm": round(rec["od_mm"], 2),
+                "wt_mm": round(rec["wt_mm"], 2),
+                "start_elevation_m": round(local_interp(0.0), 2),
+                "end_elevation_m": round(local_interp(sec_len), 2),
+                "min_elevation_m": round(min(local_elevs), 2),
+                "max_elevation_m": round(max(local_elevs), 2),
                 "status": sec_status_worst,
             }
         )
 
-    thinned_profile = _thin_points(global_profile_points, 300, required_xs=boundary_xs)
+    thinned_profile = _thin_points(global_profile_points, 450, required_xs=boundary_xs)
     global_interp = _elevation_interpolator(thinned_profile)
 
     all_survey_profile = bool(records) and survey_section_count == len(records)

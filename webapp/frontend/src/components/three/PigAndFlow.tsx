@@ -14,16 +14,51 @@ export interface PigHandle {
   current: THREE.Vector3;
 }
 
+export interface PigTelemetry {
+  distanceM: number;
+  elevationM: number;
+  slopePct: number;
+  progress: number;
+  pressureBar: number | null;
+}
+
 interface PigProps {
   layout: SceneLayout;
   startDistance: number;
   speedMps: number | null;
   playing: boolean;
   rate: number;
+  direction?: 1 | -1;
+  seekDistance?: number | null;
+  seekNonce?: number;
+  onProgress?: (sample: PigTelemetry) => void;
   visible: boolean;
   showLabels: boolean;
   reducedMotion: boolean;
   positionRef: PigHandle;
+}
+
+function sampleTelemetry(layout: SceneLayout, distance: number): PigTelemetry {
+  const safeDist = clamp(distance, 0, layout.totalLengthM);
+  const seg = layout.segmentAt(safeDist);
+  const rawSeg = seg.segment;
+  const low = Math.min(seg.distanceStart, seg.distanceEnd);
+  const high = Math.max(seg.distanceStart, seg.distanceEnd);
+  const dx = Math.max(1e-6, high - low);
+  const t = clamp((safeDist - low) / dx, 0, 1);
+  const dz = rawSeg.end_elevation_m - rawSeg.start_elevation_m;
+  const elevationM = rawSeg.start_elevation_m + dz * t;
+  const slopePct = dx > 0.1 ? (dz / dx) * 100 : 0;
+  return {
+    distanceM: safeDist,
+    elevationM,
+    slopePct,
+    progress: layout.totalLengthM > 0 ? safeDist / layout.totalLengthM : 0,
+    pressureBar:
+      typeof rawSeg.pressure_bar === "number" && Number.isFinite(rawSeg.pressure_bar)
+        ? rawSeg.pressure_bar
+        : null,
+  };
 }
 
 /** Glowing inspection pig inside the pipe; the beacon marks its station when the pipe is closed. */
@@ -33,30 +68,48 @@ export default function PipelinePig({
   speedMps,
   playing,
   rate,
+  direction = 1,
+  seekDistance = null,
+  seekNonce = 0,
+  onProgress,
   visible,
   showLabels,
   reducedMotion,
   positionRef,
 }: PigProps) {
   const pigRef = useRef<THREE.Group>(null);
+  const pigBodyRef = useRef<THREE.Group>(null);
   const beaconRef = useRef<THREE.Group>(null);
   const stationRingRef = useRef<THREE.Mesh>(null);
   const haloRef = useRef<THREE.Mesh>(null);
   const distanceRef = useRef(startDistance);
+  const lastEmitAtRef = useRef(0);
   const temp = useMemo(() => new THREE.Vector3(), []);
   const visualSpeed = (layout.totalLengthM / 22) * Math.max(1, rate);
 
   useEffect(() => {
     distanceRef.current = startDistance;
-  }, [startDistance]);
+    if (onProgress) onProgress(sampleTelemetry(layout, startDistance));
+  }, [startDistance, layout, onProgress]);
+
+  useEffect(() => {
+    if (seekNonce <= 0 || seekDistance === null || !Number.isFinite(seekDistance)) return;
+    const clamped = clamp(seekDistance, 0, layout.totalLengthM);
+    distanceRef.current = clamped;
+    if (onProgress) onProgress(sampleTelemetry(layout, clamped));
+  }, [seekNonce, seekDistance, layout, onProgress]);
 
   useFrame((state, delta) => {
     const pig = pigRef.current;
     if (!pig || !visible) return;
 
-    if (playing && !reducedMotion) {
-      const step = visualSpeed * Math.min(delta, 0.05);
-      distanceRef.current = (distanceRef.current + step) % layout.totalLengthM;
+    if (playing && !reducedMotion && layout.totalLengthM > 0) {
+      const step = visualSpeed * Math.min(delta, 0.05) * direction;
+      const next = distanceRef.current + step;
+      distanceRef.current =
+        next < 0
+          ? ((next % layout.totalLengthM) + layout.totalLengthM) % layout.totalLengthM
+          : next % layout.totalLengthM;
     }
 
     layout.sample(distanceRef.current, temp);
@@ -66,6 +119,11 @@ export default function PipelinePig({
     pig.quaternion.copy(segment.quaternion);
     positionRef.current.copy(temp);
 
+    if (pigBodyRef.current) {
+      const bodyScale = clamp((segment.radius * 0.72) / 0.145, 0.45, 1.35);
+      pigBodyRef.current.scale.setScalar(bodyScale);
+    }
+
     if (stationRingRef.current) {
       stationRingRef.current.position.copy(temp);
       stationRingRef.current.quaternion.copy(segment.ringQuaternion);
@@ -74,11 +132,19 @@ export default function PipelinePig({
     }
 
     if (beaconRef.current) {
-      beaconRef.current.position.set(temp.x, temp.y + 1.05, 0);
+      beaconRef.current.position.set(temp.x, temp.y + Math.max(0.55, segment.radius * 3.8), 0);
     }
     if (haloRef.current) {
       const pulse = reducedMotion ? 1 : 1 + Math.sin(state.clock.elapsedTime * 2.6) * 0.14;
       haloRef.current.scale.setScalar(pulse);
+    }
+
+    if (onProgress && playing) {
+      const now = state.clock.elapsedTime;
+      if (now - lastEmitAtRef.current >= 0.1) {
+        lastEmitAtRef.current = now;
+        onProgress(sampleTelemetry(layout, distanceRef.current));
+      }
     }
   });
 
@@ -91,39 +157,41 @@ export default function PipelinePig({
   return (
     <group>
       <group ref={pigRef}>
-        <mesh castShadow>
-          <capsuleGeometry args={[0.145, 0.52, 4, 14]} />
-          <meshStandardMaterial
-            color="#f8c56b"
-            emissive="#f59e0b"
-            emissiveIntensity={0.55}
-            metalness={0.45}
-            roughness={0.35}
-          />
-        </mesh>
-        {[-0.2, 0, 0.2].map((offset) => (
-          <mesh key={offset} position={[0, offset, 0]} rotation={[Math.PI / 2, 0, 0]}>
-            <torusGeometry args={[0.152, 0.018, 6, 18]} />
+        <group ref={pigBodyRef}>
+          <mesh castShadow>
+            <capsuleGeometry args={[0.145, 0.52, 4, 14]} />
             <meshStandardMaterial
-              color="#1e2a3a"
-              metalness={0.4}
-              roughness={0.6}
-              emissive="#22d3ee"
-              emissiveIntensity={0.2}
+              color="#f8c56b"
+              emissive="#f59e0b"
+              emissiveIntensity={0.65}
+              metalness={0.45}
+              roughness={0.35}
             />
           </mesh>
-        ))}
-        <mesh ref={haloRef}>
-          <sphereGeometry args={[0.27, 14, 10]} />
-          <meshBasicMaterial
-            color="#67e8f9"
-            transparent
-            opacity={0.12}
-            blending={THREE.AdditiveBlending}
-            depthWrite={false}
-            toneMapped={false}
-          />
-        </mesh>
+          {[-0.2, 0, 0.2].map((offset) => (
+            <mesh key={offset} position={[0, offset, 0]} rotation={[Math.PI / 2, 0, 0]}>
+              <torusGeometry args={[0.152, 0.018, 6, 18]} />
+              <meshStandardMaterial
+                color="#1e2a3a"
+                metalness={0.4}
+                roughness={0.6}
+                emissive="#22d3ee"
+                emissiveIntensity={0.25}
+              />
+            </mesh>
+          ))}
+          <mesh ref={haloRef}>
+            <sphereGeometry args={[0.27, 14, 10]} />
+            <meshBasicMaterial
+              color="#67e8f9"
+              transparent
+              opacity={0.14}
+              blending={THREE.AdditiveBlending}
+              depthWrite={false}
+              toneMapped={false}
+            />
+          </mesh>
+        </group>
         <pointLight color="#fcd34d" intensity={1.1} distance={1.6} decay={2} />
       </group>
 
@@ -162,6 +230,7 @@ export default function PipelinePig({
 interface FlowProps {
   layout: SceneLayout;
   speedMps: number | undefined;
+  direction?: 1 | -1;
   enabled: boolean;
   reducedMotion: boolean;
   compact: boolean;
@@ -171,6 +240,7 @@ interface FlowProps {
 export function FlowParticles({
   layout,
   speedMps,
+  direction = 1,
   enabled,
   reducedMotion,
   compact,
@@ -210,7 +280,8 @@ export function FlowParticles({
 
     for (let index = 0; index < count; index += 1) {
       const particle = seeded[index];
-      const fraction = (particle.offset + time * fractionSpeed * particle.drift) % 1;
+      const rawFraction = particle.offset + time * fractionSpeed * particle.drift * direction;
+      const fraction = ((rawFraction % 1) + 1) % 1;
       const distance = fraction * layout.totalLengthM;
       layout.sample(distance, tempPosition);
       const segment = layout.segmentAt(distance);

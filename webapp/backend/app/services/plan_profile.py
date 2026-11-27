@@ -1176,6 +1176,30 @@ def _format_cad_section_label(prefix: str, code: str) -> str:
     return f"BÖLÜM {upper_code}"
 
 
+def _filter_cad_vertical_spikes(
+    points: list[tuple[float, float]],
+) -> list[tuple[float, float]]:
+    """Vektör CAD grid çizgilerinden sızan tekil çerçeve/antet sıçrama noktalarını eler."""
+    if len(points) < 3:
+        return points
+    cleaned: list[tuple[float, float]] = [points[0]]
+    for idx in range(1, len(points) - 1):
+        s_prev, e_prev = cleaned[-1]
+        s_cur, e_cur = points[idx]
+        s_next, e_next = points[idx + 1]
+        dx = s_next - s_prev
+        ratio = (s_cur - s_prev) / dx if dx > 1e-6 else 0.5
+        e_interp = e_prev + (e_next - e_prev) * ratio
+        neighbor_diff = abs(e_next - e_prev)
+        if e_cur - max(e_prev, e_next) > 100.0 and e_cur - e_interp > max(
+            120.0, neighbor_diff * 2.5
+        ):
+            continue
+        cleaned.append((s_cur, e_cur))
+    cleaned.append(points[-1])
+    return cleaned
+
+
 def _extract_cad_plan_profile_page(
     page: Any,
     reader: Any,
@@ -1390,7 +1414,9 @@ def _extract_cad_plan_profile_page(
                     if el0 - 200.0 <= el_val <= el1 + 500.0:
                         st_clamped = round(max(min_kp_m, min(max_kp_m, m_val)), 1)
                         profile_map[st_clamped] = round(el_val, 1)
-    profile_points = sorted(profile_map.items(), key=lambda item: item[0])
+    profile_points = _filter_cad_vertical_spikes(
+        sorted(profile_map.items(), key=lambda item: item[0])
+    )
 
     raw_landmarks: list[tuple[float, str, str]] = []
     for x, y, text in items:
