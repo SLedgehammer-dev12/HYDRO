@@ -167,7 +167,7 @@ export default function ApplyToSessionPanel({
                 <select
                   value={applyProjectId}
                   onChange={(e) => onChangeApplyProjectId(e.target.value)}
-                  className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-2.5 py-2 text-xs text-[var(--text)]"
+                  className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2 text-xs text-[var(--text)]"
                 >
                   {projects.map((proj) => (
                     <option key={proj.id} value={proj.id}>
@@ -182,7 +182,7 @@ export default function ApplyToSessionPanel({
                 <select
                   value={applySessionId}
                   onChange={(e) => onChangeApplySessionId(e.target.value)}
-                  className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-2.5 py-2 text-xs text-[var(--text)]"
+                  className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2 text-xs text-[var(--text)]"
                 >
                   {targetSessions.map((sess) => (
                     <option key={sess.id} value={sess.id}>
@@ -200,7 +200,7 @@ export default function ApplyToSessionPanel({
                     value={newApplySectionNo}
                     onChange={(e) => onChangeNewSectionNo(e.target.value)}
                     placeholder="Ör: BÖLÜM 1"
-                    className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-2.5 py-2 text-xs text-[var(--text)]"
+                    className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2 text-xs text-[var(--text)]"
                   />
                 </label>
               ) : null}
@@ -214,7 +214,7 @@ export default function ApplyToSessionPanel({
                   value={newApplyProjectName}
                   onChange={(e) => onChangeNewProjectName(e.target.value)}
                   placeholder="Ör: HİZAN İLÇESİ DGBH YAPIM İŞİ PROJESİ"
-                  className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-2.5 py-2 text-xs text-[var(--text)]"
+                  className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2 text-xs text-[var(--text)]"
                 />
               </label>
               <label className="flex flex-col gap-1 text-[11px] font-medium text-[var(--text-soft)]">
@@ -224,7 +224,7 @@ export default function ApplyToSessionPanel({
                   value={newApplySectionNo}
                   onChange={(e) => onChangeNewSectionNo(e.target.value)}
                   placeholder="Ör: BÖLÜM 1"
-                  className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-2.5 py-2 text-xs text-[var(--text)]"
+                  className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2 text-xs text-[var(--text)]"
                 />
               </label>
             </div>

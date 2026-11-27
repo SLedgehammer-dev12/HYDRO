@@ -88,7 +88,7 @@ export function SectionFormsModal({
                 {formsQuery.data.missing_required_forms.map((m) => (
                   <span
                     key={m.form_code}
-                    className="rounded border border-[var(--border)] bg-[var(--surface-1)] px-2 py-0.5 text-[11px]"
+                    className="rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-0.5 text-[11px]"
                   >
                     {m.form_title} ({m.botas_code})
                   </span>

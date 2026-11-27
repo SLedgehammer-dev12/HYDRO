@@ -24,6 +24,7 @@ import {
   useImportDesktopSnapshot,
   useMeta,
   useSafeSwitchSession,
+  useSaveSession,
   useSessions,
 } from "../hooks/queries";
 import { useAppStore } from "../store/useAppStore";
@@ -58,6 +59,7 @@ export function ReportsPage() {
 
   const sessionId = useAppStore((state) => state.sessionId);
   const projectId = useAppStore((state) => state.projectId);
+  const dirty = useAppStore((state) => state.dirty);
   const backend = useAppStore((state) => state.backend);
   const sessionApiReady = useAppStore((state) => state.sessionApiReady);
   const revision = useAppStore((state) => state.revision);
@@ -68,6 +70,7 @@ export function ReportsPage() {
   const { data: meta } = useMeta();
   const { data: sessions } = useSessions();
   const safeSwitchSession = useSafeSwitchSession();
+  const saveSession = useSaveSession();
   const importDesktopSnapshot = useImportDesktopSnapshot();
 
   const [generatedAt, setGeneratedAt] = useState(() => new Date());
@@ -94,17 +97,19 @@ export function ReportsPage() {
   }, [inputs, results, meta, generatedAt, history, isOffline]);
 
   const sectionsStatus = [
-    { label: "Geometri", ready: Boolean(results.geometry), detail: results.geometry ? fmt.m(results.geometry.total_length_m, 0) : "hesap yok" },
-    { label: "A katsayısı", ready: Boolean(inputs.air.a_micro_per_bar), detail: fmt.a(inputs.air.a_micro_per_bar) },
-    { label: "B katsayısı", ready: inputs.pressure.b_micro_per_c !== null, detail: fmt.b(inputs.pressure.b_micro_per_c) },
-    { label: "Hava testi", ready: Boolean(results.air), detail: results.air?.decision.status ?? "—" },
-    { label: "Basınç testi", ready: Boolean(results.pressure), detail: results.pressure?.decision.status ?? "—" },
-    { label: "Profil", ready: Boolean(results.profile), detail: results.profile?.decision.status ?? "—" },
-    { label: "Pig", ready: Boolean(results.pig), detail: results.pig?.status ?? "—" },
+    { label: "Geometri", ready: Boolean(results.geometry), detail: results.geometry ? fmt.m(results.geometry.total_length_m, 0) : "hesap yok", tab: "geometry" as const },
+    { label: "A katsayısı", ready: Boolean(inputs.air.a_micro_per_bar), detail: fmt.a(inputs.air.a_micro_per_bar), tab: "coefficients" as const },
+    { label: "B katsayısı", ready: inputs.pressure.b_micro_per_c !== null, detail: fmt.b(inputs.pressure.b_micro_per_c), tab: "coefficients" as const },
+    { label: "Hava testi", ready: Boolean(results.air), detail: results.air?.decision.status ?? "—", tab: "air" as const },
+    { label: "Basınç testi", ready: Boolean(results.pressure), detail: results.pressure?.decision.status ?? "—", tab: "pressure" as const },
+    { label: "Profil", ready: Boolean(results.profile), detail: results.profile?.decision.status ?? "—", tab: "geometry" as const, scrollTarget: "saha" },
+    { label: "Pig", ready: Boolean(results.pig), detail: results.pig?.status ?? "—", tab: "geometry" as const, scrollTarget: "saha" },
     {
       label: "Saha kontrolü",
       ready: CHECK_DEFINITIONS.every((check) => inputs.checks[check.key]),
       detail: `${CHECK_DEFINITIONS.filter((check) => inputs.checks[check.key]).length}/${CHECK_DEFINITIONS.length}`,
+      tab: "geometry" as const,
+      scrollTarget: "saha",
     },
   ];
 
@@ -145,6 +150,13 @@ export function ReportsPage() {
       }
       if (!sessionId) {
         return;
+      }
+      if ((format === "pdf" || format === "xlsx") && dirty) {
+        try {
+          await saveSession.mutateAsync();
+        } catch {
+          return;
+        }
       }
       const { blob, filename } = await api.exportSession(sessionId, format, { includeRawOcr });
       const link = document.createElement("a");
@@ -332,6 +344,13 @@ export function ReportsPage() {
         }
       />
 
+      {dirty && !isOffline && sessionId ? (
+        <InlineNotice tone="warning" title="Kaydedilmemiş değişiklikler var">
+          Resmî PDF veya Excel raporu indirilirken ekrandaki güncel değişiklikler önce sunucuya
+          kaydedilir, ardından rapor üretilir.
+        </InlineNotice>
+      ) : null}
+
       <div className="tabs" role="tablist" aria-label="Rapor ve yedekleme görünümleri">
         {(
           [
@@ -437,15 +456,26 @@ export function ReportsPage() {
             >
               <ul className="grid gap-1.5">
                 {sectionsStatus.map((section) => (
-                  <li
-                    key={section.label}
-                    className="flex items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1.5"
-                  >
-                    <span className="flex items-center gap-1.5 text-[11px]">
-                      <span className={section.ready ? "status-dot tone-pass" : "status-dot tone-pending"} aria-hidden />
-                      {section.label}
-                    </span>
-                    <span className="max-w-[55%] truncate text-right font-mono text-[10px] text-[var(--text-faint)]">{section.detail}</span>
+                  <li key={section.label}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if ("scrollTarget" in section && section.scrollTarget) {
+                          useAppStore.getState().setPendingScrollTarget(section.scrollTarget);
+                        }
+                        setTab(section.tab);
+                      }}
+                      className="flex w-full items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1.5 text-left transition-colors hover:border-[var(--primary)] hover:bg-[var(--surface-3)]"
+                    >
+                      <span className="flex items-center gap-1.5 text-[11px]">
+                        <span className={section.ready ? "status-dot tone-pass" : "status-dot tone-pending"} aria-hidden />
+                        {section.label}
+                      </span>
+                      <span className="flex max-w-[60%] items-center gap-1.5 font-mono text-[11px] text-[var(--text-faint)]">
+                        <span className="truncate">{section.detail}</span>
+                        <ArrowRight size={11} aria-hidden className="shrink-0 text-[var(--primary)]" />
+                      </span>
+                    </button>
                   </li>
                 ))}
               </ul>

@@ -54,11 +54,13 @@ export function TopBar({
   const backend = useAppStore((state) => state.backend);
   const sessionApiReady = useAppStore((state) => state.sessionApiReady);
   const rightPanelOpen = useAppStore((state) => state.rightPanelOpen);
+  const rightDrawerOpen = useAppStore((state) => state.rightDrawerOpen);
   const desktopSidebarOpen = useAppStore((state) => state.desktopSidebarOpen);
   const setTheme = useAppStore((state) => state.setTheme);
   const toggleSidebar = useAppStore((state) => state.toggleSidebar);
   const toggleDesktopSidebar = useAppStore((state) => state.toggleDesktopSidebar);
   const toggleRightPanel = useAppStore((state) => state.toggleRightPanel);
+  const toggleRightDrawer = useAppStore((state) => state.toggleRightDrawer);
   const setTab = useAppStore((state) => state.setTab);
   const setSessionMeta = useAppStore((state) => state.setSessionMeta);
   const setSessionName = useAppStore((state) => state.setSessionName);
@@ -87,9 +89,12 @@ export function TopBar({
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [confirmNew, setConfirmNew] = useState(false);
+  const [pendingSwitchId, setPendingSwitchId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState(sessionName);
   const [switching, setSwitching] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
+  const pickerTriggerRef = useRef<HTMLButtonElement>(null);
+  const listboxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setDraftName(sessionName);
@@ -100,12 +105,29 @@ export function TopBar({
     const onClick = (event: MouseEvent) => {
       if (!pickerRef.current?.contains(event.target as Node)) setPickerOpen(false);
     };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setPickerOpen(false);
+        pickerTriggerRef.current?.focus();
+      }
+    };
     document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("keydown", onKeyDown);
+    };
   }, [pickerOpen]);
 
-  async function selectSession(id: string) {
+  async function selectSession(id: string, force = false) {
     setPickerOpen(false);
+    if (!id) return;
+    if (id === sessionId) return;
+    if (!force && dirty) {
+      setPendingSwitchId(id);
+      return;
+    }
     const item = sessions?.find((session) => session.id === id);
     if (!item) return;
     if (backend !== "online" || item.id.startsWith("demo-") || sessionApiReady === false) {
@@ -190,9 +212,10 @@ export function TopBar({
 
           <div className="relative min-w-0" ref={pickerRef}>
             <button
+              ref={pickerTriggerRef}
               type="button"
               className="flex h-9 min-w-0 max-w-[190px] items-center gap-2 rounded-xl border border-[var(--border-strong)] bg-[var(--surface-2)] px-2.5 py-1 text-left transition-colors hover:border-[var(--primary)] hover:bg-[var(--surface-3)] sm:max-w-[380px]"
-              aria-haspopup="listbox"
+              aria-haspopup="dialog"
               aria-expanded={pickerOpen}
               onClick={() => setPickerOpen((value) => !value)}
             >
@@ -218,7 +241,7 @@ export function TopBar({
                   {switching ? "Yükleniyor…" : sessionName}
                 </span>
                 {dirty ? (
-                  <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] font-semibold tone-warning">
+                  <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-semibold tone-warning">
                     <span className="size-1.5 rounded-full bg-current" aria-hidden />
                     <span className="hidden md:inline">Kaydedilmedi</span>
                   </span>
@@ -230,7 +253,7 @@ export function TopBar({
             {pickerOpen ? (
               <div
                 className="absolute left-0 top-[calc(100%+8px)] z-50 w-[min(420px,calc(100vw-24px))] overflow-hidden rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] shadow-2xl"
-                role="listbox"
+                role="dialog"
                 aria-label="Test Bölümü seçici"
               >
                 <div className="border-b border-[var(--border)] p-2.5">
@@ -264,7 +287,27 @@ export function TopBar({
                     </Button>
                   </div>
                 </div>
-                <div className="max-h-[280px] overflow-y-auto scroll-thin p-1.5">
+                <div
+                  ref={listboxRef}
+                  role="listbox"
+                  aria-label="Test Bölümleri"
+                  tabIndex={-1}
+                  className="max-h-[280px] overflow-y-auto scroll-thin p-1.5"
+                  onKeyDown={(event) => {
+                    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+                    const options = Array.from(
+                      listboxRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? [],
+                    );
+                    if (!options.length) return;
+                    event.preventDefault();
+                    const currentIdx = options.indexOf(document.activeElement as HTMLButtonElement);
+                    const nextIdx =
+                      event.key === "ArrowDown"
+                        ? (currentIdx + 1) % options.length
+                        : (currentIdx - 1 + options.length) % options.length;
+                    options[nextIdx]?.focus();
+                  }}
+                >
                   {(sessions ?? []).map((session) => (
                     <button
                       key={session.id}
@@ -291,7 +334,7 @@ export function TopBar({
                           <span className="truncate text-[12.5px] font-medium">{session.name}</span>
                           {session.id === sessionId ? <Check size={13} className="tone-pass" /> : null}
                         </span>
-                        <span className="mt-0.5 block text-[10.5px] text-[var(--text-faint)]">
+                        <span className="mt-0.5 block text-[11px] text-[var(--text-faint)]">
                           {session.status} · rev. {session.revision} · {relativeTime(session.updated_at)}
                         </span>
                       </span>
@@ -327,7 +370,7 @@ export function TopBar({
               >
                 <Search size={12} aria-hidden />
                 <span>Ara</span>
-                <kbd className="rounded border border-[var(--border)] bg-[var(--surface-1)] px-1 font-mono text-[9.5px]">
+                <kbd className="rounded border border-[var(--border)] bg-[var(--surface)] px-1 font-mono text-[11px]">
                   ⌘K
                 </kbd>
               </button>
@@ -451,13 +494,27 @@ export function TopBar({
             </IconButton>
 
             <IconButton
-              label={rightPanelOpen ? "Canlı özet panelini gizle" : "Canlı özet panelini göster"}
-              className={
-                tab === "forms" || tab === "ocr" || tab === "projects" ? "hidden" : "hidden 2xl:grid"
+              label={
+                (typeof window !== "undefined" && window.innerWidth < 1536 ? rightDrawerOpen : rightPanelOpen)
+                  ? "Canlı özet panelini gizle"
+                  : "Canlı özet panelini göster"
               }
-              onClick={toggleRightPanel}
+              className={
+                tab === "forms" || tab === "ocr" || tab === "projects" ? "hidden" : "grid"
+              }
+              onClick={() => {
+                if (typeof window !== "undefined" && window.innerWidth < 1536) {
+                  toggleRightDrawer();
+                } else {
+                  toggleRightPanel();
+                }
+              }}
             >
-              {rightPanelOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
+              {(typeof window !== "undefined" && window.innerWidth < 1536 ? rightDrawerOpen : rightPanelOpen) ? (
+                <PanelRightClose size={18} />
+              ) : (
+                <PanelRightOpen size={18} />
+              )}
             </IconButton>
           </div>
         </div>
@@ -475,6 +532,24 @@ export function TopBar({
         confirmLabel="Yeni Bölüm Aç"
         onConfirm={createNew}
         onClose={() => setConfirmNew(false)}
+      />
+
+      <ConfirmDialog
+        open={pendingSwitchId !== null}
+        title="Kaydedilmemiş değişiklikler var"
+        message={
+          <span>
+            Başka bir Test Bölümüne geçerseniz sunucuya kaydedilmemiş mevcut değişiklikler kaybolur.
+          </span>
+        }
+        confirmLabel="Kaydetmeden geç"
+        danger
+        onConfirm={() => {
+          const nextId = pendingSwitchId;
+          setPendingSwitchId(null);
+          if (nextId) void selectSession(nextId, true);
+        }}
+        onClose={() => setPendingSwitchId(null)}
       />
     </>
   );

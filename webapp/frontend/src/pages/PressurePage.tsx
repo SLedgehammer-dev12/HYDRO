@@ -48,6 +48,9 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
   const saveResult = useSaveTestResult();
   const [aPrepError, setAPrepError] = useState<string | null>(null);
   const [bPrepError, setBPrepError] = useState<string | null>(null);
+  const [derivePa, setDerivePa] = useState(false);
+  const [pInitial, setPInitial] = useState<number | null>(null);
+  const [pFinal, setPFinal] = useState<number | null>(null);
   useEvaluateShortcut(evaluate);
 
   function prepareAB() {
@@ -194,6 +197,29 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
       },
     });
   }
+
+  function setPressures(initial: number | null, final: number | null, derive: boolean) {
+    setPInitial(initial);
+    setPFinal(final);
+    setDerivePa(derive);
+    if (derive) {
+      patchInputs({
+        pressure: {
+          actual_pressure_change_bar:
+            initial !== null && final !== null ? round(initial - final, 3) : null,
+        },
+      });
+    }
+  }
+
+  const paDirectionHint =
+    pa === null
+      ? "Pa = Pilk − Pson"
+      : pa > 0
+        ? `Basınç düşüşü (+${num(pa, 3)} bar)`
+        : pa < 0
+          ? `Basınç artışı (${num(pa, 3)} bar)`
+          : "Basınç değişimi yok (0 bar)";
 
   function buildRequest(): PressureVariationRequest | null {
     if (!sections.length || !aValue || bValue === null || deltaT === null || pa === null) return null;
@@ -432,8 +458,10 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <span className="field-label">Sıcaklık değişimi</span>
-                  <p className="mt-0.5 text-[10.5px] text-[var(--text-faint)]">
-                    ΔT = Tilk − Tson. Tilk/Tson girilirse ΔT otomatik hesaplanır ve kilitlenir.
+                  <p className="mt-0.5 text-[11px] text-[var(--text-faint)]">
+                    {inputs.pressure.derive_delta_t
+                      ? "Tilk ve Tson değerlerinden ΔT = Tilk − Tson otomatik hesaplanır ve kilitlenir."
+                      : "ΔT = Tilk − Tson değerini doğrudan girin (sıcaklık düşüşünde +, artışında −)."}
                   </p>
                 </div>
                 <div className="seg-control" role="group" aria-label="Sıcaklık değişimi modu">
@@ -468,26 +496,76 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
                 </div>
               </div>
 
-              <FieldGrid cols={2} className="mt-2">
-                <NumberField
-                  label="Başlangıç sıcaklığı Tilk"
-                  unit="°C"
-                  value={inputs.pressure.t_initial_c}
-                  onChange={(value) =>
-                    setTemperatures(value, inputs.pressure.t_final_c, inputs.pressure.derive_delta_t)
-                  }
-                  help="İsteğe bağlı; girilirse ΔT = Tilk − Tson otomatik hesaplanır."
-                />
-                <NumberField
-                  label="Bitiş sıcaklığı Tson"
-                  unit="°C"
-                  value={inputs.pressure.t_final_c}
-                  onChange={(value) =>
-                    setTemperatures(inputs.pressure.t_initial_c, value, inputs.pressure.derive_delta_t)
-                  }
-                  help="İsteğe bağlı; girilirse ΔT = Tilk − Tson otomatik hesaplanır."
-                />
-              </FieldGrid>
+              {inputs.pressure.derive_delta_t ? (
+                <FieldGrid cols={2} className="mt-2">
+                  <NumberField
+                    label="Başlangıç sıcaklığı Tilk"
+                    unit="°C"
+                    value={inputs.pressure.t_initial_c}
+                    onChange={(value) =>
+                      setTemperatures(value, inputs.pressure.t_final_c, true)
+                    }
+                    help="ΔT = Tilk − Tson için başlangıç sıcaklığı."
+                  />
+                  <NumberField
+                    label="Bitiş sıcaklığı Tson"
+                    unit="°C"
+                    value={inputs.pressure.t_final_c}
+                    onChange={(value) =>
+                      setTemperatures(inputs.pressure.t_initial_c, value, true)
+                    }
+                    help="ΔT = Tilk − Tson için bitiş sıcaklığı."
+                  />
+                </FieldGrid>
+              ) : null}
+
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border)] pt-3">
+                <div>
+                  <span className="field-label">Basınç değişimi (Pa)</span>
+                  <p className="mt-0.5 text-[11px] text-[var(--text-faint)]">
+                    {derivePa
+                      ? "Pilk ve Pson değerlerinden Pa = Pilk − Pson otomatik hesaplanır ve kilitlenir."
+                      : "Pa = Pilk − Pson değerini doğrudan girin (düşüşte +, artışta −)."}
+                  </p>
+                </div>
+                <div className="seg-control" role="group" aria-label="Basınç değişimi modu">
+                  <button
+                    type="button"
+                    className="seg-btn"
+                    aria-pressed={!derivePa}
+                    onClick={() => setPressures(pInitial, pFinal, false)}
+                  >
+                    Pa doğrudan gir
+                  </button>
+                  <button
+                    type="button"
+                    className="seg-btn"
+                    aria-pressed={derivePa}
+                    onClick={() => setPressures(pInitial, pFinal, true)}
+                  >
+                    Pilk − Pson ile türet
+                  </button>
+                </div>
+              </div>
+
+              {derivePa ? (
+                <FieldGrid cols={2} className="mt-2">
+                  <NumberField
+                    label="Başlangıç basıncı Pilk"
+                    unit="bar"
+                    value={pInitial}
+                    onChange={(value) => setPressures(value, pFinal, true)}
+                    help="Pa = Pilk − Pson için test başlangıç basıncı."
+                  />
+                  <NumberField
+                    label="Bitiş basıncı Pson"
+                    unit="bar"
+                    value={pFinal}
+                    onChange={(value) => setPressures(pInitial, value, true)}
+                    help="Pa = Pilk − Pson için test bitiş basıncı."
+                  />
+                </FieldGrid>
+              ) : null}
 
               <div className="mt-3 grid grid-cols-2 gap-2">
                 {inputs.pressure.derive_delta_t ? (
@@ -504,7 +582,7 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
                       hint={deltaHint}
                     />
                     {deltaError ? (
-                      <p className="mt-1 text-[10.5px] font-medium text-[var(--danger)]" role="alert">
+                      <p className="mt-1 text-[11px] font-medium text-[var(--danger)]" role="alert">
                         {deltaError}
                       </p>
                     ) : null}
@@ -519,18 +597,39 @@ export function PressurePage({ embedded = false }: { embedded?: boolean } = {}) 
                     help="-20…+20 °C"
                   />
                 )}
-                <NumberField
-                  label="Fiili basınç değişimi Pa"
-                  unit="bar"
-                  value={pa}
-                  onChange={(value) => patchInputs({ pressure: { actual_pressure_change_bar: value } })}
-                  error={paError}
-                  help="Pa = Pilk − Pson"
-                />
+                {derivePa ? (
+                  <div>
+                    <ReadonlyValue
+                      label="Pa (türetilmiş)"
+                      unit="bar"
+                      value={
+                        <span className="flex items-center justify-end gap-1.5">
+                          <Lock size={11} className="text-[var(--text-faint)]" aria-hidden />
+                          {num(pa, 3)}
+                        </span>
+                      }
+                      hint={paDirectionHint}
+                    />
+                    {paError ? (
+                      <p className="mt-1 text-[11px] font-medium text-[var(--danger)]" role="alert">
+                        {paError}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <NumberField
+                    label="Fiili basınç değişimi Pa"
+                    unit="bar"
+                    value={pa}
+                    onChange={(value) => patchInputs({ pressure: { actual_pressure_change_bar: value } })}
+                    error={paError}
+                    help={paDirectionHint}
+                  />
+                )}
               </div>
 
               <div className="mt-2 rounded-lg border border-[var(--info-border)] bg-[var(--info-bg)] px-2.5 py-2">
-                <p className="flex items-start gap-1.5 text-[10.5px] leading-relaxed text-[var(--text-muted)]">
+                <p className="flex items-start gap-1.5 text-[11px] leading-relaxed text-[var(--text-muted)]">
                   <Info size={12} className="mt-0.5 shrink-0 text-[var(--info)]" aria-hidden />
                   <span>
                     <span className="font-mono">ΔT = Tilk − Tson</span>,{" "}

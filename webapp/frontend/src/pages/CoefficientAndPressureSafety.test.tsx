@@ -90,5 +90,16 @@ describe("Slice 5 UI safety, B=0, 0 C notice, and Tilk/Tson derivation", () => {
     const tilkInput = screen.getByLabelText(/Başlangıç sıcaklığı Tilk/);
     await user.clear(tilkInput);
     expect(useAppStore.getState().inputs.pressure.delta_t_c).toBeNull();
+
+    // Switching to direct ΔT mode hides Tilk/Tson fields to prevent ignored-input mismatch
+    await user.click(screen.getByRole("button", { name: "ΔT doğrudan gir" }));
+    expect(screen.queryByLabelText(/Başlangıç sıcaklığı Tilk/)).not.toBeInTheDocument();
+
+    // Enabling Pilk - Pson derivation computes Pa = Pilk - Pson with signed direction feedback
+    await user.click(screen.getByRole("button", { name: "Pilk − Pson ile türet" }));
+    await user.type(screen.getByLabelText(/Başlangıç basıncı Pilk/), "82");
+    await user.type(screen.getByLabelText(/Bitiş basıncı Pson/), "76,05");
+    expect(useAppStore.getState().inputs.pressure.actual_pressure_change_bar).toBe(5.95);
+    expect(screen.getByText(/Basınç düşüşü \(\+5,95 bar\)/)).toBeInTheDocument();
   });
 });

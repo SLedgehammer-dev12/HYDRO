@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { AlertCircle, ChevronDown } from "lucide-react";
 import { formatInput, parseNumber } from "../../lib/format";
 import { cn } from "../../lib/utils";
@@ -97,8 +97,12 @@ export function NumberField({
   const [text, setText] = useState(() => formatInput(value, digits));
   const [focused, setFocused] = useState(false);
   const [localInvalid, setLocalInvalid] = useState(false);
+  const lastPropRef = useRef({ value, digits });
 
   useEffect(() => {
+    const changed = lastPropRef.current.value !== value || lastPropRef.current.digits !== digits;
+    if (!changed) return;
+    lastPropRef.current = { value, digits };
     if (!focused) {
       setText(formatInput(value, digits));
       setLocalInvalid(false);
@@ -154,8 +158,25 @@ export function NumberField({
         onFocus={() => setFocused(true)}
         onBlur={() => {
           setFocused(false);
-          setText(formatInput(value, digits));
+          const trimmed = text.trim();
+          if (!trimmed) {
+            setLocalInvalid(false);
+            setText("");
+            return;
+          }
+          const parsed = parseNumber(text);
+          if (parsed === null) {
+            setLocalInvalid(false);
+            setText("");
+            return;
+          }
+          if (Number.isNaN(parsed)) {
+            setLocalInvalid(true);
+            return;
+          }
           setLocalInvalid(false);
+          if (parsed !== value) onChange(parsed);
+          setText(formatInput(parsed, digits));
         }}
         onChange={(event) => handleChange(event.target.value)}
       />

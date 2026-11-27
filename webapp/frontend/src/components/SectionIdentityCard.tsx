@@ -295,7 +295,7 @@ export function SectionIdentityCard() {
                     : ""}
                 </span>
                 {segmentSummary.issues.length > 0 ? (
-                  <span className="text-[var(--danger-text)]">
+                  <span className="text-[var(--danger)]">
                     {segmentSummary.issues[0]}
                   </span>
                 ) : null}

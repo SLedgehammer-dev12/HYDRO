@@ -122,5 +122,13 @@ describe("GeometryPage per-segment SMYS and material grade", () => {
     fireEvent.blur(smysInput2);
     expect(useAppStore.getState().inputs.segments[1].smys_mpa).toBeNull();
     expect(useAppStore.getState().results.geometry).toBeUndefined();
+
+    // SegmentNumberCell preserves invalid input on blur and flags aria-invalid instead of silent revert
+    const lengthInput1 = screen.getByLabelText("Segment 1 uzunluk") as HTMLInputElement;
+    fireEvent.change(lengthInput1, { target: { value: "abc" } });
+    fireEvent.blur(lengthInput1);
+    expect(lengthInput1.value).toBe("abc");
+    expect(lengthInput1).toHaveAttribute("aria-invalid", "true");
+    expect(useAppStore.getState().inputs.segments[0].length_m).toBe(600);
   });
 });

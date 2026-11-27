@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Command, FileText, FolderOpen, LayoutGrid, Moon, Plus, Search, Sun, Zap } from "lucide-react";
 import { BOTAS_FORM_NAV_ITEMS, VISIBLE_TABS } from "../../lib/constants";
 import type { BotasFormCode, TabKey } from "../../lib/types";
@@ -26,6 +27,10 @@ export function CommandPalette({ open, onClose, onOpenHelp }: CommandPaletteProp
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   const setTab = useAppStore((s) => s.setTab);
   const openForm = useAppStore((s) => s.openForm);
@@ -42,11 +47,74 @@ export function CommandPalette({ open, onClose, onOpenHelp }: CommandPaletteProp
   const { data: projects } = useProjects();
 
   useEffect(() => {
-    if (!open) return;
-    setQuery("");
-    setActiveIndex(0);
-    const id = window.setTimeout(() => inputRef.current?.focus(), 0);
-    return () => window.clearTimeout(id);
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    if (open) {
+      previousFocusRef.current =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      setQuery("");
+      setActiveIndex(0);
+      if (typeof dialog.showModal === "function") {
+        if (!dialog.open) dialog.showModal();
+      } else {
+        dialog.setAttribute("open", "");
+      }
+      const id = window.setTimeout(() => inputRef.current?.focus(), 0);
+      return () => window.clearTimeout(id);
+    }
+
+    if (typeof dialog.close === "function") {
+      if (dialog.open) dialog.close();
+    } else {
+      dialog.removeAttribute("open");
+    }
+    return undefined;
+  }, [open]);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    const handleClose = () => {
+      dialog.returnValue = "";
+      onCloseRef.current();
+      const prev = previousFocusRef.current;
+      previousFocusRef.current = null;
+      if (prev && prev.isConnected) {
+        window.setTimeout(() => prev.focus(), 0);
+      }
+    };
+    dialog.addEventListener("close", handleClose);
+
+    let cleanupFallback: (() => void) | undefined;
+    if (typeof HTMLDialogElement !== "undefined" && !("closedBy" in HTMLDialogElement.prototype)) {
+      let pressedOutside = false;
+      const outside = (e: PointerEvent) => {
+        const r = dialog.getBoundingClientRect();
+        return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+      };
+      const onPointerDown = (e: PointerEvent) => {
+        pressedOutside = e.target === dialog && outside(e);
+      };
+      const onPointerUp = (e: PointerEvent) => {
+        if (pressedOutside && e.target === dialog && outside(e) && dialog.open) {
+          dialog.close();
+        }
+        pressedOutside = false;
+      };
+      dialog.addEventListener("pointerdown", onPointerDown);
+      dialog.addEventListener("pointerup", onPointerUp);
+      cleanupFallback = () => {
+        dialog.removeEventListener("pointerdown", onPointerDown);
+        dialog.removeEventListener("pointerup", onPointerUp);
+      };
+    }
+
+    return () => {
+      dialog.removeEventListener("close", handleClose);
+      cleanupFallback?.();
+    };
   }, [open]);
 
   const items = useMemo<PaletteItem[]>(() => {
@@ -156,7 +224,7 @@ export function CommandPalette({ open, onClose, onOpenHelp }: CommandPaletteProp
     return items.filter((item) => item.keywords.includes(q)).slice(0, 20);
   }, [items, query]);
 
-  if (!open) return null;
+  if (!open || typeof document === "undefined") return null;
 
   const safeIndex = filtered.length > 0 ? Math.min(activeIndex, filtered.length - 1) : 0;
 
@@ -166,20 +234,14 @@ export function CommandPalette({ open, onClose, onOpenHelp }: CommandPaletteProp
     void item.run();
   };
 
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center px-3 pt-[12vh]"
-      role="dialog"
-      aria-modal="true"
+  return createPortal(
+    <dialog
+      ref={dialogRef}
       aria-label="Hızlı geçiş ve komut paleti"
+      {...({ closedby: "any" } as Record<string, unknown>)}
+      className="modal-dialog modal-palette overflow-hidden"
     >
-      <button
-        type="button"
-        aria-label="Komut paletini kapat"
-        onClick={onClose}
-        className="fixed inset-0 cursor-default border-0 bg-black/55 backdrop-blur-[2px]"
-      />
-      <div className="relative z-10 w-full max-w-xl overflow-hidden rounded-2xl border border-[var(--border-strong)] bg-[var(--surface-1)] shadow-2xl">
+      <div className="w-full overflow-hidden bg-[var(--surface)]">
         <div className="flex items-center gap-2.5 border-b border-[var(--border)] px-4 py-3">
           <Search size={16} className="shrink-0 text-[var(--primary)]" aria-hidden="true" />
           <input
@@ -193,7 +255,13 @@ export function CommandPalette({ open, onClose, onOpenHelp }: CommandPaletteProp
             onKeyDown={(event) => {
               if (event.key === "Escape") {
                 event.preventDefault();
-                onClose();
+                if (typeof dialogRef.current?.close === "function" && dialogRef.current.open) {
+                  dialogRef.current.close();
+                } else {
+                  onClose();
+                  previousFocusRef.current?.focus();
+                  previousFocusRef.current = null;
+                }
               } else if (event.key === "ArrowDown") {
                 event.preventDefault();
                 setActiveIndex((i) => (filtered.length ? (i + 1) % filtered.length : 0));
@@ -211,9 +279,22 @@ export function CommandPalette({ open, onClose, onOpenHelp }: CommandPaletteProp
             aria-label="Komut ve sayfa arama"
             className="w-full bg-transparent text-sm text-[var(--text)] placeholder:text-[var(--text-faint)] focus:outline-none"
           />
-          <kbd className="rounded border border-[var(--border)] bg-[var(--surface-2)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--text-faint)]">
+          <button
+            type="button"
+            onClick={() => {
+              if (typeof dialogRef.current?.close === "function" && dialogRef.current.open) {
+                dialogRef.current.close();
+              } else {
+                onClose();
+                previousFocusRef.current?.focus();
+                previousFocusRef.current = null;
+              }
+            }}
+            aria-label="Komut paletini kapat"
+            className="rounded border border-[var(--border)] bg-[var(--surface-2)] px-1.5 py-0.5 font-mono text-[11px] text-[var(--text-faint)] hover:border-[var(--border-strong)]"
+          >
             ESC
-          </kbd>
+          </button>
         </div>
 
         <div className="max-h-[56vh] overflow-y-auto p-2">
@@ -255,9 +336,9 @@ export function CommandPalette({ open, onClose, onOpenHelp }: CommandPaletteProp
                       <Icon size={15} className="shrink-0 opacity-80" aria-hidden="true" />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-xs font-semibold">{item.title}</p>
-                        <p className="truncate text-[10.5px] text-[var(--text-muted)]">{item.subtitle}</p>
+                        <p className="truncate text-[11px] text-[var(--text-muted)]">{item.subtitle}</p>
                       </div>
-                      <span className="shrink-0 rounded border border-[var(--border)] bg-[var(--surface-2)] px-1.5 py-0.5 text-[9.5px] text-[var(--text-faint)]">
+                      <span className="shrink-0 rounded border border-[var(--border)] bg-[var(--surface-2)] px-1.5 py-0.5 text-[11px] text-[var(--text-faint)]">
                         {item.group}
                       </span>
                     </button>
@@ -268,13 +349,14 @@ export function CommandPalette({ open, onClose, onOpenHelp }: CommandPaletteProp
           )}
         </div>
 
-        <footer className="flex items-center justify-between border-t border-[var(--border)] bg-[var(--surface-2)] px-4 py-2 text-[10px] text-[var(--text-faint)]">
+        <footer className="flex items-center justify-between border-t border-[var(--border)] bg-[var(--surface-2)] px-4 py-2 text-[11px] text-[var(--text-faint)]">
           <span className="inline-flex items-center gap-1">
             <Command size={11} aria-hidden="true" />↑↓ gezin · Enter aç · Esc kapat
           </span>
           <span>Ctrl/⌘ + K</span>
         </footer>
       </div>
-    </div>
+    </dialog>,
+    document.body,
   );
 }

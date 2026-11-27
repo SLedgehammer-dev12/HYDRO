@@ -117,7 +117,6 @@ export default function App() {
   const activeFormCode = useAppStore((state) => state.activeFormCode);
   const setActiveFormCode = useAppStore((state) => state.setActiveFormCode);
   const theme = useAppStore((state) => state.theme);
-  const rightPanelOpen = useAppStore((state) => state.rightPanelOpen);
   const updateModalOpen = useAppStore((state) => state.updateModalOpen);
   const revisionConflict = useAppStore((state) => state.revisionConflict);
   const tourActive = useAppStore((state) => state.tourActive);
@@ -335,8 +334,14 @@ export default function App() {
   })();
 
   return (
-    <div className="min-h-screen overflow-x-clip">
-      <div className="flex min-h-screen">
+    <div className="min-h-dvh overflow-x-clip">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[100] focus:rounded-lg focus:bg-[var(--primary)] focus:px-3 focus:py-2 focus:text-xs focus:font-semibold focus:text-[var(--primary-ink)] focus:shadow-lg"
+      >
+        Ana içeriğe atla
+      </a>
+      <div className="flex min-h-dvh">
         <Sidebar />
         <div className="flex min-w-0 flex-1 flex-col">
           <TopBar
@@ -348,11 +353,11 @@ export default function App() {
           ) : null}
 
           <div className="mx-auto flex w-full max-w-[1500px] flex-1 gap-5 px-3 py-4 sm:px-4 sm:py-5">
-            <main className="min-w-0 flex-1">
+            <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 focus:outline-none">
               {backend !== "online" ? (
                 <div
                   role="status"
-                  className="mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200"
+                  className="mb-3 rounded-lg border border-[var(--warning-border)] bg-[var(--warning-bg)] px-3 py-2 text-xs text-[var(--warning)]"
                 >
                   <strong className="font-semibold">DEMO / ÇEVRİMDIŞI MOD</strong> — Sunucu bağlantısı yok;
                   hesaplamalar tarayıcı içinde çalışıyor, resmi PDF/XLSX çıktısı devre dışıdır.
@@ -370,7 +375,7 @@ export default function App() {
                 </div>
               </PageErrorBoundary>
 
-              <footer className="mt-6 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border)] pt-3 text-[10px] text-[var(--text-faint)]">
+              <footer className="mt-6 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border)] pt-3 text-[11px] text-[var(--text-faint)]">
                 <span>
                   HYDRO · Hidrostatik Test Değerlendirme · sunucu:{" "}
                   <span className="font-mono">{backend === "online" ? "bağlı" : "çevrimdışı"}</span>
@@ -379,7 +384,7 @@ export default function App() {
               </footer>
             </main>
 
-            {rightPanelOpen && tab !== "forms" && tab !== "ocr" && tab !== "projects" ? (
+            {tab !== "forms" && tab !== "ocr" && tab !== "projects" ? (
               <RightPanel />
             ) : null}
           </div>

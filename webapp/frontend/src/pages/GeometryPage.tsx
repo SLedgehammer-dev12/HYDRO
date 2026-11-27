@@ -44,22 +44,43 @@ function SegmentNumberCell({
   label: string;
 }) {
   const [text, setText] = useState(() => formatInput(value));
-  useEffect(() => setText(formatInput(value)), [value]);
+  const [localInvalid, setLocalInvalid] = useState(false);
+
+  useEffect(() => {
+    setText(formatInput(value));
+    setLocalInvalid(false);
+  }, [value]);
 
   const commit = () => {
-    const parsed = parseNumber(text);
-    if (parsed !== null && Number.isFinite(parsed)) onChange(parsed);
-    setText(formatInput(value));
+    const trimmed = text.trim();
+    if (!trimmed) {
+      setLocalInvalid(true);
+      return;
+    }
+    const parsed = parseNumber(trimmed);
+    if (parsed !== null && Number.isFinite(parsed)) {
+      setLocalInvalid(false);
+      onChange(parsed);
+      setText(formatInput(parsed));
+      return;
+    }
+    setLocalInvalid(true);
   };
+
+  const hasInvalid = Boolean(invalid || localInvalid);
 
   return (
     <input
       className="table-input"
       inputMode="decimal"
       aria-label={label}
-      aria-invalid={invalid || undefined}
+      aria-invalid={hasInvalid || undefined}
+      title={localInvalid ? "Geçerli bir sayı girin." : undefined}
       value={text}
-      onChange={(event) => setText(event.target.value)}
+      onChange={(event) => {
+        setText(event.target.value);
+        if (localInvalid) setLocalInvalid(false);
+      }}
       onBlur={commit}
       onKeyDown={(event) => {
         if (event.key === "Enter" && !event.nativeEvent.isComposing) {
@@ -965,7 +986,9 @@ export function GeometryPage() {
         </>
       ) : null}
 
-      {geoTab === "field" ? <FieldPage embedded /> : null}
+      {geoTab === "field" ? (
+        <FieldPage embedded onOpenProfileTab={() => setGeoTab("profile")} />
+      ) : null}
 
       <ConfirmDialog
         open={confirmClearSegments}

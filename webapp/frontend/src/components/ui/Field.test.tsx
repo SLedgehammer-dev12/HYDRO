@@ -64,5 +64,10 @@ describe("Field controls accessibility", () => {
     await user.clear(numInput);
     await user.type(numInput, "12-3");
     expect(screen.getByRole("alert")).toHaveTextContent("Geçerli bir sayı girin");
+
+    await user.tab();
+    expect(numInput).toHaveValue("12-3");
+    expect(numInput).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("alert")).toHaveTextContent("Geçerli bir sayı girin");
   });
 });

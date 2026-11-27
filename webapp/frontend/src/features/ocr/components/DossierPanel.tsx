@@ -385,8 +385,8 @@ export default function DossierPanel({ analysisId, dossier, onCommitted }: Props
                       }}
                       className={`flex flex-col rounded-lg border p-2.5 text-left transition-colors ${
                         chosen
-                          ? "border-[var(--primary)] bg-[var(--surface-1)] ring-1 ring-[var(--primary)]"
-                          : "border-[var(--border)] bg-[var(--surface-1)] hover:border-[var(--border-strong)]"
+                          ? "border-[var(--primary)] bg-[var(--surface)] ring-1 ring-[var(--primary)]"
+                          : "border-[var(--border)] bg-[var(--surface)] hover:border-[var(--border-strong)]"
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
@@ -478,7 +478,7 @@ export default function DossierPanel({ analysisId, dossier, onCommitted }: Props
                   bırakılan formlar onaysız otomatik doldurulur; ancak zaten dolu olan formların üzerine yeni
                   dokümandaki kayıtların yazılması için onayınız gerekiyor:
                 </p>
-                <div className="max-h-40 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-2">
+                <div className="max-h-40 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface)] p-2">
                   <ul className="space-y-1 text-[11px]">
                     {activeConflicts.map((c, i) => (
                       <li
@@ -557,7 +557,7 @@ export default function DossierPanel({ analysisId, dossier, onCommitted }: Props
                   key={sec.section_no}
                   className={`rounded-xl border p-3.5 transition-colors ${
                     isActive
-                      ? "border-[var(--primary)] bg-[var(--surface-1)] ring-2 ring-[var(--primary)]"
+                      ? "border-[var(--primary)] bg-[var(--surface)] ring-2 ring-[var(--primary)]"
                       : "border-[var(--border)] bg-[var(--surface-2)] hover:border-[var(--border-strong)]"
                   }`}
                 >
@@ -666,7 +666,7 @@ export default function DossierPanel({ analysisId, dossier, onCommitted }: Props
 
         {/* 4. Seçili Bölümün Detaylı İncelemesi */}
         {activeSection ? (
-          <div className="space-y-4 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-4">
+          <div className="space-y-4 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] pb-3">
               <div>
                 <h4 className="text-sm font-bold text-[var(--text)]">
@@ -1068,7 +1068,7 @@ export default function DossierPanel({ analysisId, dossier, onCommitted }: Props
                   }}
                   className={`flex flex-col rounded-lg border p-2.5 text-left transition-colors ${
                     chosen
-                      ? "border-[var(--primary)] bg-[var(--surface-1)] ring-1 ring-[var(--primary)]"
+                      ? "border-[var(--primary)] bg-[var(--surface)] ring-1 ring-[var(--primary)]"
                       : "border-[var(--border)] bg-[var(--surface-2)] hover:border-[var(--border-strong)]"
                   }`}
                 >

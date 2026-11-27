@@ -71,6 +71,7 @@ export interface AppStore {
   sidebarOpen: boolean;
   desktopSidebarOpen: boolean;
   rightPanelOpen: boolean;
+  rightDrawerOpen: boolean;
   sceneScope: "section" | "project";
   onboardingDismissed: boolean;
   tourActive: boolean;
@@ -127,6 +128,8 @@ export interface AppStore {
   toggleSidebar: () => void;
   toggleDesktopSidebar: () => void;
   toggleRightPanel: () => void;
+  setRightDrawerOpen: (open: boolean) => void;
+  toggleRightDrawer: () => void;
   setSceneScope: (scope: "section" | "project") => void;
 
   setBackend: (mode: BackendMode, health?: HealthResponse | null) => void;
@@ -173,6 +176,7 @@ export const useAppStore = create<AppStore>()(
       theme: "dark",
       sidebarOpen: false,
       desktopSidebarOpen: true,
+      rightDrawerOpen: false,
       rightPanelOpen: false,
       sceneScope: "section",
       onboardingDismissed: false,
@@ -377,6 +381,8 @@ export const useAppStore = create<AppStore>()(
       toggleDesktopSidebar: () =>
         set((state) => ({ desktopSidebarOpen: !state.desktopSidebarOpen })),
       toggleRightPanel: () => set((state) => ({ rightPanelOpen: !state.rightPanelOpen })),
+      setRightDrawerOpen: (rightDrawerOpen) => set({ rightDrawerOpen }),
+      toggleRightDrawer: () => set((state) => ({ rightDrawerOpen: !state.rightDrawerOpen })),
       setSceneScope: (sceneScope) => set({ sceneScope }),
 
       setBackend: (backend, health) =>

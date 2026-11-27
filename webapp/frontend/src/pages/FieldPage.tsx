@@ -67,7 +67,7 @@ function WindowBar({
           />
         ) : null}
       </div>
-      <div className="mt-1 flex justify-between font-mono text-[9.5px] text-[var(--text-faint)]">
+      <div className="mt-1 flex justify-between font-mono text-[11px] text-[var(--text-faint)]">
         <span>{num(low, 1)} bar</span>
         <span className="text-[var(--warning)]">min {num(min, 1)}</span>
         <span className="text-[var(--danger)]">max {num(max, 1)}</span>
@@ -77,7 +77,13 @@ function WindowBar({
   );
 }
 
-export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
+export function FieldPage({
+  embedded = false,
+  onOpenProfileTab,
+}: {
+  embedded?: boolean;
+  onOpenProfileTab?: () => void;
+} = {}) {
   const inputs = useAppStore((state) => state.inputs);
   const results = useAppStore((state) => state.results);
   const projectId = useAppStore((state) => state.projectId);
@@ -274,7 +280,7 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
       <Badge tone={profile ? (profile.feasible ? "pass" : "fail") : "pending"}>
         {profile ? (profile.feasible ? "Pencere uygun" : "Pencere uygun değil") : "Profil bekliyor"}
       </Badge>
-      <span className="text-[10.5px] text-[var(--text-faint)]">
+      <span className="text-[11px] text-[var(--text-faint)]">
         {checked}/{CHECK_DEFINITIONS.length} saha kontrolü
       </span>
       <span className="chip">{PUMP_LABELS[inputs.pump_location] ?? inputs.pump_location ?? "pompa seçilmedi"}</span>
@@ -489,11 +495,23 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
           icon={Mountain}
         >
           {embedded ? (
-            <p className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-muted)]">
-              Kotlar, dizayn basıncı, SMYS, Location Class ve pompa konumu yukarıdaki{" "}
-              <strong className="font-medium text-[var(--text-soft)]">Test bölümü profili</strong>{" "}
-              kartından düzenlenir.
-            </p>
+            <div className="space-y-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2.5 text-[11px] leading-relaxed text-[var(--text-muted)]">
+              <p>
+                Kotlar, dizayn basıncı, SMYS, Location Class ve pompa konumu{" "}
+                <strong className="font-medium text-[var(--text-soft)]">Kot &amp; Grafikler</strong>{" "}
+                sekmesindeki Test bölümü profili kartından düzenlenir.
+              </p>
+              <Button
+                size="sm"
+                icon={<ArrowRight size={13} />}
+                onClick={() => {
+                  if (onOpenProfileTab) onOpenProfileTab();
+                  else setTab("geometry");
+                }}
+              >
+                Profil girdilerini düzenle
+              </Button>
+            </div>
           ) : (
             <>
               <FieldGrid cols={2}>
@@ -800,7 +818,7 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
               />
             </FieldGrid>
             <div className="mt-3 flex items-center justify-between">
-              <span className="text-[10.5px] text-[var(--text-faint)]">
+              <span className="text-[11px] text-[var(--text-faint)]">
                 {pigLimit === null ? "Bu modda hız limiti tanımlı değildir (bilgi)." : "Limit aşılırsa durum kırmızıya döner."}
               </span>
               <Button
@@ -834,7 +852,7 @@ export function FieldPage({ embedded = false }: { embedded?: boolean } = {}) {
                   max={1}
                   tone={pig?.passed === false ? "fail" : "pass"}
                 />
-                <div className="mt-1 flex justify-between font-mono text-[9.5px] text-[var(--text-faint)]">
+                <div className="mt-1 flex justify-between font-mono text-[11px] text-[var(--text-faint)]">
                   <span>0</span>
                   <span>limit {num(pigLimit, 2)} m/s</span>
                 </div>

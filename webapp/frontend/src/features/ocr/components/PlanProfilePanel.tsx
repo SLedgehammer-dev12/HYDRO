@@ -513,7 +513,7 @@ export default function PlanProfilePanel() {
                       />
                       <label
                         htmlFor={appendInputId}
-                        className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-soft)] hover:border-[var(--primary)] hover:text-[var(--text)] [input:focus-visible+&]:outline [input:focus-visible+&]:outline-2 [input:focus-visible+&]:outline-offset-2 [input:focus-visible+&]:outline-[var(--focus)]"
+                        className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-soft)] hover:border-[var(--primary)] hover:text-[var(--text)] [input:focus-visible+&]:outline [input:focus-visible+&]:outline-2 [input:focus-visible+&]:outline-offset-2 [input:focus-visible+&]:outline-[var(--focus)]"
                       >
                         <Plus size={12} aria-hidden />
                         Başka Pafta Ekle
@@ -534,7 +534,7 @@ export default function PlanProfilePanel() {
                   {fileQueue.map((item, idx) => (
                     <li
                       key={item.id}
-                      className="flex items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-2.5 py-1.5 text-[11.5px]"
+                      className="flex items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-[11.5px]"
                     >
                       <span className="flex min-w-0 items-center gap-2">
                         <FileSpreadsheet size={13} className="shrink-0 text-[var(--text-muted)]" aria-hidden />
@@ -649,7 +649,7 @@ export default function PlanProfilePanel() {
             </div>
 
             {showNewProject || projectMode === "new" ? (
-              <div className="space-y-2 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-2.5">
+              <div className="space-y-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-2.5">
                 <TextField
                   label="Proje adı (yeni proje)"
                   value={newProjectName}
@@ -730,7 +730,7 @@ export default function PlanProfilePanel() {
             )}
 
             {scanResult?.detected_project_name ? (
-              <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-2.5 text-[11px]">
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-2.5 text-[11px]">
                 <div className="flex flex-wrap items-center justify-between gap-1.5">
                   <span className="font-semibold text-[var(--text)]">
                     Paftadan Okunan Proje:
@@ -911,7 +911,7 @@ export default function PlanProfilePanel() {
                           autoCapitalize="none"
                           spellCheck={false}
                           onChange={(e) => updateRow(idx, { section_no: e.target.value })}
-                          className="w-28 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 font-mono text-[12px] font-semibold"
+                          className="w-28 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 font-mono text-[12px] font-semibold"
                         />
                       </td>
                       <td className="py-2 pr-3">
@@ -923,7 +923,7 @@ export default function PlanProfilePanel() {
                           autoCapitalize="none"
                           spellCheck={false}
                           onChange={(e) => updateRow(idx, { start_kp: e.target.value })}
-                          className="w-24 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 font-mono text-[12px]"
+                          className="w-24 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 font-mono text-[12px]"
                         />
                       </td>
                       <td className="py-2 pr-3">
@@ -935,7 +935,7 @@ export default function PlanProfilePanel() {
                           autoCapitalize="none"
                           spellCheck={false}
                           onChange={(e) => updateRow(idx, { end_kp: e.target.value })}
-                          className="w-24 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 font-mono text-[12px]"
+                          className="w-24 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 font-mono text-[12px]"
                         />
                       </td>
                       <td className="py-2 pr-3 text-right font-mono font-medium">
@@ -962,7 +962,7 @@ export default function PlanProfilePanel() {
                           value={row.description}
                           aria-label={`Açıklama satır ${idx + 1}`}
                           onChange={(e) => updateRow(idx, { description: e.target.value })}
-                          className="w-full min-w-[200px] rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-[12px]"
+                          className="w-full min-w-[200px] rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-[12px]"
                         />
                       </td>
                       <td className="py-2 text-right">
@@ -970,7 +970,7 @@ export default function PlanProfilePanel() {
                           type="button"
                           onClick={() => removeRow(idx)}
                           aria-label={`Satır ${idx + 1} (${row.section_no}) sil`}
-                          className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-[var(--danger-bg)] hover:text-[var(--danger-text)]"
+                          className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-[var(--danger-bg)] hover:text-[var(--danger)]"
                           title="Satırı sil"
                         >
                           <Trash2 size={14} aria-hidden />

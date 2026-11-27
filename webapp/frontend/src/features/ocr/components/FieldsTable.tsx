@@ -192,7 +192,7 @@ export default function FieldsTable({
                   "rounded-full border px-2.5 py-1 text-[10.5px] font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]",
                   active
                     ? "border-[var(--primary)] bg-[var(--primary-soft)] text-[var(--primary)]"
-                    : "border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-muted)] hover:border-[var(--border-strong)] hover:text-[var(--text)]",
+                    : "border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)] hover:border-[var(--border-strong)] hover:text-[var(--text)]",
                 )}
               >
                 {item.label}
@@ -222,7 +222,7 @@ export default function FieldsTable({
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Alan veya ham metin ara..."
             aria-label="Alanlarda ara"
-            className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] py-1 pl-8 pr-2.5 text-[11px] text-[var(--text)] placeholder:text-[var(--text-faint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
+            className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] py-1 pl-8 pr-2.5 text-[11px] text-[var(--text)] placeholder:text-[var(--text-faint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
           />
         </label>
       </div>
@@ -242,7 +242,7 @@ export default function FieldsTable({
           <button
             type="button"
             onClick={applyAllPendingFixes}
-            className="rounded-md border border-[var(--warning-border)] bg-[var(--surface-1)] px-2.5 py-1 text-[10.5px] font-semibold text-[var(--warning)] transition hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
+            className="rounded-md border border-[var(--warning-border)] bg-[var(--surface)] px-2.5 py-1 text-[10.5px] font-semibold text-[var(--warning)] transition hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
           >
             Tüm Önerileri Uygula ({pendingFixes.length})
           </button>
@@ -441,7 +441,7 @@ export default function FieldsTable({
                         onClick={() => onPreviewPage(item.field.page!)}
                         aria-label={`Sayfa ${item.field.page} belgesini önizle`}
                         title={`Sayfa ${item.field.page} görselini aç`}
-                        className="inline-flex items-center gap-1 rounded border border-[var(--border)] bg-[var(--surface-1)] px-2 py-0.5 text-[11px] font-medium text-[var(--primary)] transition hover:border-[var(--primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
+                        className="inline-flex items-center gap-1 rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-0.5 text-[11px] font-medium text-[var(--primary)] transition hover:border-[var(--primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
                       >
                         <Eye size={11} aria-hidden="true" />
                         {item.field.page}

@@ -43,6 +43,26 @@ describe("Phase 3 UI ergonomics", () => {
     expect(useAppStore.getState().activeFormCode).toBe("pressure_test");
   });
 
+  it("CommandPalette closes on Escape and restores focus to opener", () => {
+    const onClose = vi.fn();
+    function Harness() {
+      return (
+        <div>
+          <button type="button" data-testid="palette-opener">
+            Aç
+          </button>
+          <CommandPalette open onClose={onClose} onOpenHelp={vi.fn()} />
+        </div>
+      );
+    }
+    render(wrapper(<Harness />));
+    const opener = screen.getByTestId("palette-opener");
+    opener.focus();
+    const input = screen.getByRole("searchbox", { name: /Komut ve sayfa arama/i });
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("DashboardPage marks Step 4 done when sessionStatus is completed and exposes OCR quick import", () => {
     useAppStore.setState({ sessionStatus: "completed" });
     render(wrapper(<DashboardPage />));

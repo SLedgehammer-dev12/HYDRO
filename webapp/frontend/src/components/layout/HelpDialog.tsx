@@ -6,7 +6,8 @@ import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
 
 const SHORTCUTS: Array<[string, string]> = [
-  ["Alt + 1…9", "Ana sekmeler arası geç (mühendislik sırasıyla)"],
+  ["Ctrl/Cmd + K", "Hızlı geçiş ve komut paleti"],
+  ["Alt + 1…9", "Ana sekmeler arası geç (menü sırasıyla)"],
   ["Ctrl/Cmd + S", "Aktif formu / Test Bölümünü kaydet"],
   ["Ctrl/Cmd + Enter", "Aktif testi / profili değerlendir"],
   ["Shift + ?", "Bu yardım penceresi"],

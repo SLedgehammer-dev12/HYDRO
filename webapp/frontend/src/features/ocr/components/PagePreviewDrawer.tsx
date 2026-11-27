@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight, Eye, Loader2, RotateCw, X, ZoomIn, ZoomOut } from "lucide-react";
 import { fetchAnalysisPagePreview, isAbortError, toOcrApiError } from "../ocrApi";
 
@@ -24,16 +25,65 @@ export default function PagePreviewDrawer({
   const [error, setError] = useState<string | null>(null);
   const [zoom, setZoom] = useState(100);
   const [rotation, setRotation] = useState(0);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const closeBtnRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        onClose();
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const prev = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+    if (typeof dialog.showModal === "function") {
+      if (!dialog.open) dialog.showModal();
+    } else {
+      dialog.setAttribute("open", "");
+    }
+    const focusTimer = window.setTimeout(() => closeBtnRef.current?.focus(), 0);
+
+    const handleClose = () => {
+      dialog.returnValue = "";
+      onCloseRef.current();
+    };
+    dialog.addEventListener("close", handleClose);
+
+    let cleanupFallback: (() => void) | undefined;
+    if (typeof HTMLDialogElement !== "undefined" && !("closedBy" in HTMLDialogElement.prototype)) {
+      let pressedOutside = false;
+      const outside = (e: PointerEvent) => {
+        const r = dialog.getBoundingClientRect();
+        return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+      };
+      const onPointerDown = (e: PointerEvent) => {
+        pressedOutside = e.target === dialog && outside(e);
+      };
+      const onPointerUp = (e: PointerEvent) => {
+        if (pressedOutside && e.target === dialog && outside(e) && dialog.open) {
+          dialog.close();
+        }
+        pressedOutside = false;
+      };
+      dialog.addEventListener("pointerdown", onPointerDown);
+      dialog.addEventListener("pointerup", onPointerUp);
+      cleanupFallback = () => {
+        dialog.removeEventListener("pointerdown", onPointerDown);
+        dialog.removeEventListener("pointerup", onPointerUp);
+      };
+    }
+
+    return () => {
+      window.clearTimeout(focusTimer);
+      dialog.removeEventListener("close", handleClose);
+      cleanupFallback?.();
+      if (typeof dialog.close === "function" && dialog.open) {
+        dialog.close();
+      }
+      if (prev && prev.isConnected) {
+        window.setTimeout(() => prev.focus(), 0);
       }
     };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+  }, []);
 
   useEffect(() => {
     if (demo) {
@@ -69,22 +119,16 @@ export default function PagePreviewDrawer({
 
   const maxPage = Math.max(1, pageCount || 1);
 
-  return (
-    <div
-      className="fixed inset-0 z-50 flex justify-end"
-      role="dialog"
-      aria-modal="true"
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <dialog
+      ref={dialogRef}
       aria-label={`Belge sayfa ${pageNo} önizlemesi`}
+      {...({ closedby: "any" } as Record<string, unknown>)}
+      className="drawer-dialog-right"
     >
-      <button
-        type="button"
-        aria-label="Önizleme arka planını kapat"
-        onClick={onClose}
-        className="flex-1 cursor-default border-0 bg-black/50 backdrop-blur-[2px]"
-      />
-      <aside
-        className="flex h-full w-full max-w-2xl flex-col border-l border-[var(--border)] bg-[var(--surface-1)] shadow-2xl"
-      >
+      <div className="flex h-full w-full flex-col bg-[var(--surface)]">
         <header className="flex flex-wrap items-center justify-between gap-2 border-b hairline px-4 py-3">
           <div className="flex items-center gap-2">
             <Eye size={16} className="text-[var(--primary)]" aria-hidden="true" />
@@ -145,8 +189,15 @@ export default function PagePreviewDrawer({
               <RotateCw size={14} aria-hidden="true" />
             </button>
             <button
+              ref={closeBtnRef}
               type="button"
-              onClick={onClose}
+              onClick={() => {
+                if (typeof dialogRef.current?.close === "function" && dialogRef.current.open) {
+                  dialogRef.current.close();
+                } else {
+                  onClose();
+                }
+              }}
               aria-label="Önizlemeyi kapat"
               className="ml-1 rounded-md border border-[var(--border)] p-1.5 text-[var(--text-soft)] hover:border-[var(--danger-border)] hover:text-[var(--danger)]"
             >
@@ -181,7 +232,8 @@ export default function PagePreviewDrawer({
             </div>
           ) : null}
         </div>
-      </aside>
-    </div>
+      </div>
+    </dialog>,
+    document.body,
   );
 }

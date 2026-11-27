@@ -147,7 +147,7 @@ export function DecisionStrip() {
                 {activeFormSpec.shortCode} · {activeFormSpec.shortTitle}
               </span>
               {activeFormRec?.findings?.length ? (
-                <span className="font-mono text-[10.5px] text-[var(--text-faint)]">
+                <span className="font-mono text-[11px] text-[var(--text-faint)]">
                   · {activeFormRec.findings[0].ref || activeFormRec.findings[0].title}
                 </span>
               ) : null}
@@ -156,14 +156,14 @@ export function DecisionStrip() {
             <>
               <span className="font-semibold">{active?.title ?? "Değerlendirme bekliyor"}</span>
               {active?.rule ? (
-                <span className="font-mono text-[10.5px] text-[var(--text-faint)]">· {active.rule}</span>
+                <span className="font-mono text-[11px] text-[var(--text-faint)]">· {active.rule}</span>
               ) : null}
             </>
           )}
         </span>
 
         {tab !== "forms" && typeof margin === "number" ? (
-          <span className="ml-auto flex items-center gap-1 text-[10.5px] text-[var(--text-faint)]">
+          <span className="ml-auto flex items-center gap-1 text-[11px] text-[var(--text-faint)]">
             Marj
             <span className={cn("font-mono font-semibold", `tone-${tone}`)}>
               {num(margin, 4)} {unit}
@@ -177,7 +177,7 @@ export function DecisionStrip() {
 
         <button
           type="button"
-          className="ml-auto inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap text-[10.5px] font-semibold text-[var(--primary)] hover:underline"
+          className="ml-auto inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap text-[11px] font-semibold text-[var(--primary)] hover:underline"
           onClick={() => {
             if (tab === "forms" && summary?.first_issue_form_code) {
               openForm(summary.first_issue_form_code as BotasFormCode);

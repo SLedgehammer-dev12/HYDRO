@@ -271,7 +271,7 @@ export function Sidebar() {
         <span className="flex min-w-0 items-center gap-1.5">
           <span
             className={cn(
-              "shrink-0 font-mono text-[9.5px] font-bold",
+              "shrink-0 font-mono text-[11px] font-bold",
               isActive ? "text-[var(--primary)]" : "text-[var(--text-faint)]",
             )}
           >
@@ -281,7 +281,7 @@ export function Sidebar() {
         </span>
         <span className="flex shrink-0 items-center gap-1">
           {item.hasDetailCalc ? (
-            <span className="rounded bg-[var(--surface-3)] px-1 py-0.5 text-[8.5px] font-bold uppercase text-[var(--primary)]">
+            <span className="rounded bg-[var(--surface-3)] px-1 py-0.5 text-[11px] font-bold uppercase text-[var(--primary)]">
               Hesap
             </span>
           ) : null}
@@ -338,7 +338,7 @@ export function Sidebar() {
             <p className="text-[17px] font-bold leading-none tracking-[-0.02em] text-[var(--text)]">
               HYDRO
             </p>
-            <p className="mt-1 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
+            <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
               Test Platformu
             </p>
           </div>
@@ -356,7 +356,7 @@ export function Sidebar() {
       <div className="min-h-0 flex-1 space-y-3.5 overflow-y-auto pb-2 pr-0.5 scroll-thin">
         {/* 1. Başlangıç */}
         <div>
-          <p className="px-2 pb-1 text-[10.5px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">
+          <p className="px-2 pb-1 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">
             Başlangıç
           </p>
           <div className="space-y-0.5">{startTabs.map((item) => renderNavButton(item))}</div>
@@ -364,7 +364,7 @@ export function Sidebar() {
 
         {/* 2. Denetim & Hesap */}
         <div>
-          <p className="px-2 pb-1 text-[10.5px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">
+          <p className="px-2 pb-1 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">
             Denetim &amp; Hesap
           </p>
           <div className="space-y-0.5">{auditAndCalcTabs.map((item) => renderNavButton(item))}</div>
@@ -378,13 +378,13 @@ export function Sidebar() {
             aria-expanded={formsExpanded}
             className="flex w-full items-center justify-between gap-1.5 rounded-lg px-1.5 py-1 text-left hover:bg-[var(--surface-3)]"
           >
-            <span className="flex items-center gap-1 text-[10px] font-extrabold uppercase tracking-[0.09em] text-[var(--text-soft)]">
+            <span className="flex items-center gap-1 text-[11px] font-extrabold uppercase tracking-[0.06em] text-[var(--text-soft)]">
               {formsExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
               Test Bölümü Formları
             </span>
             <span
               className={cn(
-                "rounded-full px-1.5 py-0.5 font-mono text-[9.5px] font-bold",
+                "rounded-full px-1.5 py-0.5 font-mono text-[11px] font-bold",
                 summary?.failed_forms?.length
                   ? "bg-[var(--danger-bg)] text-[var(--danger)]"
                   : summary?.complete
@@ -417,7 +417,7 @@ export function Sidebar() {
                     aria-pressed={formFilter === key}
                     onClick={() => setFormFilter(key)}
                     className={cn(
-                      "rounded-md border px-1.5 py-0.5 text-[9.5px] font-semibold transition-colors",
+                      "rounded-md border px-1.5 py-0.5 text-[11px] font-semibold transition-colors",
                       formFilter === key
                         ? "border-[var(--primary-border)] bg-[var(--primary-soft)] text-[var(--primary)]"
                         : "border-[var(--border)] bg-[var(--surface)] text-[var(--text-faint)] hover:text-[var(--text-soft)]",
@@ -429,7 +429,7 @@ export function Sidebar() {
               </div>
 
               {mandatoryForms.length === 0 ? (
-                <p className="px-2 py-2 text-center text-[10.5px] text-[var(--text-faint)]">
+                <p className="px-2 py-2 text-center text-[11px] text-[var(--text-faint)]">
                   {formFilter === "issues"
                     ? "Bulgu veya uyarı içeren form yok."
                     : "Eksik zorunlu form kalmadı."}
@@ -445,20 +445,20 @@ export function Sidebar() {
                   type="button"
                   onClick={() => setExtrasExpanded((prev) => !prev)}
                   aria-expanded={extrasExpanded}
-                  className="flex w-full items-center justify-between rounded-lg border border-dashed border-[var(--border-strong)] bg-[var(--surface)] px-2 py-1 text-[10px] font-semibold text-[var(--text-muted)] hover:text-[var(--text)]"
+                  className="flex w-full items-center justify-between rounded-lg border border-dashed border-[var(--border-strong)] bg-[var(--surface)] px-2 py-1 text-[11px] font-semibold text-[var(--text-muted)] hover:text-[var(--text)]"
                 >
                   <span className="flex items-center gap-1">
                     {extrasExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                     Ek Raporlar (5 doküman)
                   </span>
-                  <span className="font-mono text-[9.5px] text-[var(--primary)]">
+                  <span className="font-mono text-[11px] text-[var(--primary)]">
                     {summary?.supplementary_filled ?? 0} dolu
                   </span>
                 </button>
                 {extrasExpanded ? (
                   <div className="mt-1 space-y-0.5 pl-1">
                     {extraForms.length === 0 ? (
-                      <p className="px-2 py-1 text-[10px] text-[var(--text-faint)]">
+                      <p className="px-2 py-1 text-[11px] text-[var(--text-faint)]">
                         Seçili filtreye uyan ek form yok.
                       </p>
                     ) : (
@@ -473,7 +473,7 @@ export function Sidebar() {
 
         {/* 3. Çıktı & Araçlar */}
         <div>
-          <p className="px-2 pb-1 text-[10.5px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">
+          <p className="px-2 pb-1 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">
             Çıktı &amp; Araçlar
           </p>
           <div className="space-y-0.5">{outputTabs.map((item) => renderNavButton(item))}</div>
@@ -481,7 +481,7 @@ export function Sidebar() {
             className="mt-1.5 rounded-xl border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-2)_45%,transparent)] p-1"
             open={tab === "coefficients" || tab === "settings" ? true : undefined}
           >
-            <summary className="cursor-pointer list-none rounded-lg px-2 py-1 text-[10.5px] font-semibold text-[var(--text-muted)] hover:bg-[var(--surface-3)] hover:text-[var(--text)]">
+            <summary className="cursor-pointer list-none rounded-lg px-2 py-1 text-[11px] font-semibold text-[var(--text-muted)] hover:bg-[var(--surface-3)] hover:text-[var(--text)]">
               Gelişmiş &amp; Ayarlar
             </summary>
             <div className="mt-1 space-y-0.5">{advancedTabs.map((item) => renderNavButton(item))}</div>
@@ -491,7 +491,7 @@ export function Sidebar() {
 
       {/* Alt Sunucu & Güncelleme Yöneticisi Satırı */}
       <div className="shrink-0 flex items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-2">
-        <span className="flex min-w-0 items-center gap-1.5 text-[10.5px] font-semibold text-[var(--text-muted)]">
+        <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-semibold text-[var(--text-muted)]">
           <BackendDot backend={backend} />
           <span className="truncate">
             {backend === "online"
@@ -502,7 +502,7 @@ export function Sidebar() {
                 ? "Çevrimdışı"
                 : "Kontrol"}
           </span>
-          <span className="font-mono text-[10px] text-[var(--text-faint)]">
+          <span className="font-mono text-[11px] text-[var(--text-faint)]">
             · v{meta?.app.version ?? "2.1.0"}
           </span>
         </span>
@@ -518,7 +518,7 @@ export function Sidebar() {
               : "Güncelleme Yöneticisi"
           }
           className={cn(
-            "inline-flex shrink-0 items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-semibold transition-colors",
+            "inline-flex shrink-0 items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-semibold transition-colors",
             updateStatus?.update_available
               ? "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success)]"
               : "border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)] hover:border-[var(--primary)] hover:text-[var(--text)]",
@@ -545,7 +545,7 @@ export function Sidebar() {
           desktopSidebarOpen && "lg:block",
         )}
       >
-        <div className="sticky top-3.5 h-[calc(100vh-1.75rem)]">{nav}</div>
+        <div className="sticky top-3.5 h-[calc(100dvh-1.75rem)]">{nav}</div>
       </aside>
 
       {sidebarOpen ? (

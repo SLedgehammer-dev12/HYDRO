@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
 import process from "node:process";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen } from "@testing-library/react";
@@ -74,7 +74,7 @@ describe("Accessibility (R8): critical components and focus management", () => {
     });
   });
 
-  it("TopBar has zero critical/serious axe violations", async () => {
+  it("TopBar has zero critical/serious axe violations and exposes valid dialog/listbox picker ARIA", async () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const { container } = render(
       <QueryClientProvider client={qc}>
@@ -82,6 +82,16 @@ describe("Accessibility (R8): critical components and focus management", () => {
       </QueryClientProvider>,
     );
     await expectNoSeriousA11yViolations(container);
+
+    const trigger = screen.getByRole("button", { name: /Doğu Hattı|Test Bölümü|Demo/i });
+    expect(trigger).toHaveAttribute("aria-haspopup", "dialog");
+    fireEvent.click(trigger);
+    const pickerDialog = screen.getByRole("dialog", { name: "Test Bölümü seçici" });
+    expect(pickerDialog).toBeInTheDocument();
+    expect(screen.getByRole("listbox", { name: "Test Bölümleri" })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Test Bölümü seçici" })).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(trigger);
   });
 
   it("OnboardingWelcomeCard has zero critical/serious axe violations", async () => {
@@ -151,6 +161,8 @@ describe("Accessibility (R8): critical components and focus management", () => {
       ["--text", "--canvas", 4.5],
       ["--text-soft", "--surface", 4.5],
       ["--text-muted", "--surface", 4.5],
+      ["--text-faint", "--surface", 4.5],
+      ["--text-faint", "--surface-3", 4.5],
       ["--primary-ink", "--primary", 4.5],
       ["--primary", "--surface", 4.5],
       ["--danger", "--surface", 4.5],
@@ -229,5 +241,39 @@ describe("Accessibility (R8): critical components and focus management", () => {
       </QueryClientProvider>,
     );
     await expectNoSeriousA11yViolations(container);
+  });
+
+  it("declares every CSS custom property referenced via var(--*) in src/ within styles.css", () => {
+    const declared = new Set<string>();
+    for (const match of stylesCss.matchAll(/(--[a-z0-9-]+)\s*:/gi)) {
+      declared.add(match[1]);
+    }
+
+    const srcRoot = resolve(process.cwd(), "src");
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir)) {
+        const full = join(dir, entry);
+        if (statSync(full).isDirectory()) {
+          walk(full);
+        } else if (/\.(ts|tsx|css)$/.test(entry) && !/\.test\.(ts|tsx)$/.test(entry)) {
+          files.push(full);
+        }
+      }
+    };
+    walk(srcRoot);
+
+    const missing: string[] = [];
+    for (const file of files) {
+      const content = readFileSync(file, "utf8");
+      for (const match of content.matchAll(/var\(\s*(--[a-z0-9-]+)\s*(?:,|\))/gi)) {
+        const token = match[1];
+        if (!declared.has(token)) {
+          missing.push(`${file.replace(`${srcRoot}/`, "")}: ${token}`);
+        }
+      }
+    }
+
+    expect(missing).toEqual([]);
   });
 });

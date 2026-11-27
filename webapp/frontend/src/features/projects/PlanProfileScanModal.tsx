@@ -262,7 +262,7 @@ export function PlanProfileScanModal({
                 if (isScanningSheets) return;
                 addModalScanFiles(event.dataTransfer.files);
               }}
-              className="flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-[var(--border-strong)] bg-[var(--surface-1)] px-4 py-4 text-center transition-colors hover:border-[var(--primary)] [input:focus-visible+&]:outline [input:focus-visible+&]:outline-2 [input:focus-visible+&]:outline-offset-2 [input:focus-visible+&]:outline-[var(--focus)]"
+              className="flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-[var(--border-strong)] bg-[var(--surface)] px-4 py-4 text-center transition-colors hover:border-[var(--primary)] [input:focus-visible+&]:outline [input:focus-visible+&]:outline-2 [input:focus-visible+&]:outline-offset-2 [input:focus-visible+&]:outline-[var(--focus)]"
             >
               <Upload size={18} className="mb-1.5 text-[var(--primary)]" aria-hidden />
               <span className="text-[12.5px] font-medium text-[var(--text)]">
@@ -277,7 +277,7 @@ export function PlanProfileScanModal({
           </div>
 
           {scanQueue.length > 0 ? (
-            <div className="space-y-2 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-2.5">
+            <div className="space-y-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-[11px] font-semibold text-[var(--text)]">
                   Seçili Paftalar ({scanQueue.length})
