@@ -827,7 +827,9 @@ def _parse_excel_cell_float(raw: str) -> float | None:
         return None
 
 
-def _detect_filling_schema(rows: Sequence[Sequence[str]], start_idx: int) -> dict[str, int | None] | None:
+def _detect_filling_schema(
+    rows: Sequence[Sequence[str]], start_idx: int
+) -> dict[str, int | None] | None:
     """Detect column indices for BOTAŞ Filling (`DOLUM R`) multi-row header."""
     combined_cols: dict[int, list[str]] = {}
     for offset in range(3):
@@ -836,7 +838,9 @@ def _detect_filling_schema(rows: Sequence[Sequence[str]], start_idx: int) -> dic
         for c_idx, val in enumerate(rows[start_idx + offset]):
             if val:
                 combined_cols.setdefault(c_idx, []).append(_fold(val).lower())
-    joined_row0 = " ".join(combined_cols.get(c, [""])[0] for c in combined_cols if combined_cols.get(c))
+    joined_row0 = " ".join(
+        combined_cols.get(c, [""])[0] for c in combined_cols if combined_cols.get(c)
+    )
     if "okuma" not in joined_row0 and "sayac" not in joined_row0:
         return None
 
@@ -871,7 +875,9 @@ def _detect_filling_schema(rows: Sequence[Sequence[str]], start_idx: int) -> dic
     return schema
 
 
-def _detect_monitoring_schema(rows: Sequence[Sequence[str]], start_idx: int) -> dict[str, Any] | None:
+def _detect_monitoring_schema(
+    rows: Sequence[Sequence[str]], start_idx: int
+) -> dict[str, Any] | None:
     """Detect column indices for BOTAŞ Leak/Pressure monitoring (`018` / `021`) tables."""
     row0 = rows[start_idx]
     folded_cells = {c_idx: _fold(val).lower() for c_idx, val in enumerate(row0) if val}

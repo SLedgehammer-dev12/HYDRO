@@ -1353,7 +1353,9 @@ class SpreadsheetExtractionTests(unittest.TestCase):
         ws.append([dt.time(18, 30), 9380, None, 20, 20, 16, None, None, "ÖN SU"])
         ws.append([dt.time(19, 30), 9448, None, 68, 68, None, None, 1, "1.PİG GÖNDERİLDİ"])
         ws.append([dt.datetime(1900, 1, 1, 0, 30, 0), 9780, None, 68, 332, None, None, None, None])
-        ws.append([dt.datetime(1900, 1, 2, 1, 30, 0), 9847, None, 67, 399, None, None, None, "PİG ALINDI"])
+        ws.append(
+            [dt.datetime(1900, 1, 2, 1, 30, 0), 9847, None, 67, 399, None, None, None, "PİG ALINDI"]
+        )
 
         ws_cl = wb.create_sheet("TEMİZLİK")
         ws_cl.append(["TEMİZLİK KABUL RAPORU"])
@@ -1376,13 +1378,26 @@ class SpreadsheetExtractionTests(unittest.TestCase):
             pages = ocr.extract_text(xlsx_path)
 
         dolum_lines = pages[0].text.splitlines()
-        self.assertTrue(any("19:30:00 | 9448 | 68 | 68 | - | 1 | 1.PİG GÖNDERİLDİ" in ln for ln in dolum_lines))
-        self.assertTrue(any(ln.startswith("00:30:00 | 9780 | 68 | 332 | - | -") for ln in dolum_lines))
-        self.assertTrue(any(ln.startswith("01:30:00 | 9847 | 67 | 399 | - | - | PİG ALINDI") for ln in dolum_lines))
+        self.assertTrue(
+            any("19:30:00 | 9448 | 68 | 68 | - | 1 | 1.PİG GÖNDERİLDİ" in ln for ln in dolum_lines)
+        )
+        self.assertTrue(
+            any(ln.startswith("00:30:00 | 9780 | 68 | 332 | - | -") for ln in dolum_lines)
+        )
+        self.assertTrue(
+            any(
+                ln.startswith("01:30:00 | 9847 | 67 | 399 | - | - | PİG ALINDI")
+                for ln in dolum_lines
+            )
+        )
 
         cl_lines = pages[1].text.splitlines()
         self.assertTrue(
-            any("FIRÇALI ÇELİK GÖVDELİ | 2026-08-27 | 09:30:00 | 2026-08-27 | 13:30:00 | SAĞLAM - TEMİZ" in ln for ln in cl_lines)
+            any(
+                "FIRÇALI ÇELİK GÖVDELİ | 2026-08-27 | 09:30:00 | 2026-08-27 | 13:30:00 | SAĞLAM - TEMİZ"
+                in ln
+                for ln in cl_lines
+            )
         )
 
     def test_windows_ocr_word_clustering_and_multi_column_pairing(self) -> None:

@@ -373,9 +373,7 @@ def _extract_pipe_meta(text: str) -> dict[str, Any]:
         if override_mm := _pick_dominant_inch_mm(consistent_tokens):
             outside_diameter_mm = override_mm
 
-    design_pressure_bar = (
-        _parse_float(dp_match.group(1) or dp_match.group(2)) if dp_match else None
-    )
+    design_pressure_bar = _parse_float(dp_match.group(1) or dp_match.group(2)) if dp_match else None
     material_grade = ""
     smys_mpa: float | None = None
     if grade_match:
@@ -720,16 +718,20 @@ def parse_plan_profile_text(
         station_elev_map = {}
         proc_pts: list[tuple[float, float]] = []
         for r in proc_rows:
-            s_m = float(r["start_m"])
-            e_m = float(r["end_m"])
-            proc_pts.append((s_m, float(r["start_elevation_m"])))
-            proc_pts.append((e_m, float(r["end_elevation_m"])))
-            span_mid = round((s_m + e_m) / 2.0, 1)
+            ps_m = float(r["start_m"])
+            pe_m = float(r["end_m"])
+            proc_pts.append((ps_m, float(r["start_elevation_m"])))
+            proc_pts.append((pe_m, float(r["end_elevation_m"])))
+            span_mid = round((ps_m + pe_m) / 2.0, 1)
             max_st = r["max_kp_m"] if r["max_kp_m"] is not None else span_mid
-            min_st = r["min_kp_m"] if r["min_kp_m"] is not None else round((s_m + e_m) * 0.6, 1)
-            if abs(max_st - s_m) > 0.5 and abs(max_st - e_m) > 0.5:
+            min_st = r["min_kp_m"] if r["min_kp_m"] is not None else round((ps_m + pe_m) * 0.6, 1)
+            if abs(max_st - ps_m) > 0.5 and abs(max_st - pe_m) > 0.5:
                 proc_pts.append((float(max_st), float(r["highest_elevation_m"])))
-            if abs(min_st - s_m) > 0.5 and abs(min_st - e_m) > 0.5 and abs(min_st - float(max_st)) > 0.5:
+            if (
+                abs(min_st - ps_m) > 0.5
+                and abs(min_st - pe_m) > 0.5
+                and abs(min_st - float(max_st)) > 0.5
+            ):
                 proc_pts.append((float(min_st), float(r["lowest_elevation_m"])))
             station_elev_map.update({round(st, 1): el for st, el in proc_pts})
         profile_points = sorted(station_elev_map.items(), key=lambda item: item[0])
@@ -859,7 +861,12 @@ def parse_plan_profile_text(
             matched = proc_by_no.get(str(draft.get("section_no") or ""))
             if not matched:
                 continue
-            for ek in ("start_elevation_m", "end_elevation_m", "highest_elevation_m", "lowest_elevation_m"):
+            for ek in (
+                "start_elevation_m",
+                "end_elevation_m",
+                "highest_elevation_m",
+                "lowest_elevation_m",
+            ):
                 draft[ek] = matched[ek]
     return response
 

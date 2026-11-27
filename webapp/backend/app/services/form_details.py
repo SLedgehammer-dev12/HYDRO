@@ -476,9 +476,8 @@ def _extract_test_data_tables(text: str, *, dot_decimal: bool | None = None) -> 
                 look = idx + 1
                 while look < n_lines and look <= idx + 5:
                     lf = _fold(lines[look])
-                    if (
-                        meas_point_rx.match(lf)
-                        or any(st in lf for st in ("aciklama", "botas", "yuklenici", "muteahhit"))
+                    if meas_point_rx.match(lf) or any(
+                        st in lf for st in ("aciklama", "botas", "yuklenici", "muteahhit")
                     ):
                         break
                     block_tokens.append(lines[look])
@@ -580,11 +579,13 @@ def _extract_pig_runs(text: str) -> list[dict[str, Any]]:
             continue
         if "|" in line:
             parts = [p.strip() for p in line.split("|")]
-            times = [m.group(1) for p in parts if (m := re.search(r"\b(\d{1,2}:\d{2})(?::\d{2})?\b", p))]
+            times = [
+                m.group(1) for p in parts if (m := re.search(r"\b(\d{1,2}:\d{2})(?::\d{2})?\b", p))
+            ]
             if times:
                 launch_t = times[0]
                 receive_t = times[1] if len(times) >= 2 else ""
-                dur_min = None
+                dur_min: float | None = None
                 if launch_t and receive_t:
                     t0 = _parse_hhmm_to_min(launch_t)
                     t1 = _parse_hhmm_to_min(receive_t)
@@ -619,7 +620,7 @@ def _extract_pig_runs(text: str) -> list[dict[str, Any]]:
                 continue
             launch_t = times[0]
             receive_t = times[1] if len(times) >= 2 else ""
-            dur_min: float | None = None
+            dur_min = None
             if launch_t and receive_t:
                 t0 = _parse_hhmm_to_min(launch_t)
                 t1 = _parse_hhmm_to_min(receive_t)
@@ -627,7 +628,9 @@ def _extract_pig_runs(text: str) -> list[dict[str, Any]]:
                     if t1 < t0:
                         t1 += 24 * 60.0
                     dur_min = round(t1 - t0, 1)
-            prefix = re.split(r"\d{1,2}:\d{2}|\d{4}-\d{2}-\d{2}|\d{1,2}[./-]\d{1,2}[./-]\d{2,4}", line, maxsplit=1)[0]
+            prefix = re.split(
+                r"\d{1,2}:\d{2}|\d{4}-\d{2}-\d{2}|\d{1,2}[./-]\d{1,2}[./-]\d{2,4}", line, maxsplit=1
+            )[0]
             prefix = re.sub(r"^\d{1,2}\s+", "", prefix).strip()
             pig_type = _clean_text_value(prefix) or "Pig"
             runs.append(

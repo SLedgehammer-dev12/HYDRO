@@ -2408,8 +2408,8 @@ def test_didim_excel_regression_fixes_multifile_and_forms(tmp_path) -> None:
     import datetime as dt
 
     import openpyxl
-
     from app.services.dossier import analyze_dossier_pages
+
     from hidrostatik_test.services.report_ocr import extract_text
 
     wb = openpyxl.Workbook()
@@ -2442,9 +2442,15 @@ def test_didim_excel_regression_fixes_multifile_and_forms(tmp_path) -> None:
     ws_veri.append(["Test Bölüm Hacmi", ":", 429.35, "m3", "1.Başlık Yeri", ":", "34W53T"])
     ws_veri.append(["Boru Dış Çapı", ":", 406.4, "mm", "2.Başlık No", ":", "TB6"])
     ws_veri.append(["Boru İç Çapı", ":", 396.0, "mm", "2.Başlık Yeri", ":", "38W10T"])
-    ws_veri.append(["Boru Et Kalınlığı", ":", "5,20 ve 6,4", "mm", "Basınç Pompası Yeri", ":", "34+670"])
-    ws_veri.append(["Boru Et Kalınlığı (mm) :", 5.2, "Uzunluk (m) :", 3319.37, "Hacim (m³) :", 408.62])
-    ws_veri.append(["Boru Et Kalınlığı (mm) :", 6.4, "Uzunluk (m) :", 162.63, "Hacim (m³) :", 19.78])
+    ws_veri.append(
+        ["Boru Et Kalınlığı", ":", "5,20 ve 6,4", "mm", "Basınç Pompası Yeri", ":", "34+670"]
+    )
+    ws_veri.append(
+        ["Boru Et Kalınlığı (mm) :", 5.2, "Uzunluk (m) :", 3319.37, "Hacim (m³) :", 408.62]
+    )
+    ws_veri.append(
+        ["Boru Et Kalınlığı (mm) :", 6.4, "Uzunluk (m) :", 162.63, "Hacim (m³) :", 19.78]
+    )
     ws_veri.append(["Boru Et Kalınlığı (mm) :", 7.9, "Uzunluk (m) :", 0, "Hacim (m³) :", 0])
     ws_veri.append(["Boru Akma Dayanımı (SMYS)", ":", 161.30, "bar"])
     ws_veri.append(["3.Test Ölçümleri:"])
@@ -2459,7 +2465,16 @@ def test_didim_excel_regression_fixes_multifile_and_forms(tmp_path) -> None:
     ws_cl.append(["TEMİZLİK KABUL RAPORU"])
     ws_cl.append(["Test Bölüm No", ":", "2-B", "Tarih", ":", dt.datetime(2026, 6, 25)])
     ws_cl.append(["PIG TİPİ", "ATILIŞ TARİH", "SAAT", "ALIŞ TARİH", "SAAT", "NOT"])
-    ws_cl.append(["FIRÇALI ÇELİK GÖVDELİ", dt.datetime(2026, 6, 25), dt.time(16, 50), dt.datetime(2026, 6, 25), dt.time(17, 40), "TEMİZ"])
+    ws_cl.append(
+        [
+            "FIRÇALI ÇELİK GÖVDELİ",
+            dt.datetime(2026, 6, 25),
+            dt.time(16, 50),
+            dt.datetime(2026, 6, 25),
+            dt.time(17, 40),
+            "TEMİZ",
+        ]
+    )
 
     # 4. DOLUM R (post-midnight + empty temp with pressure=1)
     ws_fl = wb.create_sheet("DOLUM R")

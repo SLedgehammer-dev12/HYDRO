@@ -1193,9 +1193,7 @@ def _extract_chainages_for_section(text: str) -> tuple[str, str]:
         is_start_head = any(
             k in folded for k in ("1.baslik yeri", "1. baslik yeri", "atma basligi")
         )
-        is_end_head = any(
-            k in folded for k in ("2.baslik yeri", "2. baslik yeri", "alma basligi")
-        )
+        is_end_head = any(k in folded for k in ("2.baslik yeri", "2. baslik yeri", "alma basligi"))
         if not (is_start_km or is_end_km or is_start_head or is_end_head):
             continue
 
@@ -1844,7 +1842,9 @@ def _format_kp_clean(raw: str) -> str:
     return f"{km}+{whole:03d},{frac_str}"
 
 
-def _extract_smys_mpa(norm_text: str, folded_norm: str, *, dot_decimal: bool = False) -> float | None:
+def _extract_smys_mpa(
+    norm_text: str, folded_norm: str, *, dot_decimal: bool = False
+) -> float | None:
     """Extract steel SMYS (MPa) from grade (`X60`), psi (`60200 psi`), or MPa label (ignoring P_SMYS in bar)."""
     # 1. Explicit MPa / N/mm² label (ignore rows whose unit is bar, which report P_SMYS yield pressure)
     for line, f_line in zip(norm_text.splitlines(), folded_norm.splitlines()):
@@ -1864,7 +1864,10 @@ def _extract_smys_mpa(norm_text: str, folded_norm: str, *, dot_decimal: bool = F
 
     # 2. Steel grade token (e.g. `Boru Kalitesi (GrB,X42,X52,X65,.....) : X60` or `API 5L X60`)
     for f_line in folded_norm.splitlines():
-        if any(tok in f_line for tok in ("boru kalitesi", "celik kalitesi", "steel grade", "pipe grade", "api 5l")):
+        if any(
+            tok in f_line
+            for tok in ("boru kalitesi", "celik kalitesi", "steel grade", "pipe grade", "api 5l")
+        ):
             rhs = f_line.split(":", 1)[-1] if ":" in f_line else f_line
             m_grade = re.search(r"\b(gr\s*b|x\s*(?:42|46|52|56|60|65|70|80))\b", rhs)
             if m_grade:
@@ -1873,7 +1876,7 @@ def _extract_smys_mpa(norm_text: str, folded_norm: str, *, dot_decimal: bool = F
                     canon = "Grade B"
                 for g_entry in API_5L_PSL2_GRADES:
                     if str(g_entry.get("grade") or "").upper() == canon:
-                        return float(g_entry["smys_mpa"])
+                        return _grade_smys_value(g_entry)
 
     # 3. `S = 60200 psi` or `SMYS (52000/14.50377)` formula
     m_psi_lbl = re.search(r"\b(?:s|smys)\s*[:=]\s*(\d{4,6})\s*psi\b", folded_norm)
@@ -5459,7 +5462,11 @@ def commit_dossier_to_project(
                 "length_m": header.get("length_m"),
             }
             td_form = next(
-                (fm for fm in (sec.get("present_forms") or []) if fm.get("form_code") == "test_data"),
+                (
+                    fm
+                    for fm in (sec.get("present_forms") or [])
+                    if fm.get("form_code") == "test_data"
+                ),
                 None,
             )
             td_segs = ((td_form or {}).get("extracted_data") or {}).get("test_data", {}).get(
