@@ -2,9 +2,9 @@
 
 > Tek kaynak özet. Ayrıntı için "Ayrıntılı notlar" bölümündeki dosyalara bakın.
 >
-> **Son güncelleme:** 2026-11-27
-> **Dal:** `main` (`v2.4.0` — Çoklu Test Raporu Yükleme, Excel/OCR Hücre Doğruluğu & Didim Revize Pafta Düzeltmeleri)
-> **Son commit:** `hidrostatik-test-v2.4.0` (`v2.4.0` — Çoklu Dosya OCR Kuyruğu, 8 Excel Form Düzeltmesi, Plan-Profil Tablo & Taranmış Dolum Onarımı)
+> **Son güncelleme:** 2026-11-28
+> **Dal:** `main` (`v2.5.0` — 3D Genel/Detay Görünüm, RDP Profil Sadakati & Çoklu Dosya OCR Toplu Kayıt)
+> **Son commit:** `hidrostatik-test-v2.5.0` (`v2.5.0` — Kesit 3D Detay Modalı + Pig Akışı, Kot/Çap Ölçeği, CAD Sıçrama Filtresi & Çoklu OCR Toplu Kayıt)
 
 ---
 
@@ -13,7 +13,7 @@
 <!-- generated:metrics:start -->
 | Otomatik Metrik (`sync_doc_metrics.py`) | Değer | Kaynak |
 | --- | --- | --- |
-| Uygulama / Frontend Sürümü | `2.4.0` / `2.4.0` | `app_metadata.py`, `package.json` |
+| Uygulama / Frontend Sürümü | `2.5.0` / `2.5.0` | `app_metadata.py`, `package.json` |
 | Veritabanı Şema Revizyonu (Alembic) | `0005` | `migrations_runner.py` |
 | OpenAPI Sözleşme Yüzeyi | `97` path / `112` operation | `webapp/docs/openapi.json` |
 <!-- generated:metrics:end -->

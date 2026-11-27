@@ -1,7 +1,14 @@
-# Neler Yeni — HYDRO v2.4.0 (What's New)
+# Neler Yeni — HYDRO v2.5.0 (What's New)
 
-**Sürüm:** `v2.4.0` (`hidrostatik-test-v2.4.0`)  
-**Tarih:** 2026-11-27
+**Sürüm:** `v2.5.0` (`hidrostatik-test-v2.5.0`)  
+**Tarih:** 2026-11-28
+
+---
+
+### v2.5.0 Öne Çıkanlar
+- **Sadeleştirilmiş Genel 3D Hat & Kesit Detay Pop-Up Penceresi:** Genel 3D projede kalabalık ekipmanlar gizlendi ve kesite tıklayınca tam ekran destekli **Kesit 3D Detay & Mühendislik Bilgi Kartı** penceresi açılır hale getirildi; `Geçişler` katmanı isteğe bağlı açılıp kapatılabilir.
+- **Yarı Saydam Boru, Kesit İçi Pig Akışı & Gerçekçi Kot Ölçeği:** Detay penceresi yarı saydam boru (`Saydam`) ve canlı telemetrili (KP, kot, eğim %, basınç) **Pig Akış Simülasyonu** ile açılır; ince boru çapı, güçlendirilmiş dikey kot rölyefi (`Oto/1×/2×/4×`), rakım kılavuz çizgileri ve RDP profil sadakati + CAD çerçeve sıçrama filtresi eklendi.
+- **Çoklu Dosya OCR Tek Tıkla Toplu Proje Kaydı:** Birden fazla test raporu analiz edilirken ilk dosyanın otomatik kayıt penceresinin ekranı kilitlemesi kaldırıldı; **Toplu Analiz Kuyruğu** üzerinden tamamlanan tüm dosya ve bölümler tek tıkla hedef projeye kaydedilir.
 
 ---
 

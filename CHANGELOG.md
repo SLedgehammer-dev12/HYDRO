@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.5.0 - 2026-11-28
+
+### Added & Changed
+
+- **3D Genel Hat Sadeleştirmesi & Kesit Detay Pop-Up Penceresi (`PipelineScene.tsx`, `SectionDetailModal.tsx`, `PipeNetwork.tsx`, `SceneEquipment.tsx`, `PigAndFlow.tsx`)**:
+  - Birleşik proje 3D görünümü (`mode="overview"`) ekipman karmaşasından arındırıldı; kesit sınır halkaları, ortak `session_id` vurgusu, orta nokta kesit rozetleri ve isteğe bağlı **`Geçişler`** katmanı eklendi.
+  - Genel görünümde bir kesite tıklandığında tam ekran destekli, önceki/sonraki kesit geçişli ve sağında **Mühendislik Bilgi Kartı** bulunan **3D Kesit Detay Pop-Up Modalı (`SectionDetailModal`)** açılır.
+  - Detay penceresi varsayılan olarak yarı saydam boru duvarı (`Saydam`) ve kesit içi oynatılabilir **Pig Akış Simülasyonu** (`1×/4×/16×`, yön seçici, istasyon kaydırıcısı, canlı KP/kot/eğim/basınç telemetrisi) ile açılır; `LauncherModel` beton kaideli, eksantrik redüksiyon konili ve manometreli endüstriyel pig atıcı/alıcı olarak detaylandırıldı.
+- **Kot Farkı / Boru Çapı Oranı & Arka Plan Rakım Izgarası (`sceneModel.ts`, `SceneEnvironment.tsx`)**:
+  - Görsel boru yarıçapı genel görünümde `0.08–0.16`, detayda `0.12–0.22` aralığına inceltildi; dikey kot rölyefi artırıldı, **`Oto / 1× / 2× / 4×`** dikey ölçek seçici ve arka plan yatay rakım kılavuz çizgileri (`ElevationBackdropGrid`) eklendi.
+- **Plan-Profil Profil Sadakati (`scene.py`, `mock.ts`, `plan_profile.py`)**:
+  - Sabit indeks seyreltme yerine X-Y normalize **Ramer–Douglas–Peucker (RDP)** nokta seçimine geçildi (`build_project_scene` küresel `450`, kesit başı `6–48`, `buildSceneData` `96` nokta) ve `sections_summary` yanıtı çap/kot özetiyle zenginleştirildi.
+  - Vektör CAD profil çıkarımına (`_filter_cad_vertical_spikes`) düşey antet/çerçeve çizgisi iğne sıçramalarını eleyen komşuluk filtresi eklendi.
+- **Çoklu Dosya OCR Toplu Proje Aktarımı (`OcrPage.tsx`, `DossierPanel.tsx`, `ocrApi.ts`)**:
+  - Çoklu dosya analizinde `DossierPanel` otomatik kayıt modalının ilk dosya biter bitmez ekranı kilitlemesi engellendi (`autoOpenModal`), **Toplu Analiz Kuyruğu** içine tek tıkla **"Tüm Bölümleri Projeye Kaydet"** akışı eklendi ve `Idempotency-Key` benzersizleştirildi.
+
+### Fixed
+
+- `OcrPage` çoklu dosya yüklemesinde arka arkaya gönderilen isteklerde hız sınırı (`60/dk`) ve `Idempotency-Key` çarpışma olasılığı giderildi; `DossierPanel` ilk render sırasında modal flash sorunu çözüldü.
+
 ## 2.4.0 - 2026-11-27
 
 ### Added & Changed
