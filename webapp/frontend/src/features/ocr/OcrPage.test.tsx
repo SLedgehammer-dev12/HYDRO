@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEMO_META } from "../../lib/mock";
 import { useAppStore } from "../../store/useAppStore";
@@ -200,6 +200,88 @@ describe("OcrPage unmount cleanup (F10) and dynamic server timeout (F11)", () =>
         "failed-ana-999",
         expect.objectContaining({ timeoutMs: 1_230_000 }),
       );
+    });
+  });
+
+  it("supports selecting multiple files, removing one, and analyzing a batch sequentially", async () => {
+    const xlsx1 = new File(["xlsx-1"], "section-1a.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      lastModified: 1001,
+    });
+    const xlsx2 = new File(["xlsx-2"], "section-1b.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      lastModified: 1002,
+    });
+
+    mockAnalyzeOcr
+      .mockResolvedValueOnce({ analysis_id: "job-1a", status: "queued", reused: false })
+      .mockResolvedValueOnce({ analysis_id: "job-1b", status: "queued", reused: false });
+
+    const makeResult = (id: string, sectionId: string) => ({
+      id,
+      status: "succeeded",
+      source: "excel",
+      page_count: 16,
+      character_count: 1200,
+      confidence: 0.96,
+      report: {
+        section_id: { value: sectionId, unit: "", confidence: 0.95, raw: sectionId },
+        warnings: [],
+      },
+      discrepancies: [],
+      issues: [],
+      warnings: [],
+      pages: [],
+      approved: false,
+      applied: false,
+      suggested_fixes: [],
+    });
+
+    mockWaitForAnalysis
+      .mockResolvedValueOnce(makeResult("job-1a", "BÖLÜM 1A"))
+      .mockResolvedValueOnce(makeResult("job-1b", "BÖLÜM 1B"));
+
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={qc}>
+        <OcrPage />
+      </QueryClientProvider>,
+    );
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(fileInput.multiple).toBe(true);
+
+    fireEvent.change(fileInput, { target: { files: [xlsx1, xlsx2] } });
+
+    expect(await screen.findByText("2 dosya seçildi")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Analiz Et \(2 dosya\)/i })).toBeInTheDocument();
+
+    // Remove the second file and confirm button returns to single-file label
+    fireEvent.click(screen.getByRole("button", { name: "section-1b.xlsx dosyasını kaldır" }));
+    expect(screen.getByText("1 dosya seçildi")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Analiz Et$/i })).toBeInTheDocument();
+
+    // Re-add the second file via the picker input and run batch analysis
+    fireEvent.change(fileInput, { target: { files: [xlsx2] } });
+    const batchBtn = await screen.findByRole("button", { name: /Analiz Et \(2 dosya\)/i });
+    fireEvent.click(batchBtn);
+
+    await waitFor(() => {
+      expect(mockAnalyzeOcr).toHaveBeenCalledTimes(2);
+    });
+
+    const queuePanel = await screen.findByTestId("ocr-batch-queue");
+    expect(queuePanel).toHaveTextContent("Tamamlanan: 2 / 2");
+
+    // First result is active initially (#job-1a)
+    expect(screen.getByRole("heading", { name: /Analiz sonucu/i })).toHaveTextContent("job-1a");
+
+    // Clicking the second completed file switches active result to #job-1b
+    fireEvent.click(within(queuePanel).getByRole("button", { name: /section-1b\.xlsx/i }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: /Analiz sonucu/i })).toHaveTextContent("job-1b");
     });
   });
 });

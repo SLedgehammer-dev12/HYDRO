@@ -2402,3 +2402,157 @@ def test_acceptance_forms_compute_independent_a_b_and_flag_form_deviations():
     assert pres_codes["pa_a_match"]["status"] == "warning"
     assert pres_codes["pa_b_match"]["status"] == "warning"
     assert pres_codes["pa_pt_match"]["status"] == "warning"
+
+
+def test_didim_excel_regression_fixes_multifile_and_forms(tmp_path) -> None:
+    import datetime as dt
+
+    import openpyxl
+
+    from app.services.dossier import analyze_dossier_pages
+    from hidrostatik_test.services.report_ocr import extract_text
+
+    wb = openpyxl.Workbook()
+
+    # 1. DONE
+    ws_done = wb.active
+    ws_done.title = "DONE"
+    ws_done.append(["Bölüm No :", "2-B"])
+    ws_done.append(["Maksimum Basınç Hesabı Katsayısı", 0.5])
+    ws_done.append(["Test Kabul İçin Katsayılar", 96, 24.2, 43.99, 233.25])
+    ws_done.append(["Başlangıç Noktasının Kotu", -7.425, "m"])
+    ws_done.append(["Bitiş Noktasının Kotu", 96.168, "m"])
+    ws_done.append(["En Düşük Noktasının Kotu", -7.425, "m"])
+    ws_done.append(["En Yüksek Noktasının Kotu", 96.168, "m"])
+    ws_done.append(["Boru Dış Çapı Do (mm)", 406.4, "mm"])
+    ws_done.append(["Toplam Boru Uzunluğu (m)", 3482, "m"])
+    ws_done.append(["Boru Kalitesi (GrB,X42,X52,X65)", "X60"])
+    ws_done.append(["Başlangıç Noktasının Kilometresi KmS", 34670, "m"])
+    ws_done.append(["Bitiş Noktasının Kilometresi KmE", 38152, "m"])
+    ws_done.append(["PMİN", 93.75, "bar"])
+    ws_done.append(["PMAX", 106.17, "bar"])
+    ws_done.append(["İşletme Basıncı Po (bar)", 75, "bar"])
+    ws_done.append(["S=", 60200, "psi"])
+
+    # 2. VERİ
+    ws_veri = wb.create_sheet("VERİ")
+    ws_veri.append(["HİDROSTATİK TEST VERİLERİ"])
+    ws_veri.append(["Test Bölüm No", ":", "2-B", "Tarih", ":", dt.datetime(2026, 6, 26)])
+    ws_veri.append(["Test Bölüm Boyu", ":", 3482, "m", "1.Başlık No", ":", "TB5"])
+    ws_veri.append(["Test Bölüm Hacmi", ":", 429.35, "m3", "1.Başlık Yeri", ":", "34W53T"])
+    ws_veri.append(["Boru Dış Çapı", ":", 406.4, "mm", "2.Başlık No", ":", "TB6"])
+    ws_veri.append(["Boru İç Çapı", ":", 396.0, "mm", "2.Başlık Yeri", ":", "38W10T"])
+    ws_veri.append(["Boru Et Kalınlığı", ":", "5,20 ve 6,4", "mm", "Basınç Pompası Yeri", ":", "34+670"])
+    ws_veri.append(["Boru Et Kalınlığı (mm) :", 5.2, "Uzunluk (m) :", 3319.37, "Hacim (m³) :", 408.62])
+    ws_veri.append(["Boru Et Kalınlığı (mm) :", 6.4, "Uzunluk (m) :", 162.63, "Hacim (m³) :", 19.78])
+    ws_veri.append(["Boru Et Kalınlığı (mm) :", 7.9, "Uzunluk (m) :", 0, "Hacim (m³) :", 0])
+    ws_veri.append(["Boru Akma Dayanımı (SMYS)", ":", 161.30, "bar"])
+    ws_veri.append(["3.Test Ölçümleri:"])
+    ws_veri.append(["Test Bölümü", "Boru Üst Kotu", "Ölçüm Noktası", "Basınç(Bar)", "%SMYS"])
+    ws_veri.append(["Başlangıç Noktası", -7.425, "34+670", 103.91, 0.98])
+    ws_veri.append(["En Düşük Noktası", -7.425, "34+670", 103.91, 0.98])
+    ws_veri.append(["En Yüksek Noktası", 96.168, "38+152", 93.75, 0.88])
+    ws_veri.append(["Bitiş Noktası", 96.168, "38+152", 93.75, 0.88])
+
+    # 3. TEMİZLİK
+    ws_cl = wb.create_sheet("TEMİZLİK")
+    ws_cl.append(["TEMİZLİK KABUL RAPORU"])
+    ws_cl.append(["Test Bölüm No", ":", "2-B", "Tarih", ":", dt.datetime(2026, 6, 25)])
+    ws_cl.append(["PIG TİPİ", "ATILIŞ TARİH", "SAAT", "ALIŞ TARİH", "SAAT", "NOT"])
+    ws_cl.append(["FIRÇALI ÇELİK GÖVDELİ", dt.datetime(2026, 6, 25), dt.time(16, 50), dt.datetime(2026, 6, 25), dt.time(17, 40), "TEMİZ"])
+
+    # 4. DOLUM R (post-midnight + empty temp with pressure=1)
+    ws_fl = wb.create_sheet("DOLUM R")
+    ws_fl.append(["SU DOLUM RAPORU (1/1)"])
+    ws_fl.append(["Test Bölüm No", ":", "2-B", "Tarih", ":", "(26-27).06.2026"])
+    ws_fl.append(["Okuma", "Sayaç", "Hacim", "Toplam", "Su Giriş", "Su Basıncı", "NOT"])
+    ws_fl.append(["Saati", "Okuması (m3)", "Değişimi", "Hacim", "Sıcaklığı", "(Bar)", ""])
+    ws_fl.append([dt.time(22, 0), 1000, 0, 0, 15.0, None, None])
+    ws_fl.append([dt.time(23, 0), 1200, 200, 200, None, 1, "PİG"])
+    ws_fl.append([dt.datetime(1900, 1, 1, 0, 0, 0), 1432, 232, 432, 16.0, None, None])
+
+    # 5. BASINÇLANDIRMA 1 & blank BASINÇLANDIRMA (2)
+    ws_p1 = wb.create_sheet("BASINÇLANDIRMA 1")
+    ws_p1.append(["BASINÇLANDIRMA TEST RAPORU"])
+    ws_p1.append(["Test Bölüm No", ":", "2-B", "Tarih", ":", dt.datetime(2026, 6, 28)])
+    ws_p1.append(["Saat", "İlk Basınç", "Son Basınç", "Kullanılan Su", "Toplam Su", "Su Sıcaklığı"])
+    ws_p1.append([dt.time(15, 0), 90.0, 96.0, 0.4, 0.4, 18.0])
+    ws_p1.append([dt.time(15, 15), 96.0, 104.2, 0.5, 0.9, 18.0])
+
+    ws_p2 = wb.create_sheet("BASINÇLANDIRMA (2)")
+    ws_p2.append(["BASINÇLANDIRMA TEST RAPORU (2/2)"])
+    ws_p2.append(["Test Bölüm No :", "", "Tarih", ":"])
+    ws_p2.append(["Saat", "İlk Basınç", "Son Basınç", "Kullanılan Su", "Toplam Su"])
+    ws_p2.append([dt.time(18, 30), 124.6, 124.8, 0.0008, "#REF!"])
+
+    # 6. BASINÇ TESTİ with 7 probes + Avg Boru (no Avg Toprak) & post-midnight
+    ws_pt = wb.create_sheet("BASINÇ TESTİ ")
+    ws_pt.append(["BASINÇ TESTİ RAPORU"])
+    ws_pt.append(["Test Bölüm No", ":", "2-B", "Tarih", ":", "(28-29).06.2026"])
+    hdr = ["Zaman", "Basınç", "Çevre Sıcaklığı"]
+    for p_i in range(1, 8):
+        hdr.extend([f"Toprak Sıcaklığı {p_i}", f"Boru Sıcaklığı {p_i}"])
+    hdr.append("Avg. Boru Sıcaklığı")
+    ws_pt.append(hdr)
+    row0 = [dt.time(23, 0), 104.2, 26.0] + [24.0, 23.0] * 7 + [23.0]
+    row_mid = [dt.datetime(1900, 1, 1, 0, 0, 0), 104.2]
+    row_end = [dt.datetime(1900, 1, 1, 23, 0, 0), 104.1, 26.0] + [24.2, 23.2] * 7 + [23.2]
+    ws_pt.append(row0)
+    ws_pt.append(row_mid)
+    ws_pt.append(row_end)
+
+    # 7. Blank HAVA KURUTMA + ÇİĞLENME NOKTASI
+    ws_hk = wb.create_sheet("HAVA KURUTMA")
+    ws_hk.append(["HAVA KURUTMA RAPORU"])
+    ws_hk.append(["BÖLÜM NO :", None, "BORU ÇAPI :", None, "UZUNLUK :", None])
+
+    ws_dn = wb.create_sheet("ÇİĞLENME NOKTASI")
+    ws_dn.append(["ÇİĞLENME NOKTASI RAPORU"])
+    ws_dn.append(["Test Bölüm No", ":", "2-B"])
+    ws_dn.append(["Bölüm Uzunluğu", ":", 3482, "m"])
+
+    xlsx_path = tmp_path / "didim_2b_reg.xlsx"
+    wb.save(xlsx_path)
+
+    pages = extract_text(xlsx_path)
+    dos = analyze_dossier_pages(pages, source_filename=xlsx_path.name)
+    assert len(dos["sections"]) == 1
+    sec = dos["sections"][0]
+    assert sec["section_no"] == "BÖLÜM 2B"
+    hdr_out = sec["header"]
+    assert hdr_out["wall_thickness_mm"] == pytest.approx(5.2)
+    assert hdr_out["smys_mpa"] == pytest.approx(415.0)
+    assert hdr_out["start_kp"] == "34+670"
+    assert hdr_out["end_kp"] == "38+152"
+
+    forms = {f["form_code"]: f for f in sec["present_forms"]}
+    td = forms["test_data"]["extracted_data"]["test_data"]
+    assert len(td["volume_segments"]) == 2
+    assert len(td["test_measurements"]) == 4
+    assert forms["test_data"]["form_date"] == "2026-06-26"
+
+    fl = forms["filling"]["extracted_data"]
+    assert fl["filling"]["total_filled_m3"] == pytest.approx(432.0)
+    assert fl["filling"]["min_temp_c"] == pytest.approx(15.0)
+    assert fl["filling"]["max_pressure_bar"] == pytest.approx(1.0)
+    assert forms["filling"]["form_date"] == "(26-27).06.2026"
+
+    prs = forms["pressurization"]["extracted_data"]
+    assert forms["pressurization"]["pages"] == [5]
+    assert prs["pressurization"]["p_max_bar"] == pytest.approx(104.2)
+
+    pt = forms["pressure_test"]["extracted_data"]
+    assert pt["time_log"]["duration_hours"] == pytest.approx(24.0)
+    assert pt["rows"][0]["avg_soil_c"] == pytest.approx(24.0)
+    assert pt["rows"][0]["avg_pipe_c"] == pytest.approx(23.0)
+
+    assert "final_drying" in forms
+    assert forms["cleaning"]["extracted_data"]["pig_runs"] == [
+        {
+            "pig_type": "FIRÇALI ÇELİK GÖVDELİ",
+            "launch_time": "16:50",
+            "receive_time": "17:40",
+            "duration_min": 50.0,
+            "note": "TEMİZ",
+        }
+    ]

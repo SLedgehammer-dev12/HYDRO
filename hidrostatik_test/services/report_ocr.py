@@ -40,6 +40,7 @@ import zipfile
 from dataclasses import dataclass, replace
 from datetime import date as _date
 from datetime import datetime as _datetime
+from datetime import time as _time
 from pathlib import Path
 from typing import Any, Callable, Final, Iterator, Mapping, Sequence
 
@@ -533,10 +534,27 @@ def _validate_xlsx_zip(path: Path) -> None:
         ) from exc
 
 
+_EXCEL_TIME_CELL_RE: Final[re.Pattern[str]] = re.compile(r"^\d{1,2}:\d{2}(?::\d{2})?$")
+_EXCEL_PAIR_NUM_RE: Final[re.Pattern[str]] = re.compile(
+    r"^\d+(?:[.,]\d+)?\s+(?:ve|/|ile)\s+\d+(?:[.,]\d+)?$", re.IGNORECASE
+)
+
+
 def _excel_normalize_cell(value: Any) -> str:
     if value is None or isinstance(value, bool):
         return ""
-    if isinstance(value, (_datetime, _date)):
+    if isinstance(value, _datetime):
+        # Excel stores post-midnight serial times (>= 24:00) on 1899-12-30 / 1900-01-01..31
+        if value.year in (1899, 1900) and value.month == 1 and value.day <= 31:
+            return value.strftime("%H:%M:%S")
+        if value.year == 1899 and value.month == 12 and value.day in (30, 31):
+            return value.strftime("%H:%M:%S")
+        if value.hour == 0 and value.minute == 0 and value.second == 0:
+            return value.strftime("%Y-%m-%d")
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(value, _time):
+        return value.strftime("%H:%M:%S")
+    if isinstance(value, _date):
         return value.strftime("%Y-%m-%d")
     if isinstance(value, int):
         return str(value)
@@ -578,6 +596,8 @@ def _excel_match_label_key(label: str) -> str | None:
 def _looks_like_excel_value(token: str) -> bool:
     if _EXCEL_TRAILING_OP_RE.search(token):
         return False
+    if _EXCEL_PAIR_NUM_RE.fullmatch(token):
+        return True
     if _looks_like_value(token) or normalize_result(token) is not None:
         return True
     if match := _NUMBER_RE.match(token):
@@ -718,8 +738,10 @@ def _extract_xlsx_sheets(path: Path) -> list[tuple[str, list[list[str]]]]:
                 max_row=_EXCEL_MAX_ROWS, max_col=_EXCEL_MAX_COLS, values_only=True
             ):
                 cells = [_excel_normalize_cell(val) for val in row_values]
+                while cells and not cells[-1]:
+                    cells.pop()
                 if any(cells):
-                    rows.append([cell for cell in cells if cell])
+                    rows.append(cells)
             sheets.append((ws.title, rows))
     except Exception as exc:
         raise ReportOcrError(
@@ -773,24 +795,221 @@ def _extract_xls_sheets(path: Path) -> list[tuple[str, list[list[str]]]]:
                 for c in range(min(sh.ncols, _EXCEL_MAX_COLS)):
                     ctype = sh.cell_type(r, c)
                     if ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK, xlrd.XL_CELL_ERROR):
+                        row_cells.append("")
                         continue
                     val = sh.cell_value(r, c)
                     if ctype == xlrd.XL_CELL_DATE:
                         try:
                             val = xlrd.xldate_as_datetime(val, wb.datemode)
                         except Exception:
+                            row_cells.append("")
                             continue
                     elif ctype == xlrd.XL_CELL_BOOLEAN:
+                        row_cells.append("")
                         continue
-                    normalized = _excel_normalize_cell(val)
-                    if normalized:
-                        row_cells.append(normalized)
-                if row_cells:
+                    row_cells.append(_excel_normalize_cell(val))
+                while row_cells and not row_cells[-1]:
+                    row_cells.pop()
+                if any(row_cells):
                     rows.append(row_cells)
             sheets.append((sh.name, rows))
     finally:
         wb.release_resources()
     return sheets
+
+
+def _parse_excel_cell_float(raw: str) -> float | None:
+    if not raw:
+        return None
+    try:
+        return float(raw.replace(",", "."))
+    except ValueError:
+        return None
+
+
+def _detect_filling_schema(rows: Sequence[Sequence[str]], start_idx: int) -> dict[str, int | None] | None:
+    """Detect column indices for BOTAŞ Filling (`DOLUM R`) multi-row header."""
+    combined_cols: dict[int, list[str]] = {}
+    for offset in range(3):
+        if start_idx + offset >= len(rows):
+            break
+        for c_idx, val in enumerate(rows[start_idx + offset]):
+            if val:
+                combined_cols.setdefault(c_idx, []).append(_fold(val).lower())
+    joined_row0 = " ".join(combined_cols.get(c, [""])[0] for c in combined_cols if combined_cols.get(c))
+    if "okuma" not in joined_row0 and "sayac" not in joined_row0:
+        return None
+
+    schema: dict[str, int | None] = {
+        "time": None,
+        "meter": None,
+        "delta": None,
+        "total": None,
+        "temp": None,
+        "pressure": None,
+        "note": None,
+    }
+    for c_idx, parts in sorted(combined_cols.items()):
+        lbl = " ".join(parts)
+        if "okuma" in lbl and "saat" in lbl:
+            schema["time"] = c_idx
+        elif "sayac" in lbl:
+            schema["meter"] = c_idx
+        elif "degisim" in lbl:
+            schema["delta"] = c_idx
+        elif "toplam" in lbl and "hacim" in lbl:
+            schema["total"] = c_idx
+        elif "sicakl" in lbl or "giris" in lbl:
+            schema["temp"] = c_idx
+        elif "basinc" in lbl:
+            schema["pressure"] = c_idx
+        elif lbl == "not" or "notlar" in lbl:
+            schema["note"] = c_idx
+
+    if schema["time"] is None or (schema["meter"] is None and schema["total"] is None):
+        return None
+    return schema
+
+
+def _detect_monitoring_schema(rows: Sequence[Sequence[str]], start_idx: int) -> dict[str, Any] | None:
+    """Detect column indices for BOTAŞ Leak/Pressure monitoring (`018` / `021`) tables."""
+    row0 = rows[start_idx]
+    folded_cells = {c_idx: _fold(val).lower() for c_idx, val in enumerate(row0) if val}
+    if not folded_cells:
+        return None
+    joined = " ".join(folded_cells.values())
+    if "zaman" not in joined or "basinc" not in joined:
+        return None
+
+    time_col: int | None = None
+    pressure_col: int | None = None
+    ambient_col: int | None = None
+    soil_cols: dict[int, int] = {}
+    pipe_cols: dict[int, int] = {}
+    avg_soil_col: int | None = None
+    avg_pipe_col: int | None = None
+    note_col: int | None = None
+
+    for c_idx, lbl in sorted(folded_cells.items()):
+        if lbl == "zaman" or "okuma saati" in lbl:
+            time_col = c_idx
+        elif lbl == "basinc" or lbl.startswith("basinc "):
+            pressure_col = c_idx
+        elif "cevre" in lbl and "sicakl" in lbl:
+            ambient_col = c_idx
+        elif ("avg" in lbl or "ort" in lbl) and "toprak" in lbl:
+            avg_soil_col = c_idx
+        elif ("avg" in lbl or "ort" in lbl) and "boru" in lbl:
+            avg_pipe_col = c_idx
+        elif m_s := re.search(r"toprak\s*sicakl\w*\s*(\d+)", lbl):
+            soil_cols[int(m_s.group(1))] = c_idx
+        elif m_p := re.search(r"boru\s*sicakl\w*\s*(\d+)", lbl):
+            pipe_cols[int(m_p.group(1))] = c_idx
+        elif lbl == "not" or lbl.startswith("not "):
+            note_col = c_idx
+
+    if time_col is None or pressure_col is None or not (soil_cols or pipe_cols):
+        return None
+
+    probe_nums = sorted(set(soil_cols) | set(pipe_cols))
+    return {
+        "time": time_col,
+        "pressure": pressure_col,
+        "ambient": ambient_col,
+        "soil_cols": [soil_cols.get(p) for p in probe_nums],
+        "pipe_cols": [pipe_cols.get(p) for p in probe_nums],
+        "avg_soil": avg_soil_col,
+        "avg_pipe": avg_pipe_col,
+        "note": note_col,
+    }
+
+
+def _cell_at(row: Sequence[str], col: int | None) -> str:
+    if col is None or col < 0 or col >= len(row):
+        return ""
+    return row[col].strip()
+
+
+def _mean_cell_floats(values: Sequence[str]) -> str:
+    nums = [n for v in values if (n := _parse_excel_cell_float(v)) is not None]
+    if not nums:
+        return ""
+    return f"{sum(nums) / len(nums):.6g}".replace(".", ",")
+
+
+def _sheet_rows_to_lines(rows: Sequence[Sequence[str]]) -> list[str]:
+    """Convert one Excel sheet's positional rows into structured lines without column shift."""
+    lines: list[str] = []
+    filling_schema: dict[str, int | None] | None = None
+    monitoring_schema: dict[str, Any] | None = None
+
+    for idx, row in enumerate(rows):
+        if filling_schema is None:
+            detected_fill = _detect_filling_schema(rows, idx)
+            if detected_fill is not None:
+                filling_schema = detected_fill
+                monitoring_schema = None
+        if monitoring_schema is None:
+            detected_mon = _detect_monitoring_schema(rows, idx)
+            if detected_mon is not None:
+                monitoring_schema = detected_mon
+                filling_schema = None
+
+        if filling_schema is not None:
+            t_col = filling_schema["time"]
+            t_val = _cell_at(row, t_col)
+            if _EXCEL_TIME_CELL_RE.fullmatch(t_val):
+                slots = [
+                    _cell_at(row, filling_schema["meter"]) or "-",
+                    _cell_at(row, filling_schema["delta"]) or "-",
+                    _cell_at(row, filling_schema["total"]) or "-",
+                    _cell_at(row, filling_schema["temp"]) or "-",
+                    _cell_at(row, filling_schema["pressure"]) or "-",
+                ]
+                note = _cell_at(row, filling_schema["note"])
+                line = f"{t_val} | " + " | ".join(slots)
+                if note:
+                    line += f" | {note}"
+                lines.append(line)
+                continue
+
+        if monitoring_schema is not None:
+            t_col = monitoring_schema["time"]
+            t_val = _cell_at(row, t_col)
+            if _EXCEL_TIME_CELL_RE.fullmatch(t_val):
+                p_val = _cell_at(row, monitoring_schema["pressure"])
+                amb_val = _cell_at(row, monitoring_schema["ambient"])
+                soil_vals = [_cell_at(row, c) for c in monitoring_schema["soil_cols"]]
+                pipe_vals = [_cell_at(row, c) for c in monitoring_schema["pipe_cols"]]
+                avg_soil = _cell_at(row, monitoring_schema["avg_soil"])
+                avg_pipe = _cell_at(row, monitoring_schema["avg_pipe"])
+
+                if not avg_soil:
+                    avg_soil = _mean_cell_floats(soil_vals)
+                if not avg_pipe:
+                    avg_pipe = _mean_cell_floats(pipe_vals)
+
+                slots = [p_val or "-", amb_val or "-"]
+                for p_idx in range(4):
+                    slots.append((soil_vals[p_idx] if p_idx < len(soil_vals) else "") or "-")
+                    slots.append((pipe_vals[p_idx] if p_idx < len(pipe_vals) else "") or "-")
+                slots.append(avg_soil or "-")
+                slots.append(avg_pipe or "-")
+                note = _cell_at(row, monitoring_schema["note"])
+                line = f"{t_val} | " + " | ".join(slots)
+                if note:
+                    line += f" | {note}"
+                lines.append(line)
+                continue
+
+        # Keep single-row Pig launch/receive records on one line so pairs don't split apart
+        time_cells = [c for c in row if c and _EXCEL_TIME_CELL_RE.fullmatch(c)]
+        if len(time_cells) >= 2:
+            lines.append(" | ".join(c for c in row if c))
+            continue
+
+        lines.extend(_excel_row_to_lines(row))
+    return lines
 
 
 def _extract_spreadsheet_text(path: Path) -> list[PageText]:
@@ -802,8 +1021,7 @@ def _extract_spreadsheet_text(path: Path) -> list[PageText]:
         if not rows:
             continue
         lines: list[str] = [sheet_name] if sheet_name else []
-        for row in rows:
-            lines.extend(_excel_row_to_lines(row))
+        lines.extend(_sheet_rows_to_lines(rows))
         sheet_text = "\n".join(line for line in lines if line.strip())
         if sheet_text.strip():
             pages.append(

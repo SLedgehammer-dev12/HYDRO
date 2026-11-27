@@ -85,11 +85,36 @@ import {
 
 type Phase = "idle" | "analyzing" | "done" | "error";
 type TabKey = "fields" | "discrepancies" | "warnings";
+type BatchItemStatus = "pending" | "analyzing" | "succeeded" | "failed" | "cancelled";
+
+interface OcrBatchItem {
+  key: string;
+  file: File;
+  status: BatchItemStatus;
+  analysisId?: string;
+  result?: OcrAnalysisResult;
+  error?: string;
+}
+
+const BATCH_STATUS_LABEL: Record<BatchItemStatus, string> = {
+  pending: "Bekliyor",
+  analyzing: "Analiz ediliyor",
+  succeeded: "Tamamlandı",
+  failed: "Hata",
+  cancelled: "İptal",
+};
+
+function getBatchFileKey(target: File): string {
+  return `${target.name}:${target.size}:${target.lastModified}`;
+}
 
 export default function OcrPage() {
   const [ocrMode, setOcrMode] = useState<"report" | "plan_profile">("report");
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const [batchItems, setBatchItems] = useState<OcrBatchItem[]>([]);
+  const [activeBatchKey, setActiveBatchKey] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
+  const file = files[0] ?? null;
 
   const [phase, setPhase] = useState<Phase>("idle");
   const [stage, setStage] = useState<StageKey>("upload");
@@ -351,11 +376,15 @@ export default function OcrPage() {
     };
   }, [profiles, profilesDemo, selectedProfileId]);
 
-  const applyResult = (analysis: OcrAnalysisResult, demo: boolean) => {
+  const applyResult = (analysis: OcrAnalysisResult, demo: boolean, keepAnalyzing = false) => {
     const flattened = flattenReport(analysis.report);
     setResult(analysis);
     setResultDemo(demo);
-    setPhase("done");
+    if (!keepAnalyzing) {
+      setPhase("done");
+      setStageNote(null);
+      setPageProgress(null);
+    }
     setError(null);
     setEdits({});
     setSelectedFields(
@@ -378,9 +407,9 @@ export default function OcrPage() {
       : "fields";
     setTab(nextTab);
     setComparisonRequested((analysis.discrepancies ?? []).length > 0);
-    setStageNote(null);
-    setPageProgress(null);
-    window.setTimeout(() => resultHeadingRef.current?.focus(), 40);
+    if (!keepAnalyzing) {
+      window.setTimeout(() => resultHeadingRef.current?.focus(), 40);
+    }
   };
 
   const runDemo = async (signal: AbortSignal) => {
@@ -437,7 +466,7 @@ export default function OcrPage() {
   };
 
   const runAnalysis = async (force = false) => {
-    if (!file) {
+    if (files.length === 0) {
       setFileError("Analiz için önce bir dosya seçin.");
       return;
     }
@@ -454,95 +483,328 @@ export default function OcrPage() {
     setEdits({});
     setPhase("analyzing");
     setStage("upload");
+    setPageProgress(null);
     setStageNote(demoMode ? "Sunucu kapalı; yerel ön kontrol yürütülüyor." : null);
     setElapsed(0);
     startedAtRef.current = Date.now();
     const controller = new AbortController();
     abortRef.current = controller;
 
-    try {
-      if (demoMode) {
-        await runDemo(controller.signal);
-        return;
-      }
-      const job = await analyzeOcr(
-        {
-          file,
-          calculated: parsed.value,
-          mappingProfileId: profilesDemo ? null : selectedProfileId,
-          sessionId,
-          force,
-        },
-        controller.signal,
-      );
-      setJobId(job.analysis_id);
-      setActiveOcrJob({
-        id: job.analysis_id,
-        fileName: file.name,
-        stage: job.status === "queued" ? "Kuyrukta" : "Analiz ediliyor",
-      });
-      setStage("extract");
-      setStageNote(
-        job.reused
-          ? "Aynı dosya daha önce yüklenmiş; mevcut analiz yeniden kullanılıyor."
-          : job.estimated_wait_s
-            ? `Tahmini bekleme: ${formatNumber(job.estimated_wait_s, 0)} sn.`
-            : "Sunucu analizi başlattı.",
-      );
-      const serverTimeoutS = metaQuery.data?.limits?.ocr_timeout_s ?? 600;
-      const final = await waitForAnalysis(job.analysis_id, {
-        signal: controller.signal,
-        timeoutMs: (serverTimeoutS + 30) * 1000,
-        onProgress: (info) => {
-          const parsedProgress = parseExtractProgress(
-            info.stage,
-            info.pages_done,
-            info.pages_total,
-          );
-          if (parsedProgress) {
-            setPageProgress(parsedProgress);
-          }
-          const pageSuffix = parsedProgress
-            ? ` · Sayfa ${parsedProgress.done} / ${parsedProgress.total}`
-            : "";
-          const label =
-            info.status === "queued"
-              ? "Kuyrukta"
-              : `${serverStageLabel(info.stage)}${pageSuffix}`;
-          setActiveOcrJob({
-            id: job.analysis_id,
-            fileName: file.name,
-            stage: label,
-          });
-          setStage(mapServerStage(info.stage));
-          setStageNote(
-            info.status === "queued"
-              ? "Kuyrukta; önceki analiz bitince başlayacak."
-              : `Sunucu aşaması: ${serverStageLabel(info.stage)}${pageSuffix}`,
-          );
-        },
-      });
-      setActiveOcrJob(null);
-      if (final.status === "succeeded") {
-        applyResult({ ...final, reused: Boolean(job.reused) }, false);
-        if (statusError) {
-          void loadStatus();
+    if (files.length === 1) {
+      const targetFile = files[0];
+      setBatchItems([]);
+      setActiveBatchKey(null);
+      try {
+        if (demoMode) {
+          await runDemo(controller.signal);
+          return;
         }
-      } else if (final.status === "failed") {
-        showFailure(final.error, "Analiz tamamlanamadı; sunucu hata ayrıntısı göndermedi.");
-      } else if (final.status === "cancelled") {
-        setPhase("idle");
-        setStageNote("Analiz iptal edildi.");
-      }
-    } catch (caught) {
-      if (isAbortError(caught) || controller.signal.aborted) {
-        if (!unmountRef.current) {
-          setActiveOcrJob(null);
+        const job = await analyzeOcr(
+          {
+            file: targetFile,
+            calculated: parsed.value,
+            mappingProfileId: profilesDemo ? null : selectedProfileId,
+            sessionId,
+            force,
+          },
+          controller.signal,
+        );
+        setJobId(job.analysis_id);
+        setActiveOcrJob({
+          id: job.analysis_id,
+          fileName: targetFile.name,
+          stage: job.status === "queued" ? "Kuyrukta" : "Analiz ediliyor",
+        });
+        setStage("extract");
+        setStageNote(
+          job.reused
+            ? "Aynı dosya daha önce yüklenmiş; mevcut analiz yeniden kullanılıyor."
+            : job.estimated_wait_s
+              ? `Tahmini bekleme: ${formatNumber(job.estimated_wait_s, 0)} sn.`
+              : "Sunucu analizi başlattı.",
+        );
+        const serverTimeoutS = metaQuery.data?.limits?.ocr_timeout_s ?? 600;
+        const final = await waitForAnalysis(job.analysis_id, {
+          signal: controller.signal,
+          timeoutMs: (serverTimeoutS + 30) * 1000,
+          onProgress: (info) => {
+            const parsedProgress = parseExtractProgress(
+              info.stage,
+              info.pages_done,
+              info.pages_total,
+            );
+            if (parsedProgress) {
+              setPageProgress(parsedProgress);
+            }
+            const pageSuffix = parsedProgress
+              ? ` · Sayfa ${parsedProgress.done} / ${parsedProgress.total}`
+              : "";
+            const label =
+              info.status === "queued"
+                ? "Kuyrukta"
+                : `${serverStageLabel(info.stage)}${pageSuffix}`;
+            setActiveOcrJob({
+              id: job.analysis_id,
+              fileName: targetFile.name,
+              stage: label,
+            });
+            setStage(mapServerStage(info.stage));
+            setStageNote(
+              info.status === "queued"
+                ? "Kuyrukta; önceki analiz bitince başlayacak."
+                : `Sunucu aşaması: ${serverStageLabel(info.stage)}${pageSuffix}`,
+            );
+          },
+        });
+        setActiveOcrJob(null);
+        if (final.status === "succeeded") {
+          applyResult({ ...final, reused: Boolean(job.reused) }, false);
+          if (statusError) {
+            void loadStatus();
+          }
+        } else if (final.status === "failed") {
+          showFailure(final.error, "Analiz tamamlanamadı; sunucu hata ayrıntısı göndermedi.");
+        } else if (final.status === "cancelled") {
           setPhase("idle");
           setStageNote("Analiz iptal edildi.");
         }
+      } catch (caught) {
+        if (isAbortError(caught) || controller.signal.aborted) {
+          if (!unmountRef.current) {
+            setActiveOcrJob(null);
+            setPhase("idle");
+            setStageNote("Analiz iptal edildi.");
+          }
+        } else {
+          setActiveOcrJob(null);
+          setError(toOcrApiError(caught));
+          setPhase("error");
+        }
+      } finally {
+        if (abortRef.current === controller) abortRef.current = null;
+        setJobId(null);
+        setElapsed(0);
+      }
+      return;
+    }
+
+    const initialQueue: OcrBatchItem[] = files.map((item) => ({
+      key: getBatchFileKey(item),
+      file: item,
+      status: "pending",
+    }));
+    setBatchItems(initialQueue);
+    setActiveBatchKey(null);
+
+    let firstShown = false;
+    let succeededCount = 0;
+    let failedCount = 0;
+    let lastError: OcrApiError | null = null;
+    const serverTimeoutS = metaQuery.data?.limits?.ocr_timeout_s ?? 600;
+
+    try {
+      for (let idx = 0; idx < initialQueue.length; idx += 1) {
+        if (controller.signal.aborted) {
+          setBatchItems((prev) =>
+            prev.map((entry) =>
+              entry.status === "pending" || entry.status === "analyzing"
+                ? { ...entry, status: "cancelled" }
+                : entry,
+            ),
+          );
+          break;
+        }
+        const entry = initialQueue[idx];
+        setBatchItems((prev) =>
+          prev.map((item) => (item.key === entry.key ? { ...item, status: "analyzing" } : item)),
+        );
+        setStage("upload");
+        setPageProgress(null);
+        setStageNote(`Dosya ${idx + 1} / ${initialQueue.length}: ${entry.file.name} gönderiliyor…`);
+
+        try {
+          if (demoMode) {
+            await wait(350, controller.signal);
+            const demoCopy: OcrAnalysisResult = {
+              ...DEMO_RESULT,
+              id: `demo-${idx + 1}`,
+            };
+            succeededCount += 1;
+            setBatchItems((prev) =>
+              prev.map((item) =>
+                item.key === entry.key
+                  ? { ...item, status: "succeeded", analysisId: demoCopy.id, result: demoCopy }
+                  : item,
+              ),
+            );
+            if (!firstShown) {
+              firstShown = true;
+              applyResult(demoCopy, true, true);
+              setActiveBatchKey(entry.key);
+            }
+            continue;
+          }
+
+          const job = await analyzeOcr(
+            {
+              file: entry.file,
+              calculated: parsed.value,
+              mappingProfileId: profilesDemo ? null : selectedProfileId,
+              sessionId,
+              force,
+            },
+            controller.signal,
+          );
+          setJobId(job.analysis_id);
+          setActiveOcrJob({
+            id: job.analysis_id,
+            fileName: `${idx + 1}/${initialQueue.length} · ${entry.file.name}`,
+            stage: job.status === "queued" ? "Kuyrukta" : "Analiz ediliyor",
+          });
+          setStage("extract");
+          setStageNote(
+            job.reused
+              ? `Dosya ${idx + 1} / ${initialQueue.length}: mevcut analiz yeniden kullanılıyor.`
+              : `Dosya ${idx + 1} / ${initialQueue.length}: ${entry.file.name} okunuyor…`,
+          );
+
+          const final = await waitForAnalysis(job.analysis_id, {
+            signal: controller.signal,
+            timeoutMs: (serverTimeoutS + 30) * 1000,
+            onProgress: (info) => {
+              const parsedProgress = parseExtractProgress(
+                info.stage,
+                info.pages_done,
+                info.pages_total,
+              );
+              if (parsedProgress) setPageProgress(parsedProgress);
+              const pageSuffix = parsedProgress
+                ? ` · Sayfa ${parsedProgress.done} / ${parsedProgress.total}`
+                : "";
+              const label =
+                info.status === "queued"
+                  ? "Kuyrukta"
+                  : `${serverStageLabel(info.stage)}${pageSuffix}`;
+              setActiveOcrJob({
+                id: job.analysis_id,
+                fileName: `${idx + 1}/${initialQueue.length} · ${entry.file.name}`,
+                stage: label,
+              });
+              setStage(mapServerStage(info.stage));
+              setStageNote(
+                `Dosya ${idx + 1} / ${initialQueue.length} (${entry.file.name}): ${label}`,
+              );
+            },
+          });
+
+          if (final.status === "succeeded") {
+            const enriched = { ...final, reused: Boolean(job.reused) };
+            succeededCount += 1;
+            setBatchItems((prev) =>
+              prev.map((item) =>
+                item.key === entry.key
+                  ? { ...item, status: "succeeded", analysisId: job.analysis_id, result: enriched }
+                  : item,
+              ),
+            );
+            if (!firstShown) {
+              firstShown = true;
+              applyResult(enriched, false, true);
+              setActiveBatchKey(entry.key);
+            }
+          } else if (final.status === "cancelled") {
+            setBatchItems((prev) =>
+              prev.map((item) =>
+                item.key === entry.key || item.status === "pending"
+                  ? { ...item, status: "cancelled" }
+                  : item,
+              ),
+            );
+            break;
+          } else {
+            const errMsg = final.error?.message ?? "Analiz tamamlanamadı.";
+            failedCount += 1;
+            lastError = new OcrApiError({
+              code: final.error?.code ?? "ocr_error",
+              message: errMsg,
+              details: final.error?.detail ? { detail: final.error.detail } : {},
+              status: 200,
+            });
+            setBatchItems((prev) =>
+              prev.map((item) =>
+                item.key === entry.key ? { ...item, status: "failed", error: errMsg } : item,
+              ),
+            );
+          }
+        } catch (caught) {
+          if (isAbortError(caught) || controller.signal.aborted) {
+            setBatchItems((prev) =>
+              prev.map((item) =>
+                item.key === entry.key || item.status === "pending"
+                  ? { ...item, status: "cancelled" }
+                  : item,
+              ),
+            );
+            throw caught;
+          }
+          const apiErr = toOcrApiError(caught);
+          failedCount += 1;
+          lastError = apiErr;
+          setBatchItems((prev) =>
+            prev.map((item) =>
+              item.key === entry.key ? { ...item, status: "failed", error: apiErr.message } : item,
+            ),
+          );
+        }
+      }
+
+      setActiveOcrJob(null);
+      if (controller.signal.aborted) {
+        if (!unmountRef.current) {
+          setPhase("idle");
+          setStageNote("Toplu analiz iptal edildi.");
+        }
+      } else if (firstShown) {
+        setPhase("done");
+        setStageNote(null);
+        setPageProgress(null);
+        if (failedCount > 0) {
+          pushToast(
+            "warning",
+            "Toplu Analiz Kısmen Tamamlandı",
+            `${succeededCount} dosya tamamlandı, ${failedCount} dosya hata verdi.`,
+          );
+        } else {
+          pushToast(
+            "success",
+            "Toplu Analiz Tamamlandı",
+            `${succeededCount} test raporu başarıyla okundu.`,
+          );
+        }
       } else {
-        setActiveOcrJob(null);
+        setError(
+          lastError ??
+            new OcrApiError({
+              code: "ocr_batch_error",
+              message: "Toplu analizde hiçbir dosya tamamlanamadı.",
+              details: {},
+              status: 200,
+            }),
+        );
+        setPhase("error");
+      }
+      if (!demoMode) {
+        void loadHistory();
+        if (statusError) void loadStatus();
+      }
+    } catch (caught) {
+      setActiveOcrJob(null);
+      if (isAbortError(caught) || controller.signal.aborted) {
+        if (!unmountRef.current) {
+          setPhase("idle");
+          setStageNote("Toplu analiz iptal edildi.");
+        }
+      } else {
         setError(toOcrApiError(caught));
         setPhase("error");
       }
@@ -558,6 +820,13 @@ export default function OcrPage() {
     if (jobId) {
       void cancelOcrAnalysis(jobId).catch(() => undefined);
     }
+    setBatchItems((prev) =>
+      prev.map((item) =>
+        item.status === "pending" || item.status === "analyzing"
+          ? { ...item, status: "cancelled" }
+          : item,
+      ),
+    );
     setActiveOcrJob(null);
     setPhase("idle");
     setStageNote("Analiz iptal edildi.");
@@ -675,7 +944,9 @@ export default function OcrPage() {
       abortRef.current.abort();
       if (jobId) void cancelOcrAnalysis(jobId).catch(() => undefined);
     }
-    setFile(null);
+    setFiles([]);
+    setBatchItems([]);
+    setActiveBatchKey(null);
     setFileError(null);
     setResult(null);
     setResultDemo(false);
@@ -1008,10 +1279,10 @@ export default function OcrPage() {
                 </span>
                 <div>
                   <h2 id="ocr-upload-title" className="text-[18px] font-bold text-[var(--text)]">
-                    1 · Rapor dosyası
+                    1 · Rapor dosyaları
                   </h2>
                   <p className="text-[11px] text-[var(--text-faint)]">
-                    Tek dosya · en fazla{" "}
+                    Tek veya çoklu dosya · en fazla{" "}
                     {Math.round((status?.limits?.max_file_size_bytes ?? MAX_FILE_BYTES) / (1024 * 1024))} MB
                   </p>
                 </div>
@@ -1023,12 +1294,27 @@ export default function OcrPage() {
 
             <div className="mt-4">
               <Dropzone
+                multiple
+                files={files}
                 file={file}
                 error={fileError}
                 maxBytes={status?.limits?.max_file_size_bytes}
                 disabled={phase === "analyzing"}
                 onSelect={(next) => {
-                  setFile(next);
+                  setFiles([next]);
+                  setBatchItems([]);
+                  setActiveBatchKey(null);
+                  setFileError(null);
+                  if (phase === "done" || phase === "error") {
+                    setResult(null);
+                    setPhase("idle");
+                    setStageNote(null);
+                  }
+                }}
+                onSelectFiles={(nextFiles) => {
+                  setFiles(nextFiles);
+                  setBatchItems([]);
+                  setActiveBatchKey(null);
                   setFileError(null);
                   if (phase === "done" || phase === "error") {
                     setResult(null);
@@ -1037,7 +1323,21 @@ export default function OcrPage() {
                   }
                 }}
                 onRemove={() => {
-                  setFile(null);
+                  setFiles([]);
+                  setBatchItems([]);
+                  setActiveBatchKey(null);
+                  setFileError(null);
+                }}
+                onRemoveFile={(idx) => {
+                  setFiles((prev) => prev.filter((_, i) => i !== idx));
+                  setBatchItems([]);
+                  setActiveBatchKey(null);
+                  setFileError(null);
+                }}
+                onClearAll={() => {
+                  setFiles([]);
+                  setBatchItems([]);
+                  setActiveBatchKey(null);
                   setFileError(null);
                 }}
                 onError={(message) => setFileError(message)}
@@ -1186,7 +1486,7 @@ export default function OcrPage() {
                   onClick={() => {
                     void runAnalysis();
                   }}
-                  disabled={!file || phase === "analyzing"}
+                  disabled={files.length === 0 || phase === "analyzing"}
                   aria-describedby={analyzeDisabledReason ? "ocr-analyze-reason" : undefined}
                   className="btn btn-primary btn-lg"
                 >
@@ -1195,7 +1495,7 @@ export default function OcrPage() {
                   ) : (
                     <ScanLine size={18} aria-hidden="true" />
                   )}
-                  Analiz Et
+                  {files.length > 1 ? `Analiz Et (${files.length} dosya)` : "Analiz Et"}
                 </button>
               </div>
             </div>
@@ -1372,6 +1672,87 @@ export default function OcrPage() {
                 </button>
               </div>
             </div>
+          ) : null}
+
+          {batchItems.length > 1 ? (
+            <section
+              className="panel p-4"
+              aria-labelledby="ocr-batch-queue-title"
+              data-testid="ocr-batch-queue"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b hairline pb-3">
+                <div>
+                  <h2 id="ocr-batch-queue-title" className="text-sm font-bold text-[var(--text)]">
+                    Toplu Analiz Kuyruğu
+                  </h2>
+                  <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">
+                    Tamamlanan:{" "}
+                    <span className="numeric font-semibold text-[var(--text)]">
+                      {batchItems.filter((item) => item.status === "succeeded").length} / {batchItems.length}
+                    </span>
+                    {batchItems.some((item) => item.status === "failed")
+                      ? ` · Hata: ${batchItems.filter((item) => item.status === "failed").length}`
+                      : ""}
+                    {" · "}İncelemek için tamamlanan bir dosyaya tıklayın.
+                  </p>
+                </div>
+              </div>
+              <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+                {batchItems.map((item) => {
+                  const isActive = item.key === activeBatchKey;
+                  const canInspect = item.status === "succeeded" && Boolean(item.result);
+                  return (
+                    <li key={item.key}>
+                      <button
+                        type="button"
+                        disabled={!canInspect}
+                        onClick={() => {
+                          if (!item.result) return;
+                          applyResult(item.result, demoMode, phase === "analyzing");
+                          setActiveBatchKey(item.key);
+                        }}
+                        className={clsx(
+                          "flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]",
+                          isActive
+                            ? "border-[var(--primary)] bg-[var(--info-bg)]"
+                            : "border-[var(--border)] bg-[var(--surface-2)] hover:border-[var(--border-strong)]",
+                          !canInspect && "cursor-default opacity-80",
+                        )}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs font-medium text-[var(--text)]" title={item.file.name}>
+                            {item.file.name}
+                          </p>
+                          {item.error ? (
+                            <p className="truncate text-[10px] text-[var(--danger)]" title={item.error}>
+                              {item.error}
+                            </p>
+                          ) : item.result?.dossier?.sections?.[0]?.section_no ? (
+                            <p className="text-[10px] text-[var(--text-muted)]">
+                              {item.result.dossier.sections[0].section_no}
+                            </p>
+                          ) : null}
+                        </div>
+                        <span
+                          className={clsx(
+                            "shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold",
+                            item.status === "succeeded"
+                              ? "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success)]"
+                              : item.status === "failed"
+                                ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger)]"
+                                : item.status === "analyzing"
+                                  ? "border-[var(--info-border)] bg-[var(--info-bg)] text-[var(--primary)]"
+                                  : "border-[var(--border)] bg-[var(--surface-3)] text-[var(--text-muted)]",
+                          )}
+                        >
+                          {BATCH_STATUS_LABEL[item.status]}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
           ) : null}
 
           {!result && phase === "idle" ? (

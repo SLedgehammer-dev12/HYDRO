@@ -219,7 +219,9 @@ _SECTION_REJECT_TOKENS = {
 
 _CHAINAGE_RE = re.compile(r"\b(\d{1,3})\s*\+\s*(\d{3}(?:[.,]\d+)?)\b")
 _DATE_RE = re.compile(
-    r"\b(\d{1,2}(?:\s*-\s*\d{1,2})?[./-]\d{1,2}[./-]\d{2,4}(?:\s*-\s*\d{1,2}[./-]\d{1,2}[./-]\d{2,4})?)\b"
+    r"(\(\d{1,2}\s*-\s*\d{1,2}\)[./-]\d{1,2}[./-]\d{2,4}"
+    r"|\b\d{4}-\d{2}-\d{2}\b"
+    r"|\b\d{1,2}(?:\s*-\s*\d{1,2})?[./-]\d{1,2}[./-]\d{2,4}(?:\s*-\s*\d{1,2}[./-]\d{1,2}[./-]\d{2,4})?\b)"
 )
 _TIME_TOKEN_RE = re.compile(r"(?<![\d:])(\d{1,2}):(\d{2})(?::(\d{2}))?(?![\d:])")
 
@@ -403,7 +405,19 @@ def classify_form_text(text: str, sheet_hint: str = "") -> FormSpec | None:
         ("cleaning", ("temizlik kabul raporu", "hat temizlik raporu", "cleaning report")),
         ("dewatering", ("bosaltma kabul raporu", "su bosaltma raporu", "dewatering report")),
         ("pre_drying", ("on kurutma kabul", "on kurutma raporu", "pre-drying", "pre drying")),
-        ("final_drying", ("nihai kurutma", "son kurutma", "final drying", "kurutma kabul raporu")),
+        (
+            "final_drying",
+            (
+                "nihai kurutma",
+                "son kurutma",
+                "final drying",
+                "kurutma kabul raporu",
+                "hava kurutma raporu",
+                "hava kurutma",
+                "ciglenme noktasi raporu",
+                "ciglenme noktasi",
+            ),
+        ),
         ("test_data", ("hidrostatik test verileri", "hydrostatic test data")),
         ("spool_test", ("spool test verileri", "spool test raporu", "spool test")),
         (
@@ -636,11 +650,22 @@ def _is_blank_template_page(text: str, section_no: str | None) -> bool:
     )
     has_numeric_geom = bool(
         re.search(
-            r"(?:boru\s*dis\s*capi|test\s*bolum\s*boyu|test\s*bolum\s*hacmi)[ \t]*[:=]?[ \t]*\d+(?!\s*\.\s*baslik)",
+            r"(?:boru\s*dis\s*capi|test\s*bolum\s*boyu|test\s*bolum\s*hacmi|boru\s*capi|uzunluk)[ \t]*[:=]?[ \t]*\d+(?!\s*\.\s*baslik)",
             folded,
         )
     )
-    return has_placeholder and not has_numeric_geom and not _has_real_date(text)
+    if has_numeric_geom or _has_real_date(text):
+        return False
+    if has_placeholder:
+        return True
+    has_blank_sec_label = bool(
+        re.search(
+            r"\b(?:test\s*bolum\s*no|bolum\s*no)\s*[:=]?\s*(?:$|boru\s*capi)",
+            folded,
+            re.MULTILINE,
+        )
+    )
+    return has_blank_sec_label and len(_TIME_TOKEN_RE.findall(text)) <= 1
 
 
 _PROJECT_SUFFIX_TOKENS = {"yapim", "isi", "projesi", "proje"}
@@ -1036,8 +1061,8 @@ def _first_valid_num_in_segment(
     *,
     dot_decimal: bool = False,
 ) -> float | None:
-    # Strip date strings before scanning numeric tokens so dates like 04.10.2026 are never parsed as floats
-    scrubbed = _DATE_RE.sub(" ", segment)
+    # Strip dates and KP chainages so tokens like 04.10.2026 or 34+670 never turn into floats
+    scrubbed = _CHAINAGE_RE.sub(" ", _DATE_RE.sub(" ", segment))
     for cand in re.findall(r"[-+]?\d[\d.,]*", scrubbed):
         if re.fullmatch(r"\d+\.", cand):
             continue
@@ -1151,39 +1176,58 @@ def _extract_form_date(text: str) -> str:
     return ""
 
 
+def _meters_to_kp_clean(meters_val: float) -> str:
+    whole_m = int(round(meters_val))
+    km = whole_m // 1000
+    rem = abs(whole_m - km * 1000)
+    return _format_kp_clean(f"{km}+{rem:03d}")
+
+
 def _extract_chainages_for_section(text: str) -> tuple[str, str]:
-    pairs: dict[str, str] = {}
-    for line in text.splitlines()[:70]:
+    explicit_pairs: dict[str, str] = {}
+    head_pairs: dict[str, str] = {}
+    for line in text.splitlines()[:75]:
         folded = fold_tr(line)
-        m_ch = _CHAINAGE_RE.search(line)
-        if not m_ch:
+        is_start_km = any(k in folded for k in ("baslangic noktasinin kilometresi", "kms"))
+        is_end_km = any(k in folded for k in ("bitis noktasinin kilometresi", "kme"))
+        is_start_head = any(
+            k in folded for k in ("1.baslik yeri", "1. baslik yeri", "atma basligi")
+        )
+        is_end_head = any(
+            k in folded for k in ("2.baslik yeri", "2. baslik yeri", "alma basligi")
+        )
+        if not (is_start_km or is_end_km or is_start_head or is_end_head):
             continue
-        kp_str = f"{int(m_ch.group(1))}+{m_ch.group(2)}"
-        if any(
-            k in folded
-            for k in (
-                "1.baslik yeri",
-                "1. baslik yeri",
-                "baslangic noktasi",
-                "baslangic noktasinin kilometresi",
-                "kms",
-                "atma basligi",
-            )
-        ):
-            pairs.setdefault("start", kp_str)
-        elif any(
-            k in folded
-            for k in (
-                "2.baslik yeri",
-                "2. baslik yeri",
-                "bitis noktasi",
-                "bitis noktasinin kilometresi",
-                "kme",
-                "alma basligi",
-            )
-        ):
-            pairs.setdefault("end", kp_str)
-    return pairs.get("start", ""), pairs.get("end", "")
+
+        m_ch = _CHAINAGE_RE.search(line)
+        kp_str = ""
+        if m_ch:
+            kp_str = _format_kp_clean(f"{int(m_ch.group(1))}+{m_ch.group(2)}")
+        elif is_start_km or is_end_km:
+            rhs = line.split(":", 1)[-1] if ":" in line else line
+            m_m = re.search(r"(?<![.,\d])(\d{1,6}(?:[.,]\d+)?)\s*(?:m\b)?", rhs)
+            if m_m:
+                try:
+                    m_val = float(m_m.group(1).replace(",", "."))
+                    if 0.0 <= m_val <= 300_000.0:
+                        kp_str = _meters_to_kp_clean(m_val)
+                except ValueError:
+                    pass
+        if not kp_str:
+            continue
+        if is_start_km:
+            explicit_pairs.setdefault("start", kp_str)
+        elif is_end_km:
+            explicit_pairs.setdefault("end", kp_str)
+        elif is_start_head:
+            head_pairs.setdefault("start", kp_str)
+        elif is_end_head:
+            head_pairs.setdefault("end", kp_str)
+
+    return (
+        explicit_pairs.get("start") or head_pairs.get("start", ""),
+        explicit_pairs.get("end") or head_pairs.get("end", ""),
+    )
 
 
 _TIME_PREFIX_RE = re.compile(
@@ -1265,9 +1309,27 @@ def _parse_time_log(text: str, *, dot_decimal: bool = False) -> dict[str, Any]:
             abs_min = raw_min + day_offset_min
             # Collect inline numbers on the same line + numeric lines before the next timestamp/footer
             nums: list[float] = []
+            slots: list[float | None] | None = None
             tail = line[tail_start:].strip()
             row_notes: list[str] = []
-            if tail:
+            is_piped = "|" in tail
+            if is_piped:
+                slots = []
+                for cell in tail.lstrip(" |").split("|"):
+                    tok = cell.strip()
+                    if not tok or tok in {"-", "—"}:
+                        slots.append(None)
+                    elif not _DATE_RE.search(tok) and re.fullmatch(r"[-+]?\d[\d.,]*", tok):
+                        try:
+                            val = parse_number(tok, dot_decimal=dot_decimal)
+                            slots.append(val)
+                            nums.append(val)
+                        except ValueError:
+                            slots.append(None)
+                            row_notes.append(tok)
+                    else:
+                        row_notes.append(tok)
+            elif tail:
                 for tok in tail.split():
                     if not _DATE_RE.search(tok) and re.fullmatch(r"[-+]?\d[\d.,]*", tok):
                         try:
@@ -1278,7 +1340,7 @@ def _parse_time_log(text: str, *, dot_decimal: bool = False) -> dict[str, Any]:
                         row_notes.append(tok)
 
             j = i + 1
-            while j < n and j <= i + 12:
+            while not is_piped and j < n and j <= i + 24:
                 nxt_raw = lines[j]
                 nxt_time_probe = _TIME_PREFIX_RE.sub("", nxt_raw).strip()
                 nxt_after = lines[j + 1] if j + 1 < n else ""
@@ -1319,14 +1381,15 @@ def _parse_time_log(text: str, *, dot_decimal: bool = False) -> dict[str, Any]:
                     row_notes.append(nxt_raw)
                 j += 1
 
-            entries.append(
-                {
-                    "time_str": f"{hh:02d}:{mm:02d}" + (f":{ss:02d}" if has_seconds else ""),
-                    "abs_min": round(abs_min, 2),
-                    "nums": nums,
-                    "notes": " ".join(row_notes),
-                }
-            )
+            entry_obj: dict[str, Any] = {
+                "time_str": f"{hh:02d}:{mm:02d}" + (f":{ss:02d}" if has_seconds else ""),
+                "abs_min": round(abs_min, 2),
+                "nums": nums,
+                "notes": " ".join(row_notes),
+            }
+            if slots is not None:
+                entry_obj["slots"] = slots
+            entries.append(entry_obj)
             prev_total_min = abs_min
             i = j
             continue
@@ -1599,6 +1662,34 @@ def _extract_four_hour_temp_delta(entries: Sequence[dict[str, Any]]) -> dict[str
     boru_readings: list[float] = []
 
     for ent in entries:
+        slots = ent.get("slots")
+        if isinstance(slots, list) and len(slots) >= 12:
+            amb = _finite_float(slots[1])
+            if amb is not None and -10.0 <= amb <= 55.0:
+                all_temps.append(amb)
+            has_pair = False
+            for idx_p in range(2, 10, 2):
+                sv = _finite_float(slots[idx_p])
+                pv = _finite_float(slots[idx_p + 1])
+                if sv is not None and pv is not None:
+                    has_pair = True
+                if sv is not None and -10.0 <= sv <= 55.0:
+                    all_temps.append(sv)
+                if pv is not None and -10.0 <= pv <= 55.0:
+                    all_temps.append(pv)
+            if has_pair:
+                toprak_readings.append(_finite_float(slots[2]) or 0.0)
+                boru_readings.append(_finite_float(slots[3]) or 0.0)
+            avg_soil = _finite_float(slots[10])
+            avg_pipe = _finite_float(slots[11])
+            if avg_soil is not None and -10.0 <= avg_soil <= 55.0:
+                all_temps.append(avg_soil)
+                block_soil_avgs.append(avg_soil)
+            if avg_pipe is not None and -10.0 <= avg_pipe <= 55.0:
+                all_temps.append(avg_pipe)
+                block_pipe_avgs.append(avg_pipe)
+            continue
+
         raw_nums: list[float] = ent.get("nums") or []
         if not raw_nums:
             continue
@@ -1744,6 +1835,47 @@ def _format_kp_clean(raw: str) -> str:
     return f"{km}+{whole:03d},{frac_str}"
 
 
+def _extract_smys_mpa(norm_text: str, folded_norm: str, *, dot_decimal: bool = False) -> float | None:
+    """Extract steel SMYS (MPa) from grade (`X60`), psi (`60200 psi`), or MPa label (ignoring P_SMYS in bar)."""
+    # 1. Explicit MPa / N/mm² label (ignore rows whose unit is bar, which report P_SMYS yield pressure)
+    for line, f_line in zip(norm_text.splitlines(), folded_norm.splitlines()):
+        if not re.search(r"boru\s*akma\s*dayanimi|\bsmys\b", f_line):
+            continue
+        if re.search(r"\(\s*bar\s*\)|\bbar\b", f_line):
+            continue
+        val = _parse_num_after_label(
+            line,
+            (r"boru\s*akma\s*dayanimi\s*(?:\(\s*smys\s*\))?", r"\bsmys\b\s*[:=]"),
+            min_val=150.0,
+            max_val=900.0,
+            dot_decimal=dot_decimal,
+        )
+        if val is not None:
+            return val
+
+    # 2. Steel grade token (e.g. `Boru Kalitesi (GrB,X42,X52,X65,.....) : X60` or `API 5L X60`)
+    for f_line in folded_norm.splitlines():
+        if any(tok in f_line for tok in ("boru kalitesi", "celik kalitesi", "steel grade", "pipe grade", "api 5l")):
+            rhs = f_line.split(":", 1)[-1] if ":" in f_line else f_line
+            m_grade = re.search(r"\b(gr\s*b|x\s*(?:42|46|52|56|60|65|70|80))\b", rhs)
+            if m_grade:
+                canon = re.sub(r"\s+", "", m_grade.group(1)).upper()
+                if canon == "GRB":
+                    canon = "Grade B"
+                for g_entry in API_5L_PSL2_GRADES:
+                    if str(g_entry.get("grade") or "").upper() == canon:
+                        return float(g_entry["smys_mpa"])
+
+    # 3. `S = 60200 psi` or `SMYS (52000/14.50377)` formula
+    m_psi_lbl = re.search(r"\b(?:s|smys)\s*[:=]\s*(\d{4,6})\s*psi\b", folded_norm)
+    if m_psi_lbl:
+        return round(float(m_psi_lbl.group(1)) / 145.0377, 1)
+    m_psi = re.search(r"smys\s*\(\s*(\d{4,6})\s*/\s*14\.50\d*\s*\)", folded_norm)
+    if m_psi:
+        return round(float(m_psi.group(1)) / 145.0377, 2)
+    return None
+
+
 def _extract_doc_engineering_defaults(pages: Sequence[PageText]) -> dict[str, Any]:
     """Extract document-level engineering parameters (e.g. SMYS formula/psi, nominal OD) from cover/procedure pages."""
     defaults: dict[str, Any] = {}
@@ -1751,20 +1883,7 @@ def _extract_doc_engineering_defaults(pages: Sequence[PageText]) -> dict[str, An
         norm = _normalize_calc_text(page.text)
         folded = fold_tr(norm)
         page_dot_dec = is_dot_decimal_text(norm)
-        # e.g. `SMYS (52000/14.50377)` or `3585.2747` bar -> 358.53 MPa
-        m_psi = re.search(r"smys\s*\(\s*(\d{4,6})\s*/\s*14\.50\d*\s*\)", folded)
-        if m_psi:
-            psi = float(m_psi.group(1))
-            defaults["smys_mpa"] = round(psi / 145.0377, 2)
-            break
-        m_smys = _parse_num_after_label(
-            norm,
-            (r"boru\s*akma\s*dayanimi\s*(?:\(\s*smys\s*\))?", r"\bsmys\b\s*[:=]"),
-            min_val=150.0,
-            max_val=900.0,
-            dot_decimal=page_dot_dec,
-        )
-        if m_smys:
+        if m_smys := _extract_smys_mpa(norm, folded, dot_decimal=page_dot_dec):
             defaults["smys_mpa"] = m_smys
             break
     return defaults
@@ -1976,13 +2095,7 @@ def _extract_form_specific_data(form_code: str, text: str) -> dict[str, Any]:
         dot_decimal=dot_decimal,
     ):
         header["lowest_elevation_m"] = hmin
-    if smys_val := _parse_num_after_label(
-        norm_text,
-        (r"boru\s*akma\s*dayanimi\s*(?:\(\s*smys\s*\))?", r"\bsmys\b\s*[:=]"),
-        min_val=150,
-        max_val=900,
-        dot_decimal=dot_decimal,
-    ):
+    if smys_val := _extract_smys_mpa(norm_text, folded_norm, dot_decimal=dot_decimal):
         header["smys_mpa"] = smys_val
 
     m_loc = re.search(
@@ -2115,6 +2228,18 @@ def _extract_form_specific_data(form_code: str, text: str) -> dict[str, Any]:
             len(e.get("nums") or []) >= 5 and float(e["nums"][0]) >= 100.0 for e in log["entries"]
         )
         for ent in log["entries"]:
+            slots = ent.get("slots")
+            if isinstance(slots, list) and len(slots) >= 4:
+                if (m_val := slots[0]) is not None and m_val >= 0:
+                    meter_readings.append(m_val)
+                if (tot_val := slots[2]) is not None and tot_val >= 0:
+                    volumes.append(tot_val)
+                if (t_val := slots[3]) is not None and -5.0 <= t_val <= 55.0:
+                    temps.append(t_val)
+                if len(slots) >= 5 and (p_val := slots[4]) is not None and 0.0 <= p_val <= 300.0:
+                    pressures.append(p_val)
+                continue
+
             nums = ent["nums"]
             # Typical row: Counter (m3), DeltaVol (m3), TotalVol (m3), WaterTemp (C), Pressure (Bar)
             if len(nums) >= 5:
@@ -2240,6 +2365,18 @@ def _extract_form_specific_data(form_code: str, text: str) -> dict[str, Any]:
         cum_vols: list[float] = []
         pr_temps: list[float] = []
         for ent in log["entries"]:
+            slots = ent.get("slots")
+            if isinstance(slots, list) and len(slots) >= 4:
+                if (m_val := slots[0]) is not None and m_val >= 0:
+                    meter_readings.append(m_val)
+                if (tot_val := slots[2]) is not None and tot_val >= 0:
+                    volumes.append(tot_val)
+                if (t_val := slots[3]) is not None and -5.0 <= t_val <= 55.0:
+                    temps.append(t_val)
+                if len(slots) >= 5 and (p_val := slots[4]) is not None and 0.0 <= p_val <= 300.0:
+                    pressures.append(p_val)
+                continue
+
             nums = ent["nums"]
             p_cands = [v for v in nums[:3] if 5.0 <= v <= 450.0]
             if len(nums) >= 4:
@@ -3743,6 +3880,17 @@ def _merge_section_header(
     if complete_elev_hdr is not None:
         for k in _ELEV_KEYS:
             merged[k] = _finite_float(complete_elev_hdr.get(k))
+
+    # Prefer canonical route KPs from calculation_sheet (DONE) or test_data (VERİ) over pump-head locations
+    for kp_src in ("calculation_sheet", "test_data"):
+        kp_entry = forms_by_code.get(kp_src)
+        if not kp_entry:
+            continue
+        kp_hdr = (kp_entry.get("extracted_data") or {}).get("header") or {}
+        if kp_hdr.get("start_kp") and kp_hdr.get("end_kp"):
+            merged["start_kp"] = kp_hdr["start_kp"]
+            merged["end_kp"] = kp_hdr["end_kp"]
+            break
 
     for code in ordered_codes:
         entry = forms_by_code.get(code)
@@ -5301,6 +5449,28 @@ def commit_dossier_to_project(
                 "wall_thickness_mm": header.get("wall_thickness_mm"),
                 "length_m": header.get("length_m"),
             }
+            td_form = next(
+                (fm for fm in (sec.get("present_forms") or []) if fm.get("form_code") == "test_data"),
+                None,
+            )
+            td_segs = ((td_form or {}).get("extracted_data") or {}).get("test_data", {}).get(
+                "volume_segments"
+            ) or []
+            od_seg = _finite_float(header.get("outside_diameter_mm"))
+            if td_segs and od_seg:
+                built_segs = [
+                    {
+                        "name": f"Segment {s_idx + 1}",
+                        "outside_diameter_mm": od_seg,
+                        "wall_thickness_mm": float(seg["wall_thickness_mm"]),
+                        "length_m": float(seg["length_m"]),
+                    }
+                    for s_idx, seg in enumerate(td_segs)
+                    if _finite_float(seg.get("wall_thickness_mm"))
+                    and (_finite_float(seg.get("length_m")) or 0.0) > 0.0
+                ]
+                if built_segs:
+                    init_inputs["segments"] = built_segs
             for sp_key in (
                 "design_pressure_bar",
                 "smys_mpa",

@@ -407,16 +407,21 @@ def _extract_test_data_tables(text: str, *, dot_decimal: bool | None = None) -> 
     lines = [" ".join(ln.split()).strip() for ln in text.splitlines() if ln.strip()]
 
     in_meas = False
-    for line in lines:
+    idx = 0
+    n_lines = len(lines)
+    while idx < n_lines:
+        line = lines[idx]
         f = _fold(line)
-        # Volume row pattern: e.g. `11.1 mm   12000 m   2418.4 m3` or `Et Kalinligi 11.1 Uzunluk 12000 Hacim 2418.4`
+
+        # Single-line segment volume row OR multi-line Excel segment triple:
+        # `Boru Et Kalınlığı : 5,2 mm` / `Uzunluk : 16262,43 m` / `Hacim : 2001,91 m³`
         if ("et kalinligi" in f or "boru et" in f) and "hacim" in f and "toplam" not in f:
             nums = [
                 _finite(parse_number(tok, dot_decimal=use_dot))
                 for tok in re.findall(r"\d[\d.,]*", line)
             ]
             nums_f = [n for n in nums if n is not None]
-            if len(nums_f) >= 3:
+            if len(nums_f) >= 3 and nums_f[1] > 0:
                 volume_segments.append(
                     {
                         "wall_thickness_mm": nums_f[0],
@@ -424,9 +429,33 @@ def _extract_test_data_tables(text: str, *, dot_decimal: bool | None = None) -> 
                         "volume_m3": nums_f[2],
                     }
                 )
+        elif re.match(r"^(?:boru\s*)?et\s*kalinligi\b", f) and ":" in line and idx + 2 < n_lines:
+            f1 = _fold(lines[idx + 1])
+            f2 = _fold(lines[idx + 2])
+            if "uzunluk" in f1 and "hacim" in f2:
+                wt_nums = re.findall(r"\d[\d.,]*", line.split(":", 1)[-1])
+                ln_nums = re.findall(r"\d[\d.,]*", lines[idx + 1].split(":", 1)[-1])
+                vl_nums = re.findall(r"\d[\d.,]*", lines[idx + 2].split(":", 1)[-1])
+                if wt_nums and ln_nums and vl_nums:
+                    wt_v = _finite(parse_number(wt_nums[0], dot_decimal=use_dot))
+                    ln_v = _finite(parse_number(ln_nums[0], dot_decimal=use_dot))
+                    vl_v = _finite(parse_number(vl_nums[0], dot_decimal=use_dot))
+                    if wt_v is not None and ln_v is not None and vl_v is not None and ln_v > 0:
+                        volume_segments.append(
+                            {
+                                "wall_thickness_mm": wt_v,
+                                "length_m": ln_v,
+                                "volume_m3": vl_v,
+                            }
+                        )
+                    idx += 3
+                    continue
+
         if "test olcumleri" in f or ("boru ust" in f and "kot" in f):
             in_meas = True
+            idx += 1
             continue
+
         if in_meas:
             if (
                 "aciklama" in f
@@ -436,7 +465,54 @@ def _extract_test_data_tables(text: str, *, dot_decimal: bool | None = None) -> 
                 or "sayfa" in f
             ):
                 in_meas = False
+                idx += 1
                 continue
+
+            meas_point_rx = re.compile(
+                r"^(?:baslangic\s*nokta(?:s[iı])?|en\s*dusuk\s*nokta(?:s[iı])?|en\s*yuksek\s*nokta(?:s[iı])?|bitis\s*nokta(?:s[iı])?)\s*:"
+            )
+            if meas_point_rx.match(f):
+                block_tokens: list[str] = [line.split(":", 1)[-1]]
+                look = idx + 1
+                while look < n_lines and look <= idx + 5:
+                    lf = _fold(lines[look])
+                    if (
+                        meas_point_rx.match(lf)
+                        or any(st in lf for st in ("aciklama", "botas", "yuklenici", "muteahhit"))
+                    ):
+                        break
+                    block_tokens.append(lines[look])
+                    look += 1
+                joined = " ".join(block_tokens)
+                kp_norm = re.sub(
+                    r"\b(\d{1,3})\+(\d{3}(?:[.,]\d+)?)\b",
+                    lambda m: (
+                        f"{int(m.group(1)) * 1000.0 + float(m.group(2).replace(',', '.')):g}".replace(
+                            ".", "." if use_dot else ","
+                        )
+                    ),
+                    joined,
+                )
+                nums_b = [
+                    n
+                    for tok in re.findall(r"[-+]?\d[\d.,]*", kp_norm)
+                    if (n := _finite(parse_number(tok, dot_decimal=use_dot))) is not None
+                ]
+                if len(nums_b) >= 3 and -500.0 <= nums_b[0] <= 6000.0:
+                    measurements.append(
+                        {
+                            "pipe_top_elev_m": nums_b[0],
+                            "station_m": nums_b[1] if len(nums_b) >= 2 else None,
+                            "max_pressure_bar": nums_b[2] if len(nums_b) >= 3 else None,
+                            "max_smys_pct": nums_b[3] if len(nums_b) >= 4 else None,
+                            "min_pressure_bar": nums_b[4] if len(nums_b) >= 5 else None,
+                            "min_smys_pct": nums_b[5] if len(nums_b) >= 6 else None,
+                            "note": "",
+                        }
+                    )
+                idx = look
+                continue
+
             kp_normalized = re.sub(
                 r"\b(\d{1,3})\+(\d{3}(?:[.,]\d+)?)\b",
                 lambda m: (
@@ -451,7 +527,7 @@ def _extract_test_data_tables(text: str, *, dot_decimal: bool | None = None) -> 
                 for tok in re.findall(r"[-+]?\d[\d.,]*", kp_normalized)
             ]
             nums_f = [n for n in nums if n is not None]
-            if len(nums_f) >= 3 and 50 <= abs(nums_f[0]) <= 5000:
+            if len(nums_f) >= 3 and -500.0 <= nums_f[0] <= 6000.0:
                 measurements.append(
                     {
                         "pipe_top_elev_m": nums_f[0],
@@ -463,6 +539,8 @@ def _extract_test_data_tables(text: str, *, dot_decimal: bool | None = None) -> 
                         "note": "",
                     }
                 )
+        idx += 1
+
     return {
         "volume_segments": volume_segments[:25],
         "test_measurements": measurements[:40],
@@ -500,7 +578,42 @@ def _extract_pig_runs(text: str) -> list[dict[str, Any]]:
         if in_table and any(stop in f for stop in ("aciklama", "botas", "muteahhit", "yuklenici")):
             in_table = False
             continue
-        times = re.findall(r"\b\d{1,2}:\d{2}\b", line)
+        if "|" in line:
+            parts = [p.strip() for p in line.split("|")]
+            times = [m.group(1) for p in parts if (m := re.search(r"\b(\d{1,2}:\d{2})(?::\d{2})?\b", p))]
+            if times:
+                launch_t = times[0]
+                receive_t = times[1] if len(times) >= 2 else ""
+                dur_min = None
+                if launch_t and receive_t:
+                    t0 = _parse_hhmm_to_min(launch_t)
+                    t1 = _parse_hhmm_to_min(receive_t)
+                    if t0 is not None and t1 is not None:
+                        if t1 < t0:
+                            t1 += 24 * 60.0
+                        dur_min = round(t1 - t0, 1)
+                non_dt = [
+                    p
+                    for p in parts
+                    if p
+                    and not re.fullmatch(r"\d{1,2}", p)
+                    and not re.fullmatch(r"\d{1,2}:\d{2}(?::\d{2})?", p)
+                    and not re.fullmatch(r"\d{4}-\d{2}-\d{2}|\d{1,2}[./-]\d{1,2}[./-]\d{2,4}", p)
+                ]
+                pig_type = _clean_text_value(non_dt[0]) if non_dt else "Pig"
+                note = _clean_text_value(non_dt[-1]) if len(non_dt) >= 2 else ""
+                runs.append(
+                    {
+                        "pig_type": pig_type or "Pig",
+                        "launch_time": launch_t,
+                        "receive_time": receive_t,
+                        "duration_min": dur_min,
+                        "note": note,
+                    }
+                )
+                continue
+
+        times = [m.group(1) for m in re.finditer(r"\b(\d{1,2}:\d{2})(?::\d{2})?\b", line)]
         if in_table or (times and any(k in f for k in pig_keywords)):
             if not times:
                 continue
@@ -514,7 +627,8 @@ def _extract_pig_runs(text: str) -> list[dict[str, Any]]:
                     if t1 < t0:
                         t1 += 24 * 60.0
                     dur_min = round(t1 - t0, 1)
-            prefix = re.split(r"\d{1,2}:\d{2}|\d{1,2}[./-]\d{1,2}[./-]\d{2,4}", line, maxsplit=1)[0]
+            prefix = re.split(r"\d{1,2}:\d{2}|\d{4}-\d{2}-\d{2}|\d{1,2}[./-]\d{1,2}[./-]\d{2,4}", line, maxsplit=1)[0]
+            prefix = re.sub(r"^\d{1,2}\s+", "", prefix).strip()
             pig_type = _clean_text_value(prefix) or "Pig"
             runs.append(
                 {
@@ -570,6 +684,20 @@ def _map_filling_rows(entries: Sequence[dict[str, Any]]) -> list[dict[str, Any]]
         len(e.get("nums") or []) >= 5 and float(e["nums"][0]) >= 100.0 for e in entries
     )
     for ent in list(entries)[:MAX_TABLE_ROWS]:
+        slots = ent.get("slots")
+        if isinstance(slots, list) and len(slots) >= 4:
+            row = {
+                "time_str": str(ent.get("time_str") or ""),
+                "meter_reading_m3": slots[0],
+                "delta_volume_m3": slots[1],
+                "total_volume_m3": slots[2],
+                "water_inlet_temp_c": slots[3],
+                "water_pressure_bar": slots[4] if len(slots) >= 5 else None,
+                "note": str(ent.get("notes") or ""),
+            }
+            rows.append(row)
+            continue
+
         nums = [float(n) for n in (ent.get("nums") or [])]
         if has_meter_col and len(nums) == 2 and abs(nums[0]) < 1e-6 and abs(nums[1]) < 1e-6:
             row = {
@@ -610,6 +738,27 @@ def _map_filling_rows(entries: Sequence[dict[str, Any]]) -> list[dict[str, Any]]
 def _map_monitoring_rows(entries: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for ent in list(entries)[:MAX_TABLE_ROWS]:
+        slots = ent.get("slots")
+        if isinstance(slots, list) and len(slots) >= 12:
+            row = {
+                "time_str": str(ent.get("time_str") or ""),
+                "pressure_bar": slots[0],
+                "ambient_temp_c": slots[1],
+                "soil_1_c": slots[2],
+                "pipe_1_c": slots[3],
+                "soil_2_c": slots[4],
+                "pipe_2_c": slots[5],
+                "soil_3_c": slots[6],
+                "pipe_3_c": slots[7],
+                "soil_4_c": slots[8],
+                "pipe_4_c": slots[9],
+                "avg_soil_c": slots[10],
+                "avg_pipe_c": slots[11],
+                "note": str(ent.get("notes") or ""),
+            }
+            rows.append(row)
+            continue
+
         nums = [float(n) for n in (ent.get("nums") or [])]
         # BOTAŞ 018/021 standard column order:
         # Basınç, Çevre T, Toprak1, Boru1, Toprak2, Boru2, Toprak3, Boru3, Toprak4, Boru4, Avg.Toprak, Avg.Boru
