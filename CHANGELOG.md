@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.4.0 - 2026-11-27
+
+### Added & Changed
+
+- **Test Raporu Çoklu Dosya Ekleme & Toplu Analiz Kuyruğu (`Dropzone.tsx`, `OcrPage.tsx`, `OcrPage.test.tsx`)**:
+  - Test Raporu Kontrolü ekranına çoklu `.xlsx`/`.pdf`/görsel dosya seçimi, sürükle-bırak ekleme, dosya bazlı kaldırma ve toplam boyut özeti eklendi.
+  - Yüklenen dosyalar mevcut `/api/ocr/analyze` akışı üzerinden sıralı kuyrukla analiz edilir; **Toplu Analiz Kuyruğu** (`ocr-batch-queue`) ile her dosyanın durumu izlenip tamamlanan bölümler arası tek tıkla geçiş yapılır.
+
+### Fixed
+
+- **Excel Form Okuma Doğruluğu & Bölüm Aktarımı (`report_ocr.py`, `dossier.py`, `form_details.py`)**:
+  - Excel'de gece yarısı sonrasına sarkan (`1900-01-01 HH:MM:SS` / `1900-01-02 HH:MM:SS`) saat satırlarının tarih olarak kırpılıp düşmesi düzeltildi.
+  - `DOLUM R`, `DENGELEME T` (`018`) ve `BASINÇ TESTİ` (`021`) tablolarında boş hücreler nedeniyle oluşan sütun kayması (ör. `Su Basıncı = 1`'in `Su Giriş Sıcaklığı = 1.0 °C` olarak okunması) ve 3–8 problu sayfalardaki `Avg. Toprak` / `Avg. Boru` eşleme hataları boru-ayraçlı sabit sütun şemasıyla giderildi.
+  - `VERİ` (`015`) çoklu et kalınlığı/uzunluk segmentleri ve 4 kıyı kotu ölçüm noktası tam çıkarılır hale getirildi; `Boru Et Kalınlığı : 5,20 ve 6,4` ile KP zincirlerinin sayısal okunması ayrıştırıldı (`34.0 mm` hatası giderildi); `bar` birimli `P_SMYS` satırları yerine çelik kalitesi (`X60`) / `S = 60200 psi` üzerinden `415.0 MPa` SMYS hesaplandı ve `commit_dossier_to_project` çoklu segmentleri `Session.inputs.segments` içine aktaracak şekilde güncellendi.
+  - Tek satırda atılış + alış saati olan pig satırları tek bir `pig_runs` kaydında eşleştirildi; ISO ve parantezli gün aralığı (`(27-28).08.2026`) form tarihleri tanındı; boş `BASINÇLANDIRMA (2)` / boş `HAVA KURUTMA` şablon sayfaları filtrelendi; `ÇİĞLENME NOKTASI` sayfaları `final_drying` (`KUR-002`) olarak sınıflandırıldı ve `DONE` içindeki düz metre `KmS`/`KmE` KP değerleri doğru yönde çözüldü.
+- **Didim Revize Plan-Profil PDF Çıkarımı & Taranmış Dolum Logları (`plan_profile.py`, `dossier.py`)**:
+  - Prosedür formüllerindeki `10"#` / `10".` font kodlamalarının `10"` (`273.1 mm`) boru çapı olarak eşlenmesi engellendi; `Dp : 16" (406,4 mm)` ve `75.0 bar` tasarım basıncı çıkarımı eklendi; bitişik KP değerlerinin kot olarak okunması düzeltildi ve `1-A/1-B`, `2-A/2-B` prosedür tabloları ayrı taslak kesitlere bölündü.
+  - Taranmış PDF dolum loglarında `"1. Pig Gönderildi"` / `"2. Pig Gönderildi"` satırlarındaki sıra numaralarının (`1.`, `2.`) `water_inlet_temp_c` alanına sızması engellendi.
+
 ## 2.3.0 - 2026-11-27
 
 ### Added & Changed

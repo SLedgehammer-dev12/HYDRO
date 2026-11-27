@@ -1,7 +1,14 @@
-# Neler Yeni — HYDRO v2.3.0 (What's New)
+# Neler Yeni — HYDRO v2.4.0 (What's New)
 
-**Sürüm:** `v2.3.0` (`hidrostatik-test-v2.3.0`)  
+**Sürüm:** `v2.4.0` (`hidrostatik-test-v2.4.0`)  
 **Tarih:** 2026-11-27
+
+---
+
+### v2.4.0 Öne Çıkanlar
+- **Test Raporu Çoklu Dosya Ekleme & Toplu Analiz Kuyruğu:** Test Raporu Kontrolü ekranında birden fazla `.xlsx`/`.pdf`/görsel dosya aynı anda yüklenip sıralı kuyrukla analiz edilir; tamamlanan tüm test bölümleri kuyruk kartından seçilip incelenebilir.
+- **Excel Test Raporu Okuma Doğruluğu (`8` Düzeltme):** Gece yarısı sonrası saat satırları, `DOLUM R` / `018` / `021` boş hücre ve çoklu sıcaklık probu sütun hizaları, `VERİ` çoklu segment/ölçüm aktarımı, `X60` SMYS (`415 MPa`), `KmS`/`KmE` KP'leri, `ÇİĞLENME NOKTASI` (`KUR-002`) ve boş `(2/2)` şablon filtresi düzeltildi.
+- **Didim Revize Paftaları & Taranmış PDF Dolum Logları:** Revize prosedür PDF'lerinden `406.4 mm` çap, `75 bar` tasarım basıncı ve `1-A/1-B`, `2-A/2-B` alt kesit kotları doğru çıkarılır; taranmış PDF dolum tablolarında `"1. Pig Gönderildi"` sıra numarası artık sıcaklık olarak okunmaz.
 
 ---
 
